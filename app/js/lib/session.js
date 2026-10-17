@@ -194,3 +194,18 @@ export function restAfter(exercises, key) {
 
 /** RPE choices with the reps-in-reserve hint. */
 export const RPE = [[10, 'nothing left'], [9.5, 'maybe 1 more'], [9, '1 more'], [8.5, '1-2 more'], [8, '2 more'], [7.5, '2-3 more'], [7, '3 more'], [6, '4+ more']];
+
+/**
+ * Timer for a time-based set (P24). It counts up from Start; the target is a cue (a beep), not a stop, because a hold
+ * may go past it ("30 seconds or more"). Stop fills the seconds with the time actually done.
+ * @returns {{elapsedS:number, targetS:number, reached:boolean, text:string}}
+ */
+export function setTimerView({ startedAt, targetS }, now = Date.now()) {
+  const elapsedS = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const reached = targetS > 0 && elapsedS >= targetS;
+  const mmss = (x) => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`;
+  return { elapsedS, targetS, reached, text: targetS > 0 ? `${mmss(elapsedS)} / ${mmss(targetS)}` : mmss(elapsedS) };
+}
+
+/** Seconds to fill when a set timer is stopped: at least 1. */
+export const setTimerResult = ({ startedAt }, now = Date.now()) => Math.max(1, Math.round((now - startedAt) / 1000));

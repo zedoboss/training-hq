@@ -138,8 +138,8 @@ export function render(view, params = []) {
       const active = sessions.find((x) => x.status === 'active' && x.kind !== 'holds');
       if (active) { toast('Finish or discard the session in progress first.'); return; }
       const { session: ns, sets: nsets } = copySession(session, done);
-      await repo.put('sessions', ns.id, ns);
       for (const x of nsets) await repo.put('sets', x.id, x);
+      await repo.put('sessions', ns.id, ns);
       location.hash = `#/session/${ns.id}`;
     };
     view.querySelector('#del').onclick = async () => {

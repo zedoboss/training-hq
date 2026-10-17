@@ -2,7 +2,7 @@
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory } from '../lib/history.js';
-import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE } from '../lib/session.js';
+import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay } from '../lib/time.js';
@@ -12,7 +12,7 @@ import { pickExercises } from '../ui/picker.js';
 import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
 import { warmupSets } from '../lib/plates.js';
-import { actionSheet, confirmSheet, promptText } from '../ui/sheet.js';
+import { actionSheet, confirmSheet, promptText, overlay } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
 import { withDefaults, equipmentWithDefaults, smallestPlate, restFor, restDefault, weightUnitFor, toUnit, fromUnit, toDistance, fromDistance, REST_CHOICES, restText } from '../lib/settings.js';
@@ -25,6 +25,36 @@ const num = (v) => { if (v === '' || v == null) return null; const n = Number(St
 const rangeText = (r) => (!r ? '' : r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`);
 const SS_COLORS = ['var(--pull)', 'var(--legs)', 'var(--push)', 'var(--cyan)'];
 const prefs = () => withDefaults(getState().settings);
+
+// Timer for a time-based set (P24): one at a time, stored so it survives a reload.
+const ST_KEY = 'thq.setTimer';
+const loadSetTimer = () => { try { return JSON.parse(localStorage.getItem(ST_KEY) || 'null'); } catch { return null; } };
+const storeSetTimer = (v) => { try { if (v) localStorage.setItem(ST_KEY, JSON.stringify(v)); else localStorage.removeItem(ST_KEY); } catch { /* private mode */ } };
+
+// Stopwatch from the session menu: lives while the app is open.
+const stopwatch = { startedAt: null, accMs: 0 };
+const swMs = () => stopwatch.accMs + (stopwatch.startedAt ? Date.now() - stopwatch.startedAt : 0);
+
+function stopwatchSheet() {
+  const { el, close } = overlay(`
+    <div class="hud c-muted sheet-title">STOPWATCH</div>
+    <div class="sw-time" data-k="t">0:00.0</div>
+    <div class="btn-row"><button class="btn-primary" data-sw="go" type="button">Start</button><button class="btn-ghost" data-sw="reset" type="button">Reset</button></div>
+    <button class="sheet-btn sheet-cancel" type="button" data-cancel>Close</button>`, () => clearInterval(t));
+  const draw = () => {
+    const ms = swMs();
+    el.querySelector('[data-k="t"]').textContent = `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${Math.floor(ms / 100) % 10}`;
+    el.querySelector('[data-sw="go"]').textContent = stopwatch.startedAt ? 'Stop' : swMs() ? 'Resume' : 'Start';
+  };
+  const t = setInterval(draw, 100);
+  el.querySelector('[data-sw="go"]').addEventListener('click', () => {
+    if (stopwatch.startedAt) { stopwatch.accMs = swMs(); stopwatch.startedAt = null; } else stopwatch.startedAt = Date.now();
+    draw();
+  });
+  el.querySelector('[data-sw="reset"]').addEventListener('click', () => { stopwatch.startedAt = stopwatch.startedAt ? Date.now() : null; stopwatch.accMs = 0; draw(); });
+  el.querySelector('[data-cancel]').addEventListener('click', () => close());
+  draw();
+}
 const minPlate = () => smallestPlate(getState().equipment);
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -48,8 +78,9 @@ async function startSession(view, routineId) {
     routine, meta, programmeRoutines: progDocs.filter((d) => d.kind === 'routine'), lib: ctx.lib, history: ctx.history, today: isoDate(new Date()),
     smallestPlate: minPlate(), gym: prefs().gym.name,
   });
-  await repo.put('sessions', session.id, session);
+  // Sets first: if the app is closed half-way, no session exists without its sets.
   for (const s of sets) await repo.put('sets', s.id, s);
+  await repo.put('sessions', session.id, session);
   location.replace(`#/session/${session.id}`);
 }
 
@@ -59,6 +90,8 @@ export function render(view, params = []) {
   const editing = params[1] === 'edit';
   let repo; let session; let sets = []; let ctx; let timer; let wakeLock = null; let offRest = () => {}; let offRepo = () => {};
   let typicalMs = null;
+  let setTimer = loadSetTimer();
+  let setTimerTick = null;
 
   const exSets = (key) => sets.filter((s) => s.exKey === key).sort((a, b) => a.order - b.order);
   const saveSession = async (patch) => { session = { ...session, ...patch }; await repo.put('sessions', session.id, session); };
@@ -104,6 +137,28 @@ export function render(view, params = []) {
     el.querySelector('[data-k="eta"]').title = eta ? (eta.basis === 'pace' ? 'From your pace today' : eta.basis === 'history' ? 'From your recent sessions of this type' : 'Rough estimate: 2.5 minutes a set') : '';
   };
 
+  const timerLine = (s, prev) => {
+    if (setTimer?.setId === s.id) {
+      const v = setTimerView(setTimer);
+      return `<div class="set-timer"><button class="btn-primary small" data-a="timer-stop" type="button">Stop</button><span class="hud ${v.reached ? 'c-green' : 'c-cyan'}" data-timer>${v.text}</span></div>`;
+    }
+    const target = s.durationS ?? prev?.durationS ?? 30;
+    return `<div class="set-timer"><button class="btn-ghost small" data-a="timer-start" type="button">Start ${target} s</button></div>`;
+  };
+
+  /** Live update of the running set timer; beeps once when the target is reached. */
+  const runSetTimer = () => {
+    clearInterval(setTimerTick);
+    if (!setTimer) return;
+    setTimerTick = setInterval(() => {
+      if (!setTimer) { clearInterval(setTimerTick); return; }
+      const v = setTimerView(setTimer);
+      if (v.reached && !setTimer.cued) { setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); rest.beep(3); }
+      const el = view.querySelector(`[data-set="${CSS.escape(setTimer.setId)}"] [data-timer]`);
+      if (el) { el.textContent = v.text; el.classList.toggle('c-green', v.reached); el.classList.toggle('c-cyan', !v.reached); }
+    }, 250);
+  };
+
   const setRow = (ex, s, all) => {
     const fields = setFields(ex.type, s.type);
     const prev = previousFor(prevOf(ex), all, s);
@@ -119,6 +174,7 @@ export function render(view, params = []) {
         : '<span></span>'}
       ${second ? `<input class="set-in" data-f="${second}" inputmode="numeric" value="${esc(s[second] ?? '')}" placeholder="${esc(placeholder)}" aria-label="${second === 'reps' ? 'reps' : 'seconds'}">` : '<span></span>'}
       <button class="set-tick" data-a="tick" type="button" aria-label="${s.done ? 'Mark not done' : 'Mark done'}">${s.done ? CHECK : ''}</button>
+      ${fields.includes('durationS') && !s.done && !editing && prefs().show.inlineTimer ? timerLine(s, prev) : ''}
       ${s.rpe || s.note ? `<div class="set-meta">${s.rpe ? `RPE ${s.rpe}` : ''}${s.rpe && s.note ? ' · ' : ''}${s.note ? esc(s.note) : ''}</div>` : ''}
     </div>`;
   };
@@ -131,7 +187,8 @@ export function render(view, params = []) {
     const plateCalc = prefs().show.plateCalc;
     const per = plateCalc && ex.barKg && live?.kg != null ? platesPerSide(live.kg, ex.barKg) : null;
     const unit = unitOf(ex).toUpperCase();
-    const fields = setFields(ex.type, 'normal');
+    // Column headings: an exercise done only as holds shows seconds, not reps.
+    const fields = setFields(ex.type, all.length && all.every((x) => x.type === 'hold') ? 'hold' : 'normal');
     const pinned = lib.pinnedNote?.text ?? lib.pinnedNote;
     const groups = supersetGroups(session.exercises);
     const g = ex.supersetId ? groups.get(ex.supersetId) : null;
@@ -171,6 +228,23 @@ export function render(view, params = []) {
   const onSetAction = async (setId, action) => {
     const s = sets.find((x) => x.id === setId);
     const ex = session.exercises.find((e) => e.key === s.exKey);
+    if (action === 'timer-start') {
+      rest.unlockAudio();
+      rest.clear();
+      const prev = previousFor(prevOf(ex), exSets(ex.key), s);
+      setTimer = { setId: s.id, startedAt: Date.now(), targetS: s.durationS ?? prev?.durationS ?? 30, cued: false };
+      storeSetTimer(setTimer);
+      redrawCard(ex.key);
+      runSetTimer();
+      return;
+    }
+    if (action === 'timer-stop' || (action === 'tick' && setTimer?.setId === s.id)) {
+      const secs = setTimerResult(setTimer);
+      setTimer = null; storeSetTimer(null); clearInterval(setTimerTick);
+      await saveSet({ ...s, durationS: secs });
+      if (!s.done) await onSetAction(setId, 'tick');
+      return;
+    }
     if (action === 'tick') {
       rest.unlockAudio();
       if (s.done) { await saveSet({ ...s, done: false, doneAt: null }); redrawCard(ex.key); return; }
@@ -353,6 +427,8 @@ export function render(view, params = []) {
       drawCards();
     };
     view.querySelector('#s-more').onclick = () => actionSheet(session.title, [
+      { label: 'Countdown timer', run: () => actionSheet('Countdown', [30, 60, 90, 120, 180, 300].map((x) => ({ label: restText(x), run: () => { rest.unlockAudio(); rest.start(x, 'Countdown'); } }))) },
+      { label: 'Stopwatch', run: () => { rest.unlockAudio(); stopwatchSheet(); } },
       session.pausedAt
         ? { label: 'Resume clock', run: async () => { await saveSession({ pausedMs: session.pausedMs + (Date.now() - session.pausedAt), pausedAt: null }); header(); } }
         : { label: 'Pause clock', run: async () => { await saveSession({ pausedAt: Date.now() }); header(); } },
@@ -375,7 +451,7 @@ export function render(view, params = []) {
     bar.hidden = !st;
     if (!st) return;
     bar.querySelector('[data-k="rleft"]').textContent = mmss(st.leftMs);
-    bar.querySelector('[data-k="rlabel"]').textContent = `REST · ${st.label.toUpperCase().slice(0, 24)}`;
+    bar.querySelector('[data-k="rlabel"]').textContent = st.label === 'Countdown' ? 'COUNTDOWN' : `REST · ${st.label.toUpperCase().slice(0, 24)}`;
     bar.querySelector('[data-k="fill"]').style.width = `${Math.min(100, st.fraction * 100)}%`;
   };
 
@@ -395,6 +471,8 @@ export function render(view, params = []) {
     draw();
     drawRest(rest.status());
     offRest = rest.subscribe(drawRest);
+    if (setTimer && !sets.some((x) => x.id === setTimer.setId && !x.done)) { setTimer = null; storeSetTimer(null); }
+    runSetTimer();
     timer = setInterval(header, 1000);
     if (!editing && prefs().keepAwake) keepAwake();
     document.addEventListener('visibilitychange', onVis);
@@ -409,7 +487,7 @@ export function render(view, params = []) {
   });
 
   return () => {
-    clearInterval(timer); offRest(); offRepo();
+    clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo();
     document.removeEventListener('visibilitychange', onVis);
     wakeLock?.release?.().catch(() => {});
   };

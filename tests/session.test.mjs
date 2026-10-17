@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildHistory, heaviestOf, sameRoutine } from '../app/js/lib/history.js';
-import { buildSession, summarize, elapsedMs, clock, previousFor, fillForTick, setsForAdded } from '../app/js/lib/session.js';
+import { buildSession, summarize, elapsedMs, clock, previousFor, fillForTick, setsForAdded, setTimerView, setTimerResult } from '../app/js/lib/session.js';
 
 const bridge = {
   exercises: {
@@ -175,4 +175,14 @@ test('repeat a past session; supersets; rest only after the last exercise of a s
   assert.equal(restAfter(past.exercises, 'a'), false);
   assert.equal(restAfter(past.exercises, 'b'), true);
   assert.equal(restAfter(past.exercises, 'c'), true);
+});
+
+test('set timer: counts up, the target is a cue, stopping fills the seconds done', () => {
+  const t = { startedAt: 1000, targetS: 30 };
+  assert.deepEqual(setTimerView(t, 1000 + 12400), { elapsedS: 12, targetS: 30, reached: false, text: '0:12 / 0:30' });
+  assert.equal(setTimerView(t, 1000 + 30000).reached, true);
+  assert.equal(setTimerView(t, 1000 + 95000).text, '1:35 / 0:30', 'keeps counting past the target');
+  assert.equal(setTimerView({ startedAt: 0, targetS: 0 }, 61000).text, '1:01');
+  assert.equal(setTimerResult(t, 1000 + 34600), 35);
+  assert.equal(setTimerResult(t, 1000 + 200), 1);
 });

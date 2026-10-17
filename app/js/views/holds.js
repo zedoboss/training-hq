@@ -6,8 +6,13 @@ import { isoDate, formatDay } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
+import { getState } from '../lib/store.js';
+import { withDefaults, restText } from '../lib/settings.js';
 import { confirmSheet, promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+
+/** Rest between holds, from Settings (default 2:00). */
+const holdRestS = () => withDefaults(getState().settings).rest.holdS || 120;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const loadText = (h) => (h.loadKg != null ? `${fmtKg(h.loadKg)} kg` : h.load || 'bodyweight');
@@ -105,7 +110,7 @@ function renderRun(view, repo, areaId, index) {
     const body = view.querySelector('#h-body');
     if (!body) return;
     if (phase === 'ready' || phase === 'holding' || phase === 'rest') {
-      const of = phase === 'rest' ? 120 : secs();
+      const of = phase === 'rest' ? holdRestS() : secs();
       const shown = phase === 'ready' ? secs() : left;
       body.innerHTML = `
         <div class="hold-ring">${ring(shown, of)}<div class="hold-ring-text"><b>${Math.floor(shown / 60)}:${String(Math.ceil(shown) % 60 === 0 && shown >= 60 ? 0 : Math.ceil(shown) % 60).padStart(2, '0')}</b>
@@ -135,7 +140,7 @@ function renderRun(view, repo, areaId, index) {
       body.querySelector('[data-h="save"]').addEventListener('click', async () => {
         await saveSet(pain, shaking);
         if (setNo >= total()) { await finishRound(); return; }
-        setNo++; phase = 'rest'; endsAt = Date.now() + 120000; tickLoop(); draw();
+        setNo++; phase = 'rest'; endsAt = Date.now() + holdRestS() * 1000; tickLoop(); draw();
       });
     }
     body.querySelectorAll('[data-h]').forEach((b) => {
@@ -159,7 +164,7 @@ function renderRun(view, repo, areaId, index) {
       const left = Math.max(0, (endsAt - Date.now()) / 1000);
       if (t) { t.textContent = `${Math.floor(left / 60)}:${String(Math.ceil(left) % 60 === 0 && left >= 60 ? 0 : Math.ceil(left) % 60).padStart(2, '0')}`; }
       const svg = view.querySelector('.hold-ring');
-      if (svg) svg.firstElementChild.outerHTML = ring(left, phase === 'rest' ? 120 : secs());
+      if (svg) svg.firstElementChild.outerHTML = ring(left, phase === 'rest' ? holdRestS() : secs());
     }, 200);
   };
 
@@ -170,7 +175,7 @@ function renderRun(view, repo, areaId, index) {
     if (!hold) { view.innerHTML = '<h1 class="view-title">Hold not found</h1><p class="hint"><a href="#/holds">Back</a></p>'; return; }
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/holds">Back</a><span class="hud c-muted">${esc(area.label.toUpperCase())} · ${esc((PHASE_TEXT[area.phase] || '').split(':')[0].toUpperCase())}</span></div>
-      <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${secs()} s · about 2 min between</div></div>
+      <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${secs()} s · ${restText(holdRestS())} between</div></div>
       <div id="h-body"></div>
       <p class="hint">Next-day check: ${esc(tomorrow())}${area.phase === 'heal' ? ', with the morning round' : ''}.</p>
       <button class="btn-ghost" id="h-stop" type="button">End round</button>`;
