@@ -210,3 +210,28 @@ button { font: inherit; color: inherit; }
 .hint code { font: 500 12px var(--mono); color: var(--pale); }
 .code { font: 600 20px var(--mono); letter-spacing: 0.12em; color: var(--amber); }
 @media (min-width: 1024px) { .view-settings { max-width: 640px; } }
+
+/* ---------- Train: programme view (step 1) ---------- */
+.seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg .pill { flex: 1 1 0; padding: 0 8px; }
+.ex-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ex { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-m); padding: 12px 14px; display: flex; flex-direction: column; gap: 5px; }
+.ex-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ex-name { font-size: 15px; font-weight: 600; }
+.ex-line { font-size: 14px; line-height: 1.4; }
+.ex-line b { font-weight: 600; color: var(--cyan); font-family: var(--mono); font-size: 13px; }
+.hud-ish { font: 500 10px/1.6 var(--mono); letter-spacing: 0.14em; }
+.ex-note { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.tag { flex-shrink: 0; font: 500 9px/1 var(--mono); letter-spacing: 0.14em; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 5px; padding: 4px 6px; }
+.tag-main { color: var(--amber); border-color: #5a4320; }
+.tag-hold { color: var(--pale); }
+.ex-weeks summary, .notes summary { cursor: pointer; font-size: 12px; color: var(--pale); min-height: 32px; display: flex; align-items: center; }
+.ex-weeks ol { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.ex-weeks li { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.ex-weeks li.is-now { color: var(--text); }
+.ex-weeks li.is-now .hud { color: var(--cyan); }
+.ex-guide { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.notes { padding: 10px 14px; }
+.notes ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+@media (min-width: 1024px) { .view-train { max-width: 860px; width: 100%; margin: 0 auto; } }
+.cap-warn { margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--amber); border-left: 2px solid var(--amber); padding-left: 10px; }

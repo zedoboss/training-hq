@@ -4,6 +4,7 @@ import { paths, loadConfig, APP_DIR } from './config.mjs';
 import { openStore } from './store.mjs';
 import { createApp } from './app.mjs';
 import { writePrecache } from '../scripts/precache.mjs';
+import { seedDocs, applySeed } from './seed.mjs';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
 
@@ -11,6 +12,8 @@ const p = paths();
 const config = loadConfig(p);
 const store = openStore(p.dbFile);
 const { version } = writePrecache(APP_DIR);
+const seeded = applySeed(store, seedDocs(p.seedDir));
+log(`seed: ${seeded.written} written, ${seeded.refreshed} refreshed, ${seeded.kept} unchanged`);
 
 const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, log });
 server.listen(config.port, '127.0.0.1', () => {
