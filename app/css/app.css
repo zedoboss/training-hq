@@ -415,6 +415,11 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .set-timer { grid-column: 2 / -1; display: flex; align-items: center; gap: 10px; padding-bottom: 6px; }
 .set-timer .hud { font-size: 15px; letter-spacing: 0.06em; }
 .set-row:has(.set-timer) { row-gap: 4px; }
+.record-banner { position: fixed; z-index: 30; left: 50%; top: calc(var(--safe-top) + 10px); width: min(92vw, 420px);
+  transform: translate(-50%, -140%); transition: transform .3s ease; display: flex; flex-direction: column; gap: 4px;
+  background: #1d1408; border: 1px solid var(--amber); border-radius: var(--r-m); padding: 10px 14px; pointer-events: none; }
+.record-banner.is-on { transform: translate(-50%, 0); }
+.record-banner b { font-size: 15px; }
 .sw-time { font: 600 44px/1.1 var(--mono); color: var(--cyan); text-align: center; padding: 12px 0; }
 .in-superset { border-left: 3px solid var(--ss, var(--pull)); }
 .ss-label { color: var(--ss, var(--pull)); font-size: 9px; }

@@ -12,6 +12,7 @@ import { pickExercises } from '../ui/picker.js';
 import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
 import { warmupSets } from '../lib/plates.js';
+import { setRecord } from '../lib/finish.js';
 import { actionSheet, confirmSheet, promptText, overlay } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
@@ -137,6 +138,19 @@ export function render(view, params = []) {
     el.querySelector('[data-k="eta"]').title = eta ? (eta.basis === 'pace' ? 'From your pace today' : eta.basis === 'history' ? 'From your recent sessions of this type' : 'Rough estimate: 2.5 minutes a set') : '';
   };
 
+  /** Banner at the top for a few seconds when a ticked set beats the comeback best (P27). */
+  const recordBanner = (ex, rec) => {
+    document.querySelector('.record-banner')?.remove();
+    const el = document.createElement('div');
+    el.className = 'record-banner';
+    el.setAttribute('role', 'status');
+    el.innerHTML = `<span class="hud c-amber">NEW COMEBACK BEST</span><b>${esc(ex.name)}</b>
+      <span class="hud">${showKg(ex, rec.kg)} ${unitOf(ex).toUpperCase()} × ${rec.reps ?? '–'}${rec.previous ? ` · BEFORE ${showKg(ex, rec.previous)}` : ''}</span>`;
+    document.body.append(el);
+    setTimeout(() => el.classList.add('is-on'), 20);
+    setTimeout(() => { el.classList.remove('is-on'); setTimeout(() => el.remove(), 400); }, 4000);
+  };
+
   const timerLine = (s, prev) => {
     if (setTimer?.setId === s.id) {
       const v = setTimerView(setTimer);
@@ -250,9 +264,11 @@ export function render(view, params = []) {
       if (s.done) { await saveSet({ ...s, done: false, doneAt: null }); redrawCard(ex.key); return; }
       const prev = previousFor(prevOf(ex), exSets(ex.key), s);
       const filled = { ...s, ...fillForTick(s, prev), done: true, doneAt: Date.now() };
-      play('tick', prefs().sounds.tickVolume);
+      const rec = !editing && prefs().show.recordBanner ? setRecord({ set: filled, name: ex.name, sessionId: session.id, otherSets: exSets(ex.key), history: ctx.history }) : null;
+      if (rec) play('record', prefs().sounds.recordVolume); else play('tick', prefs().sounds.tickVolume);
       await saveSet(filled);
       redrawCard(ex.key);
+      if (rec) recordBanner(ex, rec);
       const next = exSets(ex.key).find((x) => !x.done);
       if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) rest.start(restFor(ex, s.type, prefs()), ex.name);
       if (!editing && prefs().show.supersetJump && ex.supersetId && !restAfter(session.exercises, ex.key)) {

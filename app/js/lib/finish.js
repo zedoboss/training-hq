@@ -25,6 +25,22 @@ export function sessionBests(session, sets, history, { comebackStart = COMEBACK_
   return out;
 }
 
+/**
+ * Record banner (P27): does this ticked set beat the comeback best? Heaviest working weight, against history since
+ * the comeback started and the sets already ticked in this session. Never on an exercise's first-ever session.
+ * @returns {{kg:number, reps:number|null, previous:number|null}|null}
+ */
+export function setRecord({ set, name, sessionId, otherSets = [], history, comebackStart = COMEBACK_START }) {
+  if (!set?.done || set.kg == null || set.type === 'warmup' || set.type === 'hold') return null;
+  const past = history.all(name).filter((e) => e.sessionId !== sessionId);
+  if (!past.length) return null;
+  const prevComeback = past.filter((e) => e.date >= comebackStart && e.heaviest?.kg != null).reduce((m, e) => Math.max(m, e.heaviest.kg), 0);
+  const today = heaviestOf(otherSets.filter((x) => x.done && x.id !== set.id).map((x) => ({ ...x, hold: x.type === 'hold' })))?.kg ?? 0;
+  const bar = Math.max(prevComeback, today);
+  if (set.kg <= bar) return null;
+  return { kg: set.kg, reps: set.reps ?? null, previous: bar || null };
+}
+
 /** True when the logged structure differs from the routine: exercises added, removed, reordered, or set counts changed. */
 export function structureChanged(session, sets, routine) {
   if (!routine) return false;

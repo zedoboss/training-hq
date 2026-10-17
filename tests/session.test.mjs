@@ -186,3 +186,18 @@ test('set timer: counts up, the target is a cue, stopping fills the seconds done
   assert.equal(setTimerResult(t, 1000 + 34600), 35);
   assert.equal(setTimerResult(t, 1000 + 200), 1);
 });
+
+test('record banner: a ticked set over the comeback best, not on a first-ever exercise, not twice for the same load', async () => {
+  const { setRecord } = await import('../app/js/lib/finish.js');
+  const h = buildHistory({ bridge });
+  const set = (id, kg, type = 'normal') => ({ id, kg, reps: 8, type, done: true });
+  const name = 'Bench Press (Smith Machine)';
+  assert.deepEqual(setRecord({ set: set('a', 53.8), name, sessionId: 'x', history: h }), { kg: 53.8, reps: 8, previous: 51.3 });
+  assert.equal(setRecord({ set: set('a', 51.3), name, sessionId: 'x', history: h }), null, 'equal is not a record');
+  assert.equal(setRecord({ set: set('b', 53.8), name, sessionId: 'x', otherSets: [set('a', 53.8)], history: h }), null, 'already beaten today at that load');
+  assert.deepEqual(setRecord({ set: set('b', 56.3), name, sessionId: 'x', otherSets: [set('a', 53.8)], history: h }).previous, 53.8);
+  assert.equal(setRecord({ set: set('a', 99, 'warmup'), name, sessionId: 'x', history: h }), null, 'warm-ups never count');
+  assert.equal(setRecord({ set: set('a', 99, 'hold'), name, sessionId: 'x', history: h }), null, 'holds never count');
+  assert.equal(setRecord({ set: set('a', 99), name: 'Never Done Before', sessionId: 'x', history: h }), null, 'first-ever session');
+  assert.equal(setRecord({ set: { ...set('a', 60), done: false }, name, sessionId: 'x', history: h }), null);
+});
