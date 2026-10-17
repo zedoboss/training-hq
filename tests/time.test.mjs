@@ -24,3 +24,12 @@ test('day arithmetic', () => {
   assert.equal(daysBetween('2026-10-17', '2026-10-17'), 0);
   assert.equal(daysBetween('2026-10-17', '2026-10-10'), -7);
 });
+
+test('ISO week and GMT offset', async () => {
+  const { isoWeek, gmtOffset } = await import('../app/js/lib/time.js');
+  assert.equal(isoWeek(new Date('2026-10-10T06:00:00Z'), TZ), 41);
+  assert.equal(isoWeek(new Date('2026-10-17T06:00:00Z'), TZ), 42);
+  assert.equal(isoWeek(new Date('2026-01-01T06:00:00Z'), TZ), 1);
+  assert.equal(isoWeek(new Date('2027-01-01T06:00:00Z'), TZ), 53);
+  assert.equal(gmtOffset(early, TZ), 'GMT+7');
+});

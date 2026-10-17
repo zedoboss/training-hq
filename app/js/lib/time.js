@@ -46,3 +46,18 @@ export function daysBetween(isoA, isoB) {
   const b = Date.UTC(...isoB.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))));
   return Math.round((b - a) / 86400000);
 }
+
+/** ISO week number of the local date (Saturday 10/10/2026 = 41). */
+export function isoWeek(date, tz) {
+  const [y, m, d] = isoDate(date, tz).split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  const dow = t.getUTCDay() || 7; // Monday 1 .. Sunday 7
+  t.setUTCDate(t.getUTCDate() + 4 - dow); // Thursday of this week decides the year
+  const yearStart = Date.UTC(t.getUTCFullYear(), 0, 1);
+  return Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
+}
+
+/** "GMT+7" */
+export function gmtOffset(date, tz) {
+  return parts(date, { timeZoneName: 'shortOffset' }, tz).timeZoneName;
+}
