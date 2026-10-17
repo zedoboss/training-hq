@@ -11,6 +11,8 @@ import { kg as fmtKg } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
 import { confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+import { getState } from '../lib/store.js';
+import { withDefaults } from '../lib/settings.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const HOLD_PROMPT = {
@@ -32,6 +34,8 @@ export function render(view, params = []) {
     const durMin = Math.round(elapsedMs(session) / 60000);
 
     if (session.status === 'active') {
+      // Gyms for the tag: the default from Settings plus every gym used before.
+      const gyms = [...new Set([withDefaults(getState().settings).gym.name, ...(await repo.list('sessions')).map((x) => x.gym)].filter(Boolean))];
       const unticked = all.filter((s) => !s.done).length;
       view.innerHTML = `
         <div class="lib-head"><a class="pill" href="#/session/${esc(id)}">Back</a></div>
@@ -45,6 +49,8 @@ export function render(view, params = []) {
           <div class="field"><label for="f-title">Title</label><input class="input" id="f-title" value="${esc(session.title)}" maxlength="60"></div>
           <div class="field"><label for="f-start">Started</label><input class="input" id="f-start" type="datetime-local" value="${localInput(session.startedAt)}"></div>
           <div class="field"><label for="f-dur">Duration (minutes)</label><input class="input" id="f-dur" inputmode="numeric" value="${durMin}"></div>
+          <div class="field"><label for="f-gym">Gym</label><input class="input" id="f-gym" list="f-gyms" value="${esc(session.gym || '')}" maxlength="60" autocomplete="off">
+            <datalist id="f-gyms">${gyms.map((g) => `<option value="${esc(g)}"></option>`).join('')}</datalist></div>
           <div class="field"><label for="f-note">Session note</label><textarea class="input area" id="f-note" rows="2">${esc(session.note)}</textarea></div>
           ${unticked ? `<p class="hint c-amber">${unticked} set${unticked > 1 ? 's are' : ' is'} not ticked and will not be saved.</p>` : ''}
           <button class="btn-primary big" type="submit">Save session</button>
@@ -57,7 +63,7 @@ export function render(view, params = []) {
         for (const s of all.filter((x) => !x.done)) await repo.remove('sets', s.id);
         await repo.put('sessions', id, {
           ...session, title: view.querySelector('#f-title').value.trim() || session.title, note: view.querySelector('#f-note').value,
-          startedAt, endedAt: startedAt + minutes * 60000 + (session.pausedMs || 0), pausedAt: null, status: 'done',
+          gym: view.querySelector('#f-gym').value.trim() || null, startedAt, endedAt: startedAt + minutes * 60000 + (session.pausedMs || 0), pausedAt: null, status: 'done',
         });
         rest.clear();
         toast('Session saved.');
@@ -77,7 +83,7 @@ export function render(view, params = []) {
     const hold = HOLD_PROMPT[session.dayType];
     const holdDone = done.some((s) => s.type === 'hold');
     const changed = structureChanged(session, done, routine);
-    const lib = new Map(mergeLibrary(exercises).map((e) => [e.id, e]));
+    const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
     void lib;
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/train">Train</a>
@@ -96,6 +102,7 @@ export function render(view, params = []) {
       ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
+      ${session.gym ? `<p class="hint">Gym: ${esc(session.gym)}</p>` : ''}
       ${session.note ? `<p class="hint">Note: ${esc(session.note)}</p>` : ''}
       <section class="card pad-card"><div class="hud c-muted">PHOTOS</div><div class="photo-grid" id="photos"></div>
         <label class="btn-ghost center file-btn">Add photos<input type="file" accept="image/*" multiple hidden id="photo-in"></label></section>

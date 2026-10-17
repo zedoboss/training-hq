@@ -6,6 +6,7 @@ import { TYPES, SET_TYPES, muscleLabel } from '../lib/exercise-types.js';
 import { formatDay } from '../lib/time.js';
 import { kg } from '../lib/loads.js';
 import { toast } from '../ui/toast.js';
+import { getState } from '../lib/store.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const day = (iso) => formatDay(new Date(`${iso}T12:00:00`));
@@ -23,7 +24,7 @@ export function render(view, params = []) {
   let tab = 'summary';
 
   const draw = async (repo) => {
-    const ex = mergeLibrary(await repo.list('exercises')).find((e) => e.id === id);
+    const ex = mergeLibrary(await repo.list('exercises'), getState().equipment).find((e) => e.id === id);
     if (!ex) { view.innerHTML = '<h1 class="view-title">Not found</h1><p class="view-sub">This exercise is not in the library.</p>'; return; }
     const bridge = await repo.get('bridge', 'last-loads');
     const recent = bridge?.exercises?.[ex.name] || [];

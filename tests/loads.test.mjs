@@ -15,4 +15,5 @@ test('bar weight comes from the equipment setting', () => {
   const eq = { smith: { barKg: 11.3 } };
   assert.equal(barFor('Squat (Smith Machine)', eq), 11.3);
   assert.equal(barFor('Hip Thrust (Machine)', eq), null);
+  assert.equal(barFor('Squat (Smith Machine)', eq, [{ equipment: 'smith', kg: 12 }]), 12, 'the Settings bar wins');
 });

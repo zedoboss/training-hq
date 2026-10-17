@@ -3,6 +3,7 @@ import { ready } from '../lib/data.js';
 import { mergeLibrary, searchLibrary, newCustomExercise, slug } from '../lib/library.js';
 import { TYPES, MUSCLES, EQUIPMENT, muscleLabel } from '../lib/exercise-types.js';
 import { toast } from '../ui/toast.js';
+import { getState } from '../lib/store.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const state = { q: '', muscle: null, equipment: null };
@@ -58,7 +59,7 @@ export function render(view, params = []) {
 
   let off = () => {};
   ready.then(async (repo) => {
-    const load = async () => { all = mergeLibrary(await repo.list('exercises')); recent = await recentExerciseIds(repo); draw(); };
+    const load = async () => { all = mergeLibrary(await repo.list('exercises'), getState().equipment); recent = await recentExerciseIds(repo); draw(); };
     off = repo.onChange((cols) => { if (cols.includes('exercises')) load(); });
     await load();
   });

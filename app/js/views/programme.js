@@ -37,7 +37,7 @@ function gbiRow(e, week, equipment) {
   const wk = Math.min(Math.max(week || 1, 1), 4);
   const w = e.weeks[wk - 1];
   const lt = loadText(w);
-  const bar = w.load?.type === 'total' ? barFor(e.name, equipment) : null;
+  const bar = w.load?.type === 'total' ? barFor(e.name, equipment, getState().equipment?.bars) : null;
   const per = bar ? platesPerSide(w.load.kg, bar) : null;
   const target = [lt, w.reps ? `${w.reps[0]}-${w.reps[1]} reps` : null, setsText(w.sets)].filter(Boolean).join(' · ');
   return `<li class="ex">

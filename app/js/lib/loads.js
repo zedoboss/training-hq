@@ -14,8 +14,8 @@ export function totalFromPlates(perSideKg, barKg) {
   return Math.round((perSideKg * 2 + barKg) * 100) / 100;
 }
 
-/** Equipment bar weight for an exercise name, from the programme's equipment settings. */
-export function barFor(name, equipment = {}) {
-  if (/smith/i.test(name) && equipment.smith?.barKg) return equipment.smith.barKg;
-  return null;
+/** Smith bar weight for an exercise name: the Smith bar on the Settings screen, else the programme's equipment. */
+export function barFor(name, equipment = {}, bars = []) {
+  if (!/smith/i.test(name)) return null;
+  return (bars || []).find((b) => b.equipment === 'smith' && b.kg > 0)?.kg ?? equipment?.smith?.barKg ?? null;
 }

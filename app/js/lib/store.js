@@ -6,6 +6,8 @@ const state = {
   mac: { reachable: null, lastSeen: null, lastError: null },
   sync: { lastAt: null, pending: 0, running: false },
   programme: null,
+  settings: null,
+  equipment: null,
 };
 const subs = new Set();
 

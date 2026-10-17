@@ -41,10 +41,11 @@ export function setCount(sets, doneBefore) {
  * @param {number} o.week     week column
  * @param {{kg:number, reps:number, date:string}|null} o.last  heaviest working set of the last session
  * @param {number|null} o.barKg
+ * @param {number} [o.smallestPlate]  smallest plate he has (Settings), for rounding bar loads
  * @returns {{kg:number|null, approx:boolean, added:boolean, bodyweight:boolean, reps:[number,number]|null,
  *   sets:number, why:string, table:number|null, capKg:number|null, gated:string|null, week:number}}
  */
-export function targetFor({ plan, week, last = null, barKg = null }) {
+export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25 }) {
   const doneBefore = !!last;
   const gatedNotStarted = plan.weeks && plan.weeks.some((w) => w.gate) && !doneBefore;
   const cell = weekCell(plan, gatedNotStarted ? 1 : week);
@@ -67,7 +68,7 @@ export function targetFor({ plan, week, last = null, barKg = null }) {
   out.table = table;
   out.approx = !!cell.load.approx;
   if (!last) {
-    out.kg = loadable(table, { barKg }) ?? table;
+    out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
     out.why = gatedNotStarted ? 'week 1: not started yet, form focus' : 'table (no previous load)';
     return out;
   }
@@ -79,11 +80,11 @@ export function targetFor({ plan, week, last = null, barKg = null }) {
   if (plan.capClass === 'main') {
     out.capKg = capOf(last.kg);
     const capped = Math.min(table, out.capKg);
-    out.kg = loadable(capped, { barKg });
+    out.kg = loadable(capped, { barKg, smallestPlate });
     out.why = out.capKg < table ? `table ${table}, capped: last ${last.kg} + 30%` : `table ${table} (within 30% of last ${last.kg})`;
     return out;
   }
-  out.kg = loadable(table, { barKg }) ?? table;
+  out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
   out.why = `table ${table} (light work, no cap)`;
   return out;
 }
@@ -92,7 +93,7 @@ export function targetFor({ plan, week, last = null, barKg = null }) {
  * The 30% guard for an entered load. Returns null when fine.
  * history: [{date:'YYYY-MM-DD', kg}] heaviest working set per past session of this lift, any order.
  */
-export function guardCheck({ kg, capClass, history, today, barKg = null }) {
+export function guardCheck({ kg, capClass, history, today, barKg = null, smallestPlate = 1.25 }) {
   if (capClass !== 'main' || kg == null || !history?.length) return null;
   const sorted = [...history].sort((a, b) => b.date.localeCompare(a.date));
   const weekAgo = new Date(`${today}T12:00:00Z`);
@@ -109,6 +110,6 @@ export function guardCheck({ kg, capClass, history, today, barKg = null }) {
     over: Math.round(((kg - basis.kg) / basis.kg) * 100),
     basis,
     capKg,
-    suggest: loadable(capKg, { barKg }),
+    suggest: loadable(capKg, { barKg, smallestPlate }),
   };
 }

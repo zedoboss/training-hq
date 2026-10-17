@@ -4,6 +4,7 @@ import { idbAdapter } from './idb.js';
 import { syncOnce } from './sync.js';
 import { setState } from './store.js';
 import { summarizeProgramme } from './programme.js';
+import { withDefaults, equipmentWithDefaults, mergeDeep } from './settings.js';
 
 let repo = null;
 let timer = null;
@@ -14,10 +15,12 @@ export const ready = (async () => {
   repo = await openRepo(await idbAdapter());
   repo.onChange((cols) => {
     if (cols.includes('programme')) refreshProgramme();
+    if (cols.includes('settings')) refreshSettings();
     scheduleSync(1500);
   });
   await refreshPairing();
   await refreshProgramme();
+  await refreshSettings();
   setState({
     sync: { lastAt: (await repo.getMeta('lastSyncAt')) ?? null, pending: await repo.pendingCount() },
     mac: { lastSeen: (await repo.getMeta('macLastSeen')) ?? null },
@@ -36,6 +39,27 @@ async function refreshPairing() {
 
 async function refreshProgramme() {
   setState({ programme: summarizeProgramme(await repo.list('programme')) });
+}
+
+async function refreshSettings() {
+  const [main, equipment] = await Promise.all([repo.get('settings', 'main'), repo.get('settings', 'equipment')]);
+  setState({ settings: withDefaults(main), equipment: equipmentWithDefaults(equipment) });
+}
+
+/** Save settings: 'main' takes a patch deep-merged over the current values; 'equipment' is saved whole. */
+export async function saveSettings(patch) {
+  await ready;
+  const cur = withDefaults(await repo.get('settings', 'main'));
+  const next = withDefaults(mergeDeep(cur, patch));
+  await repo.put('settings', 'main', next);
+  return next;
+}
+
+export async function saveEquipment(doc) {
+  await ready;
+  const next = equipmentWithDefaults(doc);
+  await repo.put('settings', 'equipment', next);
+  return next;
 }
 
 /** The app is being served by the Mac server itself (e.g. http://localhost:4317 on the Mac). */

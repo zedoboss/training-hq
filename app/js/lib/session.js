@@ -24,13 +24,15 @@ const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmu
  * @param {ReturnType<import('./history.js').buildHistory>} o.history
  * @param {string} o.today         YYYY-MM-DD
  * @param {number} o.now
+ * @param {number} [o.smallestPlate] smallest plate he has (Settings), for rounding bar loads
+ * @param {string|null} [o.gym]   gym tag for the session (Settings)
  */
-export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now() }) {
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null }) {
   const id = newId('session');
   const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
   const session = {
     id, kind: 'workout', title: routine?.title ?? 'Workout', routineId: routine?.id ?? null, dayType: routine?.dayType ?? null, week,
-    startedAt: now, endedAt: null, pausedMs: 0, pausedAt: null, status: 'active', note: '', photos: [], gym: null, source: 'training-hq',
+    startedAt: now, endedAt: null, pausedMs: 0, pausedAt: null, status: 'active', note: '', photos: [], gym: gym || null, source: 'training-hq',
     exercises: [],
   };
   const sets = [];
@@ -47,7 +49,7 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     let planned = [];
     const pe = re.plan ? planExerciseFor(programmeRoutines, re.plan) : null;
     if (pe) {
-      const t = targetFor({ plan: pe, week, last: lastHeaviest, barKg: ex.barKg ?? null });
+      const t = targetFor({ plan: pe, week, last: lastHeaviest, barKg: ex.barKg ?? null, smallestPlate });
       entry.target = t;
       entry.capClass = pe.capClass ?? entry.capClass;
       planned = Array.from({ length: t.sets }, () => ({ type: 'normal', kg: t.bodyweight ? null : t.kg, reps: null, target: { kg: t.kg, reps: t.reps } }));

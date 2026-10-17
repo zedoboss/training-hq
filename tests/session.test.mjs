@@ -1,15 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHistory, heaviestOf } from '../app/js/lib/history.js';
+import { buildHistory, heaviestOf, sameRoutine } from '../app/js/lib/history.js';
 import { buildSession, summarize, elapsedMs, clock, previousFor, fillForTick, setsForAdded } from '../app/js/lib/session.js';
 
 const bridge = {
   exercises: {
     'Bench Press (Smith Machine)': [
-      { date: '2026-10-12', start: '2026-10-12T10:54', title: 'Push', heaviest: { kg: 51.3, reps: 12 }, sets: [
+      { date: '2026-10-12', start: '2026-10-12T10:54', title: 'Push', dayType: 'push', heaviest: { kg: 51.3, reps: 12 }, sets: [
         { type: 'normal', kg: 51.3, reps: 12, hold: false }, { type: 'normal', kg: 41.3, reps: 12, hold: false },
         { type: 'normal', kg: 31.3, reps: 10, hold: true }, { type: 'normal', kg: 31.3, reps: 10, hold: true }, { type: 'normal', kg: 31.3, reps: 10, hold: true }] },
-      { date: '2026-10-06', start: '2026-10-06T06:21', title: 'Push', heaviest: { kg: 41.3, reps: 12 }, sets: [{ type: 'normal', kg: 41.3, reps: 12, hold: false }] },
+      { date: '2026-10-06', start: '2026-10-06T06:21', title: 'Push', dayType: 'push', heaviest: { kg: 41.3, reps: 12 }, sets: [{ type: 'normal', kg: 41.3, reps: 12, hold: false }] },
     ],
     'Lateral Raise (Cable)': [{ date: '2026-10-12', start: '2026-10-12T10:54', title: 'Push', heaviest: null, sets: [{ type: 'normal', kg: 6.8, reps: 10, hold: true }] }],
   },
@@ -39,12 +39,32 @@ test('history: newest first, holds kept out of the heaviest, guard history per s
   assert.deepEqual(heaviestOf([{ type: 'warmup', kg: 99, reps: 1 }, { type: 'normal', kg: 40, reps: 8 }]), { kg: 40, reps: 8 });
 });
 
+test('previous column from the same routine: Training HQ routine first, Hevy by day type', () => {
+  const s1 = { id: 's1', status: 'done', routineId: 'push-normal', dayType: 'push', startedAt: Date.parse('2026-10-18T04:30:00Z'), exercises: [{ key: 'a', name: 'Bench Press (Smith Machine)' }] };
+  const sets = [{ sessionId: 's1', exKey: 'a', order: 0, done: true, type: 'normal', kg: 60, reps: 8 }];
+  const h = buildHistory({ sessions: [s1], sets, bridge });
+  assert.equal(h.previous('Bench Press (Smith Machine)').working[0].kg, 60, 'any session: the newest');
+  assert.equal(h.previous('Bench Press (Smith Machine)', { routineId: 'push-normal', dayType: 'push' }).working[0].kg, 60);
+  assert.equal(h.previous('Bench Press (Smith Machine)', { routineId: 'push-gbi', dayType: 'push' }).working[0].kg, 51.3, 'other routine skipped; Hevy Push matches by day type');
+  assert.equal(h.previous('Bench Press (Smith Machine)', { routineId: null, dayType: 'legs' }).working.length, 0, 'never done on Legs');
+  assert.equal(h.previous('Bench Press (Smith Machine)', { routineId: null, dayType: null }).working[0].kg, 60, 'empty session: any');
+  assert.equal(sameRoutine({ routineId: 'x', dayType: 'push' }, { routineId: 'y', dayType: 'push' }), false);
+});
+
 test('a session logged in Training HQ becomes history, newer than the bridge', () => {
   const s = { id: 's1', status: 'done', startedAt: Date.parse('2026-10-18T04:30:00Z'), exercises: [{ key: 'a', name: 'Bench Press (Smith Machine)' }] };
   const sets = [{ sessionId: 's1', exKey: 'a', order: 0, done: true, type: 'normal', kg: 60, reps: 8 }, { sessionId: 's1', exKey: 'a', order: 1, done: false, type: 'normal', kg: 99, reps: 8 }];
   const h = buildHistory({ sessions: [s], sets, bridge });
   assert.equal(h.last('Bench Press (Smith Machine)').heaviest.kg, 60, 'unticked sets are not history');
   assert.equal(h.last('Bench Press (Smith Machine)').source, 'training-hq');
+});
+
+test('session gets the gym tag, and targets round to the plates he has', () => {
+  const h = buildHistory({ bridge });
+  const { session } = buildSession({ routine, meta, programmeRoutines, lib, history: h, today: '2026-10-18', now: 1000, gym: 'Gym A', smallestPlate: 5 });
+  assert.equal(session.gym, 'Gym A');
+  assert.equal(session.exercises[0].target.kg, 61.3, 'cap 66.69 with 5 kg as the smallest plate: 11.3 + 2 x 25');
+  assert.equal(buildSession({ routine: null, meta, lib, history: h, today: '2026-10-18' }).session.gym, null);
 });
 
 test('session from a routine: capped targets, hold sets, rest times; Sunday 10/18 is Push week 4', () => {

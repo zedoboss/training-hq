@@ -16,6 +16,7 @@ function fixture(dir, title = 'Plan A') {
   writeFileSync(join(dir, 'seed', 'exercises.json'), JSON.stringify([{ id: 'cupping', name: 'Cupping' }]));
   writeFileSync(join(dir, 'seed', 'routines.json'), JSON.stringify({ folders: [{ id: 'comeback', title: 'C' }], routines: [{ id: 'pull-gbi', title: 'Pull', exercises: [] }] }));
   writeFileSync(join(dir, 'seed', 'history-bridge.json'), JSON.stringify({ kind: 'history-bridge', exercises: {} }));
+  writeFileSync(join(dir, 'seed', 'settings.json'), JSON.stringify({ main: { gym: { name: 'Gym' } }, equipment: { bars: [{ id: 'smith', equipment: 'smith', kg: 10 }] } }));
   writeFileSync(join(dir, 'seed', 'tendons.json'), JSON.stringify({
     sources: {}, notice: 'n', changes: [], rules: { kind: 'rules', items: [] },
     areas: [{ kind: 'area', id: 'knees' }], readiness: { kind: 'readiness', status: 'draft' },
@@ -31,10 +32,10 @@ test('seed files become documents and load once', () => {
     assert.deepEqual(docs.map((d) => `${d.col}/${d.id}`), [
       'programme/meta', 'programme/routine.pull-gbi', 'programme/routine.neck',
       'exercises/cupping', 'folders/comeback', 'routines/pull-gbi', 'bridge/last-loads',
-      'tendons/meta', 'tendons/rules', 'tendons/area.knees', 'tendons/readiness',
+      'settings/main', 'settings/equipment', 'tendons/meta', 'tendons/rules', 'tendons/area.knees', 'tendons/readiness',
     ]);
-    assert.deepEqual(applySeed(store, docs), { written: 11, refreshed: 0, kept: 0 });
-    assert.deepEqual(applySeed(store, docs), { written: 0, refreshed: 0, kept: 11 });
+    assert.deepEqual(applySeed(store, docs), { written: 13, refreshed: 0, kept: 0 });
+    assert.deepEqual(applySeed(store, docs), { written: 0, refreshed: 0, kept: 13 });
     store.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

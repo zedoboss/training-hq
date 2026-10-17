@@ -1,7 +1,12 @@
-// Rest timer: local to this device (no server). Survives a reload; plays a sound when it ends.
+// Rest timer: local to this device (no server). Survives a reload; plays the chosen sound when it ends.
 // The end time is stored, so the timer stays right even if the phone sleeps the page for a while.
+import { unlockAudio, play } from './sounds.js';
+import { getState } from './store.js';
+import { withDefaults } from './settings.js';
+
+export { unlockAudio };
+
 const KEY = 'thq.rest';
-let audio = null;
 const listeners = new Set();
 let tick = null;
 
@@ -10,30 +15,13 @@ const store = (v) => { try { if (v) localStorage.setItem(KEY, JSON.stringify(v))
 
 let state = load();
 
-/** Call from a tap: iOS only allows sound after a user gesture. */
-export function unlockAudio() {
-  try {
-    audio ||= new (window.AudioContext || window.webkitAudioContext)();
-    if (audio.state === 'suspended') audio.resume();
-  } catch { /* no audio */ }
-}
+const sounds = () => withDefaults(getState().settings).sounds;
 
-export function beep(times = 3) {
-  if (!audio) return;
-  const t0 = audio.currentTime + 0.02;
-  for (let i = 0; i < times; i++) {
-    const o = audio.createOscillator();
-    const g = audio.createGain();
-    o.type = 'sine';
-    o.frequency.value = i === times - 1 ? 1320 : 880;
-    g.gain.setValueAtTime(0.0001, t0 + i * 0.28);
-    g.gain.exponentialRampToValueAtTime(0.5, t0 + i * 0.28 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.28 + 0.22);
-    o.connect(g).connect(audio.destination);
-    o.start(t0 + i * 0.28);
-    o.stop(t0 + i * 0.28 + 0.24);
-  }
-}
+/** Plain beeps for the hold timer, at the timer volume. */
+export const beep = (times = 3) => play(`beeps-${Math.min(9, Math.max(1, times))}`, sounds().timerVolume);
+
+/** The rest-end sound chosen in Settings. */
+export const ring = () => play(sounds().restEnd, sounds().timerVolume);
 
 const emit = () => { for (const fn of listeners) fn(status()); };
 
@@ -43,7 +31,7 @@ function loop() {
   tick = setInterval(() => {
     if (!state) { clearInterval(tick); return; }
     if (Date.now() >= state.endsAt) {
-      if (!state.rang) { state.rang = true; store(state); beep(); }
+      if (!state.rang) { state.rang = true; store(state); ring(); }
       clear();
       return;
     }

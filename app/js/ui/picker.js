@@ -4,13 +4,14 @@ import { mergeLibrary, searchLibrary } from '../lib/library.js';
 import { MUSCLES, muscleLabel } from '../lib/exercise-types.js';
 import { ready } from '../lib/data.js';
 import { recentExerciseIds } from '../views/library.js';
+import { getState } from '../lib/store.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 /** Resolves to an array of library exercises (empty if cancelled). */
 export async function pickExercises({ multi = true, title = 'Add exercises' } = {}) {
   const repo = await ready;
-  const all = mergeLibrary(await repo.list('exercises'));
+  const all = mergeLibrary(await repo.list('exercises'), getState().equipment);
   const recent = await recentExerciseIds(repo);
   return new Promise((resolve) => {
     const chosen = new Map();

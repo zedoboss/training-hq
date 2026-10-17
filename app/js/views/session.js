@@ -14,6 +14,9 @@ import { guardCheck } from '../lib/targets.js';
 import { warmupSets } from '../lib/plates.js';
 import { actionSheet, confirmSheet, promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+import { getState } from '../lib/store.js';
+import { withDefaults, equipmentWithDefaults, smallestPlate, restFor, restDefault, weightUnitFor, toUnit, fromUnit, toDistance, fromDistance, REST_CHOICES, restText } from '../lib/settings.js';
+import { play } from '../lib/sounds.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DAY = { pull: 'PULL', push: 'PUSH', legs: 'LEGS', neck: 'NECK' };
@@ -21,13 +24,13 @@ const CHECK = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24
 const num = (v) => { if (v === '' || v == null) return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
 const rangeText = (r) => (!r ? '' : r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`);
 const SS_COLORS = ['var(--pull)', 'var(--legs)', 'var(--push)', 'var(--cyan)'];
-const REST_CHOICES = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
-const restText = (x) => (x ? `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}` : 'off');
+const prefs = () => withDefaults(getState().settings);
+const minPlate = () => smallestPlate(getState().equipment);
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 async function context(repo, excludeSessionId) {
   const [sessions, sets, bridge, exercises] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('exercises')]);
-  const lib = new Map(mergeLibrary(exercises).map((e) => [e.id, e]));
+  const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
   return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge };
 }
 
@@ -43,6 +46,7 @@ async function startSession(view, routineId) {
   const [meta, progDocs, ctx] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null)]);
   const { session, sets } = buildSession({
     routine, meta, programmeRoutines: progDocs.filter((d) => d.kind === 'routine'), lib: ctx.lib, history: ctx.history, today: isoDate(new Date()),
+    smallestPlate: minPlate(), gym: prefs().gym.name,
   });
   await repo.put('sessions', session.id, session);
   for (const s of sets) await repo.put('sets', s.id, s);
@@ -60,10 +64,17 @@ export function render(view, params = []) {
   const saveSession = async (patch) => { session = { ...session, ...patch }; await repo.put('sessions', session.id, session); };
   const saveSet = async (set) => { sets = sets.map((s) => (s.id === set.id ? set : s)); if (!sets.some((s) => s.id === set.id)) sets.push(set); await repo.put('sets', set.id, set); };
 
+  /** Previous values for an exercise: any session, or the same routine (Settings). */
+  const prevOf = (ex) => ctx.history.previous(ex.name, prefs().previousFrom === 'same-routine' ? { routineId: session.routineId, dayType: session.dayType } : null);
+  const unitOf = (ex) => weightUnitFor(ctx.lib.get(ex.exerciseId), prefs());
+  const distUnit = () => prefs().units.distance;
+  /** A load in the exercise's unit, for the screen. Stored loads are always kg. */
+  const showKg = (ex, v) => (v == null ? '' : fmtKg(toUnit(v, unitOf(ex))));
+
   /** The 30% guard: main lifts only; returns the load to use (the suggestion or the entered one). */
   const checkGuard = async (ex, kg) => {
     if (!ex || kg == null || ex.capClass !== 'main') return kg;
-    const g = guardCheck({ kg, capClass: ex.capClass, history: ctx.history.guardHistory(ex.name), today: isoDate(new Date()), barKg: ex.barKg });
+    const g = guardCheck({ kg, capClass: ex.capClass, history: ctx.history.guardHistory(ex.name), today: isoDate(new Date()), barKg: ex.barKg, smallestPlate: minPlate() });
     return g ? guardSheet({ name: ex.name, entered: kg, guard: g }) : kg;
   };
 
@@ -95,16 +106,16 @@ export function render(view, params = []) {
 
   const setRow = (ex, s, all) => {
     const fields = setFields(ex.type, s.type);
-    const prev = previousFor(ctx.history.previous(ex.name), all, s);
+    const prev = previousFor(prevOf(ex), all, s);
     const label = s.type === 'normal' ? String(all.filter((x) => x.type !== 'warmup' && x.type !== 'hold' && x.order <= s.order).length) : SET_TYPES[s.type].short;
-    const prevText = prev ? (fields.includes('durationS') && !fields.includes('reps') ? `${prev.kg != null ? `${fmtKg(prev.kg)} · ` : ''}${prev.durationS ?? 30}s` : `${prev.kg != null ? fmtKg(prev.kg) : 'BW'} × ${prev.reps ?? '–'}${prev.rpe ? ` @${prev.rpe}` : ''}`) : '–';
+    const prevText = prev ? (fields.includes('durationS') && !fields.includes('reps') ? `${prev.kg != null ? `${showKg(ex, prev.kg)} · ` : ''}${prev.durationS ?? 30}s` : `${prev.kg != null ? showKg(ex, prev.kg) : 'BW'} × ${prev.reps ?? '–'}${prev.rpe ? ` @${prev.rpe}` : ''}`) : '–';
     const second = fields.includes('reps') ? 'reps' : fields.includes('durationS') ? 'durationS' : fields.includes('distanceM') ? 'distanceM' : null;
     const placeholder = second === 'reps' ? rangeText(s.target?.reps) || (prev?.reps ?? '') : second === 'durationS' ? '30' : '';
     return `<div class="set-row ${s.done ? 'is-done' : ''} type-${s.type}" data-set="${esc(s.id)}">
       <button class="set-label" data-a="type" type="button" aria-label="Set ${esc(label)}: change type or delete">${esc(label)}</button>
       <button class="set-prev" data-a="prev" type="button" ${prev ? '' : 'disabled'} aria-label="Copy previous ${esc(prevText)}">${esc(prevText)}</button>
       ${fields.includes('kg') || fields.includes('distanceM') && !fields.includes('kg')
-        ? `<input class="set-in" data-f="${fields.includes('kg') ? 'kg' : 'distanceM'}" inputmode="decimal" value="${esc(fields.includes('kg') ? s.kg ?? '' : s.distanceM ?? '')}" placeholder="${fields.includes('kg') ? (s.target?.kg ?? 'kg') : 'm'}" aria-label="${fields.includes('kg') ? 'kg' : 'metres'}">`
+        ? `<input class="set-in" data-f="${fields.includes('kg') ? 'kg' : 'distanceM'}" inputmode="decimal" value="${esc(fields.includes('kg') ? showKg(ex, s.kg) : s.distanceM != null ? toDistance(s.distanceM, distUnit()) : '')}" placeholder="${fields.includes('kg') ? (s.target?.kg != null ? showKg(ex, s.target.kg) : unitOf(ex)) : distUnit()}" aria-label="${fields.includes('kg') ? unitOf(ex) : distUnit()}">`
         : '<span></span>'}
       ${second ? `<input class="set-in" data-f="${second}" inputmode="numeric" value="${esc(s[second] ?? '')}" placeholder="${esc(placeholder)}" aria-label="${second === 'reps' ? 'reps' : 'seconds'}">` : '<span></span>'}
       <button class="set-tick" data-a="tick" type="button" aria-label="${s.done ? 'Mark not done' : 'Mark done'}">${s.done ? CHECK : ''}</button>
@@ -117,7 +128,9 @@ export function render(view, params = []) {
     const lib = ctx.lib.get(ex.exerciseId) || {};
     const t = ex.target;
     const live = all.find((s) => !s.done && s.kg != null && s.type !== 'hold') || all.find((s) => s.kg != null && s.type !== 'hold');
-    const per = ex.barKg && live?.kg != null ? platesPerSide(live.kg, ex.barKg) : null;
+    const plateCalc = prefs().show.plateCalc;
+    const per = plateCalc && ex.barKg && live?.kg != null ? platesPerSide(live.kg, ex.barKg) : null;
+    const unit = unitOf(ex).toUpperCase();
     const fields = setFields(ex.type, 'normal');
     const pinned = lib.pinnedNote?.text ?? lib.pinnedNote;
     const groups = supersetGroups(session.exercises);
@@ -130,11 +143,11 @@ export function render(view, params = []) {
         <button class="icon-mini" data-a="ex-more" type="button" aria-label="Exercise options">···</button></span></div>
       ${pinned ? `<div class="pinned small">${esc(pinned)}</div>` : ''}
       ${ex.notes ? `<div class="hint">${esc(ex.notes)}</div>` : ''}
-      ${t && (t.kg != null || t.reps) ? `<div class="target">TARGET ${t.bodyweight ? 'BW' : t.added ? `+${fmtKg(t.kg)} KG` : t.kg != null ? `${t.approx ? '~' : ''}${fmtKg(t.kg)} KG` : ''}${t.reps ? ` · ${rangeText(t.reps)}` : ''}${t.sets ? ` · ${t.sets} SET${t.sets > 1 ? 'S' : ''}` : ''}${t.why ? ` <span class="c-muted">(${esc(t.why.toUpperCase())})</span>` : ''}${t.gated ? ' <span class="c-amber">· ONLY IF FORM IS CONSISTENT ON VIDEO</span>' : ''}</div>` : ''}
-      <div class="set-row set-headrow"><span>SET</span><span>PREVIOUS</span><span>${fields.includes('kg') ? 'KG' : fields.includes('distanceM') ? 'M' : ''}</span><span>${fields.includes('reps') ? 'REPS' : fields.includes('durationS') ? 'SEC' : ''}</span><span></span></div>
+      ${t && (t.kg != null || t.reps) ? `<div class="target">TARGET ${t.bodyweight ? 'BW' : t.added ? `+${showKg(ex, t.kg)} ${unit}` : t.kg != null ? `${t.approx ? '~' : ''}${showKg(ex, t.kg)} ${unit}` : ''}${t.reps ? ` · ${rangeText(t.reps)}` : ''}${t.sets ? ` · ${t.sets} SET${t.sets > 1 ? 'S' : ''}` : ''}${t.why ? ` <span class="c-muted">(${esc(t.why.toUpperCase())}${unit !== 'KG' && /\d/.test(t.why) ? ', IN KG' : ''})</span>` : ''}${t.gated ? ' <span class="c-amber">· ONLY IF FORM IS CONSISTENT ON VIDEO</span>' : ''}</div>` : ''}
+      <div class="set-row set-headrow"><span>SET</span><span>PREVIOUS</span><span>${fields.includes('kg') ? unit : fields.includes('distanceM') ? distUnit().toUpperCase() : ''}</span><span>${fields.includes('reps') ? 'REPS' : fields.includes('durationS') ? 'SEC' : ''}</span><span></span></div>
       ${all.map((s) => setRow(ex, s, all)).join('')}
       <div class="s-ex-foot"><span class="hud c-muted">${per != null ? `${fmtKg(ex.barKg)} BAR + ${fmtKg(per)} KG / SIDE` : ''}</span>
-        <span class="btn-row tight">${fields.includes('kg') ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
+        <span class="btn-row tight">${fields.includes('kg') && plateCalc ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
         <button class="btn-ghost small" data-a="add-set" type="button">+ Set</button></span></div>
     </section>`;
   };
@@ -161,28 +174,29 @@ export function render(view, params = []) {
     if (action === 'tick') {
       rest.unlockAudio();
       if (s.done) { await saveSet({ ...s, done: false, doneAt: null }); redrawCard(ex.key); return; }
-      const prev = previousFor(ctx.history.previous(ex.name), exSets(ex.key), s);
+      const prev = previousFor(prevOf(ex), exSets(ex.key), s);
       const filled = { ...s, ...fillForTick(s, prev), done: true, doneAt: Date.now() };
+      play('tick', prefs().sounds.tickVolume);
       await saveSet(filled);
       redrawCard(ex.key);
       const next = exSets(ex.key).find((x) => !x.done);
-      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) rest.start(s.type === 'hold' ? 120 : ex.restSeconds ?? 120, ex.name);
-      if (!editing && ex.supersetId && !restAfter(session.exercises, ex.key)) {
+      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) rest.start(restFor(ex, s.type, prefs()), ex.name);
+      if (!editing && prefs().show.supersetJump && ex.supersetId && !restAfter(session.exercises, ex.key)) {
         const keys = session.exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
         view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     } else if (action === 'prev') {
-      const prev = previousFor(ctx.history.previous(ex.name), exSets(ex.key), s);
+      const prev = previousFor(prevOf(ex), exSets(ex.key), s);
       if (!prev) return;
       await saveSet({ ...s, kg: prev.kg ?? s.kg, reps: prev.reps ?? s.reps, durationS: prev.durationS ?? s.durationS });
       redrawCard(ex.key);
     } else if (action === 'type') {
       actionSheet('Set type', [
         ...Object.entries(SET_TYPES).map(([k, t]) => ({ label: `${t.short || 'N'} · ${t.label}${s.type === k ? ' (now)' : ''}`, run: async () => { await saveSet({ ...s, type: k, ...(k === 'hold' && s.durationS == null ? { durationS: 30 } : {}) }); redrawCard(ex.key); } })),
-        { label: `RPE${s.rpe ? ` (now ${s.rpe})` : ''}`, run: () => actionSheet('RPE: how many more reps could you have done?', [
+        ...(prefs().show.rpe || s.rpe ? [{ label: `RPE${s.rpe ? ` (now ${s.rpe})` : ''}`, run: () => actionSheet('RPE: how many more reps could you have done?', [
           ...RPE.map(([v, hint]) => ({ label: `${v} · ${hint}`, run: async () => { await saveSet({ ...s, rpe: v }); redrawCard(ex.key); } })),
           { label: 'Clear RPE', run: async () => { await saveSet({ ...s, rpe: null }); redrawCard(ex.key); } },
-        ]) },
+        ]) }] : []),
         { label: s.note ? 'Edit set note' : 'Add set note', run: async () => { const t = await promptText('Set note', s.note || ''); if (t != null) { await saveSet({ ...s, note: t }); redrawCard(ex.key); } } },
         { label: 'Delete set', danger: true, run: async () => { await repo.remove('sets', s.id); sets = sets.filter((x) => x.id !== s.id); redrawCard(ex.key); } },
       ]);
@@ -200,7 +214,7 @@ export function render(view, params = []) {
     } else if (action === 'plates') {
       const all = exSets(key);
       const cur = all.find((s) => !s.done && s.type !== 'hold' && s.type !== 'warmup') || all.find((s) => !s.done) || all[all.length - 1];
-      const res = await platesSheet({ name: ex.name, kg: cur?.kg ?? ex.target?.kg ?? null, barKg: ex.barKg });
+      const res = await platesSheet({ name: ex.name, kg: cur?.kg ?? ex.target?.kg ?? null, barKg: ex.barKg, plates: equipmentWithDefaults(getState().equipment).plates });
       if (!res) return;
       const ok = await checkGuard(ex, res.kg);
       const targets = res.all ? all.filter((s) => !s.done && s.type !== 'hold' && s.type !== 'warmup') : [cur].filter(Boolean);
@@ -226,9 +240,19 @@ export function render(view, params = []) {
           await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, notes: t } : e)) });
           redrawCard(key);
         } },
-        { label: `Rest time (${restText(ex.restSeconds)})`, run: () => actionSheet('Rest time', REST_CHOICES.map((x) => ({ label: restText(x), run: async () => {
-          await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, restSeconds: x || null } : e)) });
-        } }))) },
+        { label: `Rest time (${ex.restSeconds == null ? `default ${restText(restDefault(ex, prefs()))}` : restText(ex.restSeconds)})`, run: () => actionSheet('Rest time', [null, ...REST_CHOICES].map((x) => ({
+          label: x == null ? `Default (${restText(restDefault(ex, prefs()))})` : restText(x),
+          run: async () => { await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, restSeconds: x } : e)) }); },
+        }))) },
+        ...(setFields(ex.type, 'normal').includes('kg') ? [{ label: `Show in ${unitOf(ex) === 'kg' ? 'lb' : 'kg'}`, run: async () => {
+          const unit = unitOf(ex) === 'kg' ? 'lb' : 'kg';
+          const rec = (await repo.get('exercises', ex.exerciseId)) || { id: ex.exerciseId, name: ex.name, type: ex.type };
+          const keep = unit === prefs().units.weight ? null : unit;
+          await repo.put('exercises', ex.exerciseId, { ...rec, unit: keep });
+          ctx.lib.set(ex.exerciseId, { ...(ctx.lib.get(ex.exerciseId) || {}), unit: keep });
+          toast(`${ex.name} now shows ${unit}. Stored in kg as always.`);
+          redrawCard(key);
+        } }] : []),
         ...(ex.supersetId
           ? [{ label: 'Remove from superset', run: async () => { await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, supersetId: null } : e)) }); drawCards(); } }]
           : others.length ? [{ label: 'Superset with…', run: () => actionSheet('Superset with', others.map((o) => ({ label: o.name, run: async () => {
@@ -239,7 +263,7 @@ export function render(view, params = []) {
         { label: 'Add warm-up sets', run: async () => {
           const all = exSets(key);
           const work = all.find((s) => s.type !== 'warmup' && s.type !== 'hold' && s.kg != null);
-          const ws = warmupSets(work?.kg ?? ex.target?.kg, { barKg: ex.barKg });
+          const ws = warmupSets(work?.kg ?? ex.target?.kg, { barKg: ex.barKg, steps: prefs().warmup.steps, smallestPlate: minPlate() });
           if (!ws.length) { toast('Enter a working weight first.'); return; }
           const first = all.length ? Math.min(...all.map((s) => s.order)) : 0;
           for (const [i, w] of ws.entries()) {
@@ -302,11 +326,13 @@ export function render(view, params = []) {
       const input = e.target.closest('[data-f]');
       if (!input) return;
       const s = sets.find((x) => x.id === input.closest('[data-set]').dataset.set);
+      const ex = session.exercises.find((x) => x.key === s.exKey);
       let value = num(input.value);
+      if (input.dataset.f === 'kg') value = fromUnit(value, unitOf(ex));
+      if (input.dataset.f === 'distanceM') value = fromDistance(value, distUnit());
       if (input.dataset.f === 'kg' && s.type !== 'warmup' && s.type !== 'hold') {
-        const ex = session.exercises.find((x) => x.key === s.exKey);
         value = await checkGuard(ex, value);
-        input.value = value ?? '';
+        input.value = showKg(ex, value);
       }
       await saveSet({ ...s, [input.dataset.f]: value });
       header();
@@ -356,7 +382,7 @@ export function render(view, params = []) {
   const keepAwake = async () => {
     try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch { /* not allowed */ }
   };
-  const onVis = () => { if (document.visibilityState === 'visible') { keepAwake(); header(); } };
+  const onVis = () => { if (document.visibilityState === 'visible') { if (!editing && prefs().keepAwake) keepAwake(); header(); } };
 
   ready.then(async (r) => {
     repo = r;
@@ -370,7 +396,7 @@ export function render(view, params = []) {
     drawRest(rest.status());
     offRest = rest.subscribe(drawRest);
     timer = setInterval(header, 1000);
-    if (!editing) keepAwake();
+    if (!editing && prefs().keepAwake) keepAwake();
     document.addEventListener('visibilitychange', onVis);
     offRepo = repo.onChange(async (cols, origin) => {
       if (origin !== 'remote' || (!cols.includes('sets') && !cols.includes('sessions'))) return;

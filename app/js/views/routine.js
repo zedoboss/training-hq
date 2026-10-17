@@ -7,10 +7,9 @@ import { SET_TYPES } from '../lib/exercise-types.js';
 import { pickExercises } from '../ui/picker.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+import { REST_CHOICES, restText } from '../lib/settings.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const restText = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : 'off');
-const REST_CHOICES = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
 
 export function render(view, params = []) {
   const [id, mode] = params;
@@ -29,7 +28,7 @@ export function render(view, params = []) {
       <ul class="ex-list">${r.exercises.map((e, i) => `<li class="ex">
         <div class="ex-head"><a class="ex-name plain" href="#/exercise/${esc(e.exerciseId)}">${i + 1}. ${esc(e.name)}</a>
           <span class="tag ${e.plan ? 'tag-main' : e.role === 'tendon-hold' ? 'tag-hold' : ''}">${e.plan ? 'PLAN' : e.role === 'tendon-hold' ? 'HOLD' : esc(setsSummary(e.sets))}</span></div>
-        <div class="ex-line c-muted">Rest ${restText(e.restSeconds)}${e.notes ? ` · ${esc(e.notes)}` : ''}</div></li>`).join('')}</ul>
+        <div class="ex-line c-muted">Rest ${e.restSeconds == null ? 'default' : restText(e.restSeconds)}${e.notes ? ` · ${esc(e.notes)}` : ''}</div></li>`).join('')}</ul>
       <a class="btn-primary center big" href="#/session/start/${esc(r.id)}">Start ${esc(r.title)}</a>`;
   };
 
@@ -63,7 +62,7 @@ export function render(view, params = []) {
             <button class="icon-mini" data-act="more" type="button" aria-label="Exercise options">···</button>
           </span></div>
         <div class="row-fields">
-          <label class="hint">Rest <select class="input mini" data-act="rest">${REST_CHOICES.map((s) => `<option value="${s}" ${(e.restSeconds ?? 0) === s ? 'selected' : ''}>${restText(s)}</option>`).join('')}</select></label>
+          <label class="hint">Rest <select class="input mini" data-act="rest"><option value="" ${e.restSeconds == null ? 'selected' : ''}>Default</option>${REST_CHOICES.map((s) => `<option value="${s}" ${e.restSeconds === s ? 'selected' : ''}>${restText(s)}</option>`).join('')}</select></label>
           <input class="input mini grow" data-act="notes" placeholder="Note for this exercise" value="${esc(e.notes)}">
         </div>
         ${e.plan
@@ -91,7 +90,7 @@ export function render(view, params = []) {
       const act = (name) => li.querySelector(`[data-act="${name}"]`);
       act('up').onclick = async () => { await save(moveExercise(r, key, -1)); drawEdit(); };
       act('down').onclick = async () => { await save(moveExercise(r, key, 1)); drawEdit(); };
-      act('rest').onchange = (ev) => save(updateExercise(r, key, { restSeconds: Number(ev.target.value) || null }));
+      act('rest').onchange = (ev) => save(updateExercise(r, key, { restSeconds: ev.target.value === '' ? null : Number(ev.target.value) }));
       act('notes').onchange = (ev) => save(updateExercise(r, key, { notes: ev.target.value }));
       const others = r.exercises.filter((x) => x.key !== key);
       act('more').onclick = () => actionSheet(e.name, [

@@ -1,0 +1,125 @@
+// Settings: two synced documents, col 'settings' ids 'main' and 'equipment'. Pure helpers here; data.js keeps the
+// current values in the app state. Code defaults are generic; personal values (bar weights, gym, rest times) come
+// from the private seed on the Mac and from what is changed on the Settings screen.
+
+export const REST_CHOICES = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
+export const restText = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : 'off');
+
+/** Rest-end sounds, made in the app (no sound files). */
+export const SOUNDS = [
+  { id: 'beeps', label: 'Three beeps' },
+  { id: 'chime', label: 'Chime' },
+  { id: 'bell', label: 'Bell' },
+  { id: 'pulse', label: 'Pulse' },
+  { id: 'rise', label: 'Rising' },
+];
+
+export const WEEK_DAYS = [[1, 'Monday'], [0, 'Sunday'], [6, 'Saturday']];
+
+/** Plate sizes offered on the Settings screen (kg). Custom sizes can be added. */
+export const PLATE_CHOICES = [25, 20, 15, 10, 5, 2.5, 2, 1.25, 1, 0.5];
+
+export const DEFAULT_SETTINGS = {
+  units: { weight: 'kg', distance: 'km', body: 'cm' },
+  rest: { mainS: 180, lightS: 90, holdS: 120 },
+  sounds: { restEnd: 'beeps', timerVolume: 80, tickVolume: 40, recordVolume: 80 },
+  firstDayOfWeek: 1,
+  keepAwake: true,
+  previousFrom: 'any',
+  warmup: { steps: [{ pct: 50, reps: 8 }, { pct: 75, reps: 4 }], countInStats: false },
+  show: { plateCalc: true, rpe: true, supersetJump: true, inlineTimer: true, recordBanner: true },
+  gym: { name: '' },
+};
+
+export const DEFAULT_EQUIPMENT = {
+  bars: [],
+  plates: [20, 15, 10, 5, 2.5, 1.25],
+  extraPlates: [],
+};
+
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+
+/** Deep merge of plain objects; arrays and values from `over` replace the ones in `base`. Unknown keys are kept. */
+export function mergeDeep(base, over) {
+  if (!isObj(over)) return structuredClone(base);
+  const out = structuredClone(base);
+  for (const [k, v] of Object.entries(over)) {
+    if (v === undefined) continue;
+    out[k] = isObj(v) && isObj(base[k]) ? mergeDeep(base[k], v) : structuredClone(v);
+  }
+  return out;
+}
+
+export const withDefaults = (doc) => mergeDeep(DEFAULT_SETTINGS, doc);
+
+export function equipmentWithDefaults(doc) {
+  const e = mergeDeep(DEFAULT_EQUIPMENT, doc);
+  e.plates = [...new Set((e.plates || []).map(Number).filter((p) => p > 0))].sort((a, b) => b - a);
+  if (!e.plates.length) e.plates = [...DEFAULT_EQUIPMENT.plates];
+  e.bars = (e.bars || []).filter((b) => b && Number(b.kg) > 0);
+  return e;
+}
+
+/** Smallest plate he has: loads are rounded to bar + 2 × multiples of it. */
+export const smallestPlate = (equipment) => Math.min(...equipmentWithDefaults(equipment).plates);
+
+/** Equipment type an exercise uses, for matching a bar. Smith in the name counts as the Smith machine. */
+const equipmentOf = (ex) => (/smith/i.test(ex?.name || '') ? 'smith' : ex?.equipment || null);
+
+/**
+ * Bar weight for an exercise: the bar set for its equipment on the Settings screen, else the exercise's own
+ * bar weight (from the programme seed), else none.
+ */
+export function barKgFor(ex, equipment) {
+  const eq = equipmentOf(ex);
+  const bar = eq ? (equipment?.bars || []).find((b) => b.equipment === eq && Number(b.kg) > 0) : null;
+  if (bar) return Number(bar.kg);
+  return ex?.barKg ?? null;
+}
+
+/** Default rest when an exercise has none set: main lifts get the long rest, everything else the short one. */
+export function restDefault(ex, settings) {
+  const r = withDefaults(settings).rest;
+  return ex?.capClass === 'main' ? r.mainS : r.lightS;
+}
+
+/** Rest after a ticked set: the exercise's own time (0 = off), else the default. Holds use the hold rest. */
+export function restFor(ex, setType, settings) {
+  if (setType === 'hold') return withDefaults(settings).rest.holdS;
+  return ex?.restSeconds ?? restDefault(ex, settings);
+}
+
+// Units. Everything is stored in kg and metres; only the screen shows lb, km or miles.
+export const LB = 0.45359237;
+const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
+
+/** Weight unit for an exercise: its own (set from the exercise menu), else the Settings default. */
+export const weightUnitFor = (ex, settings) => ex?.unit || withDefaults(settings).units.weight;
+
+export function toUnit(kg, unit) {
+  if (kg == null) return null;
+  return unit === 'lb' ? round(kg / LB, 1) : kg;
+}
+
+export function fromUnit(value, unit) {
+  if (value == null) return null;
+  return unit === 'lb' ? round(value * LB, 3) : value;
+}
+
+export function toDistance(m, unit) {
+  if (m == null) return null;
+  return unit === 'mi' ? round(m / 1609.344, 2) : round(m / 1000, 3);
+}
+
+export function fromDistance(value, unit) {
+  if (value == null) return null;
+  return Math.round(unit === 'mi' ? value * 1609.344 : value * 1000);
+}
+
+/** Clean warm-up steps typed on the Settings screen: 1-99 %, 1-30 reps, lightest first. */
+export function cleanWarmupSteps(steps) {
+  return (steps || [])
+    .map((s) => ({ pct: Math.round(Number(s.pct)), reps: Math.round(Number(s.reps)) }))
+    .filter((s) => s.pct >= 1 && s.pct <= 99 && s.reps >= 1 && s.reps <= 30)
+    .sort((a, b) => a.pct - b.pct);
+}

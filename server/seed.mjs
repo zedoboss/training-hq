@@ -1,4 +1,4 @@
-// Loads the programme, tendon rules, own exercises and the history bridge from the private folder
+// Loads the programme, tendon rules, own exercises, the history bridge and starting settings from the private folder
 // (data/seed/*.json) into the database.
 // A seed document is written if it is missing. If the seed file changes later, a document is refreshed only
 // if nobody has edited it in the app since it was seeded, so changes made in the app are never overwritten.
@@ -29,6 +29,10 @@ export function seedDocs(seedDir) {
   }
   const bridge = join(seedDir, 'history-bridge.json');
   if (existsSync(bridge)) docs.push({ col: 'bridge', id: 'last-loads', data: JSON.parse(readFileSync(bridge, 'utf8')) });
+  const settings = join(seedDir, 'settings.json');
+  if (existsSync(settings)) {
+    for (const [id, data] of Object.entries(JSON.parse(readFileSync(settings, 'utf8')))) docs.push({ col: 'settings', id, data });
+  }
   const tend = join(seedDir, 'tendons.json');
   if (existsSync(tend)) {
     const t = JSON.parse(readFileSync(tend, 'utf8'));

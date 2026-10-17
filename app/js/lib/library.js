@@ -2,18 +2,24 @@
 // "exercises": programme exercises, ones found in imported history, custom ones), plus per-exercise settings.
 // A synced record with the same id as a library entry overrides or extends it (pinned note, rest time, demo).
 import { LIBRARY, slug } from '../data/exercise-library.js';
+import { barKgFor } from './settings.js';
 
 export { slug };
 
-/** Merge the static library with synced exercise records. Deleted records are already filtered out. */
-export function mergeLibrary(records = []) {
+/**
+ * Merge the static library with synced exercise records. Deleted records are already filtered out.
+ * With the equipment settings, every exercise also gets the bar weight that applies to it.
+ */
+export function mergeLibrary(records = [], equipment = null) {
   const byId = new Map(LIBRARY.map((e) => [e.id, { ...e }]));
   for (const r of records) {
     if (!r?.id) continue;
     const base = byId.get(r.id);
     byId.set(r.id, base ? { ...base, ...r, source: base.source, custom: !!r.custom } : { source: r.custom ? 'custom' : 'mine', ...r });
   }
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const out = [...byId.values()];
+  if (equipment) for (const e of out) e.barKg = barKgFor(e, equipment);
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
