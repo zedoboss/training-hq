@@ -29,6 +29,8 @@ export const DEFAULT_SETTINGS = {
   warmup: { steps: [{ pct: 50, reps: 8 }, { pct: 75, reps: 4 }], countInStats: false },
   show: { plateCalc: true, rpe: true, supersetJump: true, inlineTimer: true, recordBanner: true },
   gym: { name: '' },
+  // Until Apple Health is connected (step 7): bodyweight for pull-ups and other bodyweight exercises.
+  bodyweight: { kg: null, at: null },
 };
 
 export const DEFAULT_EQUIPMENT = {

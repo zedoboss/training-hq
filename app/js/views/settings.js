@@ -47,6 +47,7 @@ function prefsHtml(st, eq) {
       ${opt('Rest after main lifts', 'Used when an exercise has no rest time of its own', sel('rest.mainS', restOptions, st.rest.mainS))}
       ${opt('Rest after light work', 'Isolation, grip and abs', sel('rest.lightS', restOptions, st.rest.lightS))}
       ${opt('Rest between holds', '', sel('rest.holdS', restOptions, st.rest.holdS))}
+      ${opt('Bodyweight', 'For pull-ups and other bodyweight exercises, until Apple Health is connected', `<span class="row-fields"><input class="input mini num" data-s="bodyweight.kg" inputmode="decimal" value="${st.bodyweight.kg ?? ''}" placeholder="kg" aria-label="Bodyweight in kg"><span class="hint">kg</span></span>`)}
       ${opt('Keep the screen awake', 'During a session', sw('keepAwake', st.keepAwake))}
       ${opt('Previous column', 'Last time you did the exercise in any session, or only in the same routine', '')}
       ${seg('previousFrom', [['any', 'Any session'], ['same-routine', 'Same routine']], st.previousFrom)}
@@ -143,6 +144,12 @@ function wirePrefs(box) {
       let v = t.type === 'checkbox' ? t.checked : t.value;
       if (t.type === 'range' || /^rest\./.test(path)) v = Number(v);
       if (path === 'gym.name') v = String(v).trim();
+      if (path === 'bodyweight.kg') {
+        v = t.value.trim() === '' ? null : Number(t.value.replace(',', '.'));
+        if (v != null && !(v > 30 && v < 250)) { toast('Bodyweight must be between 30 and 250 kg.'); t.value = st().bodyweight.kg ?? ''; return; }
+        await saveSettings({ bodyweight: { kg: v, at: v == null ? null : Date.now() } });
+        return;
+      }
       await save(path, v);
       preview(path);
     } else if (t.dataset.w) {

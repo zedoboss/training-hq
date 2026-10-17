@@ -29,13 +29,14 @@ const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmu
  * @param {string|null} [o.gym]   gym tag for the session (Settings)
  * @param {Array} [o.warmupSteps] warm-up steps (Settings) for exercises marked "warm-up sets" in the routine
  * @param {boolean} [o.sameRoutine] previous values only from the same routine (Settings: previous column)
+ * @param {number|null} [o.bodyweightKg] bodyweight for bodyweight exercises (Settings now, Apple Health in step 7)
  */
-export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false }) {
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null }) {
   const id = newId('session');
   const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
   const session = {
     id, kind: 'workout', title: routine?.title ?? 'Workout', routineId: routine?.id ?? null, dayType: routine?.dayType ?? null, week,
-    startedAt: now, endedAt: null, pausedMs: 0, pausedAt: null, status: 'active', note: '', photos: [], gym: gym || null, source: 'training-hq',
+    startedAt: now, endedAt: null, pausedMs: 0, pausedAt: null, status: 'active', note: '', photos: [], gym: gym || null, bodyweightKg: bodyweightKg ?? null, source: 'training-hq',
     exercises: [],
   };
   const sets = [];
@@ -108,8 +109,8 @@ export function clock(ms) {
   return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** Volume and set counts. Warm-ups and holds don't count toward volume or the set count. */
-export function summarize(session, sets, bodyweightKg = null) {
+/** Volume and set counts. Warm-ups and holds don't count toward volume or the set count. Bodyweight: the session's. */
+export function summarize(session, sets, bodyweightKg = session.bodyweightKg ?? null) {
   const types = new Map(session.exercises.map((e) => [e.key, e.type]));
   let volume = 0; let done = 0; let total = 0;
   for (const s of sets) {
@@ -120,6 +121,13 @@ export function summarize(session, sets, bodyweightKg = null) {
     volume += effectiveKg(types.get(s.exKey), s.kg, bodyweightKg) * (s.reps ?? 0);
   }
   return { volume: Math.round(volume), done, total };
+}
+
+/** Bodyweight exercises: the load the 30% guard compares (bodyweight + added, or bodyweight - assistance). */
+export const BODYWEIGHT_TYPES = ['weighted_bodyweight', 'assisted_bodyweight', 'reps_only'];
+export function guardLoad(type, kg, bodyweightKg) {
+  if (!BODYWEIGHT_TYPES.includes(type) || bodyweightKg == null || kg == null) return kg;
+  return Math.round(effectiveKg(type, kg, bodyweightKg) * 100) / 100;
 }
 
 /** Previous value for a set: same kind, same position among that kind. */

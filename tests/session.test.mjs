@@ -233,3 +233,18 @@ test('warm-up sets in a routine are worked out from today\'s working weight with
   assert.deepEqual(buildSession({ routine: { ...plainRows, followLast: false }, meta, lib, history: h, today: '2026-10-18' }).sets.map((s) => [s.type, s.kg]),
     [['warmup', 28.8], ['warmup', 43.8], ['normal', 60]], 'calculated warm-ups replace plain warm-up rows');
 });
+
+test('bodyweight (P20): volume and the 30% guard load for bodyweight exercises', async () => {
+  const { guardLoad } = await import('../app/js/lib/session.js');
+  assert.equal(guardLoad('weighted_bodyweight', 7.5, 78), 85.5);
+  assert.equal(guardLoad('assisted_bodyweight', 20, 78), 58);
+  assert.equal(guardLoad('reps_only', null, 78), null);
+  assert.equal(guardLoad('weight_reps', 50, 78), 50, 'other types: the load itself');
+  assert.equal(guardLoad('weighted_bodyweight', 7.5, null), 7.5, 'no bodyweight yet: the added load');
+  const s = { exercises: [{ key: 'p', type: 'weighted_bodyweight' }], bodyweightKg: 80 };
+  assert.equal(summarize(s, [{ exKey: 'p', type: 'normal', done: true, kg: 5, reps: 10 }]).volume, 850);
+  assert.equal(summarize({ ...s, bodyweightKg: null }, [{ exKey: 'p', type: 'normal', done: true, kg: 5, reps: 10 }]).volume, 50);
+  const { guardCheck } = await import('../app/js/lib/targets.js');
+  const hist = [{ date: '2026-10-16', kg: guardLoad('weighted_bodyweight', 5, 78) }];
+  assert.equal(guardCheck({ kg: guardLoad('weighted_bodyweight', 7.5, 78), capClass: 'main', history: hist, today: '2026-10-18' }), null, '+5 to +7.5 kg is 3%, not 50%');
+});

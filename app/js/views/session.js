@@ -2,7 +2,7 @@
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory } from '../lib/history.js';
-import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult } from '../lib/session.js';
+import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay } from '../lib/time.js';
@@ -17,6 +17,7 @@ import { demoPanel } from '../ui/demo-panel.js';
 import { actionSheet, confirmSheet, promptText, overlay } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
+import { saveSettings } from '../lib/data.js';
 import { withDefaults, equipmentWithDefaults, smallestPlate, restFor, restDefault, weightUnitFor, toUnit, fromUnit, toDistance, fromDistance, REST_CHOICES, restText } from '../lib/settings.js';
 import { play } from '../lib/sounds.js';
 
@@ -79,6 +80,7 @@ async function startSession(view, routineId) {
   const { session, sets } = buildSession({
     routine, meta, programmeRoutines: progDocs.filter((d) => d.kind === 'routine'), lib: ctx.lib, history: ctx.history, today: isoDate(new Date()),
     smallestPlate: minPlate(), gym: prefs().gym.name, warmupSteps: prefs().warmup.steps, sameRoutine: prefs().previousFrom === 'same-routine',
+    bodyweightKg: prefs().bodyweight.kg,
   });
   // Sets first: if the app is closed half-way, no session exists without its sets.
   for (const s of sets) await repo.put('sets', s.id, s);
@@ -109,6 +111,19 @@ export function render(view, params = []) {
   /** The 30% guard: main lifts only; returns the load to use (the suggestion or the entered one). */
   const checkGuard = async (ex, kg) => {
     if (!ex || kg == null || ex.capClass !== 'main') return kg;
+    const bw = session.bodyweightKg;
+    // Bodyweight exercises (P20): compare bodyweight + added load, so +5 to +7.5 kg on pull-ups isn't "50% more".
+    if (BODYWEIGHT_TYPES.includes(ex.type) && bw != null) {
+      const history = ctx.history.all(ex.name).map((e) => {
+        const work = e.sets.filter((x) => !x.hold && x.type !== 'warmup' && x.type !== 'hold');
+        return work.length ? { date: e.date, kg: guardLoad(ex.type, Math.max(...work.map((x) => x.kg ?? 0)), bw) } : null;
+      }).filter(Boolean);
+      const g = guardCheck({ kg: guardLoad(ex.type, kg, bw), capClass: ex.capClass, history, today: isoDate(new Date()), smallestPlate: minPlate() });
+      if (!g) return kg;
+      const back = (x) => Math.max(0, Math.round((ex.type === 'assisted_bodyweight' ? bw - x : x - bw) * 2) / 2);
+      const shown = { ...g, basis: { ...g.basis, kg: back(g.basis.kg) }, capKg: back(g.capKg), suggest: back(g.suggest) };
+      return guardSheet({ name: `${ex.name} (with ${fmtKg(bw)} kg bodyweight)`, entered: kg, guard: shown });
+    }
     const g = guardCheck({ kg, capClass: ex.capClass, history: ctx.history.guardHistory(ex.name), today: isoDate(new Date()), barKg: ex.barKg, smallestPlate: minPlate() });
     return g ? guardSheet({ name: ex.name, entered: kg, guard: g }) : kg;
   };
@@ -341,6 +356,16 @@ export function render(view, params = []) {
           label: x == null ? `Default (${restText(restDefault(ex, prefs()))})` : restText(x),
           run: async () => { await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, restSeconds: x } : e)) }); },
         }))) },
+        ...(BODYWEIGHT_TYPES.includes(ex.type) ? [{ label: session.bodyweightKg != null ? `Bodyweight today (${fmtKg(session.bodyweightKg)} kg)` : 'Set bodyweight for today', run: async () => {
+          const t = await promptText('Bodyweight today (kg)', session.bodyweightKg != null ? String(session.bodyweightKg) : '', { placeholder: 'e.g. 78.5' });
+          if (t == null) return;
+          const v = Number(String(t).replace(',', '.'));
+          if (!(v > 30 && v < 250)) { toast('Bodyweight must be between 30 and 250 kg.'); return; }
+          await saveSession({ bodyweightKg: v });
+          await saveSettings({ bodyweight: { kg: v, at: Date.now() } });
+          header();
+          toast(`Bodyweight ${fmtKg(v)} kg for today. Used for volume and the 30% guard on bodyweight exercises.`);
+        } }] : []),
         ...(setFields(ex.type, 'normal').includes('kg') ? [{ label: `Show in ${unitOf(ex) === 'kg' ? 'lb' : 'kg'}`, run: async () => {
           const unit = unitOf(ex) === 'kg' ? 'lb' : 'kg';
           const rec = (await repo.get('exercises', ex.exerciseId)) || { id: ex.exerciseId, name: ex.name, type: ex.type };

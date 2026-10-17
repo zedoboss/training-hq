@@ -39,7 +39,7 @@ export function setRows({ sessions, sets, lib, countWarmups = false, tz }) {
     rows.push({
       sessionId: s.id, date: isoDate(new Date(s.startedAt), tz), name: ex.name, exerciseId: ex.exerciseId,
       primary: info.primary || 'other', secondary: info.secondary || [], warmup, kg: x.kg ?? null, reps: x.reps ?? null,
-      volume: warmup ? 0 : effectiveKg(ex.type, x.kg, null) * (x.reps ?? 0),
+      volume: warmup ? 0 : effectiveKg(ex.type, x.kg, s.bodyweightKg ?? null) * (x.reps ?? 0),
     });
   }
   return rows;
