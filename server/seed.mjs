@@ -21,6 +21,12 @@ export function seedDocs(seedDir) {
   if (existsSync(ex)) {
     for (const e of JSON.parse(readFileSync(ex, 'utf8'))) docs.push({ col: 'exercises', id: e.id, data: e });
   }
+  const rt = join(seedDir, 'routines.json');
+  if (existsSync(rt)) {
+    const r = JSON.parse(readFileSync(rt, 'utf8'));
+    for (const f of r.folders) docs.push({ col: 'folders', id: f.id, data: f });
+    for (const x of r.routines) docs.push({ col: 'routines', id: x.id, data: x });
+  }
   const bridge = join(seedDir, 'history-bridge.json');
   if (existsSync(bridge)) docs.push({ col: 'bridge', id: 'last-loads', data: JSON.parse(readFileSync(bridge, 'utf8')) });
   const tend = join(seedDir, 'tendons.json');

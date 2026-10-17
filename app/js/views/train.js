@@ -1,116 +1,120 @@
-// TRAIN, step 1: read-only view of the programme as it synced from the Mac.
-// The workout tracker (logging sets, rest timer, library) replaces this in step 2.
+// TRAIN: next session from the rotation, today's tendon holds, routines grouped in folders.
 import { ready } from '../lib/data.js';
-import { getState, subscribe } from '../lib/store.js';
+import { groupByFolder, newRoutine, duplicateRoutine, moveFolder, nextDayType, newId } from '../lib/routines.js';
 import { weekColumn } from '../lib/programme.js';
 import { isoDate, formatDay } from '../lib/time.js';
-import { kg, platesPerSide, barFor } from '../lib/loads.js';
+import { actionSheet, promptText, confirmSheet } from '../ui/sheet.js';
+import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const DAYS = [['pull', 'Pull'], ['push', 'Push'], ['legs', 'Legs'], ['neck', 'Neck']];
-let chosen = { day: 'pull', variant: 'getting-back-into' };
+const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)' };
+const LABEL = { pull: 'Pull', push: 'Push', legs: 'Legs' };
+const day = (iso) => formatDay(new Date(`${iso}T12:00:00`));
 
-function loadText(w) {
-  if (!w.load) return null;
-  if (w.load.type === 'bodyweight') return 'Bodyweight';
-  if (w.load.type === 'added') return `+${kg(w.load.kg)} kg`;
-  return `${w.load.approx ? '~' : ''}${kg(w.load.kg)} kg`;
-}
-function setsText(s) {
-  if (!s) return '';
-  if (s.firstSession != null) return `${s.after} sets (first session ${s.firstSession})`;
-  if (s.count != null) return `${s.count} set${s.count === 1 ? '' : 's'}`;
-  return `${s.min}-${s.max} sets`;
-}
-
-function gbiRow(e, week, equipment) {
-  if (e.role === 'tendon-hold') {
-    return `<li class="ex"><div class="ex-head"><span class="ex-name">${esc(e.name)}</span><span class="tag tag-hold">HOLD</span></div>
-      <div class="ex-line c-muted">Shoulder isometric hold, last ${kg(e.lastLogged.kg)} kg, 3 × 30 s. Tendon checklist arrives in step 2.</div></li>`;
-  }
-  if (!e.weeks) {
-    const l = e.lastLogged;
-    return `<li class="ex"><div class="ex-head"><span class="ex-name">${esc(e.name)}</span><span class="tag">LAST LOAD</span></div>
-      <div class="ex-line">Last: ${kg(l.kg)} kg × ${l.reps}, ${formatDay(new Date(`${l.date}T12:00:00`))}</div>
-      <div class="ex-note">${esc(e.override?.rule)}</div></li>`;
-  }
-  const wk = Math.min(Math.max(week || 1, 1), 4);
-  const w = e.weeks[wk - 1];
-  const lt = loadText(w);
-  const bar = w.load?.type === 'total' ? barFor(e.name, equipment) : null;
-  const per = bar ? platesPerSide(w.load.kg, bar) : null;
-  const target = [lt, w.reps ? `${w.reps[0]}-${w.reps[1]} reps` : null, setsText(w.sets)].filter(Boolean).join(' · ');
-  return `<li class="ex">
-    <div class="ex-head"><span class="ex-name">${esc(e.name)}</span>
-      <span class="tag ${e.capClass === 'main' ? 'tag-main' : ''}">${e.capClass === 'main' ? '30% CAP' : 'LIGHT'}</span></div>
-    <div class="ex-line"><span class="hud-ish c-faint">TABLE</span> <b>${esc(target || w.text)}</b></div>
-    ${per != null ? `<div class="ex-line c-muted hud-ish">${kg(bar)} BAR + ${kg(per)} KG/SIDE</div>` : ''}
-    ${e.override ? `<div class="ex-note">${esc(e.override.rule)} <span class="c-faint">(${esc(e.override.source)})</span></div>` : ''}
-    <details class="ex-weeks"><summary>All four weeks, as written</summary>
-      <ol>${e.weeks.map((x) => `<li class="${x.week === wk ? 'is-now' : ''}"><span class="hud">WK ${x.week}</span> ${esc(x.text)}</li>`).join('')}</ol>
-    </details>
-  </li>`;
-}
-
-function normalRow(e) {
-  if (e.guidance) {
-    return `<li class="ex"><div class="ex-head"><span class="ex-name">${esc(e.name)}</span></div>
-      <ul class="ex-guide">${e.guidance.map((g) => `<li>${esc(g)}</li>`).join('')}</ul></li>`;
-  }
-  return `<li class="ex"><div class="ex-head"><span class="ex-name">${e.order}. ${esc(e.name)}</span></div>
-    <div class="ex-line"><b>${esc(e.workingSets)}</b> · ${esc(e.reps)} reps</div>
-    <div class="ex-line c-muted">Warm-up: ${esc(e.warmup)}</div>
-    <div class="ex-note">${esc(e.cue)}</div></li>`;
+/** Last completed workout: Training HQ sessions first, then the Hevy bridge. */
+export async function lastCompleted(repo) {
+  const own = (await repo.list('sessions')).filter((s) => s.status === 'done' && s.kind !== 'holds' && s.dayType)
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+  const bridge = (await repo.get('bridge', 'last-loads'))?.lastSessions?.find((s) => s.dayType);
+  const ownIso = own ? isoDate(new Date(own.startedAt)) : null;
+  if (own && (!bridge || ownIso >= bridge.date)) return { dayType: own.dayType, date: ownIso };
+  return bridge ? { dayType: bridge.dayType, date: bridge.date } : null;
 }
 
 export function render(view) {
   view.innerHTML = '<p class="view-sub">Loading…</p>';
-  let docs = [];
+  let repo;
 
-  const draw = () => {
-    const meta = docs.find((d) => d.kind === 'meta');
-    const routines = docs.filter((d) => d.kind === 'routine');
-    if (!meta || !routines.length) {
-      view.innerHTML = `<h1 class="view-title">Train</h1>
-        <section class="card later"><div class="hud c-amber">NO PROGRAMME YET</div>
-        <p>${getState().paired ? 'Waiting for the first sync from your Mac.' : 'Pair with your Mac in Settings and your programme loads here.'}</p></section>`;
-      return;
-    }
+  const draw = async () => {
+    const [folders, routines, meta, last, active] = await Promise.all([
+      repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), lastCompleted(repo),
+      repo.list('sessions').then((ss) => ss.find((s) => s.status === 'active')),
+    ]);
+    const next = nextDayType(last?.dayType);
     const today = isoDate(new Date());
-    const week = chosen.day === 'neck' ? null : weekColumn(meta.firstSessions?.[chosen.day], today);
-    const variants = chosen.day === 'neck' ? [] : [['getting-back-into', 'Getting back into'], ['normal', 'Normal (later)']];
-    const r = chosen.day === 'neck'
-      ? routines.find((x) => x.id === 'neck')
-      : routines.find((x) => x.dayType === chosen.day && x.variant === chosen.variant);
+    const wk = meta ? weekColumn(meta.firstSessions?.[next], today) : null;
+    const nextRoutine = routines.filter((r) => r.dayType === next && r.folderId === 'comeback').sort((a, b) => a.order - b.order)[0]
+      || routines.find((r) => r.dayType === next);
+    const lastByRoutine = new Map();
+    const bridge = await repo.get('bridge', 'last-loads');
+    for (const s of bridge?.lastSessions || []) if (s.dayType && !lastByRoutine.has(s.dayType)) lastByRoutine.set(s.dayType, s.date);
 
     view.innerHTML = `
-      <div class="train-head">
-        <h1 class="view-title">${esc(meta.title)}</h1>
-        <p class="hud c-muted">STEP 1: YOUR PROGRAMME, READ ONLY. LOGGING ARRIVES IN STEP 2.</p>
-        <p class="cap-warn">These are The Comeback's table targets. Your rule is that the 30% cap on your last load always wins.
-          The app applies that once your history is in (steps 2-3). Until then, check the cap yourself.</p>
-      </div>
-      <nav class="seg" aria-label="Day type">${DAYS.map(([id, label]) => `<button class="pill ${chosen.day === id ? 'is-on' : ''}" data-day="${id}" type="button">${label}</button>`).join('')}</nav>
-      ${variants.length ? `<nav class="seg" aria-label="Version">${variants.map(([id, label]) => `<button class="pill ${chosen.variant === id ? 'is-on' : ''}" data-variant="${id}" type="button">${label}</button>`).join('')}</nav>` : ''}
-      ${week ? `<div class="hud c-cyan">WEEK ${week} COLUMN${week > 4 ? ' · SHOWING WEEK 4; WEEK 5+ PROPOSALS ARRIVE IN STEP 4' : ''} · FROM ${esc(formatDay(new Date(`${meta.firstSessions[chosen.day]}T12:00:00`)).toUpperCase())}</div>` : ''}
-      ${r?.scheduled === false ? `<div class="card later"><div class="hud c-amber">NOT SCHEDULED YET</div><p>${esc(r.lastDone?.note)}</p><p>${esc(r.rule)}</p></div>` : ''}
-      <ul class="ex-list">${(r?.exercises || []).map((e) => (r.variant === 'normal' ? normalRow(e) : r.id === 'neck'
-        ? `<li class="ex"><div class="ex-head"><span class="ex-name">${esc(e.name)}</span><span class="tag">LIGHT START</span></div></li>`
-        : gbiRow(e, week, meta.loads?.equipment))).join('')}</ul>
-      ${r?.notes?.length ? `<details class="card notes"><summary class="hud">NOTES FROM THE COMEBACK</summary><ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}`;
+      ${active ? `<a class="card resume" href="#/session/${esc(active.id)}"><span class="hud c-amber">SESSION IN PROGRESS</span><b>${esc(active.title)}</b><span class="pill is-on">Resume</span></a>` : ''}
+      <section class="card next-card">
+        <div class="hud c-muted next-top"><span>NEXT FROM ROTATION</span><span>${last ? `AFTER ${esc(LABEL[last.dayType] || last.dayType).toUpperCase()} · ${esc(day(last.date)).toUpperCase()}` : ''}</span></div>
+        <div class="next-title"><span>${esc(LABEL[next])}</span>${wk ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
+        <p class="hint">${nextRoutine ? `${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
+        <div class="btn-row next-btns">
+          ${nextRoutine ? `<a class="btn-primary center" href="#/session/start/${esc(nextRoutine.id)}">Start ${esc(LABEL[next])}</a>` : ''}
+          <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
+        </div>
+      </section>
+      <a class="card holds-link" href="#/holds"><span><span class="hud c-muted">TENDON HOLDS</span><br>Shoulder, knees, wrist</span><span class="pill">Open</span></a>
+      ${groupByFolder(folders, routines).map(({ folder, routines: rs }) => `
+        <div class="section-label folder-label">
+          <span>${esc(folder ? folder.title : 'No folder')}</span>
+          ${folder ? `<button class="icon-mini" data-folder="${esc(folder.id)}" type="button" aria-label="Folder options for ${esc(folder.title)}">···</button>` : ''}
+        </div>
+        <ul class="routine-list">
+          ${rs.map((r) => `<li class="routine-row">
+            <span class="dot" style="background:${DOT[r.dayType] || 'var(--border-strong)'}"></span>
+            <a class="routine-main" href="#/routine/${esc(r.id)}"><b>${esc(r.title)}</b>
+              <span class="hint">${r.exercises.length} exercises${lastByRoutine.has(r.dayType) && r.folderId === 'comeback' ? ` · last ${esc(day(lastByRoutine.get(r.dayType)))}` : ''}</span></a>
+            ${r.folderId === 'comeback' && meta?.firstSessions?.[r.dayType] ? `<span class="hud c-cyan">WK ${weekColumn(meta.firstSessions[r.dayType], today)}</span>` : r.dayType === 'neck' ? '<span class="hud c-amber">NOT SCHEDULED</span>' : '<span></span>'}
+            <button class="icon-mini" data-routine="${esc(r.id)}" type="button" aria-label="Options for ${esc(r.title)}">···</button>
+          </li>`).join('') || '<li class="hint pad">Empty folder.</li>'}
+        </ul>`).join('')}
+      <div class="btn-row three">
+        <button class="btn-ghost" id="new-routine" type="button">+ Routine</button>
+        <button class="btn-ghost" id="new-folder" type="button">+ Folder</button>
+        <a class="btn-ghost center" href="#/library">Library</a>
+      </div>`;
 
-    view.querySelectorAll('[data-day]').forEach((b) => { b.onclick = () => { chosen.day = b.dataset.day; draw(); }; });
-    view.querySelectorAll('[data-variant]').forEach((b) => { b.onclick = () => { chosen.variant = b.dataset.variant; draw(); }; });
+    view.querySelector('#new-routine').onclick = async () => {
+      const title = await promptText('New routine', '', { placeholder: 'Name' });
+      if (!title) return;
+      const r = newRoutine({ title, folderId: null, order: routines.length });
+      await repo.put('routines', r.id, r);
+      location.hash = `#/routine/${r.id}/edit`;
+    };
+    view.querySelector('#new-folder').onclick = async () => {
+      const title = await promptText('New folder', '', { placeholder: 'Name' });
+      if (!title) return;
+      const f = { id: newId('folder'), title, order: -1 };
+      await repo.put('folders', f.id, f);
+      for (const x of moveFolder([...folders, f], f.id, 0)) await repo.put('folders', x.id, x);
+    };
+    view.querySelectorAll('[data-routine]').forEach((b) => b.addEventListener('click', () => {
+      const r = routines.find((x) => x.id === b.dataset.routine);
+      actionSheet(r.title, [
+        { label: 'Edit', run: () => { location.hash = `#/routine/${r.id}/edit`; } },
+        { label: 'Duplicate', run: async () => { const d = duplicateRoutine(r); await repo.put('routines', d.id, d); toast('Duplicated.'); } },
+        { label: 'Move to folder', run: () => actionSheet('Move to', [...folders.map((f) => ({ label: f.title, run: async () => repo.put('routines', r.id, { ...r, folderId: f.id }) })), { label: 'No folder', run: async () => repo.put('routines', r.id, { ...r, folderId: null }) }]) },
+        { label: 'Delete', danger: true, run: async () => { if (await confirmSheet(`Delete the routine "${r.title}"? Past sessions stay.`, { ok: 'Delete', danger: true })) await repo.remove('routines', r.id); } },
+      ]);
+    }));
+    view.querySelectorAll('[data-folder]').forEach((b) => b.addEventListener('click', () => {
+      const f = folders.find((x) => x.id === b.dataset.folder);
+      const save = async (list) => { for (const x of list) await repo.put('folders', x.id, x); };
+      actionSheet(f.title, [
+        { label: 'Rename', run: async () => { const t = await promptText('Rename folder', f.title); if (t) await repo.put('folders', f.id, { ...f, title: t }); } },
+        { label: 'Move up', run: () => save(moveFolder(folders, f.id, -1)) },
+        { label: 'Move down', run: () => save(moveFolder(folders, f.id, 1)) },
+        { label: 'Delete folder', danger: true, run: async () => {
+          if (!(await confirmSheet(`Delete the folder "${f.title}"? Its routines move to No folder.`, { ok: 'Delete', danger: true }))) return;
+          for (const r of routines.filter((x) => x.folderId === f.id)) await repo.put('routines', r.id, { ...r, folderId: null });
+          await repo.remove('folders', f.id);
+        } },
+      ]);
+    }));
   };
 
-  let repo;
-  const load = async () => { docs = await repo.list('programme'); draw(); };
   let off = () => {};
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.includes('programme')) load(); });
-    load();
+    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge'].includes(c))) draw(); });
+    draw();
   });
-  const unsub = subscribe(() => { if (!docs.length) draw(); });
-  return () => { off(); unsub(); };
+  return () => off();
 }
