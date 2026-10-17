@@ -1,4 +1,5 @@
-// Loads the programme and tendon rules from the private folder (data/seed/*.json) into the database.
+// Loads the programme, tendon rules, own exercises and the history bridge from the private folder
+// (data/seed/*.json) into the database.
 // A seed document is written if it is missing. If the seed file changes later, a document is refreshed only
 // if nobody has edited it in the app since it was seeded, so changes made in the app are never overwritten.
 import { createHash } from 'node:crypto';
@@ -16,6 +17,12 @@ export function seedDocs(seedDir) {
     docs.push({ col: 'programme', id: 'meta', data: p.meta });
     for (const r of p.routines) docs.push({ col: 'programme', id: `routine.${r.id}`, data: r });
   }
+  const ex = join(seedDir, 'exercises.json');
+  if (existsSync(ex)) {
+    for (const e of JSON.parse(readFileSync(ex, 'utf8'))) docs.push({ col: 'exercises', id: e.id, data: e });
+  }
+  const bridge = join(seedDir, 'history-bridge.json');
+  if (existsSync(bridge)) docs.push({ col: 'bridge', id: 'last-loads', data: JSON.parse(readFileSync(bridge, 'utf8')) });
   const tend = join(seedDir, 'tendons.json');
   if (existsSync(tend)) {
     const t = JSON.parse(readFileSync(tend, 'utf8'));

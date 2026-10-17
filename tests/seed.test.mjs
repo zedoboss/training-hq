@@ -13,6 +13,8 @@ function fixture(dir, title = 'Plan A') {
     meta: { kind: 'meta', title },
     routines: [{ kind: 'routine', id: 'pull-gbi', exercises: [{ name: 'A' }] }, { kind: 'routine', id: 'neck', exercises: [] }],
   }));
+  writeFileSync(join(dir, 'seed', 'exercises.json'), JSON.stringify([{ id: 'cupping', name: 'Cupping' }]));
+  writeFileSync(join(dir, 'seed', 'history-bridge.json'), JSON.stringify({ kind: 'history-bridge', exercises: {} }));
   writeFileSync(join(dir, 'seed', 'tendons.json'), JSON.stringify({
     sources: {}, notice: 'n', changes: [], rules: { kind: 'rules', items: [] },
     areas: [{ kind: 'area', id: 'knees' }], readiness: { kind: 'readiness', status: 'draft' },
@@ -27,10 +29,11 @@ test('seed files become documents and load once', () => {
     const docs = seedDocs(join(dir, 'seed'));
     assert.deepEqual(docs.map((d) => `${d.col}/${d.id}`), [
       'programme/meta', 'programme/routine.pull-gbi', 'programme/routine.neck',
+      'exercises/cupping', 'bridge/last-loads',
       'tendons/meta', 'tendons/rules', 'tendons/area.knees', 'tendons/readiness',
     ]);
-    assert.deepEqual(applySeed(store, docs), { written: 7, refreshed: 0, kept: 0 });
-    assert.deepEqual(applySeed(store, docs), { written: 0, refreshed: 0, kept: 7 });
+    assert.deepEqual(applySeed(store, docs), { written: 9, refreshed: 0, kept: 0 });
+    assert.deepEqual(applySeed(store, docs), { written: 0, refreshed: 0, kept: 9 });
     store.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
