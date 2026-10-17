@@ -53,5 +53,5 @@ export function newCustomExercise({ name, type, primary, secondary = [], equipme
   return { id: slug(clean), name: clean, type, primary, secondary, equipment, custom: true, createdAt: Date.now() };
 }
 
-/** Demo clip file name for an exercise: its id plus .mp4 (2.17). */
-export const demoFileName = (ex) => `${ex.id}.mp4`;
+/** Demo clip file name for an exercise: its id plus the video type, .mp4 unless said otherwise (2.17). */
+export const demoFileName = (ex, ext = 'mp4') => `${ex.id}.${ext}`;

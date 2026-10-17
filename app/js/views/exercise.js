@@ -1,11 +1,11 @@
 // EXERCISE page: muscles and equipment, demo slot, pinned note, recent sessions.
 // Charts and records over the full history arrive with the import in step 3.
 import { ready } from '../lib/data.js';
-import { mergeLibrary, demoFileName } from '../lib/library.js';
+import { mergeLibrary } from '../lib/library.js';
+import { demoPanel } from '../ui/demo-panel.js';
 import { TYPES, SET_TYPES, muscleLabel } from '../lib/exercise-types.js';
 import { formatDay } from '../lib/time.js';
 import { kg } from '../lib/loads.js';
-import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -33,11 +33,7 @@ export function render(view, params = []) {
       <div class="lib-head"><a class="pill" href="javascript:history.back()">Back</a></div>
       <h1 class="view-title">${esc(ex.name)}</h1>
       <div class="tags">${tags.map((t) => `<span class="tag ${t === '30% CAP' ? 'tag-main' : ''}">${esc(String(t).toUpperCase())}</span>`).join('')}</div>
-      <section class="demo-slot" aria-label="Demo clip">
-        <svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5v5l4.5-2.5z"/></svg>
-        <div class="hud c-faint">NO DEMO YET</div>
-        <button class="btn-ghost small" type="button" id="add-demo">Add demo · ${esc(demoFileName(ex))}</button>
-      </section>
+      <div id="demo"></div>
       ${ex.pinnedNote ? `<div class="pinned"><span class="hud c-muted">PINNED NOTE</span> ${esc(ex.pinnedNote.text ?? ex.pinnedNote)}<span class="c-faint"> ${ex.pinnedNote.from ? `(${esc(ex.pinnedNote.from)})` : ''}</span></div>` : ''}
       <nav class="seg" aria-label="Exercise sections">
         ${[['summary', 'Summary'], ['history', 'History'], ['howto', 'How-to']].map(([k, l]) => `<button class="pill ${tab === k ? 'is-on' : ''}" data-tab-x="${k}" type="button">${l}</button>`).join('')}
@@ -61,13 +57,15 @@ export function render(view, params = []) {
       body.innerHTML = `<p class="hint">${ex.howTo ? esc(ex.howTo) : 'No written instructions yet. They are optional and written fresh for Training HQ.'}</p>`;
     }
     view.querySelectorAll('[data-tab-x]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tabX; draw(repo); }));
-    view.querySelector('#add-demo').addEventListener('click', () => toast('Adding demo clips is part of feature 2.17, coming later in this step.'));
+    offDemo();
+    offDemo = demoPanel(view.querySelector('#demo'), ex);
   };
+  let offDemo = () => {};
 
   let off = () => {};
   ready.then((repo) => {
-    off = repo.onChange((cols) => { if (cols.includes('exercises') || cols.includes('bridge')) draw(repo); });
+    off = repo.onChange((cols) => { if (cols.includes('exercises') || cols.includes('bridge') || cols.includes('demos')) draw(repo); });
     draw(repo);
   });
-  return () => off();
+  return () => { off(); offDemo(); };
 }

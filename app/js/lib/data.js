@@ -122,6 +122,46 @@ async function post(path, body) {
   }
 }
 
+/** A call to the Mac that isn't JSON sync (demo clips). Throws with a plain message when it can't be reached. */
+async function macFetch(path, { method = 'GET', body, type, timeoutMs = 60000 } = {}) {
+  await ready;
+  const url = await repo.getMeta('macUrl');
+  const token = await repo.getMeta('token');
+  if (!url || !token) throw new Error('Pair with your Mac first (Settings).');
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url + path, { method, body, signal: ctrl.signal, headers: { authorization: `Bearer ${token}`, ...(type ? { 'content-type': type } : {}) } });
+  } catch {
+    throw new Error('Mac unreachable. Try again when it is connected.');
+  } finally { clearTimeout(t); }
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Mac answered ${res.status}`);
+  return res;
+}
+
+/** Upload a demo clip for an exercise; the Mac stores it as <exercise id>.<type> and syncs a small record. */
+export async function uploadDemo(id, blob) {
+  const res = await macFetch(`/api/demo?id=${encodeURIComponent(id)}`, { method: 'POST', body: blob, type: blob.type || 'video/mp4', timeoutMs: 180000 });
+  syncNow();
+  return res.json();
+}
+
+export const fetchDemo = async (id) => (await macFetch(`/api/demo?id=${encodeURIComponent(id)}`)).blob();
+
+export async function deleteDemo(id) {
+  const res = await macFetch('/api/demo/delete', { method: 'POST', body: JSON.stringify({ id }), type: 'application/json' });
+  syncNow();
+  return res.json();
+}
+
+/** Ask the Mac to look for clips copied into its demos folder by hand. */
+export async function rescanDemos() {
+  const res = await macFetch('/api/demos');
+  await syncNow();
+  return res.json();
+}
+
 /** Ask the Mac for a pairing code for another device. */
 export async function newPairingCode() {
   await ready;

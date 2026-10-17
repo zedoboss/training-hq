@@ -13,6 +13,7 @@ import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
 import { warmupSets } from '../lib/plates.js';
 import { setRecord } from '../lib/finish.js';
+import { demoPanel } from '../ui/demo-panel.js';
 import { actionSheet, confirmSheet, promptText, overlay } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
@@ -316,6 +317,12 @@ export function render(view, params = []) {
       const others = session.exercises.filter((e) => e.key !== key);
       const lib = ctx.lib.get(ex.exerciseId) || {};
       actionSheet(ex.name, [
+        { label: 'Demo clip', run: () => {
+          let offDemo = () => {};
+          const { el, close } = overlay(`<div class="hud c-muted sheet-title">${esc(ex.name)}</div><div data-demo></div><button class="sheet-btn sheet-cancel" type="button" data-cancel>Close</button>`, () => offDemo());
+          offDemo = demoPanel(el.querySelector('[data-demo]'), { id: ex.exerciseId, name: ex.name });
+          el.querySelector('[data-cancel]').addEventListener('click', () => close());
+        } },
         { label: lib.pinnedNote ? 'Edit pinned note' : 'Pin a note (shows every time)', run: async () => {
           const t = await promptText('Pinned note for this exercise', lib.pinnedNote?.text ?? lib.pinnedNote ?? '');
           if (t == null) return;

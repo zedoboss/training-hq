@@ -5,6 +5,7 @@ import { openStore } from './store.mjs';
 import { createApp } from './app.mjs';
 import { writePrecache } from '../scripts/precache.mjs';
 import { seedDocs, applySeed } from './seed.mjs';
+import { openDemos } from './demos.mjs';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
 
@@ -15,7 +16,11 @@ const { version } = writePrecache(APP_DIR);
 const seeded = applySeed(store, seedDocs(p.seedDir));
 log(`seed: ${seeded.written} written, ${seeded.refreshed} refreshed, ${seeded.kept} unchanged`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, log });
+const demos = openDemos(p.demosDir, store);
+const scan = demos.rescan();
+log(`demos: ${scan.clips} clips (${scan.added} new, ${scan.removed} gone) in ${p.demosDir}`);
+
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });

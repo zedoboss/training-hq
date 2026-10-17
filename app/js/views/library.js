@@ -39,7 +39,7 @@ export function render(view, params = []) {
   view.innerHTML = `
     <div class="lib-head">
       <h1 class="view-title">Library</h1>
-      <a class="pill" href="#/library/new">+ Custom</a>
+      <span class="btn-row tight"><a class="pill" href="#/demos">Demos</a><a class="pill" href="#/library/new">+ Custom</a></span>
     </div>
     <input class="input" id="lib-q" type="search" placeholder="Search exercises" autocomplete="off" value="${esc(state.q)}" aria-label="Search exercises">
     <div class="chips" role="group" aria-label="Muscle">

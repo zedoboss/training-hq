@@ -4,6 +4,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
+import { MAX_DEMO_BYTES } from './demos.mjs';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -35,15 +36,31 @@ function readJson(req) {
   });
 }
 
+/** Raw request body (a video upload), refused past `limit` bytes. */
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { reject(new HttpError(413, `video too large (max ${Math.round(limit / 1048576)} MB)`)); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 /**
  * @param {object} o
  * @param {ReturnType<import('./store.mjs').openStore>} o.store
  * @param {string} o.appDir folder with the app's files
  * @param {string[]} o.allowedOrigins extra origins allowed to call the API (e.g. the GitHub Pages site)
+ * @param {ReturnType<import('./demos.mjs').openDemos>} [o.demos] exercise demo clips (2.17)
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -122,6 +139,39 @@ export function createApp({ store, appDir, allowedOrigins = [], now = () => Date
       return { revoked: store.revokeDevice(id) };
     },
 
+    // Exercise demo clips (2.17). The id is the exercise id, passed as ?id=.
+    'GET /api/demos': async (req) => {
+      auth(req);
+      if (!demos) throw new HttpError(404, 'no demo folder');
+      return demos.rescan();
+    },
+
+    'POST /api/demo': async (req, url) => {
+      auth(req);
+      if (!demos) throw new HttpError(404, 'no demo folder');
+      const body = await readRaw(req, MAX_DEMO_BYTES);
+      try {
+        const rec = demos.save(url.searchParams.get('id'), req.headers['content-type'], body);
+        log(`demo saved: ${rec.file} (${rec.bytes} bytes)`);
+        return rec;
+      } catch (e) { throw new HttpError(e.status || 500, e.message); }
+    },
+
+    'GET /api/demo': async (req, url, res) => {
+      auth(req);
+      const clip = demos?.read(url.searchParams.get('id'));
+      if (!clip) throw new HttpError(404, 'no demo for this exercise');
+      res.writeHead(200, { 'Content-Type': clip.type, 'Content-Length': clip.body.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      res.end(clip.body);
+    },
+
+    'POST /api/demo/delete': async (req) => {
+      auth(req);
+      if (!demos) throw new HttpError(404, 'no demo folder');
+      const { id } = await readJson(req);
+      try { return { removed: demos.remove(id) }; } catch (e) { throw new HttpError(e.status || 500, e.message); }
+    },
+
     'POST /api/sync': async (req) => {
       const device = auth(req);
       const body = await readJson(req);
@@ -167,7 +217,8 @@ export function createApp({ store, appDir, allowedOrigins = [], now = () => Date
       if (url.pathname.startsWith('/api/')) {
         const handler = routes[`${req.method} ${url.pathname}`];
         if (!handler) throw new HttpError(404, 'no such endpoint');
-        send(res, 200, await handler(req));
+        const out = await handler(req, url, res);
+        if (!res.headersSent) send(res, 200, out);
         return;
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'method not allowed');
