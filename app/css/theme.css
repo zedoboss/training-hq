@@ -1,0 +1,126 @@
+/* Training HQ theme. Colours come from the "Training HQ design options" canvas, option E. */
+@font-face {
+  font-family: 'Inter';
+  src: url('../fonts/inter-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --bg: #050b12;
+  --bg-2: #08121b;
+  --surface: #0a1722;
+  --surface-2: #0d2231;
+  --core: #071a26;
+  --border: #1f3a4b;
+  --border-strong: #2b5268;
+  --divider: #16293a;
+  --ring: #12222f;
+
+  --text: #e8f3f9;
+  --muted: #8ea6b6;
+  --faint: #55707f;
+
+  --cyan: #4fd8ff;
+  --cyan-dim: #3aa7c9;
+  --pale: #a9e6ff;
+  --on-pale: #062230;
+  --amber: #ffb84d;
+  --green: #46e08c;
+  --green-bg: #0c2a1d;
+  --red: #ff7a6b;
+
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --r-s: 9px;
+  --r-m: 12px;
+  --r-l: 16px;
+  --tap: 44px;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  color-scheme: dark;
+}
+
+html { background: var(--bg); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* HUD text: uppercase monospace readouts. */
+.hud {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.c-cyan { color: var(--cyan); }
+.c-cyan-dim { color: var(--cyan-dim); }
+.c-amber { color: var(--amber); }
+.c-green { color: var(--green); }
+.c-muted { color: var(--muted); }
+.c-faint { color: var(--faint); }
+.c-text { color: var(--text); }
+.c-red { color: var(--red); }
+
+/* Pill tabs and buttons. */
+.pill {
+  height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-s);
+  background: var(--surface);
+  color: var(--pale);
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pill[aria-current='page'], .pill.is-on {
+  background: var(--pale);
+  border-color: var(--pale);
+  color: var(--on-pale);
+  font-weight: 600;
+}
+.pill:disabled, .pill[aria-disabled='true'] { opacity: 0.45; cursor: default; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-m);
+}
+
+/* Corner-bracket readouts, as in God's Eye View. */
+.bracket-tl { border-left: 1px solid var(--border-strong); border-top: 1px solid var(--border-strong); padding: 10px 0 0 14px; }
+.bracket-tr { border-right: 1px solid var(--border-strong); border-top: 1px solid var(--border-strong); padding: 10px 14px 0 0; text-align: right; }
+.bracket-bl { border-left: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); padding: 0 0 10px 14px; }
+.bracket-br { border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); padding: 0 14px 10px 0; text-align: right; }
+
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

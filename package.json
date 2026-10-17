@@ -1,0 +1,15 @@
+{
+  "name": "training-hq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal training tracker and coach: phone web app plus a small server on the Mac.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.14"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.mjs\"",
+    "precache": "node scripts/precache.mjs",
+    "start": "node server/index.mjs"
+  }
+}

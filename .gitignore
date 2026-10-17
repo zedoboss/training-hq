@@ -1,0 +1,8 @@
+node_modules/
+app/precache.js
+*.log
+.DS_Store
+# Personal data and keys live in ~/Documents/training-hq-private, never here.
+*.sqlite
+*.sqlite-*
+.env*
