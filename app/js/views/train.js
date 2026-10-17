@@ -69,7 +69,8 @@ export function render(view) {
         <button class="btn-ghost" id="new-routine" type="button">+ Routine</button>
         <button class="btn-ghost" id="new-folder" type="button">+ Folder</button>
         <a class="btn-ghost center" href="#/library">Library</a>
-      </div>`;
+      </div>
+      <a class="btn-ghost center" href="#/stats">Statistics</a>`;
 
     view.querySelector('#new-routine').onclick = async () => {
       const title = await promptText('New routine', '', { placeholder: 'Name' });
