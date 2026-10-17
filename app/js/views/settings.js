@@ -1,6 +1,6 @@
 // SETTINGS: link to the Mac (pairing, sync status), workout settings (2.19), equipment, units, app details.
 // Settings are synced documents (col 'settings', ids 'main' and 'equipment'); every change saves at once.
-import { appVersion } from '../lib/sw-client.js';
+import { appVersion, latestVersion, checkForUpdate, reloadAppFiles } from '../lib/sw-client.js';
 import { getState, subscribe } from '../lib/store.js';
 import { ready, pair, unpair, syncNow, newPairingCode, sameOriginMac, saveSettings, saveEquipment } from '../lib/data.js';
 import { formatTime, formatDay } from '../lib/time.js';
@@ -10,6 +10,7 @@ import { warmupSets } from '../lib/plates.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import { unlockAudio, play } from '../lib/sounds.js';
 import { toast } from '../ui/toast.js';
+import { confirmSheet } from '../ui/sheet.js';
 
 const isPhone = /iPhone|iPad|Android/.test(navigator.userAgent);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -214,9 +215,13 @@ export function render(view) {
     <div class="section-label">App</div>
     <dl class="card kv">
       <dt>Version</dt><dd id="set-version">…</dd>
+      <dt>Latest</dt><dd id="set-latest">…</dd>
       <dt>Installed</dt><dd id="set-installed">…</dd>
       <dt>This device</dt><dd id="set-device">…</dd>
-    </dl>`;
+    </dl>
+    <div class="btn-row"><button class="btn-ghost" id="upd-check" type="button">Check for update</button>
+      <button class="btn-ghost" id="upd-reload" type="button">Reload app files</button></div>
+    <p class="hint">Reload app files fetches the app again from the web if an update won't come through. Your data on this device stays.</p>`;
 
   const kv = view.querySelector('#mac-kv');
   const actions = view.querySelector('#mac-actions');
@@ -307,7 +312,22 @@ export function render(view) {
   const unsub = subscribe(draw);
   ready.then(() => drawPrefs(getState()));
 
-  appVersion().then((v) => { view.querySelector('#set-version').textContent = v; });
+  const showVersions = async () => {
+    const [v, latest] = await Promise.all([appVersion(), latestVersion()]);
+    view.querySelector('#set-version').textContent = v;
+    view.querySelector('#set-latest').innerHTML = latest == null ? '<span class="c-muted">offline</span>'
+      : latest === v ? '<span class="c-green">up to date</span>' : `<span class="c-amber">${esc(latest)} available</span>`;
+  };
+  showVersions();
+  view.querySelector('#upd-check').onclick = async () => {
+    const r = await checkForUpdate();
+    toast(r === 'reloading' ? 'Updating… the app reloads in a moment.' : r === 'slow' ? 'Still downloading. It asks to reload when ready.' : r === 'no-worker' ? 'Offline mode is not set up in this browser.' : 'You have the latest version.');
+    showVersions();
+  };
+  view.querySelector('#upd-reload').onclick = async () => {
+    if (!navigator.onLine) { toast('No connection: the app files can\'t be fetched now.'); return; }
+    if (await confirmSheet('Fetch the app again from the web? Your data on this device stays.', { ok: 'Reload' })) reloadAppFiles();
+  };
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   view.querySelector('#set-installed').textContent = standalone ? 'Home Screen app' : 'Browser tab';
   ready.then((repo) => { view.querySelector('#set-device').textContent = repo.device; });

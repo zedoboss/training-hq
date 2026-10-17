@@ -1,5 +1,7 @@
 node_modules/
 app/precache.js
+app/sw.js
+app/version.json
 *.log
 .DS_Store
 # Personal data and keys live in ~/Documents/training-hq-private, never here.

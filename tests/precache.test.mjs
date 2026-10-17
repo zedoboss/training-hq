@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { buildPrecache } from '../scripts/precache.mjs';
+import { buildPrecache, writePrecache } from '../scripts/precache.mjs';
+import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const APP = fileURLToPath(new URL('../app/', import.meta.url));
 
@@ -19,4 +22,22 @@ test('every file the page needs is in the offline list', () => {
     assert.ok(existsSync(APP + f), `listed but missing on disk: ${f}`);
   }
   assert.ok(!files.includes('sw.js'), 'the service worker must not cache itself');
+  assert.ok(!files.includes('version.json'), 'the latest-version probe is never cached');
+});
+
+test('sw.js itself changes when any app file changes, so iPhone Safari sees the update', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-pc-'));
+  try {
+    cpSync(APP, dir, { recursive: true });
+    const a = writePrecache(dir);
+    const swA = readFileSync(join(dir, 'sw.js'), 'utf8');
+    assert.ok(swA.includes(a.version), 'the version is inside sw.js');
+    assert.ok(swA.includes('self.TRAINING_HQ_PRECACHE = {'), 'the file list is inside sw.js');
+    assert.ok(!swA.includes('importScripts'), 'nothing imported: Safari would not notice it change');
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'version.json'), 'utf8')), { version: a.version });
+    writeFileSync(join(dir, 'css', 'app.css'), `${readFileSync(join(dir, 'css', 'app.css'), 'utf8')}\n/* changed */\n`);
+    const b = writePrecache(dir);
+    assert.notEqual(a.version, b.version);
+    assert.notEqual(readFileSync(join(dir, 'sw.js'), 'utf8'), swA);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
