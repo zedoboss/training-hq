@@ -77,7 +77,7 @@ async function startSession(view, routineId) {
   const [meta, progDocs, ctx] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null)]);
   const { session, sets } = buildSession({
     routine, meta, programmeRoutines: progDocs.filter((d) => d.kind === 'routine'), lib: ctx.lib, history: ctx.history, today: isoDate(new Date()),
-    smallestPlate: minPlate(), gym: prefs().gym.name,
+    smallestPlate: minPlate(), gym: prefs().gym.name, warmupSteps: prefs().warmup.steps, sameRoutine: prefs().previousFrom === 'same-routine',
   });
   // Sets first: if the app is closed half-way, no session exists without its sets.
   for (const s of sets) await repo.put('sets', s.id, s);

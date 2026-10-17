@@ -128,6 +128,12 @@ test('finish: skipped exercises are not a routine change and keep their sets', a
   assert.deepEqual(r.exercises[0].plan, routine.exercises[0].plan);
   const moreSets = [...sets, { exKey: 'b', done: true, type: 'normal', kg: 29, reps: 15, order: 1 }, { exKey: 'b', done: true, type: 'normal', kg: 29, reps: 15, order: 2 }];
   assert.equal(structureChanged(session, moreSets, routine), true, 'an extra set on abduction is a change');
+  const withWarm = { ...routine, exercises: routine.exercises.map((e) => (e.key === 'x2' ? { ...e, warmup: true } : e)) };
+  const warmed = [...sets, { exKey: 'b', done: true, type: 'warmup', kg: 15, reps: 8, order: 1 }, { exKey: 'b', done: true, type: 'normal', kg: 29, reps: 15, order: 2 }];
+  assert.equal(structureChanged(session, warmed, withWarm), false, 'warm-ups made by the routine option are not a change');
+  const again = routineFromSession(session, warmed, withWarm).exercises[1];
+  assert.equal(again.warmup, true);
+  assert.deepEqual(again.sets.map((x) => x.type), ['normal'], 'generated warm-ups are not saved into the routine');
 });
 
 test('typical session length: median of the last 3 of the same day type', async () => {
@@ -200,4 +206,30 @@ test('record banner: a ticked set over the comeback best, not on a first-ever ex
   assert.equal(setRecord({ set: set('a', 99, 'hold'), name, sessionId: 'x', history: h }), null, 'holds never count');
   assert.equal(setRecord({ set: set('a', 99), name: 'Never Done Before', sessionId: 'x', history: h }), null, 'first-ever session');
   assert.equal(setRecord({ set: { ...set('a', 60), done: false }, name, sessionId: 'x', history: h }), null);
+});
+
+test('routine weights follow the last session set by set, or the routine own weights when switched off (P11)', () => {
+  const s1 = { id: 's1', status: 'done', routineId: 'mine', dayType: 'push', startedAt: Date.parse('2026-10-18T04:30:00Z'), exercises: [{ key: 'a', name: 'Bench Press (Smith Machine)' }] };
+  const done = [{ sessionId: 's1', exKey: 'a', order: 0, done: true, type: 'normal', kg: 60, reps: 8 }, { sessionId: 's1', exKey: 'a', order: 1, done: true, type: 'normal', kg: 55, reps: 10 }];
+  const h = buildHistory({ sessions: [s1], sets: done, bridge });
+  const mine = { id: 'mine', title: 'Mine', dayType: 'push', exercises: [{ key: 'k', exerciseId: 'bench-press-smith-machine', name: 'Bench Press (Smith Machine)', plan: null,
+    sets: [{ type: 'normal', kg: 40, reps: [8, 8] }, { type: 'normal', kg: 40, reps: [8, 8] }, { type: 'normal', kg: 40, reps: [8, 8] }] }] };
+  const kgs = (r) => buildSession({ routine: r, meta, lib, history: h, today: '2026-10-19' }).sets.map((s) => s.kg);
+  assert.deepEqual(kgs(mine), [60, 55, 40], 'third set: nothing last time, keeps the routine weight');
+  assert.deepEqual(kgs({ ...mine, followLast: false }), [40, 40, 40]);
+});
+
+test('warm-up sets in a routine are worked out from today\'s working weight with the Settings steps (P5)', () => {
+  const h = buildHistory({ bridge });
+  const withWarmup = { ...routine, exercises: routine.exercises.map((e, i) => (i === 0 ? { ...e, warmup: true } : e)) };
+  const { session, sets } = buildSession({ routine: withWarmup, meta, programmeRoutines, lib, history: h, today: '2026-10-18' });
+  const bench = sets.filter((s) => s.exKey === session.exercises[0].key);
+  assert.deepEqual(bench.map((s) => [s.type, s.kg]), [['warmup', 31.3], ['warmup', 48.8], ['normal', 66.3], ['normal', 66.3]]);
+  assert.deepEqual(bench[0].target.reps, [8, 8]);
+  const custom = buildSession({ routine: withWarmup, meta, programmeRoutines, lib, history: h, today: '2026-10-18', warmupSteps: [{ pct: 60, reps: 5 }] }).sets;
+  assert.equal(custom.filter((s) => s.type === 'warmup').length, 1);
+  const plainRows = { id: 'p', title: 'P', exercises: [{ key: 'k', exerciseId: 'bench-press-smith-machine', name: 'Bench Press (Smith Machine)', plan: null, warmup: true,
+    sets: [{ type: 'warmup', reps: [10, 10] }, { type: 'normal', kg: 60, reps: [8, 8] }] }] };
+  assert.deepEqual(buildSession({ routine: { ...plainRows, followLast: false }, meta, lib, history: h, today: '2026-10-18' }).sets.map((s) => [s.type, s.kg]),
+    [['warmup', 28.8], ['warmup', 43.8], ['normal', 60]], 'calculated warm-ups replace plain warm-up rows');
 });

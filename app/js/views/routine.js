@@ -7,8 +7,10 @@ import { SET_TYPES } from '../lib/exercise-types.js';
 import { pickExercises } from '../ui/picker.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
-import { REST_CHOICES, restText } from '../lib/settings.js';
+import { REST_CHOICES, restText, withDefaults } from '../lib/settings.js';
+import { getState } from '../lib/store.js';
 
+const warmupText = () => withDefaults(getState().settings).warmup.steps.map((x) => `${x.pct}% × ${x.reps}`).join(', ') || 'none set';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export function render(view, params = []) {
@@ -24,11 +26,12 @@ export function render(view, params = []) {
         <div class="btn-row tight"><a class="pill" href="#/routine/${esc(r.id)}/edit">Edit</a></div></div>
       <h1 class="view-title">${esc(r.title)}</h1>
       ${r.notes ? `<p class="hint">${esc(r.notes)}</p>` : ''}
+      <p class="hint">${r.followLast === false ? 'Weights: as set in this routine.' : 'Weights: from your last session of each exercise; the routine\'s own weights fill any gaps.'}</p>
       ${r.exercises.some((e) => e.plan) ? `<p class="hint">Sets and targets for exercises marked PLAN come from The Comeback when you start: this week's column, capped at your last load + 30%. <a href="#/programme/${esc(r.dayType || '')}">See the table</a>.</p>` : ''}
       <ul class="ex-list">${r.exercises.map((e, i) => `<li class="ex">
         <div class="ex-head"><a class="ex-name plain" href="#/exercise/${esc(e.exerciseId)}">${i + 1}. ${esc(e.name)}</a>
           <span class="tag ${e.plan ? 'tag-main' : e.role === 'tendon-hold' ? 'tag-hold' : ''}">${e.plan ? 'PLAN' : e.role === 'tendon-hold' ? 'HOLD' : esc(setsSummary(e.sets))}</span></div>
-        <div class="ex-line c-muted">Rest ${e.restSeconds == null ? 'default' : restText(e.restSeconds)}${e.notes ? ` · ${esc(e.notes)}` : ''}</div></li>`).join('')}</ul>
+        <div class="ex-line c-muted">Rest ${e.restSeconds == null ? 'default' : restText(e.restSeconds)}${e.warmup ? ' · warm-up sets' : ''}${e.notes ? ` · ${esc(e.notes)}` : ''}</div></li>`).join('')}</ul>
       <a class="btn-primary center big" href="#/session/start/${esc(r.id)}">Start ${esc(r.title)}</a>`;
   };
 
@@ -53,6 +56,8 @@ export function render(view, params = []) {
       <div class="field"><label for="r-folder">Folder</label><select class="input" id="r-folder">
         <option value="">No folder</option>${folders.map((f) => `<option value="${esc(f.id)}" ${r.folderId === f.id ? 'selected' : ''}>${esc(f.title)}</option>`).join('')}</select></div>
       <div class="field"><label for="r-notes">Routine note</label><textarea class="input area" id="r-notes" rows="2">${esc(r.notes)}</textarea></div>
+      <div class="card opt-list"><div class="opt"><div class="opt-text">Weights follow your last session<small>Off: every session starts from the weights set here</small></div>
+        <input class="switch" type="checkbox" role="switch" id="r-follow" ${r.followLast === false ? '' : 'checked'}></div></div>
       <ul class="ex-list" id="r-ex">${r.exercises.map((e, i) => `<li class="ex ${e.supersetId ? 'in-superset' : ''}" data-key="${esc(e.key)}">
         ${e.supersetId ? '<div class="hud ss-label">SUPERSET</div>' : ''}
         <div class="ex-head"><span class="ex-name">${i + 1}. ${esc(e.name)}</span>
@@ -65,6 +70,7 @@ export function render(view, params = []) {
           <label class="hint">Rest <select class="input mini" data-act="rest"><option value="" ${e.restSeconds == null ? 'selected' : ''}>Default</option>${REST_CHOICES.map((s) => `<option value="${s}" ${e.restSeconds === s ? 'selected' : ''}>${restText(s)}</option>`).join('')}</select></label>
           <input class="input mini grow" data-act="notes" placeholder="Note for this exercise" value="${esc(e.notes)}">
         </div>
+        ${e.warmup ? `<p class="hint">+ Warm-up sets before the first working set: ${esc(warmupText())} of it (steps in Settings).</p>` : ''}
         ${e.plan
           ? `<p class="hint">Follows The Comeback: sets and targets are set when you start. <button class="link-btn" data-act="detach" type="button">Set my own sets</button></p>`
           : `${e.sets.map((s, si) => setRow(e, s, si)).join('')}<button class="link-btn" data-act="add-set" type="button">+ Set</button>`}
@@ -75,6 +81,7 @@ export function render(view, params = []) {
     titleEl.addEventListener('change', () => save({ ...r, title: titleEl.value.trim() || r.title }));
     view.querySelector('#r-folder').addEventListener('change', (ev) => save({ ...r, folderId: ev.target.value || null }));
     view.querySelector('#r-notes').addEventListener('change', (ev) => save({ ...r, notes: ev.target.value }));
+    view.querySelector('#r-follow').addEventListener('change', (ev) => save({ ...r, followLast: ev.target.checked }));
     view.querySelector('#r-add').addEventListener('click', async () => {
       const picked = await pickExercises({ multi: true });
       if (picked.length) { await save(addExercises(r, picked)); drawEdit(); }
@@ -101,6 +108,12 @@ export function render(view, params = []) {
             await save({ ...r, exercises: r.exercises.map((x) => (x.key === key || x.key === o.key ? { ...x, supersetId: sid } : x)) });
             drawEdit();
           } }))) }] : []),
+        { label: e.warmup ? 'Remove warm-up sets' : 'Add warm-up sets', run: async () => {
+          const plain = (e.sets || []).filter((x) => x.type === 'warmup').length;
+          await save(updateExercise(r, key, e.warmup ? { warmup: false } : { warmup: true, sets: (e.sets || []).filter((x) => x.type !== 'warmup') }));
+          if (!e.warmup && plain) toast(`Replaced ${plain} plain warm-up row${plain > 1 ? 's' : ''} with calculated warm-up sets.`);
+          drawEdit();
+        } },
         { label: 'Replace', run: async () => { const [ex] = await pickExercises({ multi: false, title: 'Replace with' }); if (ex) { await save(replaceExercise(r, key, ex)); drawEdit(); } } },
         { label: 'Remove', danger: true, run: async () => { await save(removeExercise(r, key)); drawEdit(); } },
       ]);

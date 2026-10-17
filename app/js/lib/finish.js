@@ -51,7 +51,8 @@ export function structureChanged(session, sets, routine) {
   return session.exercises.some((e, i) => {
     const re = routine.exercises[i];
     if (re.plan) return false;
-    const done = sets.filter((s) => s.exKey === e.key && s.done).length;
+    // Warm-ups made by the routine's "warm-up sets" option are not part of its structure.
+    const done = sets.filter((s) => s.exKey === e.key && s.done && !(re.warmup && s.type === 'warmup')).length;
     return done > 0 && done !== (re.sets?.length ?? 0);
   });
 }
@@ -67,10 +68,10 @@ export function routineFromSession(session, sets, routine = null) {
     notes: routine?.notes ?? '',
     exercises: session.exercises.map((e) => {
       const re = routine?.exercises.find((x) => x.exerciseId === e.exerciseId);
-      const mine = sets.filter((s) => s.exKey === e.key && s.done).sort((a, b) => a.order - b.order);
+      const mine = sets.filter((s) => s.exKey === e.key && s.done && !(re?.warmup && s.type === 'warmup')).sort((a, b) => a.order - b.order);
       return {
         key: re?.key ?? newKey(), exerciseId: e.exerciseId, name: e.name, restSeconds: e.restSeconds ?? null, notes: re?.notes ?? e.notes ?? '',
-        plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,
+        plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null, warmup: re?.warmup ?? false,
         sets: re?.plan ? [] : !mine.length && re ? re.sets
           : mine.map((s) => ({ type: s.type, kg: s.kg ?? null, reps: s.reps != null ? [s.reps, s.reps] : null, durationS: s.durationS ?? null })),
       };

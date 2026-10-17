@@ -4,6 +4,7 @@ import { targetFor } from './targets.js';
 import { weekColumn } from './programme.js';
 import { effectiveKg } from './exercise-types.js';
 import { newId, newKey, defaultSets } from './routines.js';
+import { warmupSets } from './plates.js';
 
 export const newSetId = () => newId('set');
 
@@ -26,8 +27,10 @@ const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmu
  * @param {number} o.now
  * @param {number} [o.smallestPlate] smallest plate he has (Settings), for rounding bar loads
  * @param {string|null} [o.gym]   gym tag for the session (Settings)
+ * @param {Array} [o.warmupSteps] warm-up steps (Settings) for exercises marked "warm-up sets" in the routine
+ * @param {boolean} [o.sameRoutine] previous values only from the same routine (Settings: previous column)
  */
-export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null }) {
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false }) {
   const id = newId('session');
   const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
   const session = {
@@ -55,11 +58,27 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
       planned = Array.from({ length: t.sets }, () => ({ type: 'normal', kg: t.bodyweight ? null : t.kg, reps: null, target: { kg: t.kg, reps: t.reps } }));
     } else {
       const base = re.sets?.length ? re.sets : defaultSets(entry.type);
+      // P11: weights follow the last session (decision 10), set by set, unless the routine is switched to its own weights.
+      const follow = routine?.followLast !== false;
+      const prev = follow ? history.previous(re.name, sameRoutine && routine ? { routineId: routine.id, dayType: routine.dayType } : null) : null;
+      const seen = { warmup: 0, working: 0, hold: 0 };
       planned = base.map((s) => {
-        const kgGuess = s.kg ?? (s.type !== 'warmup' && s.type !== 'hold' ? lastHeaviest?.kg ?? null : null);
+        const kind = kindOf(s);
+        const fromLast = prev ? prev[kind]?.[seen[kind]]?.kg ?? null : null;
+        seen[kind]++;
+        const fallback = kind === 'working' ? lastHeaviest?.kg ?? null : null;
+        const kgGuess = follow ? fromLast ?? s.kg ?? fallback : s.kg ?? fallback;
         return { type: s.type, kg: kgGuess, reps: null, durationS: s.type === 'hold' ? s.durationS ?? 30 : s.durationS ?? null, target: { kg: kgGuess, reps: Array.isArray(s.reps) ? s.reps : s.reps ? [s.reps, s.reps] : null } };
       });
       if (lastHeaviest && !re.sets?.length) entry.target = { kg: lastHeaviest.kg, reps: null, why: `last load (${lastHeaviest.kg})` };
+    }
+    // P5: calculated warm-up sets from today's first working weight (Settings steps), loadable on the bar and plates.
+    // They take the place of any plain warm-up rows the routine has.
+    if (re.warmup) {
+      planned = planned.filter((p) => p.type !== 'warmup');
+      const work = planned.find((p) => p.type !== 'hold' && p.kg != null);
+      const ws = work ? warmupSets(work.kg, { barKg: entry.barKg, steps: warmupSteps, smallestPlate }) : [];
+      planned = [...ws.map((w) => ({ type: 'warmup', kg: w.kg, reps: null, target: { kg: w.kg, reps: [w.reps, w.reps] } })), ...planned];
     }
     session.exercises.push(entry);
     for (const p of planned) {
