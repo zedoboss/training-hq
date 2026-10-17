@@ -46,10 +46,13 @@ test('commit: only the backup and demo folders, and only when something changed'
     const store = openStore(join(dir, 'db.sqlite'));
     store.writeLocal('sets', 's1', { kg: 50 });
     writeBackup(store, join(dir, 'data', 'backup'));
+    mkdirSync(join(dir, 'data', 'demos'), { recursive: true });
     mkdirSync(join(dir, 'notes'), { recursive: true });
     spawnSync('sh', ['-c', `echo draft > ${join(dir, 'notes', 'wip.md')}`]);
-    assert.equal(commitBackup(dir, 'Nightly backup'), 'committed');
+    assert.equal(commitBackup(dir, 'Nightly backup'), 'committed', 'an empty demos folder does not block the commit');
     assert.equal(commitBackup(dir, 'Nightly backup'), 'unchanged');
+    spawnSync('sh', ['-c', `echo clip > ${join(dir, 'data', 'demos', 'squat.mp4')}`]);
+    assert.equal(commitBackup(dir, 'Nightly backup'), 'committed', 'a new clip is committed');
     assert.match(git('status', '--porcelain').stdout, /\?\? notes\//, 'other work is not committed');
     assert.match(git('log', '--oneline').stdout, /Nightly backup/);
     store.close();

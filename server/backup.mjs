@@ -75,8 +75,10 @@ export function commitBackup(privateDir, message, paths = ['data/backup', 'data/
   if (!present.length) return 'unchanged';
   const add = git('add', '-A', '--', ...present);
   if (add.status !== 0) return `git add failed: ${add.stderr.trim()}`;
-  if (git('diff', '--cached', '--quiet', '--', ...present).status === 0) return 'unchanged';
-  const c = git('commit', '-q', '-m', message, '--', ...present);
+  // An empty folder (no clips yet) is unknown to git and can't be named in the commit.
+  const known = present.filter((p) => git('ls-files', '--', p).stdout.trim() || git('ls-files', '--deleted', '--', p).stdout.trim() || git('diff', '--cached', '--name-only', '--', p).stdout.trim());
+  if (!known.length || git('diff', '--cached', '--quiet', '--', ...known).status === 0) return 'unchanged';
+  const c = git('commit', '-q', '-m', message, '--', ...known);
   return c.status === 0 ? 'committed' : `git commit failed: ${c.stderr.trim() || c.stdout.trim()}`;
 }
 
@@ -94,20 +96,26 @@ export function msUntil(hour, now = new Date()) {
  */
 export function scheduleNightly({ store, privateDir, backupDir, hour = 1, log = () => {}, now = () => Date.now() }) {
   let timer = null;
-  const run = () => {
-    try {
-      const r = writeBackup(store, backupDir);
-      const day = isoDate(new Date(now()));
-      const outcome = commitBackup(privateDir, `Nightly backup ${day}: ${r.records} records in ${r.collections} collections`);
-      store.setMeta('lastBackup', { at: now(), ...r, outcome });
-      log(`backup: ${r.records} records, ${r.files} files, ${outcome}`);
-    } catch (e) {
-      log(`backup failed: ${e.stack || e}`);
-    }
-  };
+  const run = () => backupNow({ store, privateDir, backupDir, log, now });
   const plan = () => { timer = setTimeout(() => { run(); plan(); }, msUntil(hour)); timer.unref?.(); };
   const last = store.getMeta('lastBackup');
   if (!last || now() - last.at > 24 * 3600 * 1000) run();
   plan();
   return () => clearTimeout(timer);
+}
+
+/** One backup: write the files and commit them. Returns the outcome. */
+export function backupNow({ store, privateDir, backupDir, log = () => {}, now = () => Date.now() }) {
+  try {
+    const r = writeBackup(store, backupDir);
+    const day = isoDate(new Date(now()));
+    const outcome = commitBackup(privateDir, `Nightly backup ${day}: ${r.records} records in ${r.collections} collections`);
+    // A failed commit doesn't count as done: the next start tries again.
+    if (!/failed/.test(outcome)) store.setMeta('lastBackup', { at: now(), ...r, outcome });
+    log(`backup: ${r.records} records, ${r.files} files, ${outcome}`);
+    return outcome;
+  } catch (e) {
+    log(`backup failed: ${e.stack || e}`);
+    return `failed: ${e.message}`;
+  }
 }
