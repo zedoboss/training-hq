@@ -42,7 +42,7 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     const entry = {
       key: newKey(), exerciseId: re.exerciseId, name: re.name, type: ex.type || 'weight_reps', capClass: ex.capClass ?? null,
       barKg: ex.barKg ?? null, restSeconds: re.restSeconds ?? ex.restSeconds ?? null, notes: re.notes || '', role: re.role ?? null,
-      target: null,
+      supersetId: re.supersetId ?? null, target: null,
     };
     let planned = [];
     const pe = re.plan ? planExerciseFor(programmeRoutines, re.plan) : null;
@@ -153,3 +153,42 @@ export function expectedFinish({ session, sets, typicalMs = null, now = Date.now
   else { leftMs = left * 150000; basis = 'estimate'; }
   return { at: now + leftMs, basis, leftMs };
 }
+
+/** A new active session repeating a past one: same exercises and supersets, sets prefilled with what was done. */
+export function copySession(past, pastSets, now = Date.now()) {
+  const id = newId('session');
+  const keyMap = new Map();
+  const did = new Set(pastSets.filter((x) => x.done).map((x) => x.exKey));
+  const exercises = past.exercises.filter((e) => did.has(e.key)).map((e) => { const key = newKey(); keyMap.set(e.key, key); return { ...e, key }; });
+  const sets = pastSets.filter((x) => x.done && keyMap.has(x.exKey)).sort((a, b) => a.order - b.order).map((x, i) => ({
+    id: newSetId(), sessionId: id, exKey: keyMap.get(x.exKey), order: i, done: false, doneAt: null, rpe: null, note: '',
+    type: x.type, kg: x.kg ?? null, reps: null, durationS: x.durationS ?? null, distanceM: x.distanceM ?? null,
+    target: { kg: x.kg ?? null, reps: x.reps != null ? [x.reps, x.reps] : null },
+  }));
+  return {
+    session: { ...past, id, exercises, startedAt: now, endedAt: null, pausedMs: 0, pausedAt: null, status: 'active', note: '', photos: [], copiedFrom: past.id },
+    sets,
+  };
+}
+
+/** Superset groups in session order: supersetId -> {letter, keys[]} */
+export function supersetGroups(exercises) {
+  const groups = new Map();
+  for (const e of exercises) {
+    if (!e.supersetId) continue;
+    if (!groups.has(e.supersetId)) groups.set(e.supersetId, { letter: String.fromCharCode(65 + groups.size), keys: [] });
+    groups.get(e.supersetId).keys.push(e.key);
+  }
+  return groups;
+}
+
+/** In a superset the rest timer starts after the last exercise of the group; otherwise after every set. */
+export function restAfter(exercises, key) {
+  const ex = exercises.find((e) => e.key === key);
+  if (!ex?.supersetId) return true;
+  const keys = exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
+  return keys[keys.length - 1] === key;
+}
+
+/** RPE choices with the reps-in-reserve hint. */
+export const RPE = [[10, 'nothing left'], [9.5, 'maybe 1 more'], [9, '1 more'], [8.5, '1-2 more'], [8, '2 more'], [7.5, '2-3 more'], [7, '3 more'], [6, '4+ more']];

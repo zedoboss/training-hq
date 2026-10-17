@@ -3,7 +3,8 @@
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory } from '../lib/history.js';
-import { summarize, elapsedMs } from '../lib/session.js';
+import { summarize, elapsedMs, copySession } from '../lib/session.js';
+import { fileToJpeg, newPhotoId } from '../lib/photos.js';
 import { sessionBests, structureChanged, routineFromSession } from '../lib/finish.js';
 import { formatDay, formatTime } from '../lib/time.js';
 import { kg as fmtKg } from '../lib/loads.js';
@@ -95,9 +96,12 @@ export function render(view, params = []) {
       ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
+      ${session.note ? `<p class="hint">Note: ${esc(session.note)}</p>` : ''}
+      <section class="card pad-card"><div class="hud c-muted">PHOTOS</div><div class="photo-grid" id="photos"></div>
+        <label class="btn-ghost center file-btn">Add photos<input type="file" accept="image/*" multiple hidden id="photo-in"></label></section>
+      <div class="btn-row"><a class="btn-ghost center" href="#/session/${esc(id)}/edit">Edit session</a><button class="btn-ghost" id="repeat" type="button">Repeat session</button></div>
       <div class="btn-row"><button class="btn-ghost" id="as-routine" type="button">Save as routine</button>
-        <button class="btn-ghost btn-danger" id="del" type="button">Delete session</button></div>
-      ${session.note ? `<p class="hint">Note: ${esc(session.note)}</p>` : ''}`;
+        <button class="btn-ghost btn-danger" id="del" type="button">Delete session</button></div>`;
     view.querySelectorAll('[data-u]').forEach((b) => b.addEventListener('click', async () => {
       if (b.dataset.u === 'update') { await repo.put('routines', routine.id, routineFromSession(session, done, routine)); toast('Routine updated.'); }
       view.querySelector('#upd').remove();
@@ -108,9 +112,33 @@ export function render(view, params = []) {
       await repo.put('routines', r.id, r);
       toast('Saved as a new routine.');
     };
+    const drawPhotos = async () => {
+      const ps = (await repo.list('photos')).filter((x) => x.sessionId === id).sort((a, b) => a.at - b.at);
+      view.querySelector('#photos').innerHTML = ps.map((x) => `<button class="photo" data-ph="${esc(x.id)}" type="button" aria-label="Photo options"><img src="${x.dataUrl}" alt="Session photo"></button>`).join('') || '<span class="hint">No photos.</span>';
+      view.querySelectorAll('[data-ph]').forEach((b) => b.addEventListener('click', async () => {
+        if (await confirmSheet('Delete this photo?', { ok: 'Delete', danger: true })) { await repo.remove('photos', b.dataset.ph); drawPhotos(); }
+      }));
+    };
+    drawPhotos();
+    view.querySelector('#photo-in').addEventListener('change', async (e) => {
+      for (const f of e.target.files) {
+        const pid = newPhotoId();
+        try { await repo.put('photos', pid, { id: pid, sessionId: id, dataUrl: await fileToJpeg(f), at: Date.now() }); } catch { toast('That photo could not be read.'); }
+      }
+      drawPhotos();
+    });
+    view.querySelector('#repeat').onclick = async () => {
+      const active = sessions.find((x) => x.status === 'active' && x.kind !== 'holds');
+      if (active) { toast('Finish or discard the session in progress first.'); return; }
+      const { session: ns, sets: nsets } = copySession(session, done);
+      await repo.put('sessions', ns.id, ns);
+      for (const x of nsets) await repo.put('sets', x.id, x);
+      location.hash = `#/session/${ns.id}`;
+    };
     view.querySelector('#del').onclick = async () => {
       if (!(await confirmSheet('Delete this session and all its sets?', { ok: 'Delete', danger: true }))) return;
       for (const s of all) await repo.remove('sets', s.id);
+      for (const x of (await repo.list('photos')).filter((p) => p.sessionId === id)) await repo.remove('photos', x.id);
       await repo.remove('sessions', id);
       location.hash = '#/train';
     };

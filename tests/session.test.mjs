@@ -138,3 +138,21 @@ test('expected finish: history first, then today\'s pace after 3 ticked sets', a
   assert.equal(expectedFinish({ session, sets: [{ done: true }], now: now15 }).leftMs, 0);
   assert.equal(expectedFinish({ session, sets: [{ done: false }], now: now15 }).basis, 'estimate');
 });
+
+test('repeat a past session; supersets; rest only after the last exercise of a superset', async () => {
+  const { copySession, supersetGroups, restAfter } = await import('../app/js/lib/session.js');
+  const past = { id: 'p', title: 'Pull', status: 'done', exercises: [{ key: 'a', name: 'A', supersetId: 'ss1' }, { key: 'b', name: 'B', supersetId: 'ss1' }, { key: 'c', name: 'C' }] };
+  const sets = [{ exKey: 'a', done: true, type: 'normal', kg: 20, reps: 12, order: 0 }, { exKey: 'a', done: false, type: 'normal', kg: 99, order: 1 }, { exKey: 'c', done: true, type: 'hold', kg: 9, durationS: 30, order: 2 }];
+  const { session, sets: ns } = copySession(past, sets, 5);
+  assert.equal(session.status, 'active');
+  assert.equal(session.copiedFrom, 'p');
+  assert.equal(ns.length, 2, 'only sets that were done');
+  assert.deepEqual(ns.map((x) => [x.kg, x.reps, x.done, x.target.reps]), [[20, null, false, [12, 12]], [9, null, false, null]]);
+  assert.ok(ns.every((x) => session.exercises.some((e) => e.key === x.exKey)));
+  assert.deepEqual(session.exercises.map((e) => e.name), ['A', 'C'], 'exercises with nothing done are left out');
+  const g = supersetGroups(past.exercises);
+  assert.deepEqual([...g.values()], [{ letter: 'A', keys: ['a', 'b'] }]);
+  assert.equal(restAfter(past.exercises, 'a'), false);
+  assert.equal(restAfter(past.exercises, 'b'), true);
+  assert.equal(restAfter(past.exercises, 'c'), true);
+});

@@ -388,3 +388,13 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .hint.c-amber { color: var(--amber); }
 .hint.c-text { color: var(--text); }
 .hint.c-green { color: var(--green); }
+
+/* ---------- Notes, supersets, photos ---------- */
+.set-meta { grid-column: 2 / -1; font: 500 11px/1.3 var(--mono); color: var(--muted); padding-bottom: 4px; }
+.set-row:has(.set-meta) { row-gap: 2px; }
+.in-superset { border-left: 3px solid var(--ss, var(--pull)); }
+.ss-label { color: var(--ss, var(--pull)); font-size: 9px; }
+.photo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.photo { border: 0; padding: 0; background: none; cursor: pointer; aspect-ratio: 1; border-radius: 8px; overflow: hidden; }
+.photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.file-btn { cursor: pointer; }

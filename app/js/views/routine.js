@@ -54,7 +54,8 @@ export function render(view, params = []) {
       <div class="field"><label for="r-folder">Folder</label><select class="input" id="r-folder">
         <option value="">No folder</option>${folders.map((f) => `<option value="${esc(f.id)}" ${r.folderId === f.id ? 'selected' : ''}>${esc(f.title)}</option>`).join('')}</select></div>
       <div class="field"><label for="r-notes">Routine note</label><textarea class="input area" id="r-notes" rows="2">${esc(r.notes)}</textarea></div>
-      <ul class="ex-list" id="r-ex">${r.exercises.map((e, i) => `<li class="ex" data-key="${esc(e.key)}">
+      <ul class="ex-list" id="r-ex">${r.exercises.map((e, i) => `<li class="ex ${e.supersetId ? 'in-superset' : ''}" data-key="${esc(e.key)}">
+        ${e.supersetId ? '<div class="hud ss-label">SUPERSET</div>' : ''}
         <div class="ex-head"><span class="ex-name">${i + 1}. ${esc(e.name)}</span>
           <span class="btn-row tight">
             <button class="icon-mini" data-act="up" type="button" aria-label="Move up">↑</button>
@@ -92,7 +93,15 @@ export function render(view, params = []) {
       act('down').onclick = async () => { await save(moveExercise(r, key, 1)); drawEdit(); };
       act('rest').onchange = (ev) => save(updateExercise(r, key, { restSeconds: Number(ev.target.value) || null }));
       act('notes').onchange = (ev) => save(updateExercise(r, key, { notes: ev.target.value }));
+      const others = r.exercises.filter((x) => x.key !== key);
       act('more').onclick = () => actionSheet(e.name, [
+        ...(e.supersetId
+          ? [{ label: 'Remove from superset', run: async () => { await save(updateExercise(r, key, { supersetId: null })); drawEdit(); } }]
+          : others.length ? [{ label: 'Superset with…', run: () => actionSheet('Superset with', others.map((o) => ({ label: o.name, run: async () => {
+            const sid = o.supersetId || `ss-${Date.now().toString(36)}`;
+            await save({ ...r, exercises: r.exercises.map((x) => (x.key === key || x.key === o.key ? { ...x, supersetId: sid } : x)) });
+            drawEdit();
+          } }))) }] : []),
         { label: 'Replace', run: async () => { const [ex] = await pickExercises({ multi: false, title: 'Replace with' }); if (ex) { await save(replaceExercise(r, key, ex)); drawEdit(); } } },
         { label: 'Remove', danger: true, run: async () => { await save(removeExercise(r, key)); drawEdit(); } },
       ]);

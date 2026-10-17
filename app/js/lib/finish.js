@@ -54,7 +54,7 @@ export function routineFromSession(session, sets, routine = null) {
       const mine = sets.filter((s) => s.exKey === e.key && s.done).sort((a, b) => a.order - b.order);
       return {
         key: re?.key ?? newKey(), exerciseId: e.exerciseId, name: e.name, restSeconds: e.restSeconds ?? null, notes: re?.notes ?? e.notes ?? '',
-        plan: re?.plan ?? null, role: re?.role ?? e.role ?? null,
+        plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,
         sets: re?.plan ? [] : !mine.length && re ? re.sets
           : mine.map((s) => ({ type: s.type, kg: s.kg ?? null, reps: s.reps != null ? [s.reps, s.reps] : null, durationS: s.durationS ?? null })),
       };

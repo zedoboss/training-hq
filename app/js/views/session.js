@@ -2,17 +2,17 @@
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory } from '../lib/history.js';
-import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish } from '../lib/session.js';
+import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
-import { isoDate, formatTime } from '../lib/time.js';
+import { isoDate, formatTime, formatDay } from '../lib/time.js';
 import { kg as fmtKg, platesPerSide } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
 import { pickExercises } from '../ui/picker.js';
 import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
 import { warmupSets } from '../lib/plates.js';
-import { actionSheet, confirmSheet } from '../ui/sheet.js';
+import { actionSheet, confirmSheet, promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -20,6 +20,9 @@ const DAY = { pull: 'PULL', push: 'PUSH', legs: 'LEGS', neck: 'NECK' };
 const CHECK = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
 const num = (v) => { if (v === '' || v == null) return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
 const rangeText = (r) => (!r ? '' : r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`);
+const SS_COLORS = ['var(--pull)', 'var(--legs)', 'var(--push)', 'var(--cyan)'];
+const REST_CHOICES = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
+const restText = (x) => (x ? `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}` : 'off');
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 async function context(repo, excludeSessionId) {
@@ -49,6 +52,7 @@ async function startSession(view, routineId) {
 export function render(view, params = []) {
   if (params[0] === 'start') { view.innerHTML = '<p class="view-sub">Starting…</p>'; startSession(view, params[1]); return () => {}; }
   const id = params[0];
+  const editing = params[1] === 'edit';
   let repo; let session; let sets = []; let ctx; let timer; let wakeLock = null; let offRest = () => {}; let offRepo = () => {};
   let typicalMs = null;
 
@@ -67,6 +71,14 @@ export function render(view, params = []) {
     const sum = summarize(session, sets);
     const el = view.querySelector('#s-head');
     if (!el) return;
+    if (editing) {
+      el.querySelector('[data-k="clock"]').textContent = formatDay(new Date(session.startedAt));
+      el.querySelector('[data-k="vol"]').textContent = sum.volume.toLocaleString('en-US');
+      el.querySelector('[data-k="sets"]').textContent = `${sum.done} / ${sum.total}`;
+      el.querySelector('[data-k="started"]').textContent = `EDITING A SAVED SESSION`;
+      el.querySelector('[data-k="eta"]').textContent = `${formatTime(new Date(session.startedAt))} - ${formatTime(new Date(session.endedAt))}`;
+      return;
+    }
     const now = Date.now();
     const elapsedMin = Math.floor(elapsedMs(session, now) / 60000);
     const eta = expectedFinish({ session, sets, typicalMs, now });
@@ -85,7 +97,7 @@ export function render(view, params = []) {
     const fields = setFields(ex.type, s.type);
     const prev = previousFor(ctx.history.previous(ex.name), all, s);
     const label = s.type === 'normal' ? String(all.filter((x) => x.type !== 'warmup' && x.type !== 'hold' && x.order <= s.order).length) : SET_TYPES[s.type].short;
-    const prevText = prev ? (fields.includes('durationS') && !fields.includes('reps') ? `${prev.kg != null ? `${fmtKg(prev.kg)} · ` : ''}${prev.durationS ?? 30}s` : `${prev.kg != null ? fmtKg(prev.kg) : 'BW'} × ${prev.reps ?? '–'}`) : '–';
+    const prevText = prev ? (fields.includes('durationS') && !fields.includes('reps') ? `${prev.kg != null ? `${fmtKg(prev.kg)} · ` : ''}${prev.durationS ?? 30}s` : `${prev.kg != null ? fmtKg(prev.kg) : 'BW'} × ${prev.reps ?? '–'}${prev.rpe ? ` @${prev.rpe}` : ''}`) : '–';
     const second = fields.includes('reps') ? 'reps' : fields.includes('durationS') ? 'durationS' : fields.includes('distanceM') ? 'distanceM' : null;
     const placeholder = second === 'reps' ? rangeText(s.target?.reps) || (prev?.reps ?? '') : second === 'durationS' ? '30' : '';
     return `<div class="set-row ${s.done ? 'is-done' : ''} type-${s.type}" data-set="${esc(s.id)}">
@@ -96,6 +108,7 @@ export function render(view, params = []) {
         : '<span></span>'}
       ${second ? `<input class="set-in" data-f="${second}" inputmode="numeric" value="${esc(s[second] ?? '')}" placeholder="${esc(placeholder)}" aria-label="${second === 'reps' ? 'reps' : 'seconds'}">` : '<span></span>'}
       <button class="set-tick" data-a="tick" type="button" aria-label="${s.done ? 'Mark not done' : 'Mark done'}">${s.done ? CHECK : ''}</button>
+      ${s.rpe || s.note ? `<div class="set-meta">${s.rpe ? `RPE ${s.rpe}` : ''}${s.rpe && s.note ? ' · ' : ''}${s.note ? esc(s.note) : ''}</div>` : ''}
     </div>`;
   };
 
@@ -107,7 +120,11 @@ export function render(view, params = []) {
     const per = ex.barKg && live?.kg != null ? platesPerSide(live.kg, ex.barKg) : null;
     const fields = setFields(ex.type, 'normal');
     const pinned = lib.pinnedNote?.text ?? lib.pinnedNote;
-    return `<section class="card s-ex ${i === 0 ? '' : ''}" data-ex="${esc(ex.key)}">
+    const groups = supersetGroups(session.exercises);
+    const g = ex.supersetId ? groups.get(ex.supersetId) : null;
+    const gi = g ? [...groups.keys()].indexOf(ex.supersetId) : -1;
+    return `<section class="card s-ex ${g ? 'in-superset' : ''}" data-ex="${esc(ex.key)}" ${g ? `style="--ss:${SS_COLORS[gi % SS_COLORS.length]}"` : ''}>
+      ${g ? `<div class="hud ss-label">SUPERSET ${g.letter} · ${g.keys.indexOf(ex.key) + 1} OF ${g.keys.length}</div>` : ''}
       <div class="ex-head"><a class="ex-name plain" href="#/exercise/${esc(ex.exerciseId)}">${esc(ex.name)}</a>
         <span class="btn-row tight">${ex.capClass === 'main' ? '<span class="tag tag-main">30% CAP</span>' : ex.role === 'tendon-hold' ? '<span class="tag tag-hold">HOLD</span>' : ''}
         <button class="icon-mini" data-a="ex-more" type="button" aria-label="Exercise options">···</button></span></div>
@@ -149,7 +166,11 @@ export function render(view, params = []) {
       await saveSet(filled);
       redrawCard(ex.key);
       const next = exSets(ex.key).find((x) => !x.done);
-      if (!(s.type === 'normal' && next?.type === 'dropset')) rest.start(s.type === 'hold' ? 120 : ex.restSeconds ?? 120, ex.name);
+      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) rest.start(s.type === 'hold' ? 120 : ex.restSeconds ?? 120, ex.name);
+      if (!editing && ex.supersetId && !restAfter(session.exercises, ex.key)) {
+        const keys = session.exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
+        view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     } else if (action === 'prev') {
       const prev = previousFor(ctx.history.previous(ex.name), exSets(ex.key), s);
       if (!prev) return;
@@ -158,6 +179,11 @@ export function render(view, params = []) {
     } else if (action === 'type') {
       actionSheet('Set type', [
         ...Object.entries(SET_TYPES).map(([k, t]) => ({ label: `${t.short || 'N'} · ${t.label}${s.type === k ? ' (now)' : ''}`, run: async () => { await saveSet({ ...s, type: k, ...(k === 'hold' && s.durationS == null ? { durationS: 30 } : {}) }); redrawCard(ex.key); } })),
+        { label: `RPE${s.rpe ? ` (now ${s.rpe})` : ''}`, run: () => actionSheet('RPE: how many more reps could you have done?', [
+          ...RPE.map(([v, hint]) => ({ label: `${v} · ${hint}`, run: async () => { await saveSet({ ...s, rpe: v }); redrawCard(ex.key); } })),
+          { label: 'Clear RPE', run: async () => { await saveSet({ ...s, rpe: null }); redrawCard(ex.key); } },
+        ]) },
+        { label: s.note ? 'Edit set note' : 'Add set note', run: async () => { const t = await promptText('Set note', s.note || ''); if (t != null) { await saveSet({ ...s, note: t }); redrawCard(ex.key); } } },
         { label: 'Delete set', danger: true, run: async () => { await repo.remove('sets', s.id); sets = sets.filter((x) => x.id !== s.id); redrawCard(ex.key); } },
       ]);
     }
@@ -183,7 +209,33 @@ export function render(view, params = []) {
     } else if (action === 'ex-more') {
       const idx = session.exercises.indexOf(ex);
       const move = async (d) => { const list = [...session.exercises]; const j = idx + d; if (j < 0 || j >= list.length) return; [list[idx], list[j]] = [list[j], list[idx]]; await saveSession({ exercises: list }); drawCards(); };
+      const others = session.exercises.filter((e) => e.key !== key);
+      const lib = ctx.lib.get(ex.exerciseId) || {};
       actionSheet(ex.name, [
+        { label: lib.pinnedNote ? 'Edit pinned note' : 'Pin a note (shows every time)', run: async () => {
+          const t = await promptText('Pinned note for this exercise', lib.pinnedNote?.text ?? lib.pinnedNote ?? '');
+          if (t == null) return;
+          const rec = (await repo.get('exercises', ex.exerciseId)) || { id: ex.exerciseId, name: ex.name, type: ex.type };
+          await repo.put('exercises', ex.exerciseId, { ...rec, pinnedNote: { text: t, from: `Training HQ, ${formatDay(new Date())}` } });
+          ctx.lib.set(ex.exerciseId, { ...lib, pinnedNote: { text: t } });
+          redrawCard(key);
+        } },
+        { label: ex.notes ? 'Edit note for this session' : 'Note for this session', run: async () => {
+          const t = await promptText('Note for this exercise today', ex.notes || '');
+          if (t == null) return;
+          await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, notes: t } : e)) });
+          redrawCard(key);
+        } },
+        { label: `Rest time (${restText(ex.restSeconds)})`, run: () => actionSheet('Rest time', REST_CHOICES.map((x) => ({ label: restText(x), run: async () => {
+          await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, restSeconds: x || null } : e)) });
+        } }))) },
+        ...(ex.supersetId
+          ? [{ label: 'Remove from superset', run: async () => { await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, supersetId: null } : e)) }); drawCards(); } }]
+          : others.length ? [{ label: 'Superset with…', run: () => actionSheet('Superset with', others.map((o) => ({ label: o.name, run: async () => {
+            const sid = o.supersetId || `ss-${Date.now().toString(36)}`;
+            await saveSession({ exercises: session.exercises.map((e) => (e.key === key || e.key === o.key ? { ...e, supersetId: sid } : e)) });
+            drawCards();
+          } }))) }] : []),
         { label: 'Add warm-up sets', run: async () => {
           const all = exSets(key);
           const work = all.find((s) => s.type !== 'warmup' && s.type !== 'hold' && s.kg != null);
@@ -220,7 +272,7 @@ export function render(view, params = []) {
         <div class="s-row1">
           <div class="hud c-amber s-title">${esc(DAY[session.dayType] || session.title.toUpperCase())}${session.week ? ` · WK ${session.week}` : ''} <span data-k="paused" hidden>· PAUSED</span></div>
           <button class="pill" id="s-more" type="button" aria-label="Session options">···</button>
-          <a class="pill is-on" href="#/finish/${esc(session.id)}">Finish</a>
+          <a class="pill is-on" href="#/finish/${esc(session.id)}">${editing ? 'Done' : 'Finish'}</a>
         </div>
         <div class="s-row2">
           <div class="s-clock" data-k="clock">0:00:00</div>
@@ -310,7 +362,7 @@ export function render(view, params = []) {
     repo = r;
     session = await repo.get('sessions', id);
     if (!session) { view.innerHTML = '<h1 class="view-title">Session not found</h1><p class="hint"><a href="#/train">Back to Train</a></p>'; return; }
-    if (session.status !== 'active') { location.replace(`#/finish/${id}`); return; }
+    if (session.status !== 'active' && !(editing && session.status === 'done')) { location.replace(`#/finish/${id}`); return; }
     sets = (await repo.list('sets')).filter((s) => s.sessionId === id);
     ctx = await context(repo, id);
     typicalMs = typicalDurationMs(session.dayType, { sessions: ctx.sessions, bridge: ctx.bridge, now: session.startedAt });
@@ -318,14 +370,14 @@ export function render(view, params = []) {
     drawRest(rest.status());
     offRest = rest.subscribe(drawRest);
     timer = setInterval(header, 1000);
-    keepAwake();
+    if (!editing) keepAwake();
     document.addEventListener('visibilitychange', onVis);
     offRepo = repo.onChange(async (cols, origin) => {
       if (origin !== 'remote' || (!cols.includes('sets') && !cols.includes('sessions'))) return;
       if (view.contains(document.activeElement) && document.activeElement.matches('input')) return;
       session = (await repo.get('sessions', id)) || session;
       sets = (await repo.list('sets')).filter((s) => s.sessionId === id);
-      if (session.status !== 'active') { location.replace(`#/finish/${id}`); return; }
+      if (session.status !== 'active' && !editing) { location.replace(`#/finish/${id}`); return; }
       drawCards();
     });
   });
