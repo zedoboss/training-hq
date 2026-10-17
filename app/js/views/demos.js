@@ -10,12 +10,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 export function render(view) {
   view.innerHTML = '<p class="view-sub">Loading…</p>';
-  let repo; let off = () => {};
+  let repo; let off = () => {}; let alive = true;
 
   const draw = async () => {
     const [exercises, routines, demos, bridge, kept] = await Promise.all([
       repo.list('exercises'), repo.list('routines'), repo.list('demos'), repo.get('bridge', 'last-loads'), keptIds(),
     ]);
+    if (!alive) return;
     const all = mergeLibrary(exercises, getState().equipment);
     const has = new Map(demos.map((d) => [d.id, d]));
     const inRoutines = new Set(routines.flatMap((r) => r.exercises.map((e) => e.exerciseId)));
@@ -64,5 +65,5 @@ export function render(view) {
     off = repo.onChange((cols) => { if (cols.includes('demos')) draw(); });
     draw();
   });
-  return () => off();
+  return () => { alive = false; off(); };
 }

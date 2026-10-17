@@ -148,9 +148,11 @@ export function render(view, params = []) {
   const mode = params[0] === 'month' ? 'month' : 'overview';
   let off = () => {};
   let tipEl = null;
+  let alive = true;
 
   const draw = async (repo) => {
     const [sessions, sets, exercises, photos] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.list('exercises'), mode === 'month' ? repo.list('photos') : []]);
+    if (!alive) return;
     const st = withDefaults(getState().settings);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
     const rows = setRows({ sessions, sets, lib, countWarmups: st.warmup.countInStats });
@@ -227,6 +229,6 @@ export function render(view, params = []) {
     off = repo.onChange((cols) => { if (cols.includes('sessions') || cols.includes('sets')) draw(repo); });
     draw(repo);
   });
-  return () => { off(); tipEl?.remove(); window.removeEventListener('scroll', hideTip); };
+  return () => { alive = false; off(); tipEl?.remove(); window.removeEventListener('scroll', hideTip); };
 }
 

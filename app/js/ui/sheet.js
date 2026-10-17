@@ -40,6 +40,22 @@ export function promptText(title, value = '', { placeholder = '', ok = 'Save' } 
   });
 }
 
+/** Multi-line text (how-to, longer notes). Resolves to the text ('' clears it), or null if cancelled. */
+export function promptLong(title, value = '', { placeholder = '', ok = 'Save' } = {}) {
+  return new Promise((resolve) => {
+    let result = null;
+    const { el, close } = overlay(`
+      <form class="sheet-form">
+        <label class="hud c-muted sheet-title" for="sheet-area">${esc(title)}</label>
+        <textarea class="input area" id="sheet-area" rows="7" maxlength="4000" placeholder="${esc(placeholder)}">${esc(value)}</textarea>
+        <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Cancel</button><button class="btn-primary" type="submit">${esc(ok)}</button></div>
+      </form>`, () => resolve(result));
+    setTimeout(() => el.querySelector('textarea').focus(), 50);
+    el.querySelector('[data-cancel]').addEventListener('click', () => close());
+    el.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); result = el.querySelector('textarea').value.trim(); close(); });
+  });
+}
+
 /** Yes/no confirmation in the app's style. */
 export function confirmSheet(text, { ok = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {

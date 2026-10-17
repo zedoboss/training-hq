@@ -55,3 +55,19 @@ export function newCustomExercise({ name, type, primary, secondary = [], equipme
 
 /** Demo clip file name for an exercise: its id plus the video type, .mp4 unless said otherwise (2.17). */
 export const demoFileName = (ex, ext = 'mp4') => `${ex.id}.${ext}`;
+
+/** A copy of any exercise as a new custom one with no history: "Name (copy)", "Name (copy 2)"… (P34). */
+export function duplicateExercise(ex, existingIds = new Set()) {
+  let name = `${ex.name} (copy)`;
+  for (let n = 2; existingIds.has(slug(name)); n++) name = `${ex.name} (copy ${n})`;
+  return { id: slug(name), name, type: ex.type, primary: ex.primary, secondary: [...(ex.secondary || [])], equipment: ex.equipment, custom: true, createdAt: Date.now() };
+}
+
+/** Has this exercise been logged? Training HQ sessions (by id or name) or the Hevy history bridge. */
+export function exerciseUsed(ex, { sessions = [], bridge = null } = {}) {
+  if (bridge?.exercises?.[ex.name]?.length) return true;
+  return sessions.some((s) => s.status === 'done' && (s.exercises || []).some((e) => e.exerciseId === ex.id || e.name === ex.name));
+}
+
+/** Routines that use an exercise. */
+export const routinesUsing = (ex, routines = []) => routines.filter((r) => (r.exercises || []).some((e) => e.exerciseId === ex.id));

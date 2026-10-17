@@ -68,3 +68,19 @@ test('effective load: bodyweight types count bodyweight', () => {
 test('no custom exercise without a name', () => {
   assert.throws(() => newCustomExercise({ name: '  ' }));
 });
+
+test('duplicate any exercise as a custom copy with a free name; usage checks (P34)', async () => {
+  const { duplicateExercise, exerciseUsed, routinesUsing } = await import('../app/js/lib/library.js');
+  const bench = { id: 'bench-press-smith-machine', name: 'Bench Press (Smith Machine)', type: 'weight_reps', primary: 'chest', secondary: ['triceps'], equipment: 'smith', barKg: 11.3, pinnedNote: 'x' };
+  const c = duplicateExercise(bench);
+  assert.equal(c.name, 'Bench Press (Smith Machine) (copy)');
+  assert.equal(c.id, 'bench-press-smith-machine-copy');
+  assert.equal(c.custom, true);
+  assert.equal(c.pinnedNote, undefined, 'a copy starts clean');
+  assert.equal(duplicateExercise(bench, new Set([c.id])).name, 'Bench Press (Smith Machine) (copy 2)');
+  assert.equal(exerciseUsed(bench, { bridge: { exercises: { 'Bench Press (Smith Machine)': [{}] } } }), true);
+  assert.equal(exerciseUsed(c, { sessions: [{ status: 'done', exercises: [{ exerciseId: 'other' }] }] }), false);
+  assert.equal(exerciseUsed(c, { sessions: [{ status: 'done', exercises: [{ exerciseId: c.id }] }] }), true);
+  assert.equal(exerciseUsed(c, { sessions: [{ status: 'discarded', exercises: [{ exerciseId: c.id }] }] }), false);
+  assert.deepEqual(routinesUsing(bench, [{ id: 'r', exercises: [{ exerciseId: bench.id }] }, { id: 's', exercises: [] }]).map((r) => r.id), ['r']);
+});
