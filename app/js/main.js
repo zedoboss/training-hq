@@ -6,6 +6,8 @@ import * as train from './views/train.js';
 import * as fuel from './views/fuel.js';
 import * as body from './views/body.js';
 import * as settings from './views/settings.js';
+import * as library from './views/library.js';
+import * as exercise from './views/exercise.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -13,6 +15,8 @@ const VIEWS = {
   fuel: { mod: fuel, label: 'Fuel' },
   body: { mod: body, label: 'Body' },
   settings: { mod: settings, label: 'Settings', hidden: true },
+  library: { mod: library, label: 'Library', hidden: true, tab: 'train' },
+  exercise: { mod: exercise, label: 'Exercise', hidden: true, tab: 'train' },
 };
 
 const BRAND_MARK = `<svg class="brand-mark" aria-hidden="true" width="44" height="30" viewBox="0 0 44 30" fill="none"><path d="M2 15C8 5 16 2 22 2s14 3 20 13c-6 10-14 13-20 13S8 25 2 15z" stroke="#2b5268" stroke-width="1.4"/><circle cx="22" cy="15" r="9" fill="#0b2a3a" stroke="#4fd8ff" stroke-width="1.6"/><circle cx="22" cy="15" r="3.6" fill="#4fd8ff"/></svg>`;
@@ -47,17 +51,19 @@ function shell() {
 let cleanup = null;
 
 function route() {
-  const id = (location.hash.replace(/^#\/?/, '').split('/')[0]) || 'today';
-  const entry = VIEWS[id] || VIEWS.today;
+  const [first, ...params] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
+  const id = VIEWS[first] ? first : 'today';
+  const entry = VIEWS[id];
+  const tab = entry.tab || id;
   for (const el of document.querySelectorAll('[data-tab]')) {
-    if (el.dataset.tab === id) el.setAttribute('aria-current', 'page');
+    if (el.dataset.tab === tab) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
   }
   if (typeof cleanup === 'function') cleanup();
   const view = document.getElementById('view');
   view.innerHTML = '';
   view.className = `view view-${id}`;
-  cleanup = entry.mod.render(view) || null;
+  cleanup = entry.mod.render(view, params) || null;
   window.scrollTo(0, 0);
 }
 
