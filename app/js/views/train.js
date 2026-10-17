@@ -28,7 +28,7 @@ export function render(view) {
   const draw = async () => {
     const [folders, routines, meta, last, active] = await Promise.all([
       repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), lastCompleted(repo),
-      repo.list('sessions').then((ss) => ss.find((s) => s.status === 'active')),
+      repo.list('sessions').then((ss) => ss.find((s) => s.status === 'active' && s.kind !== 'holds')),
     ]);
     const next = nextDayType(last?.dayType);
     const today = isoDate(new Date());

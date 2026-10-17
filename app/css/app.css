@@ -369,3 +369,22 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .guard { background: #1d1408; border: 1px solid var(--amber); border-radius: var(--r-m); padding: 14px; display: flex; flex-direction: column; gap: 8px; }
 .guard-use { background: var(--amber); color: #231400; }
 .guard-keep { color: var(--amber); border-color: #5a4320; }
+
+/* ---------- Tendon holds ---------- */
+.area-name { font-size: 16px; }
+.hold-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--divider); }
+.confirm-card { border-color: var(--amber); }
+.hold-ring { position: relative; width: 240px; height: 240px; align-self: center; margin: 4px auto; }
+.hold-ring-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.hold-ring-text b { font: 600 56px/1 var(--mono); }
+.pain-grid { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 3px; }
+.pain { height: 40px; border: 1px solid var(--border-strong); border-radius: 6px; background: transparent; color: var(--pale); font: 500 12px/1 var(--mono); padding: 0; cursor: pointer; }
+.pain.over { color: var(--amber); border-color: #5a4320; }
+.pain.is-on { background: var(--green); color: #04200f; border-color: var(--green); font-weight: 700; }
+.pain.over.is-on { background: var(--amber); color: #231400; border-color: var(--amber); }
+#h-body .btn-row > .btn-primary { flex: 1; }
+
+/* Colour helpers win over .hint */
+.hint.c-amber { color: var(--amber); }
+.hint.c-text { color: var(--text); }
+.hint.c-green { color: var(--green); }

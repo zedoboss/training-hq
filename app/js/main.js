@@ -12,6 +12,7 @@ import * as routine from './views/routine.js';
 import * as programme from './views/programme.js';
 import * as session from './views/session.js';
 import * as finish from './views/finish.js';
+import * as holds from './views/holds.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -25,6 +26,7 @@ const VIEWS = {
   programme: { mod: programme, label: 'Programme', hidden: true, tab: 'train' },
   session: { mod: session, label: 'Session', hidden: true, tab: 'train' },
   finish: { mod: finish, label: 'Finish', hidden: true, tab: 'train' },
+  holds: { mod: holds, label: 'Holds', hidden: true, tab: 'train' },
 };
 
 const BRAND_MARK = `<svg class="brand-mark" aria-hidden="true" width="44" height="30" viewBox="0 0 44 30" fill="none"><path d="M2 15C8 5 16 2 22 2s14 3 20 13c-6 10-14 13-20 13S8 25 2 15z" stroke="#2b5268" stroke-width="1.4"/><circle cx="22" cy="15" r="9" fill="#0b2a3a" stroke="#4fd8ff" stroke-width="1.6"/><circle cx="22" cy="15" r="3.6" fill="#4fd8ff"/></svg>`;

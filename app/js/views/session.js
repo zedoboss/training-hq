@@ -30,7 +30,7 @@ async function context(repo, excludeSessionId) {
 
 async function startSession(view, routineId) {
   const repo = await ready;
-  const active = (await repo.list('sessions')).find((s) => s.status === 'active');
+  const active = (await repo.list('sessions')).find((s) => s.status === 'active' && s.kind !== 'holds');
   if (active) {
     const resume = await confirmSheet(`"${active.title}" is still in progress. Resume it? (Cancel discards nothing and goes back.)`, { ok: 'Resume' });
     location.replace(resume ? `#/session/${active.id}` : '#/train');

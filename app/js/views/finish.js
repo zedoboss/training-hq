@@ -92,7 +92,7 @@ export function render(view, params = []) {
         ${bests.map((b) => `<div class="best"><span>${esc(b.name)}</span><b>${fmtKg(b.kg)} × ${b.reps}</b></div>`).join('') || '<p class="hint">None this time.</p>'}
         <p class="hint">All-time records arrive with your full history in step 3. Your pre-layoff numbers are higher for now.</p>
       </section>
-      ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds/${hold.area}"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
+      ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
       <div class="btn-row"><button class="btn-ghost" id="as-routine" type="button">Save as routine</button>
