@@ -359,3 +359,13 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .best b { font: 600 13px/1.4 var(--mono); color: var(--cyan); }
 .hold-prompt { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-color: var(--cyan); text-decoration: none; color: var(--text); font-size: 14px; }
 @media (min-width: 1024px) { .view-session, .view-finish { max-width: 760px; width: 100%; margin: 0 auto; } }
+
+/* ---------- Plates and guard ---------- */
+.big-in { height: 56px; font-size: 28px; font-weight: 600; text-align: left; }
+.plate-bar { display: flex; align-items: center; gap: 3px; height: 74px; padding: 0 8px; background: var(--core); border-radius: 9px; }
+.pb-sleeve { width: 60px; height: 6px; background: var(--muted); border-radius: 3px; }
+.pb-plate { width: 13px; background: var(--cyan); border-radius: 3px; }
+.pb-rest { flex: 1; height: 6px; background: var(--muted); border-radius: 3px; }
+.guard { background: #1d1408; border: 1px solid var(--amber); border-radius: var(--r-m); padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.guard-use { background: var(--amber); color: #231400; }
+.guard-keep { color: var(--amber); border-color: #5a4320; }

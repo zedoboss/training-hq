@@ -98,10 +98,11 @@ export function guardCheck({ kg, capClass, history, today, barKg = null }) {
   const weekAgo = new Date(`${today}T12:00:00Z`);
   weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
   const since = weekAgo.toISOString().slice(0, 10);
-  const recent = sorted.filter((h) => h.date >= since && h.date < today);
+  // history never contains the session being logged, so an earlier session today counts too.
+  const recent = sorted.filter((h) => h.date >= since && h.date <= today);
   const basis = recent.length
     ? { kg: Math.max(...recent.map((h) => h.kg)), date: recent.reduce((a, b) => (b.kg > a.kg ? b : a)).date, window: '7 days' }
-    : { kg: sorted.find((h) => h.date < today)?.kg ?? sorted[0].kg, date: (sorted.find((h) => h.date < today) ?? sorted[0]).date, window: 'last session' };
+    : { kg: sorted[0].kg, date: sorted[0].date, window: 'last session' };
   const capKg = capOf(basis.kg);
   if (kg <= capKg + 1e-9) return null;
   return {

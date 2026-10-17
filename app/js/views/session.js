@@ -9,6 +9,9 @@ import { isoDate, formatTime } from '../lib/time.js';
 import { kg as fmtKg, platesPerSide } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
 import { pickExercises } from '../ui/picker.js';
+import { platesSheet, guardSheet } from '../ui/load-sheets.js';
+import { guardCheck } from '../lib/targets.js';
+import { warmupSets } from '../lib/plates.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
@@ -52,6 +55,13 @@ export function render(view, params = []) {
   const exSets = (key) => sets.filter((s) => s.exKey === key).sort((a, b) => a.order - b.order);
   const saveSession = async (patch) => { session = { ...session, ...patch }; await repo.put('sessions', session.id, session); };
   const saveSet = async (set) => { sets = sets.map((s) => (s.id === set.id ? set : s)); if (!sets.some((s) => s.id === set.id)) sets.push(set); await repo.put('sets', set.id, set); };
+
+  /** The 30% guard: main lifts only; returns the load to use (the suggestion or the entered one). */
+  const checkGuard = async (ex, kg) => {
+    if (!ex || kg == null || ex.capClass !== 'main') return kg;
+    const g = guardCheck({ kg, capClass: ex.capClass, history: ctx.history.guardHistory(ex.name), today: isoDate(new Date()), barKg: ex.barKg });
+    return g ? guardSheet({ name: ex.name, entered: kg, guard: g }) : kg;
+  };
 
   const header = () => {
     const sum = summarize(session, sets);
@@ -107,7 +117,8 @@ export function render(view, params = []) {
       <div class="set-row set-headrow"><span>SET</span><span>PREVIOUS</span><span>${fields.includes('kg') ? 'KG' : fields.includes('distanceM') ? 'M' : ''}</span><span>${fields.includes('reps') ? 'REPS' : fields.includes('durationS') ? 'SEC' : ''}</span><span></span></div>
       ${all.map((s) => setRow(ex, s, all)).join('')}
       <div class="s-ex-foot"><span class="hud c-muted">${per != null ? `${fmtKg(ex.barKg)} BAR + ${fmtKg(per)} KG / SIDE` : ''}</span>
-        <button class="btn-ghost small" data-a="add-set" type="button">+ Set</button></div>
+        <span class="btn-row tight">${fields.includes('kg') ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
+        <button class="btn-ghost small" data-a="add-set" type="button">+ Set</button></span></div>
     </section>`;
   };
 
@@ -160,10 +171,30 @@ export function render(view, params = []) {
       const order = all.length ? Math.max(...all.map((x) => x.order)) + 0.01 : sets.length;
       await saveSet({ id: newSetId(), sessionId: session.id, exKey: key, order, done: false, doneAt: null, rpe: null, note: '', type: last?.type === 'warmup' ? 'normal' : last?.type ?? 'normal', kg: last?.kg ?? null, reps: null, durationS: last?.durationS ?? null, target: last?.target ?? null });
       redrawCard(key);
+    } else if (action === 'plates') {
+      const all = exSets(key);
+      const cur = all.find((s) => !s.done && s.type !== 'hold' && s.type !== 'warmup') || all.find((s) => !s.done) || all[all.length - 1];
+      const res = await platesSheet({ name: ex.name, kg: cur?.kg ?? ex.target?.kg ?? null, barKg: ex.barKg });
+      if (!res) return;
+      const ok = await checkGuard(ex, res.kg);
+      const targets = res.all ? all.filter((s) => !s.done && s.type !== 'hold' && s.type !== 'warmup') : [cur].filter(Boolean);
+      for (const s of targets) await saveSet({ ...s, kg: ok });
+      redrawCard(key);
     } else if (action === 'ex-more') {
       const idx = session.exercises.indexOf(ex);
       const move = async (d) => { const list = [...session.exercises]; const j = idx + d; if (j < 0 || j >= list.length) return; [list[idx], list[j]] = [list[j], list[idx]]; await saveSession({ exercises: list }); drawCards(); };
       actionSheet(ex.name, [
+        { label: 'Add warm-up sets', run: async () => {
+          const all = exSets(key);
+          const work = all.find((s) => s.type !== 'warmup' && s.type !== 'hold' && s.kg != null);
+          const ws = warmupSets(work?.kg ?? ex.target?.kg, { barKg: ex.barKg });
+          if (!ws.length) { toast('Enter a working weight first.'); return; }
+          const first = all.length ? Math.min(...all.map((s) => s.order)) : 0;
+          for (const [i, w] of ws.entries()) {
+            await saveSet({ id: newSetId(), sessionId: session.id, exKey: key, order: first - (ws.length - i) * 0.01, done: false, doneAt: null, rpe: null, note: '', ...w, reps: null, target: { kg: w.kg, reps: [w.reps, w.reps] } });
+          }
+          redrawCard(key);
+        } },
         { label: 'Move up', run: () => move(-1) },
         { label: 'Move down', run: () => move(1) },
         { label: 'Replace', run: async () => {
@@ -219,7 +250,13 @@ export function render(view, params = []) {
       const input = e.target.closest('[data-f]');
       if (!input) return;
       const s = sets.find((x) => x.id === input.closest('[data-set]').dataset.set);
-      await saveSet({ ...s, [input.dataset.f]: num(input.value) });
+      let value = num(input.value);
+      if (input.dataset.f === 'kg' && s.type !== 'warmup' && s.type !== 'hold') {
+        const ex = session.exercises.find((x) => x.key === s.exKey);
+        value = await checkGuard(ex, value);
+        input.value = value ?? '';
+      }
+      await saveSet({ ...s, [input.dataset.f]: value });
       header();
       view.dispatchEvent(new CustomEvent('set-changed', { detail: { setId: s.id, field: input.dataset.f } }));
     });

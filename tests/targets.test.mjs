@@ -82,3 +82,8 @@ test('30% guard: previous 7 days first, else the last session; main lifts only',
   assert.equal(guardCheck({ kg: 100, capClass: 'light', history, today: '2026-10-18' }), null, 'light work is exempt');
   assert.equal(guardCheck({ kg: 100, capClass: 'main', history: [], today: '2026-10-18' }), null, 'no history, no guard');
 });
+
+test('guard: an earlier session the same day counts', () => {
+  const g = guardCheck({ kg: 80, capClass: 'main', history: [{ date: '2026-10-17', kg: 56.3 }, { date: '2026-10-10', kg: 43.8 }], today: '2026-10-17', barKg: 11.3 });
+  assert.equal(g.basis.kg, 56.3);
+});
