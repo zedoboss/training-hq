@@ -69,6 +69,16 @@ export async function idbAdapter() {
       for (const k of keys) tx.objectStore('outbox').delete(k);
       await done(tx);
     },
+    async requeueAll() {
+      const tx = db.transaction(['records', 'outbox'], 'readwrite');
+      const all = tx.objectStore('records').getAll();
+      let n = 0;
+      all.onsuccess = () => {
+        for (const r of all.result) { tx.objectStore('outbox').add(r); n++; }
+      };
+      await done(tx);
+      return n;
+    },
     // Callbacks rather than await inside the transaction: Safari can close a transaction across awaits.
     async applyRemote(recs, isNewer, clockState) {
       const tx = db.transaction(['records', 'meta'], 'readwrite');

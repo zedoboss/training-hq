@@ -1,5 +1,6 @@
 // Training HQ entry point: draws the shell (header, section tabs) and switches views by URL hash.
 import { registerServiceWorker } from './lib/sw-client.js';
+import './lib/data.js';
 import * as today from './views/today.js';
 import * as train from './views/train.js';
 import * as fuel from './views/fuel.js';

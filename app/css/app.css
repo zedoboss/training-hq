@@ -122,8 +122,9 @@ button { font: inherit; color: inherit; }
 .home-side { display: none; }
 .home-center { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 0; }
 
-.home-hud { display: flex; justify-content: space-between; gap: 10px; }
+.home-hud { display: grid; grid-template-columns: 1fr auto; column-gap: 10px; }
 .home-hud .right { text-align: right; }
+.home-hud .full { grid-column: 1 / -1; }
 
 .core-wrap { position: relative; width: min(300px, 78vw); aspect-ratio: 1; align-self: center; flex-shrink: 0; }
 .core-wrap .core-svg { display: block; width: 100%; height: 100%; }
@@ -199,3 +200,13 @@ button { font: inherit; color: inherit; }
   .dock-btn { height: 84px; padding: 0 28px; flex-direction: row; gap: 12px; font-size: 12px; letter-spacing: 0.24em; }
   .dock-mid { padding: 0 20px; }
 }
+
+/* ---------- Settings ---------- */
+.stack, #mac-actions { display: flex; flex-direction: column; gap: 10px; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-row > * { flex: 1 1 140px; }
+.pair-form { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.hint { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.hint code { font: 500 12px var(--mono); color: var(--pale); }
+.code { font: 600 20px var(--mono); letter-spacing: 0.12em; color: var(--amber); }
+@media (min-width: 1024px) { .view-settings { max-width: 640px; } }

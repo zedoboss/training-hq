@@ -1,0 +1,151 @@
+// Connects the app to its local database and to the Mac: pairing, the sync loop, and status for the screens.
+import { openRepo } from './repo.js';
+import { idbAdapter } from './idb.js';
+import { syncOnce } from './sync.js';
+import { setState } from './store.js';
+import { summarizeProgramme } from './programme.js';
+
+let repo = null;
+let timer = null;
+let running = null;
+let again = false;
+
+export const ready = (async () => {
+  repo = await openRepo(await idbAdapter());
+  repo.onChange((cols) => {
+    if (cols.includes('programme')) refreshProgramme();
+    scheduleSync(1500);
+  });
+  await refreshPairing();
+  await refreshProgramme();
+  setState({
+    sync: { lastAt: (await repo.getMeta('lastSyncAt')) ?? null, pending: await repo.pendingCount() },
+    mac: { lastSeen: (await repo.getMeta('macLastSeen')) ?? null },
+  });
+  startLoop();
+  return repo;
+})();
+
+export const getRepo = () => repo;
+
+async function refreshPairing() {
+  const macUrl = await repo.getMeta('macUrl');
+  const token = await repo.getMeta('token');
+  setState({ paired: !!(macUrl && token), macUrl: macUrl ?? null });
+}
+
+async function refreshProgramme() {
+  setState({ programme: summarizeProgramme(await repo.list('programme')) });
+}
+
+/** The app is being served by the Mac server itself (e.g. http://localhost:4317 on the Mac). */
+export async function sameOriginMac() {
+  try {
+    const r = await fetch('api/health', { cache: 'no-store' });
+    const j = await r.json();
+    return j.app === 'training-hq' ? new URL('.', location.href).href.replace(/\/$/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
+const normalizeUrl = (u) => {
+  let s = String(u || '').trim();
+  if (!s) return '';
+  if (!/^https?:\/\//.test(s)) s = `https://${s}`;
+  return s.replace(/\/+$/, '');
+};
+
+export async function pair({ macUrl, code, name }) {
+  await ready;
+  const url = normalizeUrl(macUrl);
+  const res = await fetch(`${url}/api/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: String(code).replace(/\s+/g, ''), deviceId: repo.device, name }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || `Mac answered ${res.status}`);
+  await repo.setMeta('macUrl', url);
+  await repo.setMeta('token', j.token);
+  // Keep an existing epoch: if the Mac's database was replaced, the first sync then restores it from here.
+  if (!(await repo.getMeta('epoch'))) await repo.setMeta('epoch', j.epoch);
+  await refreshPairing();
+  await syncNow();
+}
+
+export async function unpair() {
+  await ready;
+  await repo.setMeta('token', null);
+  await refreshPairing();
+}
+
+async function post(path, body) {
+  const url = await repo.getMeta('macUrl');
+  const token = await repo.getMeta('token');
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(url + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    return { status: res.status, json: await res.json().catch(() => null) };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Ask the Mac for a pairing code for another device. */
+export async function newPairingCode() {
+  await ready;
+  const r = await post('/api/pair/code', {});
+  if (r.status !== 200) throw new Error(r.json?.error || `Mac answered ${r.status}`);
+  return r.json;
+}
+
+export async function syncNow() {
+  await ready;
+  if (!(await repo.getMeta('token')) || !(await repo.getMeta('macUrl'))) return { ok: false, reason: 'unpaired' };
+  if (running) { again = true; return running; }
+  setState({ sync: { running: true } });
+  running = (async () => {
+    let result;
+    do {
+      again = false;
+      result = await syncOnce({
+        repo,
+        post,
+        onStatus: async (s) => {
+          if (s.reachable) await repo.setMeta('macLastSeen', Date.now());
+          setState({
+            mac: { reachable: s.reachable, lastError: s.error ?? null, ...(s.reachable ? { lastSeen: Date.now() } : {}) },
+            ...(s.lastAt ? { sync: { lastAt: s.lastAt } } : {}),
+          });
+        },
+      });
+    } while (again && result.ok);
+    return result;
+  })();
+  try {
+    return await running;
+  } finally {
+    running = null;
+    setState({ sync: { running: false, pending: await repo.pendingCount() } });
+  }
+}
+
+function scheduleSync(ms) {
+  clearTimeout(timer);
+  timer = setTimeout(() => { syncNow().finally(() => scheduleSync(30000)); }, ms);
+}
+
+function startLoop() {
+  scheduleSync(300);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleSync(300);
+  });
+  window.addEventListener('online', () => scheduleSync(300));
+}

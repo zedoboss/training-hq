@@ -61,8 +61,9 @@ export function render(view) {
 
     <section class="home-center">
       <div class="home-hud hud c-cyan">
-        <div><span data-k="daytag"></span><br><span class="c-amber" data-k="weekcols"></span></div>
-        <div class="right">REC <span data-k="clock"></span><br><span class="c-muted" data-k="date"></span></div>
+        <div><span data-k="daytag"></span><br><span class="c-muted" data-k="tz"></span></div>
+        <div class="right">REC <span data-k="clock"></span><br><span data-k="mac"></span></div>
+        <div class="full c-amber" data-k="weekcols"></div>
       </div>
 
       <div class="core-wrap">
@@ -125,7 +126,6 @@ export function render(view) {
     set('clock', `${formatTimeSec(now)} ${gmtOffset(now)}`);
     set('clock-short', formatTime(now));
     set('clock-long', `${isoDate(now)} ${formatTimeSec(now)} ${gmtOffset(now)}`);
-    set('date', isoDate(now));
     set('daytag', `TODAY // WK ${isoWeek(now)} // ${weekdayShort(now)}`);
     set('session', `HQ-${String(isoWeek(now)).padStart(4, '0')} SESSION-${isoDate(now).slice(5).replace('-', '')}`);
   };

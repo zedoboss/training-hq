@@ -42,6 +42,8 @@ export async function openRepo(adapter) {
       if (cols.length) changed(cols);
       return cols;
     },
+    /** Queue every local record again (used when the Mac's database was replaced: the phone restores it). */
+    requeueAll: () => adapter.requeueAll(),
     getMeta: (k) => adapter.getMeta(k),
     setMeta: (k, v) => adapter.setMeta(k, v),
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -68,6 +70,7 @@ export function memoryAdapter() {
     },
     async listOutbox() { return [...outbox.entries()].map(([key, rec]) => ({ key, rec: clone(rec) })); },
     async removeOutbox(keys) { for (const key of keys) outbox.delete(key); },
+    async requeueAll() { for (const r of records.values()) outbox.set(nextKey++, clone(r)); return records.size; },
     async applyRemote(recs, isNewer, clockState) {
       const cols = new Set();
       for (const r of recs) {
