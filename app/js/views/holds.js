@@ -17,11 +17,8 @@ const holdRestS = () => withDefaults(getState().settings).rest.holdS || 120;
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const loadText = (h) => (h.loadKg != null ? `${fmtKg(h.loadKg)} kg` : h.load || 'bodyweight');
 const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); return formatDay(d); };
-const TIMING = {
-  shoulder: 'After Push, and on rest days.',
-  knees: 'Morning and evening. On Legs days the leg extension hold at the gym counts as one; the other, and both on other days, are the toes wall squat hold at home.',
-  wrist: 'Not set yet.',
-};
+// When each area's holds are done: written in the tendon data (timingText), shown for confirmation the first time.
+const timingOf = (a) => a.timingText || 'Not set yet.';
 
 async function loadAreas(repo) {
   return (await repo.list('tendons')).filter((d) => d.kind === 'area').sort((a, b) => ['knees', 'shoulder', 'wrist'].indexOf(a.id) - ['knees', 'shoulder', 'wrist'].indexOf(b.id));
@@ -40,13 +37,14 @@ function renderList(view, repo) {
       <h1 class="view-title">Tendon holds</h1>
       <p class="hint">Your rules: hold at least 30 seconds, 3 sets, using the movement that hurts. Pain up to 3-4 out of 10 is fine if it isn't worse the next day; if it is, use less weight or push less hard.</p>
       ${unconfirmed.length ? `<section class="card pad-card confirm-card"><div class="hud c-amber">CONFIRM YOUR HOLD TIMES (FIRST TIME)</div>
-        ${unconfirmed.map((a) => `<p class="hint c-text"><b>${esc(a.label)}:</b> ${esc(TIMING[a.id] || '')}</p>`).join('')}
+        ${unconfirmed.map((a) => `<p class="hint c-text"><b>${esc(a.label)}:</b> ${esc(timingOf(a))}</p>`).join('')}
         <div class="btn-row"><button class="btn-primary" id="t-ok" type="button">Confirm</button><button class="btn-ghost" id="t-change" type="button">Change</button></div></section>` : ''}
       ${areas.filter((a) => a.holds?.length).map((a) => {
         const st = areaStatus(a, rounds[a.id] || {}, today);
         return `<section class="card pad-card">
           <div class="ex-head"><b class="area-name">${esc(a.label)}</b><span class="hud ${st.due ? 'c-amber' : 'c-green'}">${esc(st.text.toUpperCase())}</span></div>
           <div class="hint">${esc(PHASE_TEXT[a.phase] || '')}</div>
+          ${a.openQuestion ? `<div class="hint c-amber">To decide: ${esc(a.openQuestion.text)}</div>` : ''}
           ${a.holds.map((h, i) => `<div class="hold-row"><div><b>${esc(h.exercise)}</b><div class="hint">${esc(loadText(h))} · ${h.sets || 3} × ${h.seconds || 30} s${h.where ? ` · ${esc(h.where)}` : ''}</div></div>
             <a class="pill is-on" href="#/holds/${esc(a.id)}/${i}">Start</a></div>`).join('')}
         </section>`;

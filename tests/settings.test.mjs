@@ -72,3 +72,12 @@ test('warm-up steps typed on the Settings screen are cleaned and sorted', () => 
   assert.deepEqual(cleanWarmupSteps([{ pct: '75', reps: '4' }, { pct: 40, reps: 10 }, { pct: 0, reps: 5 }, { pct: 120, reps: 1 }, { pct: 60, reps: '' }]),
     [{ pct: 40, reps: 10 }, { pct: 75, reps: 4 }]);
 });
+
+test('a bar chosen for one exercise (EZ bar) wins; "none" means no bar; a bar without equipment type is opt-in', () => {
+  const eq = { bars: [{ id: 'smith', equipment: 'smith', kg: 11.3 }, { id: 'ez', equipment: null, kg: 10 }] };
+  assert.equal(barKgFor({ name: 'EZ Bar Biceps Curl', equipment: 'barbell', barId: 'ez' }, eq), 10);
+  assert.equal(barKgFor({ name: 'Preacher Curl (Barbell)', equipment: 'barbell' }, eq), null, 'the EZ bar does not apply to every barbell exercise');
+  assert.equal(barKgFor({ name: 'Squat (Smith Machine)', equipment: 'smith', barId: 'none' }, eq), null);
+  assert.equal(barKgFor({ name: 'Squat (Smith Machine)', equipment: 'smith', barId: 'gone' }, eq), 11.3, 'a removed bar falls back to the equipment bar');
+  assert.equal(equipmentWithDefaults({ bars: [{ id: 'ez', equipment: '', kg: 10 }] }).bars[0].equipment, null);
+});

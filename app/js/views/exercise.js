@@ -88,6 +88,15 @@ export function render(view, params = []) {
         toast(`Made "${copy.name}". It starts with no history.`);
         location.hash = `#/library/edit/${copy.id}`;
       } },
+      { label: `Bar (${ex.barKg ? `${kg(ex.barKg)} kg` : 'none'})`, run: () => {
+        const bars = getState().equipment?.bars || [];
+        const choose = async (barId) => { const rec = (await repo.get('exercises', ex.id)) || { id: ex.id }; await repo.put('exercises', ex.id, { ...rec, barId }); toast(barId === 'none' ? 'No bar: loads are plain totals.' : 'Saved. Loads stay totals including the bar.'); };
+        actionSheet('Bar for this exercise', [
+          ...bars.map((b) => ({ label: `${b.label || 'Bar'} · ${kg(b.kg)} kg${ex.barId === b.id ? ' (now)' : ''}`, run: () => choose(b.id) })),
+          { label: `No bar${ex.barId === 'none' ? ' (now)' : ''}`, run: () => choose('none') },
+          { label: `By equipment type (default)${!ex.barId ? ' (now)' : ''}`, run: () => choose(null) },
+        ]);
+      } },
       { label: ex.pinnedNote ? 'Edit pinned note' : 'Pin a note (shows every time)', run: () => editText('pinnedNote', 'Pinned note', ex.pinnedNote?.text ?? ex.pinnedNote ?? '') },
       { label: ex.howTo ? 'Edit how-to' : 'Write a how-to', run: () => editText('howTo', 'How-to (your own cues)', ex.howTo || '') },
       ...(ex.custom ? [{ label: 'Delete exercise', danger: true, run: async () => {

@@ -58,7 +58,7 @@ export function equipmentWithDefaults(doc) {
   const e = mergeDeep(DEFAULT_EQUIPMENT, doc);
   e.plates = [...new Set((e.plates || []).map(Number).filter((p) => p > 0))].sort((a, b) => b - a);
   if (!e.plates.length) e.plates = [...DEFAULT_EQUIPMENT.plates];
-  e.bars = (e.bars || []).filter((b) => b && Number(b.kg) > 0);
+  e.bars = (e.bars || []).filter((b) => b && Number(b.kg) > 0).map((b) => ({ ...b, equipment: b.equipment || null }));
   return e;
 }
 
@@ -69,10 +69,16 @@ export const smallestPlate = (equipment) => Math.min(...equipmentWithDefaults(eq
 const equipmentOf = (ex) => (/smith/i.test(ex?.name || '') ? 'smith' : ex?.equipment || null);
 
 /**
- * Bar weight for an exercise: the bar set for its equipment on the Settings screen, else the exercise's own
- * bar weight (from the programme seed), else none.
+ * Bar weight for an exercise: the bar chosen for that exercise (barId, or 'none'), else the bar set for its
+ * equipment on the Settings screen, else the exercise's own bar weight (from the programme seed), else none.
+ * A bar with no equipment type applies only to exercises that choose it (e.g. an EZ bar).
  */
 export function barKgFor(ex, equipment) {
+  if (ex?.barId === 'none') return null;
+  if (ex?.barId) {
+    const chosen = (equipment?.bars || []).find((b) => b.id === ex.barId && Number(b.kg) > 0);
+    if (chosen) return Number(chosen.kg);
+  }
   const eq = equipmentOf(ex);
   const bar = eq ? (equipment?.bars || []).find((b) => b.equipment === eq && Number(b.kg) > 0) : null;
   if (bar) return Number(bar.kg);

@@ -12,14 +12,10 @@ import * as rest from '../lib/rest-timer.js';
 import { confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
+import { holdsAfter } from '../lib/holds.js';
 import { withDefaults } from '../lib/settings.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const HOLD_PROMPT = {
-  push: { area: 'shoulder', text: 'Shoulder hold: cable lateral raise, 3 × 30 s' },
-  legs: { area: 'knees', text: 'Knee hold: leg extension on the full stack, 3 × 30 s' },
-  pull: { area: 'wrist', text: 'Wrist hold: cupping, 3 × 30 s' },
-};
 const localInput = (ms) => { const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
 
 export function render(view, params = []) {
@@ -80,7 +76,9 @@ export function render(view, params = []) {
     const done = all.filter((s) => s.done);
     const bests = sessionBests(session, done, history);
     const number = sessions.filter((s) => s.status === 'done' && s.startedAt <= session.startedAt).length + (bridge?.sessionCount ?? 0);
-    const hold = HOLD_PROMPT[session.dayType];
+    const areas = (await repo.list('tendons')).filter((d) => d.kind === 'area' && d.phase !== 'none');
+    const due = holdsAfter(areas, session.dayType);
+    const hold = due.length ? { text: due.map((h) => `${h.exercise} hold, ${h.sets} × ${h.seconds} s`).join(' · ') } : null;
     const holdDone = done.some((s) => s.type === 'hold');
     const changed = structureChanged(session, done, routine);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));

@@ -80,10 +80,10 @@ function prefsHtml(st, eq) {
     </div>
     <div class="section-label">Equipment</div>
     <div class="card opt-list" id="bars">
-      <p class="hint pad-s">Loads are always the total including the bar. A bar applies to every exercise with that equipment.</p>
+      <p class="hint pad-s">Loads are always the total including the bar. A bar applies to every exercise with that equipment, or only to the exercises that choose it (exercise page ··· > Bar).</p>
       ${eq.bars.map((b, i) => `<div class="opt"><div class="row-fields grow">
         <input class="input mini grow" data-b="label" data-i="${i}" value="${esc(b.label || '')}" maxlength="30" aria-label="Bar name">
-        <select class="input mini" data-b="equipment" data-i="${i}" aria-label="Used for">${BAR_EQUIPMENT.map((e) => `<option value="${e}" ${b.equipment === e ? 'selected' : ''}>${EQ_LABEL[e] || e}</option>`).join('')}</select>
+        <select class="input mini" data-b="equipment" data-i="${i}" aria-label="Used for"><option value="" ${!b.equipment ? 'selected' : ''}>Chosen exercises</option>${BAR_EQUIPMENT.map((e) => `<option value="${e}" ${b.equipment === e ? 'selected' : ''}>${EQ_LABEL[e] || e}</option>`).join('')}</select>
         <input class="input mini num" data-b="kg" data-i="${i}" inputmode="decimal" value="${fmtKg(b.kg)}" aria-label="Bar weight in kg"><span class="hint">kg</span></div>
         <button class="icon-mini" data-b-del="${i}" type="button" aria-label="Remove this bar">✕</button></div>`).join('')}
       <div class="opt"><span class="hint">${eq.bars.length ? '' : 'No bars: every load is entered as a plain total.'}</span><button class="btn-ghost small" data-b-add type="button">+ Bar</button></div>
@@ -165,7 +165,7 @@ function wirePrefs(box) {
         const v = Number(String(t.value).replace(',', '.'));
         if (!(v > 0 && v < 100)) { toast('Bar weight must be between 0 and 100 kg.'); t.value = fmtKg(b.kg); return; }
         b.kg = v;
-      } else b[t.dataset.b] = t.value.trim();
+      } else b[t.dataset.b] = t.dataset.b === 'equipment' ? t.value || null : t.value.trim();
       if (b.source) b.source = changed();
       await saveEquipment({ ...eq(), bars });
     }

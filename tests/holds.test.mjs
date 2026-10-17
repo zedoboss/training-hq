@@ -54,3 +54,15 @@ test('Hevy holds count, mapped through the hold and load lists', () => {
   const r = roundsByDate(a2, [], [], bridge);
   assert.deepEqual(r.shoulder, { '2026-10-12': 1, '2026-10-06': 1 }, 'one round per area per day from Hevy');
 });
+
+test('holds due after a workout come from the tendon data ("after Push" in timing or when)', async () => {
+  const { holdsAfter } = await import('../app/js/lib/holds.js');
+  const areas = [
+    { label: 'Shoulder', holds: [{ exercise: 'Bench Press (Smith Machine)', timing: ['after Push'] }, { exercise: 'Lateral Raise (Cable)', timing: ['after Push', 'rest days'], sets: 3, seconds: 30 }] },
+    { label: 'Knees', holds: [{ exercise: 'Leg Extension (Machine)', when: 'after Legs' }, { exercise: 'Toes Wall Squat Hold', when: 'the second session on Legs days' }] },
+  ];
+  assert.deepEqual(holdsAfter(areas, 'push').map((h) => h.exercise), ['Bench Press (Smith Machine)', 'Lateral Raise (Cable)']);
+  assert.deepEqual(holdsAfter(areas, 'legs').map((h) => h.exercise), ['Leg Extension (Machine)']);
+  assert.deepEqual(holdsAfter(areas, 'pull'), []);
+  assert.deepEqual(holdsAfter(areas, null), []);
+});

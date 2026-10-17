@@ -65,6 +65,17 @@ export function areaStatus(area, rounds, today) {
   return { kind: 'unscheduled', done: todayCount, target: null, due: false, text: 'Not scheduled yet' };
 }
 
+const DAY_NAME = { pull: 'Pull', push: 'Push', legs: 'Legs' };
+
+/** Holds due after this kind of workout, from the tendon data: holds whose timing says "after Push" and so on. */
+export function holdsAfter(areas, dayType) {
+  const day = DAY_NAME[dayType];
+  if (!day) return [];
+  const after = new RegExp(`\\bafter ${day}\\b`, 'i');
+  return areas.flatMap((a) => (a.holds || []).filter((h) => [...(h.timing || []), h.when || ''].some((t) => after.test(t)))
+    .map((h) => ({ area: a.label, exercise: h.exercise, sets: h.sets || 3, seconds: h.seconds || 30 })));
+}
+
 /** Pain rule from the tendon note: up to 3-4 out of 10 is fine if it isn't worse the next day. */
 export const painOk = (pain) => pain == null || pain <= 4;
 
