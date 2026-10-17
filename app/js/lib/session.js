@@ -1,0 +1,155 @@
+// Building and summarising a workout session. Pure functions; the views save the results.
+// A session holds its exercise list; every set is its own record (so sync can never lose one).
+import { targetFor } from './targets.js';
+import { weekColumn } from './programme.js';
+import { effectiveKg } from './exercise-types.js';
+import { newId, newKey, defaultSets } from './routines.js';
+
+export const newSetId = () => newId('set');
+
+function planExerciseFor(programmeRoutines, plan) {
+  const r = programmeRoutines.find((x) => x.id === plan.routine);
+  return r?.exercises.find((e) => e.comebackName === plan.name) ?? null;
+}
+
+const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmup' : 'working');
+
+/**
+ * Build a session (and its sets) from a routine.
+ * @param {object} o
+ * @param {object|null} o.routine  null for an empty session
+ * @param {object|null} o.meta     programme meta
+ * @param {Array} o.programmeRoutines programme routine docs
+ * @param {Map|object} o.lib       exercise id -> library entry
+ * @param {ReturnType<import('./history.js').buildHistory>} o.history
+ * @param {string} o.today         YYYY-MM-DD
+ * @param {number} o.now
+ */
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now() }) {
+  const id = newId('session');
+  const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
+  const session = {
+    id, kind: 'workout', title: routine?.title ?? 'Workout', routineId: routine?.id ?? null, dayType: routine?.dayType ?? null, week,
+    startedAt: now, endedAt: null, pausedMs: 0, pausedAt: null, status: 'active', note: '', photos: [], gym: null, source: 'training-hq',
+    exercises: [],
+  };
+  const sets = [];
+  let order = 0;
+  for (const re of routine?.exercises || []) {
+    const ex = (lib.get ? lib.get(re.exerciseId) : lib[re.exerciseId]) || { id: re.exerciseId, name: re.name, type: 'weight_reps' };
+    const last = history.last(re.name);
+    const lastHeaviest = last?.heaviest ? { ...last.heaviest, date: last.date } : null;
+    const entry = {
+      key: newKey(), exerciseId: re.exerciseId, name: re.name, type: ex.type || 'weight_reps', capClass: ex.capClass ?? null,
+      barKg: ex.barKg ?? null, restSeconds: re.restSeconds ?? ex.restSeconds ?? null, notes: re.notes || '', role: re.role ?? null,
+      target: null,
+    };
+    let planned = [];
+    const pe = re.plan ? planExerciseFor(programmeRoutines, re.plan) : null;
+    if (pe) {
+      const t = targetFor({ plan: pe, week, last: lastHeaviest, barKg: ex.barKg ?? null });
+      entry.target = t;
+      entry.capClass = pe.capClass ?? entry.capClass;
+      planned = Array.from({ length: t.sets }, () => ({ type: 'normal', kg: t.bodyweight ? null : t.kg, reps: null, target: { kg: t.kg, reps: t.reps } }));
+    } else {
+      const base = re.sets?.length ? re.sets : defaultSets(entry.type);
+      planned = base.map((s) => {
+        const kgGuess = s.kg ?? (s.type !== 'warmup' && s.type !== 'hold' ? lastHeaviest?.kg ?? null : null);
+        return { type: s.type, kg: kgGuess, reps: null, durationS: s.type === 'hold' ? s.durationS ?? 30 : s.durationS ?? null, target: { kg: kgGuess, reps: Array.isArray(s.reps) ? s.reps : s.reps ? [s.reps, s.reps] : null } };
+      });
+      if (lastHeaviest && !re.sets?.length) entry.target = { kg: lastHeaviest.kg, reps: null, why: `last load (${lastHeaviest.kg})` };
+    }
+    session.exercises.push(entry);
+    for (const p of planned) {
+      sets.push({ id: newSetId(), sessionId: id, exKey: entry.key, order: order++, done: false, doneAt: null, rpe: null, note: '', ...p });
+    }
+  }
+  return { session, sets };
+}
+
+/** Sets for an exercise added during a session. */
+export function setsForAdded(sessionId, entry, lastHeaviest, startOrder) {
+  return defaultSets(entry.type).map((s, i) => ({
+    id: newSetId(), sessionId, exKey: entry.key, order: startOrder + i, done: false, doneAt: null, rpe: null, note: '',
+    type: s.type, kg: lastHeaviest?.kg ?? null, reps: null, durationS: s.durationS ?? null, target: { kg: lastHeaviest?.kg ?? null, reps: s.reps ?? null },
+  }));
+}
+
+/** Elapsed ms, not counting paused time. */
+export function elapsedMs(session, now = Date.now()) {
+  const end = session.endedAt ?? now;
+  const paused = session.pausedMs + (session.pausedAt ? end - session.pausedAt : 0);
+  return Math.max(0, end - session.startedAt - paused);
+}
+
+export function clock(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** Volume and set counts. Warm-ups and holds don't count toward volume or the set count. */
+export function summarize(session, sets, bodyweightKg = null) {
+  const types = new Map(session.exercises.map((e) => [e.key, e.type]));
+  let volume = 0; let done = 0; let total = 0;
+  for (const s of sets) {
+    if (s.type === 'warmup' || s.type === 'hold') continue;
+    total++;
+    if (!s.done) continue;
+    done++;
+    volume += effectiveKg(types.get(s.exKey), s.kg, bodyweightKg) * (s.reps ?? 0);
+  }
+  return { volume: Math.round(volume), done, total };
+}
+
+/** Previous value for a set: same kind, same position among that kind. */
+export function previousFor(prev, sets, set) {
+  const kind = kindOf(set);
+  const sameKind = sets.filter((s) => s.exKey === set.exKey && kindOf(s) === kind).sort((a, b) => a.order - b.order);
+  const i = sameKind.findIndex((s) => s.id === set.id);
+  return prev?.[kind]?.[i] ?? null;
+}
+
+/** What to fill when a set is ticked with empty fields: previous values, then the target. */
+export function fillForTick(set, previous) {
+  const out = {};
+  if (set.type === 'hold') { if (set.durationS == null) out.durationS = previous?.durationS ?? 30; return out; }
+  if (set.reps == null) out.reps = previous?.reps ?? set.target?.reps?.[0] ?? null;
+  if (set.kg == null && previous?.kg != null) out.kg = previous.kg;
+  return out;
+}
+
+/**
+ * Typical length of this kind of session: median of the last 3 of the same day type
+ * (Training HQ sessions and the Hevy bridge), in ms. Null when there is nothing to go on.
+ */
+export function typicalDurationMs(dayType, { sessions = [], bridge = null, now = Date.now() } = {}) {
+  if (!dayType) return null;
+  const own = sessions.filter((s) => s.status === 'done' && s.dayType === dayType && s.endedAt)
+    .map((s) => ({ at: s.startedAt, ms: s.endedAt - s.startedAt - (s.pausedMs || 0) }));
+  const hevy = (bridge?.lastSessions || []).filter((s) => s.dayType === dayType && s.start && s.end)
+    .map((s) => ({ at: Date.parse(s.start), ms: Date.parse(s.end) - Date.parse(s.start) }));
+  const recent = [...own, ...hevy].filter((x) => x.ms > 10 * 60000 && x.ms < 3 * 3600000 && x.at < now)
+    .sort((a, b) => b.at - a.at).slice(0, 3).map((x) => x.ms).sort((a, b) => a - b);
+  if (!recent.length) return null;
+  return recent[Math.floor(recent.length / 2)];
+}
+
+/**
+ * Expected finish. Before 3 sets are ticked: from the typical length of this session type (or 2.5 min a set).
+ * After that: today's pace (time per ticked set) times the sets left. Every set counts, warm-ups and holds too.
+ * @returns {{at:number, basis:'pace'|'history'|'estimate', leftMs:number}|null}
+ */
+export function expectedFinish({ session, sets, typicalMs = null, now = Date.now() }) {
+  const total = sets.length;
+  const done = sets.filter((s) => s.done).length;
+  const elapsed = elapsedMs(session, now);
+  const left = total - done;
+  if (!total) return typicalMs ? { at: now + Math.max(0, typicalMs - elapsed), basis: 'history', leftMs: Math.max(0, typicalMs - elapsed) } : null;
+  if (left === 0) return { at: now, basis: 'pace', leftMs: 0 };
+  let leftMs;
+  let basis;
+  if (done >= 3) { leftMs = left * (elapsed / done); basis = 'pace'; }
+  else if (typicalMs) { leftMs = Math.max(typicalMs - elapsed, left * (typicalMs / total)); basis = 'history'; }
+  else { leftMs = left * 150000; basis = 'estimate'; }
+  return { at: now + leftMs, basis, leftMs };
+}

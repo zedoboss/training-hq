@@ -12,12 +12,13 @@ export async function openRepo(adapter) {
   }
   const clock = createClock(device, (await adapter.getMeta('clock')) || undefined);
   const listeners = new Set();
-  const changed = (cols) => { for (const fn of listeners) fn(cols); };
+  // origin: 'local' for writes on this device, 'remote' for changes that arrived by sync.
+  const changed = (cols, origin) => { for (const fn of listeners) fn(cols, origin); };
 
   async function write(col, id, data, deleted) {
     const rec = { col, id, data: deleted ? null : data, deleted, hlc: clock.tick(), device };
     await adapter.writeLocal(rec, clock.state());
-    changed([col]);
+    changed([col], 'local');
     return rec;
   }
 
@@ -39,7 +40,7 @@ export async function openRepo(adapter) {
     async applyRemote(records) {
       for (const r of records) clock.receive(r.hlc);
       const cols = await adapter.applyRemote(records, newer, clock.state());
-      if (cols.length) changed(cols);
+      if (cols.length) changed(cols, 'remote');
       return cols;
     },
     /** Queue every local record again (used when the Mac's database was replaced: the phone restores it). */

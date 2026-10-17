@@ -105,8 +105,10 @@ test('device id and clock survive reopening the same storage', async () => {
 test('change listeners hear local and remote changes', async () => {
   const repo = await openRepo(memoryAdapter());
   const heard = [];
-  repo.onChange((cols) => heard.push(...cols));
+  const origins = [];
+  repo.onChange((cols, origin) => { heard.push(...cols); origins.push(origin); });
   await repo.put('a', '1', {});
   await repo.applyRemote([{ col: 'b', id: '1', data: {}, deleted: false, hlc: formatHlc(Date.now() + 9e6, 0, DEV_B), device: DEV_B }]);
   assert.deepEqual(heard, ['a', 'b']);
+  assert.deepEqual(origins, ['local', 'remote']);
 });
