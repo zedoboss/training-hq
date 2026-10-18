@@ -195,7 +195,11 @@ export function render(view, params) {
       location.hash = `#/meal/${id}`;
       const { editItems } = await import('./meal.js');
       const items = await editItems('WHAT YOU ATE', []);
-      if (items) { const m = await repo.get('meals', id); await repo.put('meals', id, { ...m, before: { ...m.before, items, confirmedAt: Date.now() } }); }
+      if (items?.length) { const m = await repo.get('meals', id); await repo.put('meals', id, { ...m, before: { ...m.before, items, confirmedAt: Date.now() } }); return; }
+      // Cancelled, or saved with nothing typed: no empty meal left behind (it would count as a meal and quiet the
+      // meal-time reminder).
+      await repo.remove('meals', id);
+      if (location.hash === `#/meal/${id}`) history.back();
     };
   };
 
