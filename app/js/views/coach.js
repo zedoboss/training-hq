@@ -1,7 +1,8 @@
 // TALK (step 8): the coach by text, on the phone and in the Mac's browser. Same conversation on both (it syncs).
 //   #/coach        the log (time, who, the words, the tools used) and the box to type in; Sonnet or Opus
 //   #/coach/notes  notes the coach kept for him and the reminders it set
-// The coach itself runs on the Mac (Claude Code); this screen needs the Mac. Voice arrives in step 9.
+// The coach itself runs on the Mac (Claude Code); this screen needs the Mac. Spoken turns (step 9, lib/voice.js) show
+// here live too, marked VOICE.
 import { ready, syncNow, coachSend, macPost, saveSettings } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
@@ -31,7 +32,7 @@ const deps = {
 };
 
 function msgHtml(m, { live = false } = {}) {
-  const who = m.role === 'user' ? 'YOU' : 'COACH';
+  const who = m.role === 'user' ? (m.via === 'voice' ? 'YOU · VOICE' : 'YOU') : 'COACH';
   const cls = m.role === 'user' ? 'is-user' : m.error ? 'is-error' : 'is-coach';
   const tools = (m.tools || []);
   const opens = (m.actions || []).filter((a) => a.kind === 'open' && /^#\//.test(a.url || ''));
@@ -48,7 +49,7 @@ function renderChat(view) {
   view.innerHTML = `
     <div class="lib-head"><a class="pill" href="#/today">Today</a><span class="btn-row tight" style="gap:6px"><a class="pill" href="#/coach/notes">Notes</a><button class="pill" id="c-more" type="button" aria-label="More">···</button></span></div>
     <div class="coach-head">
-      <div><div class="hud c-muted">COACH · BY TEXT</div><div class="hud coach-state" id="c-state">…</div></div>
+      <div><div class="hud c-muted">COACH · TEXT AND VOICE</div><div class="hud coach-state" id="c-state">…</div></div>
       <div class="seg" role="group" id="c-model">${Object.entries(MODEL_LABEL).map(([k, l]) => `<button class="pill" type="button" data-model="${k}" aria-pressed="false">${l}</button>`).join('')}</div>
     </div>
     <div class="coach-log" id="c-log" aria-live="polite"></div>
@@ -56,7 +57,7 @@ function renderChat(view) {
       <textarea class="input coach-input" id="c-text" rows="1" placeholder="Ask, or tell it what you did: 80 for 8" aria-label="Message to the coach"></textarea>
       <button class="btn-primary coach-send" id="c-send" type="submit" aria-label="Send">${SEND}</button>
     </form>
-    <p class="hint coach-foot" id="c-foot">The coach runs on your Mac with your programme, history and rules. Voice arrives in step 9.</p>`;
+    <p class="hint coach-foot" id="c-foot">The coach runs on your Mac with your programme, history and rules. To talk instead of typing: <a href="#/voice">Settings > Voice</a>, then the mic at the top.</p>`;
   const $ = (q) => view.querySelector(q);
   const box = $('#c-text');
   box.value = draftGet();
@@ -177,6 +178,21 @@ function renderChat(view) {
     { label: 'Which Claude (Settings)', run: () => { location.hash = '#/settings'; } },
   ]);
 
+  // A spoken turn (lib/voice.js) shows here live, the same way as a typed one.
+  const onVoice = (ev) => {
+    const e = ev.detail || {};
+    if (busy || gone) return;
+    if (e.type === 'heard' && e.ok) { pendingLive = { id: '', role: 'assistant', text: '', at: Date.now(), tools: [], actions: [], model: modelOf() }; setState('THINKING…'); }
+    else if (!pendingLive) return;
+    else if (e.type === 'user') { live.push(e.message); pendingLive.at = e.message.at + 1; draw(); }
+    else if (e.type === 'text') { pendingLive.text += e.delta; updateLive(); }
+    else if (e.type === 'tool-start') setState(`USING ${String(e.name || '').toUpperCase().replace(/_/g, ' ')}…`);
+    else if (e.type === 'tool') { pendingLive.tools.push(e.tool); updateLive(); setState('THINKING…'); }
+    else if (e.type === 'action') { pendingLive.actions.push(e.action); if (e.action.kind === 'open') updateLive(); }
+    else if (e.type === 'done') { live.push(e.message); pendingLive = null; draw(); idleState(); }
+    else if (e.type === 'error') { pendingLive = null; draw(); idleState(); }
+  };
+  window.addEventListener('thq:voice-event', onVoice);
   const unsub = subscribe(() => { if (!busy) idleState(); drawModel(); });
   let off = () => {};
   ready.then(async (r) => {
@@ -189,7 +205,7 @@ function renderChat(view) {
     // Start the coach's Claude on the Mac now, so the first answer comes sooner.
     if (getState().paired) macPost('/api/coach/warm', { model: modelOf() }).then(() => { if (!busy) idleState(); }).catch(() => { if (!busy) setState('MAC UNREACHABLE', 'c-amber'); });
   });
-  return () => { gone = true; busy?.abort(); unsub(); off(); };
+  return () => { gone = true; busy?.abort(); unsub(); off(); window.removeEventListener('thq:voice-event', onVoice); };
 }
 
 function renderNotes(view) {

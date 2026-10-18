@@ -32,6 +32,8 @@ import { getState, subscribe } from './lib/store.js';
 import { withDefaults } from './lib/settings.js';
 import { MODEL_LABEL } from './lib/coach.js';
 import { autoKeepOffline } from './lib/squat-offline.js';
+import { mountVoiceHud } from './ui/voice-hud.js';
+import { resume as resumeVoice } from './lib/voice.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -83,6 +85,7 @@ function shell() {
           .map(([id, v]) => `<a class="pill" href="#/${id}" data-tab="${id}">${v.label}</a>`).join('')}
       </nav>
       <div class="top-right">
+        <button class="voice-chip" id="voice-chip" type="button" hidden></button>
         <div class="model-readout">
           <div class="hud c-faint" style="letter-spacing:.4em">ACTIVE MODEL</div>
           <div class="hud c-cyan" id="active-model" style="font-size:16px;letter-spacing:.24em;margin-top:6px">SONNET 5.5 · LOW</div>
@@ -119,6 +122,9 @@ showModel();
 subscribe(showModel);
 window.addEventListener('hashchange', route);
 route();
+// Voice (step 9): the header chip, and listening again if it was on for this device.
+mountVoiceHud(document.getElementById('voice-chip'));
+resumeVoice();
 registerServiceWorker();
 // Squat Depth's pose files (about 19 MB) are fetched once in the background so it works at the gym with no signal.
 autoKeepOffline();

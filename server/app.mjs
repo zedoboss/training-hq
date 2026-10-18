@@ -380,6 +380,15 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       if (!res.writableEnded) res.end();
     },
 
+    // Barge-in: is the voice talking over the coach his? Only the voice lock, nothing transcribed or kept.
+    'POST /api/voice/barge': async (req) => {
+      auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      const bytes = await readRaw(req, MAX_CLIP_BYTES);
+      const d = voiceCall(() => voice.check(bytes)).decision;
+      return { me: d.ok, reason: d.reason, score: d.score };
+    },
+
     'POST /api/voice/warm': async (req) => {
       auth(req);
       if (!voice) throw new HttpError(404, 'voice not available');

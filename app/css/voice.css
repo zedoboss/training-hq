@@ -10,3 +10,13 @@
 .v-list { margin: 0; padding-left: 18px; }
 .v-list li { margin: 4px 0; }
 #v-strict { margin: 0 14px 12px; }
+.voice-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; white-space: nowrap; cursor: pointer; }
+.voice-chip[hidden] { display: none; }
+.voice-chip.is-listening { color: var(--cyan); border-color: var(--cyan-dim); }
+.voice-chip.is-hearing, .voice-chip.is-thinking { color: var(--pale); border-color: var(--pale); }
+.voice-chip.is-speaking { color: var(--on-pale); background: var(--pale); border-color: var(--pale); }
+.voice-chip.is-tap { color: var(--amber); border-color: var(--amber); }
+.voice-chip.is-readout { color: var(--faint); border-color: var(--border); background: var(--surface); }
+.voice-chip.is-listening svg { animation: v-pulse 2s ease-in-out infinite; }
+@keyframes v-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .voice-chip svg { animation: none !important; } }

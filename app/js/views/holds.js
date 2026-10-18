@@ -1,6 +1,7 @@
 // TENDON HOLDS: checklist (#/holds) and the hold timer (#/holds/<area>/<holdIndex>).
 // Rules come from the owner's tendon note; the app adds no rehab advice of its own.
 import { ready, saveSettings } from '../lib/data.js';
+import { setQuiet } from '../lib/quiet.js';
 import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots } from '../lib/holds.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
@@ -177,8 +178,8 @@ function renderRun(view, repo, areaId, index) {
       });
     }
     body.querySelectorAll('[data-h]').forEach((b) => {
-      if (b.dataset.h === 'go' || b.dataset.h === 'next') b.onclick = () => { rest.unlockAudio(); phase = 'holding'; startedSet = Date.now(); endsAt = startedSet + secs() * 1000; tickLoop(); draw(); };
-      if (b.dataset.h === 'end') b.onclick = () => { clearInterval(timer); endedSet = Date.now(); rest.beep(1); phase = 'rate'; draw(); };
+      if (b.dataset.h === 'go' || b.dataset.h === 'next') b.onclick = () => { rest.unlockAudio(); phase = 'holding'; setQuiet('hold', true); startedSet = Date.now(); endsAt = startedSet + secs() * 1000; tickLoop(); draw(); };
+      if (b.dataset.h === 'end') b.onclick = () => { clearInterval(timer); setQuiet('hold', false); endedSet = Date.now(); rest.beep(1); phase = 'rate'; draw(); };
     });
   };
 
@@ -189,6 +190,7 @@ function renderRun(view, repo, areaId, index) {
         clearInterval(timer);
         rest.beep(phase === 'holding' ? 3 : 2);
         if (phase === 'holding') endedSet = Date.now();
+        setQuiet('hold', false);
         phase = phase === 'holding' ? 'rate' : 'ready';
         draw();
         return;
@@ -218,7 +220,7 @@ function renderRun(view, repo, areaId, index) {
     };
     draw();
   })();
-  return () => clearInterval(timer);
+  return () => { clearInterval(timer); setQuiet('hold', false); };
 }
 
 export function render(view, params = []) {

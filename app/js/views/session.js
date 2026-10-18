@@ -1,4 +1,5 @@
 // SESSION: start (#/session/start/<routineId|empty>) and log (#/session/<id>).
+import { setQuiet } from '../lib/quiet.js';
 import { currentBodyweight } from '../lib/health.js';
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
@@ -194,11 +195,12 @@ export function render(view, params = []) {
   /** Live update of the running set timer; beeps once when the target is reached. */
   const runSetTimer = () => {
     clearInterval(setTimerTick);
+    setQuiet('set-timer', !!setTimer && !setTimer.cued);
     if (!setTimer) return;
     setTimerTick = setInterval(() => {
-      if (!setTimer) { clearInterval(setTimerTick); return; }
+      if (!setTimer) { clearInterval(setTimerTick); setQuiet('set-timer', false); return; }
       const v = setTimerView(setTimer);
-      if (v.reached && !setTimer.cued) { setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); rest.beep(3); }
+      if (v.reached && !setTimer.cued) { setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); rest.beep(3); setQuiet('set-timer', false); }
       const el = view.querySelector(`[data-set="${CSS.escape(setTimer.setId)}"] [data-timer]`);
       if (el) { el.textContent = v.text; el.classList.toggle('c-green', v.reached); el.classList.toggle('c-cyan', !v.reached); }
     }, 250);
@@ -563,6 +565,7 @@ export function render(view, params = []) {
     clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo();
     document.removeEventListener('visibilitychange', onVis);
     wakeLock?.release?.().catch(() => {});
+    setQuiet('set-timer', false);
   };
 }
 

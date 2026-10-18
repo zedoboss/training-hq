@@ -83,6 +83,14 @@ export function createVad(o = {}, onEvent = () => {}) {
       else if (ms(clipLen) >= c.maxSec * 1000) finish(true);
       return level;
     },
+    /** The speech so far while someone is talking (for a quick voice check before they finish), else null. */
+    partial() {
+      if (!speaking) return null;
+      const out = new Float32Array(clipLen);
+      let p = 0;
+      for (const f of clip) { out.set(f, p); p += f.length; }
+      return out;
+    },
     /** Make it harder to start (while the coach is talking out of the speaker): threshold times `x`. */
     setBoost(x) { boost = Math.max(1, Number(x) || 1); },
     /** Drop anything in progress (after a reply starts, when the screen hides). */
