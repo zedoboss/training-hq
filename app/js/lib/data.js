@@ -370,3 +370,9 @@ export async function arriveTest(link) {
   syncNow(); // the arrival noted on the Mac comes back with the next sync; don't wait for it
   return j;
 }
+
+/** A11: send an Evolt results PDF to the Mac; the numbers read from it come back to check (nothing saved yet). */
+export async function uploadScanPdf(file) {
+  const res = await macFetch('/api/scan/pdf', { method: 'POST', body: file, type: 'application/pdf', timeoutMs: 60000 });
+  return res.json();
+}

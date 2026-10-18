@@ -85,7 +85,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, evolt = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -283,6 +283,14 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const r = await push.notify({ title: 'Training HQ', body: 'Test from your Mac. Tap to open Settings.', url: '#/settings', tag: 'test' }, { deviceId: device.id });
       if (!r.sent) throw new HttpError(502, r.dropped ? 'This phone\'s subscription has expired. Turn notifications off and on again.' : 'The push service did not accept the test.');
       return r;
+    },
+
+    // Evolt results PDF (A11): read on the Mac, the numbers go back to the phone to check and save.
+    'POST /api/scan/pdf': async (req) => {
+      auth(req);
+      if (!evolt) throw new HttpError(404, 'not available');
+      const body = await readRaw(req, 15 * 1024 * 1024);
+      try { return evolt.read(body); } catch (e) { throw new HttpError(e.status || 500, e.message); }
     },
 
     // "When I arrive at the gym" (A10): the link for his iPhone Shortcut (paired devices only), and the call itself

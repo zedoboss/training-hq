@@ -227,7 +227,7 @@ const words = (s) => String(s || '').toLowerCase().replace(/\((kg|lbs?|%|l|kcal|
  * the label ("Segmental lean · Right arm"). A % unit on a fat label means body fat %, a kg unit fat mass.
  */
 export function keyFor(label, unit = '') {
-  const w = words(label); const u = String(unit || '').toLowerCase().trim();
+  const w = words(label)?.replace(/\btorso\b/, 'trunk'); const u = String(unit || '').toLowerCase().trim();
   if (!w) return null;
   const seg = METRICS.find((m) => m.part && w.includes(m.part));
   if (seg) {
@@ -266,7 +266,9 @@ export function cleanMetrics(list = []) {
     const unit = String(m?.unit ?? '').trim().slice(0, 16);
     const value = Number.isFinite(Number(m?.value)) && m?.value !== '' && m?.value !== null ? Number(m.value) : numberOf(text);
     const key = KEYS.has(m?.key) ? m.key : keyFor(label, unit);
-    out.push({ key: key || null, label, value, text, unit, ...(m?.unsure ? { unsure: true } : {}) });
+    // As the report printed them (A11): its rating, reference range, share, and the whole printed line.
+    const extra = Object.fromEntries(['rating', 'range', 'share', 'printed'].filter((k) => m?.[k]).map((k) => [k, String(m[k]).trim().slice(0, 80)]));
+    out.push({ key: key || null, label, value, text, unit, ...(m?.unsure ? { unsure: true } : {}), ...extra });
   }
   // One metric per key: the first one wins, a later duplicate keeps its label but loses the key.
   const seen = new Set();

@@ -100,3 +100,7 @@ a.chip.is-on { color: var(--on-pale); }
 #tr-flag { margin-top: 8px; }
 /* A10: the arrival automation's steps. */
 .scan-steps { margin: 6px 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; color: var(--text); }
+/* A11: the report's rating and range under a number from an Evolt PDF. */
+.sr-row .sr-ref { grid-column: 1 / -1; margin-top: -2px; font-size: 12px; }
+.sr-row .input[data-unit] { padding: 0 4px; font-size: 12px; text-align: center; }
+.sr-row .input.num { padding: 0 6px; }

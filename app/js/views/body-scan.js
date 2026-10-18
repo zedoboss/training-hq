@@ -8,7 +8,7 @@
 //   #/body/scan/r/<date>   a scan's results: photos of the results screen or printout read by Claude on the Mac (or typed
 //                          in), every number as reported, checked by him; the conditions (time, fasted, trained before,
 //                          checklist lines not ticked, anything unusual)
-import { ready, saveSettings, syncNow, arriveLink, arriveTest } from '../lib/data.js';
+import { ready, saveSettings, syncNow, arriveLink, arriveTest, uploadScanPdf } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, hmOf, zonedTime, timeAt } from '../lib/time.js';
@@ -29,7 +29,8 @@ import { overlay, confirmSheet, promptLong, promptTime } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const dayName = (iso) => formatDay(new Date(`${iso}T12:00:00`));
+/** "Sunday 10/27", with the year when it isn't this year ("Sunday 10/27/2024"). */
+const dayName = (iso) => (iso.slice(0, 4) === isoDate(new Date()).slice(0, 4) ? formatDay : formatDate)(new Date(`${iso}T12:00:00`));
 const savePlan = (repo, plan) => repo.put('scan-plan', 'main', { ...plan, id: 'main' });
 const COLS = ['scan-plan', 'body-scans', 'scan-photos', 'days', 'sessions', 'settings'];
 let arriveNote = null; // the last answer from the arrival link (Copy / Test / New link)
@@ -85,7 +86,7 @@ function home(view) {
     const rec = st.prep;
     const done = scans.filter(isDone).sort((a, b) => (a.date < b.date ? 1 : -1));
     const withPhotos = new Set(ctx.photoScans);
-    const unsaved = scans.filter((x) => !isDone(x) && withPhotos.has(x.id));
+    const unsaved = scans.filter((x) => (!isDone(x) && withPhotos.has(x.id)) || x.pdfPending);
     // Ticks open from the day before the scan (the evening lines) to the day itself.
     const canTick = next && today >= addDays(next.date, -1);
     const open = next ? unticked(rec, items) : items;
@@ -159,6 +160,8 @@ function home(view) {
         <button class="link-btn" type="button" id="sc-arrive-new">New link</button>
       </section>
       <div class="section-label">Scans · ${done.length}</div>
+      <div class="btn-row"><label class="btn-ghost center file-btn" for="sc-pdf">Import an Evolt PDF</label></div>
+      <input type="file" accept="application/pdf,.pdf" hidden id="sc-pdf">
       ${unsaved.map((x) => `<a class="card confirm-card sauna-resume" href="#/body/scan/r/${esc(x.date)}"><span class="hud c-amber">RESULTS NOT SAVED</span><span>${esc(dayName(x.date))}: check and save</span></a>`).join('')}
       <ul class="lib-list" id="sc-history">${done.map((x) => { const notes = conditionNotes(x, items); const key = ['weightKg', 'fatPercent', 'muscleMassKg'].map((k) => [k, metricValue(x, k)]).filter(([, v]) => v != null);
         return `<li><a class="lib-row sc-hist" href="#/body/scan/r/${esc(x.date)}"><span class="lib-name">${esc(dayName(x.date))}${x.at ? `, ${esc(timeAt(x.at, x))}` : ''}</span>
@@ -224,6 +227,20 @@ function home(view) {
     $('#sc-arrive-new').addEventListener('click', async () => {
       if (!(await confirmSheet('Make a new link? The old one stops working: paste the new one into the automation.', { ok: 'New link' }))) return;
       try { await navigator.clipboard.writeText(await linkFor(true)); arriveOut.textContent = 'New link copied. Paste it into the automation.'; } catch (e) { arriveOut.textContent = e.message || 'Could not make a new link.'; }
+    });
+    // A11: a results PDF from the Evolt app: read on the Mac, checked and saved on the results screen.
+    $('#sc-pdf').addEventListener('change', async (e) => {
+      const f = e.target.files?.[0]; e.target.value = '';
+      if (!f) return;
+      toast('Reading the PDF on your Mac…');
+      let r;
+      try { r = await uploadScanPdf(f); } catch (err) { toast(err.message || 'That PDF could not be read.'); return; }
+      const cur = await repo.get('body-scans', scanId(r.date));
+      if (isDone(cur) && !(await confirmSheet(`A scan of ${dayName(r.date)} is already saved. Check the PDF's numbers to replace it?`, { ok: 'Check them' }))) return;
+      // Pending until he saves on the results screen; a scan already saved keeps its numbers until then.
+      await repo.put('body-scans', scanId(r.date), { ...(cur || { id: scanId(r.date), date: r.date, createdAt: Date.now(), status: 'prep' }),
+        pdf: { file: r.file, sha: r.sha, printedAt: r.printedAt, hm: r.hm, info: r.info, metrics: r.metrics, importedAt: Date.now() }, pdfPending: true });
+      location.hash = `#/body/scan/r/${r.date}`;
     });
     $('#sc-staff-add').addEventListener('click', async () => {
       const t = await promptLong("What the gym's staff said", '', { placeholder: 'How to prepare; whether the results can be exported' });
@@ -325,7 +342,7 @@ function noteFor(before, after) {
  */
 function results(view, date) {
   let alive = true; let off = () => {}; let repo = null; let pollTimer = null; let pollStart = 0;
-  let rows = null; let fromReads = false; let dirty = false; let cond = null; let hm = null; let usedAt = 0;
+  let rows = null; let fromReads = false; let fromPdf = false; let dirty = false; let cond = null; let hm = null; let usedAt = 0;
   const today = isoDate(new Date());
 
   const draw = async () => {
@@ -340,14 +357,19 @@ function results(view, date) {
     const merged = mergeReads(myReads);
     // Rows: his saved numbers, else what the Mac read, else the usual ones to type in.
     if (!rows) {
-      if (isDone(rec)) rows = rec.metrics.map((m) => ({ ...m }));
+      if (rec?.pdfPending && rec.pdf?.metrics?.length) { rows = rec.pdf.metrics.map((m) => ({ ...m, orig: m.text })); fromPdf = true; }
+      else if (isDone(rec)) rows = rec.metrics.map((m) => ({ ...m, orig: m.text }));
       else if (merged.length) { rows = merged.map((m) => ({ ...m })); fromReads = true; }
       else rows = METRICS.filter((m) => m.main).map((m) => ({ key: m.key, label: m.label, text: '', unit: m.unit }));
-    } else if (!dirty && !isDone(rec) && merged.length && (!fromReads || merged.length !== rows.length)) {
+    } else if (!dirty && !fromPdf && !isDone(rec) && merged.length && (!fromReads || merged.length !== rows.length)) {
       rows = merged.map((m) => ({ ...m })); fromReads = true;
     }
-    if (!cond) cond = isDone(rec) ? { ...rec.conditions } : conditionsFrom(rec, items);
-    if (hm == null) hm = rec?.at ? hmOf(new Date(rec.at)) : dayDoc?.sessionTime || (date === today ? hmOf(new Date()) : '');
+    if (!cond) {
+      cond = isDone(rec) ? { ...rec.conditions } : conditionsFrom(rec, items);
+      // A11: a scan from the Evolt app's PDF with no checklist of its own: the conditions weren't recorded.
+      if (fromPdf && !rec.prep && !cond.unusual) cond.unusual = `From the Evolt app's PDF (printed ${rec.pdf.printedAt || dayName(date)}); the conditions were not recorded.`;
+    }
+    if (hm == null) hm = rec?.at ? hmOf(new Date(rec.at)) : rec?.pdf?.hm || dayDoc?.sessionTime || (date === today ? hmOf(new Date()) : '');
     const st = getState();
     const offline = st.paired && st.mac?.reachable === false;
     const waiting = mine.filter((p) => { const r = readsOf.get(p.id); return !r || (r.round ?? 0) < (p.round ?? 0) || (r.status === 'failed' && (r.tries || 0) < 3); });
@@ -370,6 +392,8 @@ function results(view, date) {
         <div class="btn-row"><label class="btn-primary center" for="sr-cam">Take photo</label><label class="btn-ghost center" for="sr-lib">From Photos</label></div>
       </section>
       ${newerReads ? `<section class="card pad-card confirm-card" id="sr-newer"><span class="c-text">The Mac read ${merged.length} numbers from your photo.</span><button class="btn-ghost" type="button" id="sr-use">Use them instead of what you typed</button></section>` : ''}
+      ${fromPdf ? `<section class="card pad-card" id="sr-pdf"><div class="hud c-cyan">FROM YOUR EVOLT PDF</div>
+        <p class="hint c-text">${rows.length} numbers read from the PDF${rec.pdf.file ? ` (${esc(rec.pdf.file)})` : ''}, exactly as printed. Check them against the PDF, then save.</p></section>` : ''}
       <div class="section-label">Numbers · as the scanner reported them</div>
       ${fromReads && !isDone(rec) ? `<p class="hint">From your photo. Check each number against the screen${rows.some((r) => r.unsure) ? '; amber ones were hard to read' : ''}.</p>` : ''}
       <section class="card pad-card sr-rows" id="sr-rows">
@@ -377,7 +401,8 @@ function results(view, date) {
           <input class="input" data-label="${i}" value="${esc(r.label)}" aria-label="Name" maxlength="80">
           <input class="input num" data-text="${i}" value="${esc(r.text)}" inputmode="decimal" aria-label="${esc(r.label)} value" placeholder="—">
           <input class="input" data-unit="${i}" value="${esc(r.unit)}" aria-label="Unit" maxlength="16">
-          <button class="icon-mini" type="button" data-rm="${i}" aria-label="Remove ${esc(r.label)}">×</button></div>`).join('')}
+          <button class="icon-mini" type="button" data-rm="${i}" aria-label="Remove ${esc(r.label)}">×</button>
+          ${r.rating || r.range || r.share ? `<span class="hint sr-ref">${esc([r.rating, r.range ? `range ${r.range}` : '', r.share].filter(Boolean).join(' · '))}</span>` : ''}</div>`).join('')}
         <div class="btn-row"><button class="btn-ghost" type="button" id="sr-add">+ Another number</button><button class="btn-ghost" type="button" id="sr-more">+ Usual Evolt numbers</button></div>
       </section>
       <div class="section-label">Conditions</div>
@@ -433,12 +458,14 @@ function results(view, date) {
     }));
     $('#sr-save').onclick = async () => {
       keep();
-      const metrics = cleanMetrics(rows.filter((r) => r.label.trim() && r.text).map((r) => ({ key: r.key, label: r.label, text: r.text, unit: r.unit, unsure: false })));
+      // The report's rating, range and printed line stay with a number he didn't change.
+      const metrics = cleanMetrics(rows.filter((r) => r.label.trim() && r.text).map((r) => ({ key: r.key, label: r.label, text: r.text, unit: r.unit, unsure: false,
+        ...(r.orig === r.text ? { rating: r.rating, range: r.range, share: r.share, printed: r.printed } : {}) })));
       if (!metrics.length) { toast('Type at least one number, or take a photo of the results.'); return; }
       if (!/^\d{2}:\d{2}$/.test(hm)) { toast('Set the time of the scan.'); return; }
       const cur = await repo.get('body-scans', scanId(date));
       const conditions = { fasted: cond.fasted ?? null, trainedBefore: cond.trainedBefore ?? null, unusual: cond.unusual || '', unticked: unticked(cur, items).map((i) => i.id) };
-      await repo.put('body-scans', scanId(date), withResults(cur, { date, at: zonedTime(date, hm), metrics, conditions, photos: mine.map((p) => p.id), source: fromReads && mine.length ? 'photo' : 'manual', note: cur?.note }));
+      await repo.put('body-scans', scanId(date), { ...withResults(cur, { date, at: zonedTime(date, hm), metrics, conditions, photos: mine.map((p) => p.id), source: fromPdf ? 'pdf' : fromReads && mine.length ? 'photo' : cur?.source === 'pdf' ? 'pdf' : 'manual', note: cur?.note }), pdfPending: false });
       syncNow();
       toast(`Scan saved: ${metrics.length} numbers.`);
       location.hash = '#/body/scan';

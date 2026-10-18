@@ -11,6 +11,7 @@ import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
 import { startNotifier, phoneZone } from './notify.mjs';
 import { openArrive } from './arrive.mjs';
+import { openEvoltImport } from './evolt-import.mjs';
 import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
 import { findClaude } from './claude.mjs';
@@ -50,6 +51,8 @@ const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subje
 const notifier = startNotifier({ store, push, log });
 // "When I arrive at the gym" (A10): the iPhone automation's call; days follow the phone's zone like the reminders.
 const arrive = openArrive({ store, push, tz: () => phoneZone(store), log });
+// Evolt results PDFs (A11): originals kept in imports/evolt/ in the private folder.
+const evolt = openEvoltImport({ dir: join(p.importsDir, 'evolt'), log });
 
 // Meal photos (6.2): read by Claude on the Mac after each sync that brings one, at start, and every 2 minutes (retries).
 const vision = openMealVision({ store, log });
@@ -89,7 +92,7 @@ const voice = openVoice({ store, dataDir: p.dataDir, engine, whisper, coach, log
 const tts = openTts({ configDir: p.configDir, log });
 log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, onSync, log });
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, evolt, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });
