@@ -114,6 +114,11 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('Gym on new sessions', 'Change it on a session when you train somewhere else', '')}
       <div class="opt"><input class="input" data-s="gym.name" value="${esc(st.gym.name)}" maxlength="60" placeholder="Gym name" aria-label="Gym name"></div>
+    </div>
+    <div class="section-label">Fuel</div>
+    <div class="card opt-list">
+      ${opt('Meal photos are read by', 'Claude on your Mac. Sonnet answers in about 5 seconds; Opus takes longer and looks harder.', '')}
+      ${seg('fuel.visionModel', [['fast', 'Sonnet 5.5 · fast'], ['deep', 'Opus 5.5 · careful']], st.fuel.visionModel)}
     </div>`;
 }
 

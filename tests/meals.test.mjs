@@ -41,6 +41,8 @@ test('items: cleaned, totalled, regrammed and scaled to the scale reading', () =
   const scaled = scaleTo(items.slice(0, 2), 206);
   assert.equal(itemTotals(scaled).grams, 206);
   assert.equal(scaled[0].kcal, 150);
+  const odd = scaleTo([{ name: 'a', grams: 212, kcal: 1, protein: 0 }, { name: 'b', grams: 160, kcal: 1, protein: 0 }, { name: 'c', grams: 40, kcal: 1, protein: 0 }], 300);
+  assert.equal(itemTotals(odd).grams, 300);
 });
 
 const est = (mealId, kind, extra) => ({ id: `${mealId}.${kind}`, mealId, kind, round: 0, status: 'done', ...extra });

@@ -81,7 +81,11 @@ export function scaleTo(items, totalG) {
   const g = num(totalG);
   if (!t || !g) return items;
   const f = g / t;
-  return items.map((x) => ({ ...x, grams: Math.round(x.grams * f), kcal: Math.round(x.kcal * f), protein: r1(x.protein * f) }));
+  const out = items.map((x) => ({ ...x, grams: Math.round(x.grams * f), kcal: Math.round(x.kcal * f), protein: r1(x.protein * f) }));
+  // Rounding: the largest item takes the odd gram, so the items add up to the reading exactly.
+  const diff = Math.round(g) - out.reduce((a, x) => a + x.grams, 0);
+  if (diff) { const big = out.reduce((a, x, i) => (x.grams > out[a].grams ? i : a), 0); out[big] = { ...out[big], grams: out[big].grams + diff }; }
+  return out;
 }
 
 const estOf = (estimates, mealId, kind) => (estimates instanceof Map ? estimates.get(`${mealId}.${kind}`) : (estimates || []).find((e) => e.id === `${mealId}.${kind}`)) || null;

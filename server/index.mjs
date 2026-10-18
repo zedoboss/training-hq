@@ -10,6 +10,8 @@ import { openImports } from './imports.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
 import { startNotifier } from './notify.mjs';
+import { openMealVision } from './meal-vision.mjs';
+import { findClaude } from './claude.mjs';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -36,7 +38,16 @@ const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subje
 // Reminders (step 4): checked once a minute, sent as push notifications.
 const notifier = startNotifier({ store, push, log });
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, log });
+// Meal photos (6.2): read by Claude on the Mac after each sync that brings one, at start, and every 2 minutes (retries).
+const vision = openMealVision({ store, log });
+log(`claude: ${findClaude() || 'not found (meal photos wait until the Claude app is installed)'}`);
+const kickVision = () => vision.kick().catch((e) => log(`meal vision: ${e.stack || e}`));
+setTimeout(kickVision, 3000).unref();
+const visionTimer = setInterval(kickVision, 2 * 60000);
+visionTimer.unref();
+const onSync = (cols) => { if (cols.has('meals') || cols.has('meal-photos')) kickVision(); };
+
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });
@@ -45,6 +56,7 @@ const shutdown = (sig) => {
   log(`stopping (${sig})`);
   stopBackup();
   notifier.stop();
+  clearInterval(visionTimer);
   server.close(() => { store.close(); process.exit(0); });
   setTimeout(() => process.exit(0), 3000).unref();
 };

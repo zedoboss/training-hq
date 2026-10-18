@@ -71,7 +71,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -257,6 +257,8 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const since = Number.isInteger(body.since) && body.since >= 0 ? body.since : 0;
       const result = store.applyChanges(changes, device.id);
       if (result.rejected.length) log(`sync from ${device.id}: rejected ${JSON.stringify(result.rejected).slice(0, 500)}`);
+      // New records from the phone may need work on the Mac (meal photos to read); it runs after this reply.
+      if (onSync && result.stored) setImmediate(() => { try { onSync(new Set(changes.map((c) => c?.col))); } catch (e) { log(`after sync: ${e.stack || e}`); } });
       const pull = store.changesSince(body.epoch === store.epoch() ? since : 0, 2000);
       return {
         epoch: store.epoch(),

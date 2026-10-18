@@ -112,7 +112,7 @@ function editLeftovers(items, left) {
 export function render(view, [id]) {
   view.innerHTML = `<div id="m-body"><p class="view-sub">Loading…</p></div>${cameraInput('m-before')}${cameraInput('m-after')}`;
   const body = view.querySelector('#m-body');
-  let repo; let alive = true; let off = () => {};
+  let repo; let alive = true; let off = () => {}; let pollTimer = null; let pollStart = Date.now();
   // A new photo for this meal (before or after); replaces the old one of that kind.
   const addPhoto = (kind) => async (e) => {
     const f = e.target.files?.[0];
@@ -125,6 +125,7 @@ export function render(view, [id]) {
       const old = meal[kind]?.photoId;
       await repo.put('meals', id, { ...meal, ...(kind === 'before' ? { before: { photoId: pid, at, scaleG: null, items: null, confirmedAt: null }, source: 'photo' } : { after: { photoId: pid, at, scaleG: null, leftovers: null, none: false, confirmedAt: null } }) });
       if (old) await repo.remove('meal-photos', old);
+      pollStart = Date.now(); clearInterval(pollTimer); pollTimer = null;
       syncNow();
     } catch { toast('That photo could not be read.'); }
   };
@@ -198,6 +199,10 @@ export function render(view, [id]) {
       <div class="btn-row"><button class="btn-ghost" id="m-again" type="button" ${meal.before?.photoId ? '' : 'hidden'}>Ask the Mac again</button>
         <button class="btn-ghost" id="m-more" type="button">More</button></div>`;
 
+    // While the Mac is reading a photo, ask it every 3 seconds (for up to 2 minutes) so the estimate shows promptly.
+    if (waiting && st.paired && !offline) {
+      if (!pollTimer) pollTimer = setInterval(() => { if (!alive || Date.now() - pollStart > 120000) { clearInterval(pollTimer); pollTimer = null; } else syncNow(); }, 3000);
+    } else { clearInterval(pollTimer); pollTimer = null; pollStart = Date.now(); }
     const $ = (s) => body.querySelector(s);
     const save = (patch) => repo.put('meals', id, { ...meal, ...patch });
     $('#m-name').onclick = () => actionSheet('Which meal?', [...MEAL_NAMES.map((n) => ({ label: n, run: () => save({ name: n }) })),
@@ -249,6 +254,7 @@ export function render(view, [id]) {
     $('#m-again').onclick = async () => {
       const hint = await promptLong('Tell the Mac what it got wrong (optional)', meal.hint || '', { placeholder: 'e.g. it is beef tri-tip, about 200 g, and brown rice', ok: 'Ask again' });
       if (hint === null) return;
+      pollStart = Date.now(); clearInterval(pollTimer); pollTimer = null;
       await save({ hint, round: (meal.round || 0) + 1, before: { ...meal.before, confirmedAt: null, items: null, edited: false }, ...(meal.after?.photoId ? { after: { ...meal.after, confirmedAt: null, leftovers: null } } : {}) });
       syncNow();
       toast('Asked again. The new estimate replaces this one.');
@@ -275,5 +281,5 @@ export function render(view, [id]) {
     off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-photos', 'meal-estimates'].includes(c))) draw(); });
     draw();
   });
-  return () => { alive = false; off(); unsub(); };
+  return () => { alive = false; clearInterval(pollTimer); off(); unsub(); };
 }
