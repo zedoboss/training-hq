@@ -71,8 +71,14 @@ export const ahead = (s, n = 8) => projectRotation({ last: s.last(), days: s.day
 
 /** "Coming up ...": dates and day types from the app's rotation, so nobody works out a weekday by hand. */
 function comingUp(s, n = 8) {
-  const list = ahead(s, n).filter((d) => d.date > s.today);
-  return `Coming up, if each planned session happens on its day: ${list.map((d) => `${dayText(d.date, s.today)} ${d.kind === 'rest' ? 'rest' : `${LABEL[d.dayType]} (week ${weekOf(s, d.dayType, d.date)})`}`).join('; ')}.`;
+  const fmt = (list) => list.map((d) => `${dayText(d.date, s.today)} ${d.kind === 'rest' ? 'rest' : `${LABEL[d.dayType]} (week ${weekOf(s, d.dayType, d.date)})`}`).join('; ');
+  const line = `Coming up, if each planned session happens on its day: ${fmt(ahead(s, n).filter((d) => d.date > s.today))}.`;
+  const t = s.rotation().today;
+  if (t.kind !== 'train') return line;
+  // Today's session isn't done: if it doesn't happen today it carries over (nothing is skipped, decision 15), so
+  // tomorrow is not settled yet. Give the coach both versions so it never states tomorrow as fact.
+  const carried = projectRotation({ last: s.last(), days: s.days(), from: addDays(s.today, 1), n: n - 1 });
+  return `${line} If today's ${LABEL[t.dayType]} is NOT done today, it carries over: ${fmt(carried)}. Today's session isn't done, so don't state tomorrow's day as fact: give both, or ask whether he trains today.`;
 }
 
 function rotationLines(s) {

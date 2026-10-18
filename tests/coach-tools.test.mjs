@@ -303,6 +303,10 @@ test('check-in by talking: refused on a draft table; missing ratings asked for; 
 test('today projects the coming days from the rotation (dates never worked out by hand)', async () => {
   const r = await call('today');
   assert.match(r.text, /Coming up, if each planned session happens on its day: Wednesday 1\/21 rest; Thursday 1\/22 Pull \(week 4\); Friday 1\/23 Push \(week 4\)/);
+  // Today's Legs isn't done: if it doesn't happen today it carries over, so tomorrow isn't stated as fact
+  // (phone test Sun 10/18, 11:48 PM: the coach called Monday a rest day while Legs was still open).
+  assert.match(r.text, /If today's Legs is NOT done today, it carries over: Wednesday 1\/21 Legs \(week \d+\); Thursday 1\/22 rest; Friday 1\/23 Pull/);
+  assert.match(r.text, /don't state tomorrow's day as fact/);
 });
 
 test('read tools answer on an empty database without failing', async () => {
