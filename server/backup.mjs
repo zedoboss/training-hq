@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { isoDate } from '../app/js/lib/time.js';
 
 const BIG = 100 * 1024;
-const SPLIT_COLS = new Set(['photos', 'meal-photos']);
+const SPLIT_COLS = new Set(['photos', 'meal-photos', 'body-photos']);
 const safe = (id) => id.replace(/[^A-Za-z0-9_.-]/g, '_');
 
 /** Write the backup files. Returns {collections, records, files}. */

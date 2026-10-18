@@ -21,3 +21,40 @@
 .body-chart .ref-label { fill: var(--muted); font: 500 9px var(--mono); }
 .line-chart .pt-flag { fill: var(--surface); stroke: var(--amber); stroke-width: 2; }
 #b-steps, #b-sleep, #b-weight { scroll-margin-top: 12px; }
+
+/* Measurements (7.3) */
+a.measure-row { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-m); background: var(--surface); color: var(--text); text-decoration: none; align-items: center; }
+a.measure-row b { text-align: right; }
+.measure-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.measure-field .row-fields { flex-wrap: nowrap; }
+.measure-field .input.mini.num { width: 76px; }
+.measure-form .section-label { margin-top: 6px; }
+
+/* Progress photos (7.3) */
+.bp-take { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.bp-take > * { height: 48px; }
+.bp-day { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.bp-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.bp-thumb { position: relative; aspect-ratio: 3 / 4; border-radius: var(--r-s); overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); display: block; }
+.bp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bp-thumb span { position: absolute; left: 6px; bottom: 5px; font: 500 9px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text); text-shadow: 0 1px 2px #000; }
+.bp-thumb.is-empty span { color: var(--faint); text-shadow: none; }
+.bp-cmp { gap: 10px; }
+.bp-preview { width: 100%; max-height: 50vh; object-fit: contain; border-radius: var(--r-s); background: #000; }
+.bp-stage { position: relative; aspect-ratio: 3 / 4; max-height: 54vh; margin: 0 auto; width: 100%; border-radius: var(--r-m); overflow: hidden; background: #000; border: 1px solid var(--border); }
+.bp-stage video, .bp-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.bp-stage .is-mirrored { transform: scaleX(-1); }
+.bp-ghost { pointer-events: none; }
+.bp-count { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 600 96px var(--mono); color: var(--cyan); text-shadow: 0 2px 12px #000; }
+.bp-msg { position: absolute; left: 16px; right: 16px; top: 40%; text-align: center; color: var(--text); }
+.bp-tools { justify-content: space-between; flex-wrap: nowrap; }
+.bp-tools .btn-ghost { height: 30px; padding: 0 14px; font-size: 10px; }
+#bt-live, #bt-fallback { display: flex; flex-direction: column; gap: 10px; }
+.bp-ghost-row { display: flex; align-items: center; gap: 12px; }
+.bp-ghost-row label { flex-shrink: 0; }
+#bt-op { flex: 1; min-width: 0; accent-color: var(--cyan); }
+.bp-full { width: 100%; max-height: 70vh; object-fit: contain; border-radius: var(--r-m); background: #000; }
+.bp-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.bp-fig { margin: 0; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.bp-fig img { width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #000; border-radius: var(--r-s); }
+.bp-fig figcaption { font-size: 10px; text-align: center; }

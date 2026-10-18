@@ -86,3 +86,12 @@ export function photoDays(photos) {
   }
   return [...m.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
 }
+
+/** One pose's photos, oldest first (the compare pickers; the default pair is the first and the latest). */
+export const posePhotos = (photos, pose) => photos.filter((p) => p?.pose === pose && p.date && p.dataUrl).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+/** Width and height that fit a frame into `max` px on its longest side (never larger than it came). */
+export function fitSize(w, h, max = 1280) {
+  const s = Math.min(1, max / Math.max(w, h));
+  return [Math.round(w * s), Math.round(h * s)];
+}

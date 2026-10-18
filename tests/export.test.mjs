@@ -119,3 +119,13 @@ test('meal photos go in as photos/meal-<meal>-<before|after>.jpg', () => {
   assert.ok(files.some((f) => f.name === 'photos/meal-meal-1-after.jpg'));
   assert.ok(files.some((f) => f.name === 'data/meal-photos.csv'));
 });
+
+test('progress photos go in as photos/progress-<date>-<pose>.jpg; the CSV keeps only their size', () => {
+  const url = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 2]).toString('base64')}`;
+  const { files, counts } = exportFiles({ 'body-photos': [{ id: 'bodyphoto.2026-10-18.front', date: '2026-10-18', pose: 'front', dataUrl: url }, { id: 'bodyphoto.2026-10-18.side', date: '2026-10-18', pose: 'side', dataUrl: 'data:image/png;base64,AA' }] }, { tz: TZ });
+  assert.equal(counts.photos, 1, 'only JPEGs become files');
+  assert.ok(files.some((f) => f.name === 'photos/progress-2026-10-18-front.jpg'));
+  const csv = files.find((f) => f.name === 'data/body-photos.csv').data;
+  assert.match(csv, /\(file, \d+ KB\)/);
+  assert.doesNotMatch(csv, /base64/);
+});

@@ -132,7 +132,8 @@ workouts.csv   One row per set of every finished session (Training HQ, Hevy and 
                dropset, failure or hold. logged_as: how a hold was first logged in Hevy (e.g. "x 10").
 data/*.csv     Every record stored in the app, one file per kind (sessions, sets, exercises, routines,
                settings, ...): id first, then every field; nested values are JSON.
-photos/*.jpg   Session photos; meal photos as photos/meal-<meal id>-before.jpg and -after.jpg.
+photos/*.jpg   Session photos; meal photos as photos/meal-<meal id>-before.jpg and -after.jpg; progress
+               photos as photos/progress-<date>-<front|side|back>.jpg.
 `.replace(/\n/g, '\r\n');
 
 /**
@@ -159,6 +160,11 @@ export function exportFiles(data, { tz }) {
   for (const p of data['meal-photos'] || []) {
     if (typeof p.dataUrl !== 'string' || !p.dataUrl.startsWith('data:image/jpeg')) continue;
     files.push({ name: `photos/meal-${fileSafe(p.mealId)}-${fileSafe(p.kind)}${p.kind ? '' : `-${fileSafe(p.id)}`}.jpg`, data: dataUrlBytes(p.dataUrl) });
+    photos++;
+  }
+  for (const p of data['body-photos'] || []) {
+    if (typeof p.dataUrl !== 'string' || !p.dataUrl.startsWith('data:image/jpeg')) continue;
+    files.push({ name: `photos/progress-${fileSafe(p.date)}-${fileSafe(p.pose)}.jpg`, data: dataUrlBytes(p.dataUrl) });
     photos++;
   }
   const done = new Set(sessions.filter((s) => s.status === 'done').map((s) => s.id));

@@ -37,6 +37,18 @@ test('backup: one file per collection, photos one file each, deletions kept; res
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('progress photos are one file each, like session and meal photos', () => {
+  const dir = tmp();
+  try {
+    const store = openStore(join(dir, 'a.sqlite'));
+    store.writeLocal('body-photos', 'bodyphoto.2026-10-18.front', { date: '2026-10-18', pose: 'front', dataUrl: 'data:image/jpeg;base64,AAAA' });
+    const out = join(dir, 'backup');
+    writeBackup(store, out);
+    assert.deepEqual(readdirSync(join(out, 'body-photos')), ['bodyphoto.2026-10-18.front.json']);
+    store.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('commit: only the backup and demo folders, and only when something changed', () => {
   const dir = tmp();
   try {
