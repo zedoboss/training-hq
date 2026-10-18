@@ -111,7 +111,7 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   if (on('neck') && neck && !neck.planned) {
     const lastAsked = neck.lastAskedOn || null;
     const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
-    if (weekday === n.neckWeekday && (!lastAsked || lastAsked <= addDays(date, -6))) {
+    if (weekday === n.neckWeekday && (!lastAsked || lastAsked <= addDays(date, -7))) {
       out.push({
         id: `neck:${date}`, kind: 'neck', at: zonedTime(date, n.eveningCheck, tz) + 5 * 60000, url: '#/train', tag: 'neck', fixed: false,
         title: 'Neck is still unplanned', body: 'Your three neck exercises have no place in the rotation yet. Want to slot them in?', due: true,

@@ -6,6 +6,7 @@ import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, usual
 import { isConfirmed, normalReady, modeOf } from '../lib/progression.js';
 import { buildHistory } from '../lib/history.js';
 import { ACTION_TEXT } from '../lib/readiness.js';
+import { NECK_PLACES, placeLabel, neckAsk, answerNeck, neckToday } from '../lib/neck.js';
 import { comebackStartOf } from '../lib/finish.js';
 import { isoDate, formatDay, formatHm, addMinutesHm } from '../lib/time.js';
 import { getState } from '../lib/store.js';
@@ -51,6 +52,11 @@ export function render(view) {
     const nextLine = t.kind === 'train' ? '' : `Next: ${LABEL[next]}, ${day(rot.next.date)}`;
     const undoable = t.kind === 'rest' && t.reason !== 'rotation';
     const rd = days[today]?.readiness || null;
+    // Neck (decision 14): asked weekly until it has a place; on its day, a link to start it.
+    const neck = await repo.get('schedule', 'neck');
+    const neckRoutine = routines.find((r) => r.dayType === 'neck');
+    const askNeck = neckRoutine && neckAsk(neck, today);
+    const neckDue = neckRoutine && neckToday(neck, t.kind, t.kind === 'done' ? t.dayType : next);
     // Session time for the next session's date (decision 15: he sets it; no fixed start time).
     const nextDate = rot.next.date;
     const hm = days[nextDate]?.sessionTime || null;
@@ -78,9 +84,14 @@ export function render(view) {
           ${nextRoutine ? `<a class="${t.kind === 'train' ? 'btn-primary' : 'btn-ghost'} center" href="#/session/start/${esc(nextRoutine.id)}">${t.kind === 'train' ? `Start ${esc(LABEL[next])}` : `${esc(LABEL[next])} now`}</a>` : ''}
           <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
         </div>
+        ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">Neck ${esc(placeLabel(neck.place).toLowerCase())} today (your plan) ›</a>` : ''}
         ${t.kind === 'train' ? '<button class="link-btn" id="rest-today" type="button">Rest today instead</button>' : ''}
         ${undoable ? '<button class="link-btn" id="undo-rest" type="button">Undo rest day</button>' : ''}
       </section>
+      ${askNeck ? `<section class="card pad-card neck-card" id="neck-card"><div class="hud c-amber">NECK · STILL UNPLANNED</div>
+        <p class="hint c-text">Your Neck routine (${neckRoutine.exercises.length} exercises) has no place in the rotation yet. Where should it go?</p>
+        <div class="chips wrap">${NECK_PLACES.map(([k, label]) => `<button class="chip" data-neck="${k}" type="button">${esc(label)}</button>`).join('')}<button class="chip" data-neck="not-yet" type="button">Not yet</button></div>
+        <p class="hint">"Not yet" asks again in a week. When it restarts, your 30% cap applies from a light start.</p></section>` : ''}
       <a class="card holds-link" href="#/holds"><span><span class="hud c-muted">TENDON HOLDS</span><br>Shoulder, knees, wrist</span><span class="pill">Open</span></a>
       ${groupByFolder(folders, routines).map(({ folder, routines: rs }) => `
         <div class="section-label folder-label">
@@ -92,7 +103,7 @@ export function render(view) {
             <span class="dot" style="background:${DOT[r.dayType] || 'var(--border-strong)'}"></span>
             <a class="routine-main" href="#/routine/${esc(r.id)}"><b>${esc(r.title)}</b>
               <span class="hint">${r.exercises.length} exercises${lastByRoutine.has(r.dayType) && r.folderId === 'comeback' ? ` · last ${esc(day(lastByRoutine.get(r.dayType)))}` : ''}</span></a>
-            ${r.folderId === 'comeback' && meta?.firstSessions?.[r.dayType] ? `<span class="hud c-cyan">WK ${weekColumn(meta.firstSessions[r.dayType], today)}</span>` : r.dayType === 'neck' ? '<span class="hud c-amber">NOT SCHEDULED</span>' : '<span></span>'}
+            ${r.folderId === 'comeback' && meta?.firstSessions?.[r.dayType] ? `<span class="hud c-cyan">WK ${weekColumn(meta.firstSessions[r.dayType], today)}</span>` : r.dayType === 'neck' ? `<button class="hud link-hud ${neck?.planned ? 'c-cyan' : 'c-amber'}" id="neck-place" type="button">${neck?.planned ? esc(placeLabel(neck.place).toUpperCase()) : 'NOT SCHEDULED'}</button>` : '<span></span>'}
             <button class="icon-mini" data-routine="${esc(r.id)}" type="button" aria-label="Options for ${esc(r.title)}">···</button>
           </li>`).join('') || '<li class="hint pad">Empty folder.</li>'}
         </ul>`).join('')}
@@ -103,6 +114,16 @@ export function render(view) {
       </div>
       <div class="btn-row three"><a class="btn-ghost center" href="#/calendar">Calendar</a><a class="btn-ghost center" href="#/history">History</a><a class="btn-ghost center" href="#/stats">Statistics</a></div>`;
 
+    const saveNeck = async (answer) => {
+      await repo.put('schedule', 'neck', answerNeck(await repo.get('schedule', 'neck'), answer, today));
+      toast(answer === 'not-yet' ? 'Asks again in a week.' : `Neck ${placeLabel(answer).toLowerCase()} from now on.`);
+    };
+    view.querySelectorAll('[data-neck]').forEach((b) => b.addEventListener('click', () => saveNeck(b.dataset.neck)));
+    const place = view.querySelector('#neck-place');
+    if (place) place.onclick = () => actionSheet('Neck routine', [
+      ...NECK_PLACES.map(([k, label]) => ({ label, run: () => saveNeck(k) })),
+      ...(neck?.planned ? [{ label: 'Take it out of the rotation', run: async () => { await repo.put('schedule', 'neck', { ...neck, planned: false, place: null, lastAskedOn: today }); toast('Neck is unplanned again.'); } }] : []),
+    ]);
     const later = view.querySelector('#normal-later');
     if (later) later.onclick = async () => {
       const cur = (await repo.get('progression', 'modes')) || {};
@@ -174,7 +195,7 @@ export function render(view) {
   let off = () => {};
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression', 'schedule'].includes(c))) draw(); });
     draw();
   });
   return () => off();

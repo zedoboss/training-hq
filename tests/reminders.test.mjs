@@ -77,6 +77,7 @@ test('neck: once a week on the chosen weekday while unplanned', () => {
   assert.equal(mk({ planned: false }, '2026-01-24').length, 0);
   assert.equal(mk({ planned: true }).length, 0);
   assert.equal(mk({ planned: false, lastAskedOn: '2026-01-22' }).length, 0);
+  assert.equal(mk({ planned: false, lastAskedOn: '2026-01-19' }).length, 0);
   assert.equal(mk({ planned: false, lastAskedOn: '2026-01-18' }).length, 1);
 });
 
