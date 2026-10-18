@@ -15,6 +15,7 @@ import { actionSheet, promptText, confirmSheet, promptTime } from '../ui/sheet.j
 import { toast } from '../ui/toast.js';
 import { SQUAT_ICON } from './squat.js';
 import { savedTargetDeg } from '../lib/squat-log.js';
+import { isDone } from '../lib/scans.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)' };
@@ -64,6 +65,9 @@ export function render(view) {
     const nextDate = rot.next.date;
     const hm = days[nextDate]?.sessionTime || null;
     const checkMin = withDefaults(getState().settings).notify.readinessMin;
+    // Body scan day (step 7): first thing at the gym, before this session.
+    const [scanPlan, scans] = await Promise.all([repo.get('scan-plan', 'main'), repo.list('body-scans')]);
+    const scanFirst = scanPlan?.next?.date === nextDate && t.kind !== 'done' && !scans.some((x) => x.date === nextDate && isDone(x));
     const whenLine = hm
       ? `${nextDate === today ? 'Today' : esc(day(nextDate))}, ${formatHm(hm)} · check-in ${formatHm(addMinutesHm(hm, -checkMin))}`
       : `No time set for ${nextDate === today ? 'today' : esc(day(nextDate))}`;
@@ -78,6 +82,7 @@ export function render(view) {
         ${t.kind === 'train' ? (rd && rd.dayType === next
           ? `<a class="card-note ${rd.action === 'train' ? '' : 'c-amber'}" id="rd-line" href="#/checkin">Check-in (rule ${rd.rule}): ${esc(ACTION_TEXT[rd.action])}${rd.action === 'lighter-area' && rd.lighterExercises?.length ? ` ${esc(rd.lighterExercises.join(', '))}.` : ''}</a>`
           : '<a class="card-note" id="rd-line" href="#/checkin">Sore, or good to go? Check in before you start ›</a>') : ''}
+        ${scanFirst ? `<a class="card-note c-amber" id="scan-first" href="#/body/scan">Body scan ${nextDate === today ? 'today' : esc(day(nextDate))}: first thing at the gym, before this session. Checklist ›</a>` : ''}
         <div class="time-line"><span class="hud ${hm ? 'c-cyan' : 'c-amber'}" id="time-text">${whenLine.toUpperCase()}</span><button class="pill" id="set-time" type="button">${hm ? 'Change' : 'Set time'}</button></div>
         <p class="hint">${nextRoutine ? `${mode === 'normal' ? 'Normal programme · ' : ''}${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
         ${needsOk ? `<a class="card-note c-amber" id="wk-ok" href="#/progression/${esc(next)}/${wk}">Week ${wk} numbers need your OK. Until then: last confirmed numbers. Review ›</a>` : ''}
@@ -200,7 +205,7 @@ export function render(view) {
   let off = () => {};
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression', 'schedule', 'squats'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression', 'schedule', 'squats', 'scan-plan', 'body-scans'].includes(c))) draw(); });
     draw();
   });
   return () => off();

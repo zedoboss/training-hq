@@ -58,3 +58,14 @@ a.measure-row b { text-align: right; }
 .bp-fig { margin: 0; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
 .bp-fig img { width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #000; border-radius: var(--r-s); }
 .bp-fig figcaption { font-size: 10px; text-align: center; }
+
+/* Body scan (7.4) */
+.scan-next { display: flex; flex-direction: column; gap: 8px; }
+.scan-big { font: 600 22px/1.2 var(--mono); color: var(--text); }
+.scan-rem { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px solid var(--divider); }
+.scan-rem .link-btn { align-self: flex-start; }
+.scan-when { padding: 14px 0 2px; }
+.scan-q { margin: 6px 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; color: var(--text); }
+.scan-pr-row { flex-direction: column; align-items: stretch; gap: 6px; }
+.scan-pr-row .btn-row { align-items: center; }
+#sc-onrest { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }

@@ -1,6 +1,6 @@
 // BODY (#/body, step 7): steps, sleep, weight and workouts from Apple Health (the iPhone Shortcut's file, read by the
 // Mac), body measurements and progress photos, Evolt 360 body scans. Sub-screens: #/body/health (the Shortcut),
-// #/body/measure (measurements), #/body/photos (progress photos).
+// #/body/measure (measurements), #/body/photos (progress photos), #/body/scan (body scans).
 import { ready, saveSettings } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults, toUnit } from '../lib/settings.js';
@@ -14,8 +14,10 @@ import { latestByField, photoDays, shown, unitText } from '../lib/body.js';
 import * as health from './body-health.js';
 import * as measure from './body-measure.js';
 import * as photos from './body-photos.js';
+import * as scan from './body-scan.js';
+import { isDone } from '../lib/scans.js';
 
-const SUB = { health, measure, photos };
+const SUB = { health, measure, photos, scan };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const n0 = (x) => Math.round(x || 0).toLocaleString('en-US');
 const dayName = (iso) => formatDay(new Date(`${iso}T12:00:00`));
@@ -39,7 +41,7 @@ export function render(view, params = []) {
   let stepDays = 14; let range = '90';
 
   const draw = async (repo) => {
-    const [docs, status, measurements, bodyPhotos] = await Promise.all([repo.list('health'), repo.get('health-meta', 'status'), repo.list('measurements'), repo.list('body-photos')]);
+    const [docs, status, measurements, bodyPhotos, scanPlan, scans] = await Promise.all([repo.list('health'), repo.get('health-meta', 'status'), repo.list('measurements'), repo.list('body-photos'), repo.get('scan-plan', 'main'), repo.list('body-scans')]);
     if (!alive) return;
     const st = withDefaults(getState().settings);
     const wu = st.units.weight;
@@ -85,6 +87,11 @@ export function render(view, params = []) {
     const mDates = [...new Set(measurements.filter((m) => m?.date).map((m) => m.date))].sort();
     const pDays = photoDays(bodyPhotos.filter((p) => p?.date && p.dataUrl));
 
+    // Body scan: the confirmed date, else a nudge to plan one.
+    const nextScan = scanPlan?.next?.date >= today && !scans.some((x) => x.date === scanPlan.next.date && isDone(x)) ? scanPlan.next.date : null;
+    const lastScan = scans.filter(isDone).map((x) => x.date).sort().at(-1);
+    const scanLine = nextScan ? `Next ${dayName(nextScan)}${nextScan === today ? ' (today)' : ''}` : `${lastScan ? `Last ${dayName(lastScan)} · ` : ''}Plan the next one`;
+
     // Workouts Apple Health has (Watch walks, other apps); Training HQ's own sessions are on Train.
     const workouts = docs.flatMap((d) => (d.workouts || []).map((w) => ({ ...w, date: d.date }))).sort((a, b) => b.start - a.start).slice(0, 8);
 
@@ -129,6 +136,7 @@ export function render(view, params = []) {
         <b>${w.minutes != null ? `${Math.round(w.minutes)} min` : ''}${w.kcal != null ? `<br><span class="c-faint">${n0(w.kcal)} kcal${w.distanceKm != null ? ` · ${w.distanceKm} km` : ''}</span>` : ''}</b></li>`).join('')}</ul>` : '<p class="hint">None in the last 30 days. Apple Watch walks and other apps\' workouts show here; your Training HQ sessions are on Train.</p>'}
 
       <div class="section-label">More</div>
+      <a class="card supp-card" href="#/body/scan" id="b-scan"><span class="hud c-cyan">BODY SCAN</span><span class="supp-card-line ${nextScan || scanPlan?.safety?.readAt ? '' : 'c-amber'}">${esc(scanLine)}${scanPlan?.safety?.readAt ? '' : ' · safety notice first'}</span><span class="pill is-on">Open</span></a>
       <a class="card supp-card" href="#/body/measure"><span class="hud c-cyan">MEASUREMENTS</span><span class="supp-card-line">${mDates.length ? `${mLatest.slice(0, 2).map((f) => `${esc(f.label)} ${shown(f.kind, f.value, st.units)} ${esc(unitText(f.kind, st.units))}`).join(' · ') || `${mDates.length} entries`} · last ${esc(md(mDates.at(-1)))}` : 'Weight, body fat and 14 circumferences'}</span><span class="pill is-on">Open</span></a>
       <a class="card supp-card" href="#/body/photos"><span class="hud c-cyan">PROGRESS PHOTOS</span><span class="supp-card-line">${pDays.length ? `${pDays.length} day${pDays.length === 1 ? '' : 's'} · last ${esc(dayName(pDays[0].date))}` : 'Front, side and back, private'}</span><span class="pill is-on">Open</span></a>
       <a class="card supp-card" href="#/body/health"><span class="hud c-cyan">APPLE HEALTH</span><span class="supp-card-line">${last ? `Last file ${esc(at(last.readAt))} · ${docs.length} days` : 'Set up the iPhone Shortcut'}</span><span class="pill is-on">Open</span></a>`;
@@ -150,7 +158,7 @@ export function render(view, params = []) {
 
   untip = bindTips(view);
   ready.then((repo) => {
-    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'health-meta', 'measurements', 'body-photos', 'settings'].includes(c))) draw(repo); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'health-meta', 'measurements', 'body-photos', 'settings', 'scan-plan', 'body-scans'].includes(c))) draw(repo); });
     draw(repo);
   });
   return () => { alive = false; off(); untip(); unx(); };
