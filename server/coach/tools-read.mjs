@@ -15,6 +15,8 @@ import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf,
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
 import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks } from '../../app/js/lib/meals.js';
 import { amountsLine } from '../../app/js/lib/foods.js';
+import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
+import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered } from '../../app/js/lib/fuel-reminders.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation } from '../../app/js/lib/scans.js';
@@ -422,6 +424,26 @@ function scansText(s) {
   return lines.join('\n');
 }
 
+// ---- vitamins and minerals (A12) ------------------------------------------------------------------------------------
+
+function microText(s, { date = null, week = false }) {
+  const d = date || s.today;
+  const micro = s.one('fuel', 'micro');
+  const db = foodsDb();
+  if (!micro?.references?.length || !db) return 'No micronutrient references or food values on the Mac yet.';
+  const plan = s.one('fuel', 'plan') || {};
+  const o = { meals: s.list('meals'), estimates: s.list('meal-estimates'), plan, micro, supplements: s.list('supplements'), suppLog: s.list('supp-log'), date: d, dayKind: suppDayKind(s, d), dayKindOf: (x) => suppDayKind(s, x) };
+  const t = week ? weekMicro(db, o) : dayMicro(db, o);
+  const rows = microRows(micro, t, plannedMicro(db, { plan, micro }));
+  const n = (v) => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10);
+  const lines = [`Vitamins and minerals, ${week ? `average of ${t.days} logged day(s) in the 7 to ${dayText(d, s.today)}` : dayText(d, s.today)}: food as eaten (his analysis's cooking factors) + supplements ticked taken, against HIS references (his Diet.html). Numbers only: never advise, never suggest a supplement or dose; his accepted points are not problems.`];
+  if (t.notCounted.length) lines.push(`Not counted (no USDA match): ${t.notCounted.join(', ')}.`);
+  for (const r of rows) {
+    lines.push(`- ${r.name}: ${n(r.total)} ${r.unit}${r.pct != null ? ` (${r.pct}% of ${r.atLeast ? '≥' : ''}${n(r.ref)})` : r.within ? ` (${r.within} ${r.ref.join('-')})` : ''}${r.supp ? `, ${n(r.supp)} from supplements` : ''}; planned ${n(r.planned)}${r.ul ? `; ${r.limitUsed}% of the ${r.ulInfo ? 'reference level' : 'limit'} ${r.ul} (${r.ulNote})` : ''}${r.accepted ? `; accepted: ${r.accepted}` : ''}${r.incomplete.length ? `; incomplete (no USDA value: ${r.incomplete.join(', ')})` : ''}`);
+  }
+  return lines.join('\n');
+}
+
 // ---- sauna --------------------------------------------------------------------------------------------------------
 
 function saunaText(s) {
@@ -492,6 +514,7 @@ export const READ_TOOLS = [
   read('calendar', 'Calendar', 'Day by day what happened: sessions, holds, meals, supplements, squat depth, sauna, body scans, rest days, plus the week streak. A month (YYYY-MM, default this month) or a date range.', obj({ month: { type: 'string', pattern: '^\\d{4}-\\d{2}$' }, from: ISO, to: ISO }), (s, a) => calendarText(s, a)),
   read('health', 'Apple Health', 'Steps, sleep, weight and workouts per day from Apple Health (the iPhone Shortcut), the bodyweight used for pull-ups, and his latest body measurements.', obj({ days: { type: 'integer', minimum: 1, maximum: 120 } }), (s, a) => healthText(s, a)),
   read('meals', 'Meals', 'Meals on a day (default today) with items, grams, kcal and protein, their state, the day total against his targets, and his usual foods.', obj({ date: ISO }), (s, a) => mealsText(s, a)),
+  read('micronutrients', 'Vitamins and minerals', "Vitamins, minerals, EPA/DHA and carnitine for a day (default today) or the 7 days up to it: from the food he logged (USDA values, his analysis's cooking factors) and the supplements he ticked taken, against the references of his own diet analysis, with his planned day beside it. Numbers only: no advice.", obj({ date: ISO, week: { type: 'boolean' } }), (s, a) => microText(s, a)),
   read('supplements', 'Supplements', "His supplement list as he set it (dose, rest-day dose, time, with food, days, stock left), the checklist for a day (default today), streak, adherence, considering list and planning answers. Tracking only: never suggest a supplement or a dose.", obj({ date: ISO }), (s, a) => supplementsText(s, a)),
   read('body_scans', 'Body scans', 'The Evolt 360 scan plan: next date or proposal, safety notice, staff instructions, preparation checklist, past results with their conditions, the latest change.', obj(), (s) => scansText(s)),
   read('sauna', 'Sauna', "The sauna ladder (today's step, clean sessions needed), the doctor question, a session in progress, the last sessions with symptoms, and the fixed rules. The ladder and hard stops can't be changed.", obj(), (s) => saunaText(s)),

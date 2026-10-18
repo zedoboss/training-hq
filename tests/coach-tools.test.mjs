@@ -356,3 +356,15 @@ test('sauna_plan (A9): proposes from the rotation with his checklist and no fast
   await call('sauna_plan', { action: 'set_time', time: '19:00' });
   assert.equal(store.getRecord('sauna-plan', 'main').data.time, '19:00');
 });
+
+test('micronutrients (A12): his references, food and supplements ticked taken, numbers only', async () => {
+  store.writeLocal('fuel', 'plan', { kind: 'plan', kcal: 2000, proteinG: 150, foods: [{ name: 'Eggs', fdcId: 171287, gramsPerDay: 500 }] });
+  store.writeLocal('fuel', 'micro', { energyBasisMJ: 10, references: [{ key: 'vitA', name: 'Vitamin A', unit: 'mcg', ref: 750, refNote: 'EFSA DRV', ul: 3000, ulNote: 'EFSA UL', group: 'vitamins' }, { key: 'vitC', name: 'Vitamin C', unit: 'mg', ref: 110, refNote: 'EFSA DRV', group: 'vitamins' }],
+    retention: { foods: [171287], factors: { vitA: 0.9 } }, supplements: { 'supp.powder': { perDay: { vitC: 1000 } } } });
+  await call('log_meal', { items: [{ name: 'Eggs', grams: 200 }], time: '02:00' });
+  await call('supplement', { names: ['powder'], status: 'taken' });
+  const t = (await call('micronutrients')).text;
+  assert.match(t, /Numbers only: never advise/);
+  assert.match(t, /- Vitamin A: 288 mcg \(38% of 750\); planned 720; 10% of the limit 3000 \(EFSA UL\)/);
+  assert.match(t, /- Vitamin C: 1000 mg \(909% of 110\), 1000 from supplements/);
+});

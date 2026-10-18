@@ -159,3 +159,11 @@
 /* A7: his packs and counts under one of his foods. */
 .meal-edit .me-amts { gap: 6px; padding: 2px 0 4px; }
 .meal-edit .me-amts .chip { min-height: 34px; padding: 4px 9px; font-size: 10.5px; letter-spacing: 0.04em; }
+/* A12: vitamins and minerals. */
+.micro-list { list-style: none; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.micro-row { display: flex; flex-direction: column; gap: 3px; }
+.micro-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; font-size: 14px; }
+.micro-track { position: relative; height: 4px; border-radius: 2px; background: var(--divider); overflow: hidden; }
+.micro-fill { position: absolute; inset: 0 auto 0 0; background: var(--cyan); border-radius: 2px; }
+.micro-row.is-over .micro-fill { background: var(--amber); }
+.micro-row .hint { font-size: 12px; line-height: 1.35; }

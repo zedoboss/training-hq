@@ -164,6 +164,7 @@ export function render(view, params) {
         ${times.length ? `<p class="hint c-text">${times.map((x) => `${esc(x.name)} ${formatHm(x.time)}`).join(' · ')}</p>` : '<p class="hint">Not set yet, so no meal-time reminders. Set your usual times and the app asks when one passes with nothing logged.</p>'}
         ${dayChecks.length ? `<p class="hint">${dayChecks.map((c) => `${esc(c.name)}: ${ANSWER[c.answer].toLowerCase()}`).join(' · ')}</p>` : ''}</section>` : ''}
       ${date === today ? `<a class="card supp-card" href="#/supps" id="f-supps"><span class="hud c-amber">SUPPLEMENTS</span><span class="supp-card-line" id="f-supps-line">Your checklist</span><span class="pill is-on">Open</span></a>` : ''}
+      <a class="card supp-card" href="#/micro/${esc(date)}" id="f-micro"><span class="hud c-cyan">VITAMINS & MINERALS</span><span class="supp-card-line">From what you logged, against your Diet.html references</span><span class="pill is-on">Open</span></a>
       ${date === today ? '<a class="card supp-card" href="#/sauna" id="f-sauna"><span class="hud c-cyan">SAUNA</span><span class="supp-card-line">The ladder, the checklist and the hard stops</span><span class="pill is-on">Open</span></a>' : ''}
       <div class="section-label">${list.length ? `Meals · ${list.length}` : 'No meals logged'}</div>
       <ul class="meal-list">${list.map((m) => {
