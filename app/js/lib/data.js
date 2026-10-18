@@ -108,7 +108,7 @@ async function post(path, body) {
   const url = await repo.getMeta('macUrl');
   const token = await repo.getMeta('token');
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20000);
+  const t = setTimeout(() => ctrl.abort(), 45000);
   try {
     const res = await fetch(url + path, {
       method: 'POST',

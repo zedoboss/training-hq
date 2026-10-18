@@ -150,3 +150,36 @@ test('large pulls are paged until caught up', async () => {
   assert.equal((await phone.repo.list('history')).length, 2300);
   assert.ok(mac);
 });
+
+test('photos taken offline go up and come down in requests of a few MB, none lost', async () => {
+  const phone = await device('iPhone');
+  const other = await device('Mac browser');
+  phone.online = false;
+  const big = 'data:image/jpeg;base64,' + 'A'.repeat(300 * 1024);
+  for (let i = 0; i < 40; i++) await phone.repo.put('meal-photos', `p${i}`, { id: `p${i}`, dataUrl: big });
+  await phone.repo.put('meals', 'm1', { id: 'm1' });
+  assert.equal((await phone.sync()).ok, false);
+  phone.online = true;
+  const sizes = [];
+  const post = phone.post;
+  phone.post = async (path, body) => { sizes.push(JSON.stringify(body).length); return post(path, body); };
+  const r = await syncOnce({ repo: phone.repo, post: phone.post });
+  assert.equal(r.ok, true);
+  assert.equal(r.pushed, 41);
+  assert.ok(sizes.length >= 8, `${sizes.length} requests`);
+  assert.ok(Math.max(...sizes) < 2 * 1024 * 1024);
+  assert.equal(store.listRecords('meal-photos').length, 40);
+  const r2 = await other.sync();
+  assert.equal(r2.ok, true);
+  assert.equal((await other.repo.list('meal-photos')).length, 40);
+  assert.equal((await other.repo.list('meals')).length, 1);
+});
+
+test('takeBatch stops at the byte cap but always takes one record', async () => {
+  const { takeBatch } = await import('../app/js/lib/sync.js');
+  const rec = (n) => ({ key: n, rec: { d: 'x'.repeat(n) } });
+  assert.equal(takeBatch([rec(10), rec(10), rec(10)], 500, 1000).length, 3);
+  assert.equal(takeBatch([rec(600), rec(600)], 500, 1000).length, 1);
+  assert.equal(takeBatch([rec(5000)], 500, 1000).length, 1);
+  assert.equal(takeBatch([rec(1), rec(1), rec(1)], 2, 1000).length, 2);
+});

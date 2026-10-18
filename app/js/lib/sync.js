@@ -3,6 +3,23 @@
 // Pure logic: the network call and the storage are passed in, so tests can run it in Node.
 
 const BATCH = 500;
+// Photos ride in the records, so a batch also stops at about 1.5 MB (always at least one record): a week of meal
+// photos taken with the Mac out of reach then goes up in several small requests instead of one the Mac refuses.
+export const BATCH_BYTES = 1.5 * 1024 * 1024;
+
+/** The first records of the outbox, up to `max` records and about `maxBytes` of JSON. */
+export function takeBatch(outbox, max = BATCH, maxBytes = BATCH_BYTES) {
+  const out = [];
+  let bytes = 0;
+  for (const o of outbox) {
+    if (out.length >= max) break;
+    const size = JSON.stringify(o.rec).length;
+    if (out.length && bytes + size > maxBytes) break;
+    out.push(o);
+    bytes += size;
+  }
+  return out;
+}
 
 /**
  * @param {object} o
@@ -17,7 +34,7 @@ export async function syncOnce({ repo, post, onStatus = () => {}, now = () => Da
   let pushed = 0;
   for (;;) {
     if (++rounds > 200) throw new Error('sync did not settle');
-    const outbox = (await repo.outbox()).slice(0, BATCH);
+    const outbox = takeBatch(await repo.outbox());
     const epoch = await repo.getMeta('epoch');
     const since = (await repo.getMeta('lastSeq')) ?? 0;
 

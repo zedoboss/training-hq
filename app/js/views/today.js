@@ -9,13 +9,13 @@ import { ready } from '../lib/data.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
 import { weekColumn } from '../lib/programme.js';
 import { roundsByDate, holdSlots } from '../lib/holds.js';
+import { logMealFromFile, cameraInput } from './meal.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
 const MIC = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`;
 
 const LATER = {
-  meal: 'Meal logging arrives in step 6.',
   talk: 'Voice arrives in step 9, after you calibrate it to your voice.',
 };
 
@@ -117,7 +117,7 @@ export function render(view) {
       </section>
 
       <div class="dock">
-        <button class="dock-btn" type="button" data-later="meal">${CAMERA}LOG MEAL</button>
+        <label class="dock-btn file-btn" for="t-cam">${CAMERA}LOG MEAL</label>${cameraInput('t-cam')}
         <div class="dock-mid">
           <button class="mic-btn" type="button" data-later="talk" aria-label="Talk to the coach">${MIC}</button>
           <div class="dock-voice">
@@ -148,6 +148,13 @@ export function render(view) {
   const $all = (k) => view.querySelectorAll(`[data-k="${k}"]`);
   const set = (k, html) => { for (const el of $all(k)) el.innerHTML = html; };
 
+  // LOG MEAL: the camera opens straight away; the before photo starts a meal and its screen opens.
+  view.querySelector('#t-cam').addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try { location.hash = `#/meal/${await logMealFromFile(f)}`; } catch { toast('That photo could not be read.'); }
+  });
   view.querySelectorAll('[data-later]').forEach((b) => {
     b.addEventListener('click', () => { if (b.dataset.later === 'checkin') location.hash = '#/checkin'; else toast(LATER[b.dataset.later]); });
   });

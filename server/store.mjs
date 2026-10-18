@@ -117,10 +117,17 @@ export function openStore(file, { now = () => Date.now() } = {}) {
     return recs;
   }
 
-  function changesSince(since, limit = 2000) {
+  /** Records changed after `since`, up to `limit` records and about `maxBytes` of data (photos), at least one. */
+  function changesSince(since, limit = 2000, maxBytes = 4 * 1024 * 1024) {
     const rows = q.since.all(since, limit + 1);
-    const more = rows.length > limit;
-    const records = rows.slice(0, limit).map(toRecord);
+    let n = 0; let bytes = 0;
+    while (n < Math.min(rows.length, limit)) {
+      const size = rows[n].data?.length ?? 0;
+      if (n && bytes + size > maxBytes) break;
+      bytes += size; n++;
+    }
+    const more = rows.length > n;
+    const records = rows.slice(0, n).map(toRecord);
     const seq = records.length ? records[records.length - 1].seq : Math.max(since, 0);
     return { records, seq, more };
   }

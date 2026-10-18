@@ -110,3 +110,12 @@ test('repo lists the collections it holds', async () => {
   await repo.put('sets', 'c', {});
   assert.deepEqual(await repo.cols(), ['exercises', 'sets']);
 });
+
+test('meal photos go in as photos/meal-<meal>-<before|after>.jpg', () => {
+  const url = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 1]).toString('base64')}`;
+  const { files, counts } = exportFiles({ 'meal-photos': [{ id: 'photo-a', mealId: 'meal-1', kind: 'before', dataUrl: url }, { id: 'photo-b', mealId: 'meal-1', kind: 'after', dataUrl: url }] }, { tz: TZ });
+  assert.equal(counts.photos, 2);
+  assert.ok(files.some((f) => f.name === 'photos/meal-meal-1-before.jpg'));
+  assert.ok(files.some((f) => f.name === 'photos/meal-meal-1-after.jpg'));
+  assert.ok(files.some((f) => f.name === 'data/meal-photos.csv'));
+});

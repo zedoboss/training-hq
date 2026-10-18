@@ -22,6 +22,7 @@ import * as historyView from './views/history.js';
 import * as progression from './views/progression.js';
 import * as readiness from './views/readiness.js';
 import * as squat from './views/squat.js';
+import * as meal from './views/meal.js';
 import { autoKeepOffline } from './lib/squat-offline.js';
 
 const VIEWS = {
@@ -45,6 +46,7 @@ const VIEWS = {
   checkin: { mod: readiness, label: 'Check-in', hidden: true, tab: 'today' },
   readiness: { mod: { render: (view, params) => readiness.render(view, params, 'readiness') }, label: 'Readiness table', hidden: true, tab: 'train' },
   squat: { mod: squat, label: 'Squat Depth', hidden: true, tab: 'train' },
+  meal: { mod: meal, label: 'Meal', hidden: true, tab: 'fuel' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };
