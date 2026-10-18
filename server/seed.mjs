@@ -34,7 +34,8 @@ export function seedDocs(seedDir) {
     for (const [id, data] of Object.entries(JSON.parse(readFileSync(settings, 'utf8')))) docs.push({ col: 'settings', id, data });
   }
   // Step 6: his planned diet (targets, usual foods) and his supplement list, from the brief's section 3.
-  for (const [file, col] of [['fuel.json', 'fuel'], ['supplements.json', 'supplements']]) {
+  // schedule.json: places he has given things in the week (e.g. where Neck goes), as {id: doc}.
+  for (const [file, col] of [['fuel.json', 'fuel'], ['supplements.json', 'supplements'], ['schedule.json', 'schedule']]) {
     const f = join(seedDir, file);
     if (!existsSync(f)) continue;
     const j = JSON.parse(readFileSync(f, 'utf8'));

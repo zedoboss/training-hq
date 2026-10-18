@@ -16,6 +16,7 @@ import { confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
 import { holdsAfter } from '../lib/holds.js';
+import { neckTodayText, neckDoneOn } from '../lib/neck.js';
 import { withDefaults } from '../lib/settings.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -102,6 +103,11 @@ export function render(view, params = []) {
     // The prompt goes away once that day's tendon holds are logged; a hold on some other exercise doesn't count.
     const dueNames = new Set(due.map((h) => h.exercise));
     const holdDone = done.some((s) => s.type === 'hold' && dueNames.has(session.exercises.find((e) => e.key === s.exKey)?.name));
+    // Neck (decision 14, his answer Sun 10/18): after the session his plan puts it behind, offer it next.
+    const neck = await repo.get('schedule', 'neck');
+    const neckRoutine = (await repo.list('routines')).find((r) => r.dayType === 'neck');
+    const neckNext = neckRoutine && session.dayType && neck?.planned && neck.place === `after-${session.dayType}`
+      && day === isoDate(new Date()) && !neckDoneOn(sessions, day, (ms) => isoDate(new Date(ms)));
     const changed = structureChanged(session, done, routine);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
     void lib;
@@ -121,6 +127,7 @@ export function render(view, params = []) {
         <p class="hint">${fullHistory ? (inComeback ? 'Heaviest working set since the comeback started, against the sessions before this one. ALL-TIME: heaviest ever, Hevy and Strong included.' : 'Heaviest working set ever at the time, Hevy and Strong included.') : 'All-time bests show once your Hevy history is imported (Settings > Import and export).'}</p>
       </section>
       ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
+      ${neckNext ? `<a class="card hold-prompt" id="neck-next" href="#/session/start/${esc(neckRoutine.id)}"><span><span class="hud c-cyan">${esc(neckTodayText(neck.place).toUpperCase())}</span><br>Your plan: ${neckRoutine.exercises.length} neck exercises</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
       ${session.gym ? `<p class="hint">Gym: ${esc(session.gym)}</p>` : ''}

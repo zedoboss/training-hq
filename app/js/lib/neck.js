@@ -27,3 +27,13 @@ export function neckToday(neck, dayKind, dayType) {
   if (neck.place === 'rest-day') return dayKind === 'rest';
   return dayKind !== 'rest' && neck.place === `after-${dayType}`;
 }
+
+/** "Neck after Push today" / "Neck today (rest day)": the Train card and finish screen line. */
+export function neckTodayText(place) {
+  if (place === 'rest-day') return 'Neck today (rest day)';
+  const label = placeLabel(place);
+  return label ? `Neck ${label.replace(/^After /, 'after ')} today` : 'Neck today';
+}
+
+/** A Neck session was started or done on this date (local day of startedAt). */
+export const neckDoneOn = (sessions, date, dayOf) => sessions.some((s) => s.dayType === 'neck' && s.status !== 'discarded' && s.startedAt && dayOf(s.startedAt) === date);

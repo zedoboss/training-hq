@@ -67,3 +67,21 @@ test('no seed files: nothing happens', () => {
     assert.deepEqual(seedDocs(join(dir, 'missing')), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('schedule.json seeds his placements (Neck after Push) once, and his later change in the app stays', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-seed-'));
+  try {
+    mkdirSync(join(dir, 'seed'), { recursive: true });
+    writeFileSync(join(dir, 'seed', 'schedule.json'), JSON.stringify({ neck: { planned: true, place: 'after-push' } }));
+    const store = openStore(join(dir, 'db.sqlite'));
+    const docs = seedDocs(join(dir, 'seed'));
+    assert.deepEqual(docs.map((d) => `${d.col}/${d.id}`), ['schedule/neck']);
+    applySeed(store, docs);
+    assert.equal(store.getRecord('schedule', 'neck').data.place, 'after-push');
+    store.applyChanges([{ col: 'schedule', id: 'neck', data: { planned: true, place: 'after-legs' }, deleted: false,
+      hlc: formatHlc(Date.now() + 1000, 0, 'a1b2c3d4e5f6'), device: 'a1b2c3d4e5f6' }], 'a1b2c3d4e5f6');
+    applySeed(store, seedDocs(join(dir, 'seed')));
+    assert.equal(store.getRecord('schedule', 'neck').data.place, 'after-legs');
+    store.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

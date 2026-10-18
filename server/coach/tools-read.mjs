@@ -20,7 +20,7 @@ import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange,
 import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN } from '../../app/js/lib/sauna.js';
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
-import { neckAsk } from '../../app/js/lib/neck.js';
+import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
 import { addMinutesHm } from '../../app/js/lib/time.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -135,7 +135,14 @@ export function todayText(s) {
   if (active) lines.push(activeText(s, active));
   lines.push(...holdLines(s), suppLine(s), foodLine(s), scanLine(s));
   const neck = s.one('schedule', 'neck');
-  if (s.list('routines').some((r) => r.dayType === 'neck') && neckAsk(neck, s.today)) lines.push('Neck: his Neck routine is still unplanned (the app asks once a week where it goes).');
+  if (s.list('routines').some((r) => r.dayType === 'neck')) {
+    if (neck?.planned) {
+      const t = s.rotation().today;
+      const due = neckToday(neck, t.kind, t.dayType);
+      const done = neckDoneOn(s.list('sessions'), s.today, s.date);
+      lines.push(`Neck: his plan puts it ${placeLabel(neck.place).replace(/^\w/, (c) => c.toLowerCase())}${!due ? '.' : done ? '; done today.' : `; due today${t.kind === 'done' ? ', now' : t.dayType ? ` after ${LABEL[t.dayType]}` : ''} (Train offers it).`}`);
+    } else if (neckAsk(neck, s.today)) lines.push('Neck: his Neck routine is still unplanned (the app asks once a week where it goes).');
+  }
   const sauna = s.list('sauna').find((x) => x.status === 'active');
   if (sauna) lines.push(`Sauna session in progress (${stepText(sauna.stepIndex ?? 0)}).`);
   return lines.join('\n');

@@ -86,6 +86,16 @@ test('today and the context line say the day type, week column and what is open'
   assert.match(contextLine({ store, tz: TZ, now: NOW }), /^Today: Legs \(week 3 column\)/);
 });
 
+test('today: Neck after his chosen session (due today on a Legs plan), the weekly ask while unplanned', async () => {
+  store.writeLocal('routines', 'neck', { id: 'neck', title: 'Neck', folderId: 'other', order: 0, dayType: 'neck', exercises: [] });
+  assert.match((await call('today')).text, /Neck: his Neck routine is still unplanned/);
+  store.writeLocal('schedule', 'neck', { planned: true, place: 'after-legs' });
+  assert.match((await call('today')).text, /Neck: his plan puts it after Legs; due today after Legs \(Train offers it\)\./);
+  store.writeLocal('schedule', 'neck', { planned: true, place: 'after-push' });
+  assert.match((await call('today')).text, /Neck: his plan puts it after Push\./);
+  assert.doesNotMatch((await call('today')).text, /unplanned/);
+});
+
 test('programme gives exactly what Start would: the table capped at last load + 30%, with the bar split', async () => {
   const r = await call('programme');
   assert.match(r.text, /^Legs, today, week 3 column\./);
