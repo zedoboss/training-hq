@@ -5,6 +5,7 @@ import { syncOnce } from './sync.js';
 import { setState } from './store.js';
 import { summarizeProgramme } from './programme.js';
 import { withDefaults, equipmentWithDefaults, mergeDeep } from './settings.js';
+import { lineReader } from './coach.js';
 
 let repo = null;
 let timer = null;
@@ -204,6 +205,40 @@ export async function uploadHealth(text, name) {
   const out = await res.json();
   await syncNow();
   return out;
+}
+
+// The coach (step 8) runs on the Mac. A message goes there and the reply streams back as JSON lines: the words as
+// they are written, the tools used, actions for this device. The whole conversation also syncs ('coach-messages').
+export async function coachSend({ text, model, tz, onEvent, signal }) {
+  await ready;
+  const url = await repo.getMeta('macUrl');
+  const token = await repo.getMeta('token');
+  if (!url || !token) throw new Error('Pair with your Mac first (Settings).');
+  let res;
+  try {
+    res = await fetch(`${url}/api/coach/send`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text, model, tz }) });
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e;
+    setState({ mac: { reachable: false } });
+    throw new Error('Mac unreachable. The coach runs on your Mac: try again when it is connected.');
+  }
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Mac answered ${res.status}`);
+  setState({ mac: { reachable: true, lastSeen: Date.now() } });
+  const lines = lineReader(onEvent);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      lines.push(dec.decode(value, { stream: true }));
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e;
+    throw new Error('The connection to the Mac dropped. The answer is kept there and arrives with the next sync.');
+  }
+  lines.push(dec.decode());
+  lines.end();
 }
 
 /** Ask the Mac for a pairing code for another device. */

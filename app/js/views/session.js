@@ -107,6 +107,10 @@ export function render(view, params = []) {
   let setTimerTick = null;
 
   const exSets = (key) => sets.filter((s) => s.exKey === key).sort((a, b) => a.order - b.order);
+  const onFocus = (e) => {
+    if (e.detail?.sessionId !== id) return;
+    view.querySelector(`[data-ex="${CSS.escape(e.detail.exKey)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   const saveSession = async (patch) => { session = { ...session, ...patch }; await repo.put('sessions', session.id, session); };
   const saveSet = async (set) => { sets = sets.map((s) => (s.id === set.id ? set : s)); if (!sets.some((s) => s.id === set.id)) sets.push(set); await repo.put('sets', set.id, set); };
 
@@ -537,6 +541,8 @@ export function render(view, params = []) {
     timer = setInterval(header, 1000);
     if (!editing && prefs().keepAwake) keepAwake();
     document.addEventListener('visibilitychange', onVis);
+    // The coach said "next exercise" (step 8): bring that exercise's card into view.
+    window.addEventListener('thq:coach-focus', onFocus);
     offRepo = repo.onChange(async (cols, origin) => {
       if (origin !== 'remote' || (!cols.includes('sets') && !cols.includes('sessions'))) return;
       if (view.contains(document.activeElement) && document.activeElement.matches('input')) return;
@@ -548,6 +554,7 @@ export function render(view, params = []) {
   });
 
   return () => {
+    window.removeEventListener('thq:coach-focus', onFocus);
     clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo();
     document.removeEventListener('visibilitychange', onVis);
     wakeLock?.release?.().catch(() => {});

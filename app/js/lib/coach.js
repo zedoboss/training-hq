@@ -1,0 +1,62 @@
+// The coach chat on the phone and in the Mac's browser (8.5). The conversation is the synced 'coach-messages'
+// collection (written by the Mac); a reply also arrives as a stream of events while it is written. Pure helpers here;
+// the screen is views/coach.js. Actions are what only this device can do for the coach: its rest timer, a sync.
+
+export const MODEL_LABEL = { fast: 'SONNET 5.5 · LOW', deep: 'OPUS 5.5 · HIGH' };
+
+/** Splits a byte stream of JSON lines into events. push(text) as chunks arrive, end() at the end. */
+export function lineReader(onEvent) {
+  let buf = '';
+  const take = (line) => { if (!line.trim()) return; let e; try { e = JSON.parse(line); } catch { return; } onEvent(e); };
+  return {
+    push(text) {
+      buf += text;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, nl); buf = buf.slice(nl + 1); take(line); }
+    },
+    end() { const rest = buf; buf = ''; take(rest); },
+  };
+}
+
+const byTime = (a, b) => (a.at - b.at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * The current conversation: stored messages plus ones that arrived live and haven't synced yet (same id = one
+ * message), after the last "new conversation" marker, oldest first.
+ */
+export function conversationOf(stored = [], live = []) {
+  const map = new Map();
+  for (const m of [...stored, ...live]) if (m?.id) map.set(m.id, { ...(map.get(m.id) || {}), ...m });
+  const all = [...map.values()].sort(byTime);
+  let from = 0;
+  all.forEach((m, i) => { if (m.role === 'marker') from = i + 1; });
+  return all.slice(from);
+}
+
+/** Tool names as the design shows them: capitals, joined with a dot. */
+export const toolLabel = (t) => String(t?.title || t?.name || '').toUpperCase();
+
+/** Today's numbers for the home screen corners: turns, tool calls, errors. */
+export function todayCounts(messages = [], date, dayOf) {
+  const mine = messages.filter((m) => m.role === 'assistant' && dayOf(m.at) === date);
+  const tools = mine.flatMap((m) => m.tools || []);
+  return { turns: mine.length, tools: tools.length, errors: tools.filter((t) => !t.ok).length + mine.filter((m) => m.error).length };
+}
+
+/**
+ * Run what the coach asked this device to do. `deps` holds the rest timer, the sync and the focus event, so this
+ * stays testable. Returns true when it was done here; 'open' actions are shown as buttons instead.
+ */
+export function runAction(a, deps) {
+  switch (a?.kind) {
+    case 'rest': if (a.seconds > 0) { deps.rest.start(a.seconds, a.label || 'Rest'); return true; } return false;
+    case 'rest-add': deps.rest.adjust(Number(a.seconds) || 0); return true;
+    case 'rest-skip': deps.rest.clear(); return true;
+    case 'sync': deps.sync(); return true;
+    case 'focus': deps.focus(a); return true;
+    default: return false;
+  }
+}
+
+/** Plain text to safe HTML with line breaks (the coach answers in plain text). */
+export const textHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/\n/g, '<br>');

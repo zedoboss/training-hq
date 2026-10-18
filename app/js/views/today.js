@@ -13,6 +13,7 @@ import { logMealFromFile, cameraInput } from './meal.js';
 import { dayTotals } from '../lib/meals.js';
 import { checklist, dayKindFor } from '../lib/supplements.js';
 import { stepsToday } from './body.js';
+import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -124,7 +125,7 @@ export function render(view) {
 
       <div class="home-status hud">
         <span class="c-muted">VOICE · STEP 9</span>
-        <span class="model-chip">SONNET 5.5 · LOW</span>
+        <span class="model-chip" data-k="model">SONNET 5.5 · LOW</span>
       </div>
 
       <section class="card spoke">
@@ -136,11 +137,11 @@ export function render(view) {
       <div class="dock">
         <label class="dock-btn file-btn" for="t-cam">${CAMERA}LOG MEAL</label>${cameraInput('t-cam')}
         <div class="dock-mid">
-          <button class="mic-btn" type="button" data-later="talk" aria-label="Talk to the coach">${MIC}</button>
+          <a class="mic-btn" href="#/coach" id="t-talk" aria-label="Talk to the coach">${MIC}</a>
           <div class="dock-voice">
             <div class="hud c-text dock-name">CLAUDE</div>
             <div class="level" aria-hidden="true">${'<span></span>'.repeat(8)}</div>
-            <div class="hud c-muted dock-state">VOICE OFF</div>
+            <div class="hud c-muted dock-state">TALK · BY TEXT</div>
           </div>
         </div>
         <button class="dock-btn" type="button" data-later="checkin">${CHECK}CHECK IN</button>
@@ -150,14 +151,14 @@ export function render(view) {
     <section class="home-side home-right" aria-label="Clock and voice">
       <div class="bracket-tr hud home-block">
         REC <span data-k="clock-long"></span><br>
-        <span class="c-cyan-dim">TURN 0000 · MIC OFF</span>
+        <span class="c-cyan-dim" data-k="turns">TURN 0000 · MIC OFF</span>
       </div>
       <div class="card voice-card">
         <div class="hud c-muted voice-head">VOICE</div>
-        <p>Always-on listening, your voice only, arrives in step 9 after calibration. Coach by text arrives in step 8.</p>
+        <p>The coach by text: tap the mic button (TALK). Always-on listening, your voice only, arrives in step 9 after calibration.</p>
       </div>
       <div class="bracket-br hud home-block">
-        TALK TODAY —<br><span class="c-cyan-dim">TOOLS 0 CALLS · 0 ERRORS</span>
+        TALK TODAY —<br><span class="c-cyan-dim" data-k="toolcount">TOOLS 0 CALLS · 0 ERRORS</span>
       </div>
     </section>
   </div>`;
@@ -188,7 +189,11 @@ export function render(view) {
   let train = null;
   let fuel = null;
   let steps = null;
+  let talk = null;
   const draw = (s) => {
+    set('model', MODEL_LABEL[withDefaults(s.settings).coach.model] || MODEL_LABEL.fast);
+    set('turns', `TURN ${String(talk?.turns ?? 0).padStart(4, '0')} · MIC OFF`);
+    set('toolcount', `TOOLS ${talk?.tools ?? 0} CALLS · ${talk?.errors ?? 0} ERRORS`);
     set('weekcols', weekColumnsLine(s));
     set('r-train', train ? train.readout : '—');
     set('r-fuel', fuel ? `<a class="readout-link" href="#/fuel">${fuel.readout}</a>` : '—');
@@ -210,8 +215,12 @@ export function render(view) {
   let off = () => {};
   let gone = false;
   ready.then((repo) => {
-    const refresh = async () => { train = await trainToday(repo); fuel = await fuelToday(repo); steps = await stepsToday(repo); if (!gone) draw(getState()); };
-    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health'].includes(c))) refresh(); });
+    const refresh = async () => {
+      train = await trainToday(repo); fuel = await fuelToday(repo); steps = await stepsToday(repo);
+      talk = todayCounts(await repo.list('coach-messages'), isoDate(new Date()), (ms) => isoDate(new Date(ms)));
+      if (!gone) draw(getState());
+    };
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages'].includes(c))) refresh(); });
     refresh();
   });
   return () => { gone = true; clearInterval(timer); unsub(); off(); };
