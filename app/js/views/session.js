@@ -536,6 +536,11 @@ export function render(view, params = []) {
     draw();
     drawRest(rest.status());
     offRest = rest.subscribe(drawRest);
+    // "Next exercise" said to the coach on the Talk screen in the last 5 minutes: open on that exercise.
+    try {
+      const f = JSON.parse(sessionStorage.getItem('thq.coach.focus') || 'null');
+      if (f?.sessionId === id && Date.now() - f.at < 5 * 60000) { sessionStorage.removeItem('thq.coach.focus'); setTimeout(() => onFocus({ detail: f }), 50); }
+    } catch { /* private mode */ }
     if (setTimer && !sets.some((x) => x.id === setTimer.setId && !x.done)) { setTimer = null; storeSetTimer(null); }
     runSetTimer();
     timer = setInterval(header, 1000);

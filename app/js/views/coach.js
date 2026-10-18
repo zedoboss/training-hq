@@ -23,7 +23,11 @@ const SEND = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24"
 const deps = {
   rest,
   sync: () => { syncNow(); },
-  focus: (a) => window.dispatchEvent(new CustomEvent('thq:coach-focus', { detail: a })),
+  focus: (a) => {
+    // Kept for a few minutes, so the session screen opens on that exercise when he goes back to it.
+    try { sessionStorage.setItem('thq.coach.focus', JSON.stringify({ ...a, at: Date.now() })); } catch { /* private mode */ }
+    window.dispatchEvent(new CustomEvent('thq:coach-focus', { detail: a }));
+  },
 };
 
 function msgHtml(m, { live = false } = {}) {
