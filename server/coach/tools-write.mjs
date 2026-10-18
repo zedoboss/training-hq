@@ -18,7 +18,7 @@ import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/l
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist } from '../../app/js/lib/supplements.js';
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS } from '../../app/js/lib/sauna.js';
-import { zonedTime, addMinutesHm } from '../../app/js/lib/time.js';
+import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 
@@ -27,7 +27,14 @@ const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
 const HM = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', description: '24-hour "HH:MM" in his time zone' };
 const SET_TYPE = { type: 'string', enum: ['warmup', 'normal', 'dropset', 'failure', 'hold'] };
 
-const put = (s, col, id, data) => s.store.writeLocal(col, id, data);
+// A3: a new log made through the coach carries the zone of the phone he is talking from; an existing one keeps its own.
+const put = (s, col, id, data) => s.store.writeLocal(col, id, zoned(s, col, id, data));
+function zoned(s, col, id, data) {
+  if (!LOGGED_COLS.has(col) || !data || typeof data !== 'object' || data.tz) return data;
+  const cur = s.store.getRecord(col, id);
+  if (!cur || cur.deleted || !cur.data) return withZone(col, data, s.tz);
+  return cur.data.tz ? { ...data, tz: cur.data.tz } : data;
+}
 const del = (s, col, id) => s.store.writeLocal(col, id, null, { deleted: true });
 const num = (v) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? undefined : Number(v));
 
@@ -176,7 +183,7 @@ async function startSession(a, ctx) {
     smallestPlate: s.minPlate(), gym: st.gym.name, warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine',
     bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter,
   });
-  s.store.writeLocalMany([...sets.map((x) => ({ col: 'sets', id: x.id, data: x })), { col: 'sessions', id: session.id, data: session }]);
+  s.store.writeLocalMany([...sets.map((x) => ({ col: 'sets', id: x.id, data: x })), { col: 'sessions', id: session.id, data: zoned(s, 'sessions', session.id, session) }]);
   ctx.action({ kind: 'open', url: `#/session/${session.id}`, label: 'Open the session' });
   const first = session.exercises.find((e) => sets.some((x) => x.exKey === e.key));
   const rot = s.rotation();

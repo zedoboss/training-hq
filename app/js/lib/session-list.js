@@ -1,5 +1,5 @@
 // Session list (3.8): every finished workout, newest first, with the app it came from; search by exercise.
-import { isoDate } from './time.js';
+import { isoDate, zoneOf } from './time.js';
 import { elapsedMs, summarize } from './session.js';
 import { sourceOf } from './calendar.js';
 
@@ -21,8 +21,8 @@ export function sessionRows({ sessions = [], sets = [], tz } = {}) {
       const sum = summarize(s, ss);
       const exs = (s.exercises || []).filter((e) => done.has(e.key));
       return {
-        id: s.id, title: s.title, dayType: s.dayType ?? null, source: sourceOf(s), startedAt: s.startedAt,
-        date: isoDate(new Date(s.startedAt), tz), durationMs: s.endedAt ? elapsedMs(s) : null, sets: sum.done, volume: sum.volume,
+        id: s.id, title: s.title, dayType: s.dayType ?? null, source: sourceOf(s), startedAt: s.startedAt, tz: s.tz ?? null,
+        date: isoDate(new Date(s.startedAt), zoneOf(s, tz)), durationMs: s.endedAt ? elapsedMs(s) : null, sets: sum.done, volume: sum.volume,
         exercises: [...new Set(exs.map((e) => e.name))], also: [...new Set(exs.map((e) => e.importedName).filter(Boolean))],
       };
     });

@@ -10,7 +10,7 @@
 // body-scans  'scan.<date>': {id, date, status: 'prep'|'done', prep: {ticks: {<item id>: true}, items: [{id, when,
 //             text}], at}, ... results added in 7.5}
 import { addDays, rotationDay } from './rotation.js';
-import { daysBetween, zonedTime, formatDay } from './time.js';
+import { daysBetween, zonedTime, formatDay, hmOf, zoneOf } from './time.js';
 
 /** Every 4 weeks (brief: scanning more often mostly measures day-to-day water changes). */
 export const EVERY_DAYS = 28;
@@ -337,12 +337,12 @@ export function metricsAvailable(scans = []) {
 export function scanSeries(scans = [], id, items = PROTOCOL) {
   return scans.filter(isDone).sort((a, b) => (a.date < b.date ? -1 : 1)).flatMap((s) => {
     const m = (s.metrics || []).find((x) => idOf(x) === id && x.value != null);
-    return m ? [{ date: s.date, at: s.at, value: m.value, text: m.text, unit: m.unit, notes: conditionNotes(s, items), scan: s }] : [];
+    return m ? [{ date: s.date, at: s.at, tz: s.tz ?? null, value: m.value, text: m.text, unit: m.unit, notes: conditionNotes(s, items), scan: s }] : [];
   });
 }
 
-/** Minutes after midnight of a scan's time, in the device's zone. */
-const minuteOfDay = (at) => { const d = new Date(at); return d.getHours() * 60 + d.getMinutes(); };
+/** Minutes after midnight of a scan's time, on the clock where it was taken (A3). */
+const minuteOfDay = (scan) => { const [h, m] = hmOf(new Date(scan.at), zoneOf(scan)).split(':').map(Number); return h * 60 + m; };
 export const TIME_SLACK_MIN = 120;
 
 /**
@@ -355,7 +355,7 @@ export function notComparable(a, b, items = PROTOCOL) {
     const n = conditionNotes(s, items);
     if (n.length) out.push(`${formatDay(new Date(`${s.date}T12:00:00`))}: ${n.join('; ')}`);
   }
-  if (a?.at && b?.at && Math.abs(minuteOfDay(a.at) - minuteOfDay(b.at)) > TIME_SLACK_MIN) out.push('a different time of day');
+  if (a?.at && b?.at && Math.abs(minuteOfDay(a) - minuteOfDay(b)) > TIME_SLACK_MIN) out.push('a different time of day');
   return out;
 }
 

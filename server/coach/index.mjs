@@ -83,7 +83,7 @@ export function openCoach({ store, tools = [], profile = () => '', context = nul
     const turnId = `turn.${at.toString(36)}.${rand()}`;
     const earlier = conversation(store);
     const voice = via === 'voice';
-    const userMsg = save({ id: messageId(at), role: 'user', text: words, at, device: deviceId, turnId, model: key, ...(voice ? { via: 'voice' } : {}) });
+    const userMsg = save({ id: messageId(at), role: 'user', text: words, at, tz: zone, device: deviceId, turnId, model: key, ...(voice ? { via: 'voice' } : {}) });
     emit({ type: 'user', message: userMsg });
     const t = { turnId, tz: zone, deviceId, tools: [], actions: [], emit };
     let reply;
@@ -106,7 +106,7 @@ export function openCoach({ store, tools = [], profile = () => '', context = nul
       if (active === t) active = null;
     }
     const doneAt = now();
-    const msg = save({ id: messageId(Math.max(doneAt, at + 1)), at: Math.max(doneAt, at + 1), turnId, tools: t.tools, actions: t.actions, ...reply });
+    const msg = save({ id: messageId(Math.max(doneAt, at + 1)), at: Math.max(doneAt, at + 1), tz: zone, turnId, tools: t.tools, actions: t.actions, ...reply });
     emit({ type: 'done', message: msg });
     return msg;
   }

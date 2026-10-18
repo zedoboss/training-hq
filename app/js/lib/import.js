@@ -495,7 +495,7 @@ export function planImport({ source, workouts, tz, resolve, existing = [], resto
     const session = {
       id, kind: 'workout', title: w.title, routineId: null, dayType: dayTypeOf(w.title), week: null,
       startedAt, endedAt, pausedMs: 0, pausedAt: null, status: 'done', note: w.note || '', photos: [], gym: null, bodyweightKg: null,
-      source, importId, exercises,
+      source, importId, ...(tz ? { tz } : {}), exercises,
     };
     sessions.push(session);
   }

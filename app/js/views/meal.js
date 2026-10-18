@@ -6,7 +6,7 @@ import { getState, subscribe } from '../lib/store.js';
 import { fileToJpeg, newPhotoId } from '../lib/photos.js';
 import { newId } from '../lib/routines.js';
 import { withDefaults } from '../lib/settings.js';
-import { formatDay, formatTime, isoDate } from '../lib/time.js';
+import { formatDay, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
 import {
   MEAL_NAMES, defaultMealName, newMeal, cleanItems, itemTotals, regram, scaleTo, currentEstimate, beforeItems, leftovers,
   netItems, mealState, STATE_TEXT, afterPhotoAt,
@@ -167,12 +167,12 @@ export function render(view, [id]) {
     const headTag = meal.source === 'manual' ? 'WHAT YOU ATE' : meal.before?.confirmedAt ? 'CONFIRMED' : "COACH'S ESTIMATE";
     body.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/fuel/${esc(meal.date)}">Fuel</a>
-        <span class="hud c-muted">FUEL · ${esc(formatDay(new Date(meal.at)).toUpperCase())} · ${esc(formatTime(new Date(meal.at)))}</span></div>
+        <span class="hud c-muted">FUEL · ${esc(dayAt(meal.at, meal).toUpperCase())} · ${esc(timeAt(meal.at, meal).toUpperCase())}</span></div>
       <button class="link-btn meal-name" id="m-name" type="button"><h1 class="view-title">${esc(meal.name)}</h1></button>
       ${meal.source === 'manual' && !before ? '' : `<div class="meal-photos">
-        ${before ? `<button class="meal-tile has-photo" type="button" data-photo="before"><img src="${before.dataUrl}" alt="Before photo"><span class="hud c-green">BEFORE · ${esc(formatTime(new Date(meal.before.at)))}</span></button>`
+        ${before ? `<button class="meal-tile has-photo" type="button" data-photo="before"><img src="${before.dataUrl}" alt="Before photo"><span class="hud c-green">BEFORE · ${esc(timeAt(meal.before.at, meal).toUpperCase())}</span></button>`
           : `<label class="meal-tile is-empty file-btn" for="m-before">${CAMERA}<span class="hud">BEFORE</span></label>`}
-        ${after ? `<button class="meal-tile has-photo" type="button" data-photo="after"><img src="${after.dataUrl}" alt="After photo"><span class="hud c-green">AFTER · ${esc(formatTime(new Date(meal.after.at)))}</span></button>`
+        ${after ? `<button class="meal-tile has-photo" type="button" data-photo="after"><img src="${after.dataUrl}" alt="After photo"><span class="hud c-green">AFTER · ${esc(timeAt(meal.after.at, meal).toUpperCase())}</span></button>`
           : meal.after?.none ? '<div class="meal-tile is-none"><span class="hud c-green">AFTER</span><span>Ate it all</span><button class="link-btn" type="button" id="m-undo-none">Undo</button></div>'
             : `<label class="meal-tile is-empty file-btn" for="m-after">${CAMERA}<span class="hud">AFTER</span><span class="hint">I'll ask at ${esc(askAt)}</span></label>`}
       </div>

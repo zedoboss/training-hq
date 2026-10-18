@@ -3,6 +3,7 @@
 // The outbox is emptied only after the Mac confirms it has stored the changes.
 // Works over any storage adapter: IndexedDB in the app (idb.js), memory in tests (memoryAdapter below).
 import { createClock, newDeviceId, newer } from './hlc.js';
+import { LOGGED_COLS, withZone, deviceTimeZone } from './time.js';
 
 export async function openRepo(adapter) {
   let device = await adapter.getMeta('deviceId');
@@ -24,7 +25,15 @@ export async function openRepo(adapter) {
 
   return {
     device,
-    put: (col, id, data) => write(col, id, data, false),
+    /** A new record of a logged collection gets this device's time zone (A3); an existing one keeps what it has. */
+    async put(col, id, data) {
+      if (LOGGED_COLS.has(col) && data && typeof data === 'object' && !data.tz) {
+        const cur = await adapter.getRecord(col, id);
+        if (!cur || cur.deleted || !cur.data) data = withZone(col, data, deviceTimeZone());
+        else if (cur.data.tz) data = { ...data, tz: cur.data.tz };
+      }
+      return write(col, id, data, false);
+    },
     remove: (col, id) => write(col, id, null, true),
     async get(col, id) {
       const r = await adapter.getRecord(col, id);

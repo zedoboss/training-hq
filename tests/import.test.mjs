@@ -168,6 +168,7 @@ test('plan: sessions and sets with stable ids, holds kept, supersets grouped, ev
   assert.equal(hashId('a'), hashId('a'));
   assert.equal(s.dayType, 'push');
   assert.equal(s.status, 'done');
+  assert.equal(s.tz, 'Asia/Bangkok', 'an import keeps the zone its times were read in (A3)');
   assert.equal(s.source, 'hevy');
   assert.equal(new Date(s.startedAt).toISOString(), '2025-03-02T23:10:00.000Z');
   assert.equal(s.endedAt - s.startedAt, 55 * 60000);

@@ -9,7 +9,7 @@ import { fileToJpeg, newPhotoId } from '../lib/photos.js';
 import { sessionBests, structureChanged, routineFromSession, previousSame, comebackStartOf } from '../lib/finish.js';
 import { dayMarks, workoutDates, weekStreak, SOURCE_LABEL, sourceOf } from '../lib/calendar.js';
 import { changePct } from '../lib/stats.js';
-import { isoDate, formatDate, formatDay, formatTime } from '../lib/time.js';
+import { isoDate, formatDate, formatDay, formatTime, timeAt, dayAt, zoneOf } from '../lib/time.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
 import { confirmSheet } from '../ui/sheet.js';
@@ -113,7 +113,7 @@ export function render(view, params = []) {
     void lib;
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="${back || '#/train'}">${back ? 'Back' : 'Train'}</a>
-        <span class="hud c-muted">${esc(formatDay(new Date(session.startedAt)).toUpperCase())} · ${esc(formatTime(new Date(session.startedAt)))} - ${esc(formatTime(new Date(session.endedAt)))}</span></div>
+        <span class="hud c-muted">${esc(dayAt(session.startedAt, session).toUpperCase())} · ${esc(formatTime(new Date(session.startedAt), zoneOf(session)))} - ${esc(timeAt(session.endedAt, session).toUpperCase())}</span></div>
       <div><div class="hud c-green">${esc(session.title.toUpperCase())} DONE <span class="c-muted">· ${esc(source.toUpperCase())}</span></div><h1 class="view-title">Session ${number}</h1></div>
       <section class="stat-row">
         <div class="card stat"><span class="hud c-muted">TIME</span><b>${Math.round(elapsedMs(session) / 60000)} min</b></div>

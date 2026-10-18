@@ -1,7 +1,7 @@
 // Calendar (3.7, P43, P44): what happened on each local date, month and year grids, the week streak, rest days
 // since the last session and sessions per week. Imported Hevy and Strong sessions are ordinary sessions, so the
 // calendar reaches back through every imported year. Later steps add their own day markers through `extra`.
-import { isoDate, daysBetween } from './time.js';
+import { isoDate, daysBetween, zoneOf } from './time.js';
 import { addDays, weekStartOf, addMonths } from './stats.js';
 import { SET_TYPES } from './exercise-types.js';
 import { kg as fmtKg } from './loads.js';
@@ -26,9 +26,9 @@ export function dayMarks({ sessions = [], sets = [], extra = [], tz } = {}) {
     return out.get(d);
   };
   for (const s of [...sessions].filter((x) => x.status === 'done').sort((a, b) => a.startedAt - b.startedAt)) {
-    const d = isoDate(new Date(s.startedAt), tz);
+    const d = isoDate(new Date(s.startedAt), zoneOf(s, tz));
     if (s.kind === 'holds') { at(d).holds.push({ id: s.id, title: s.title, area: s.area ?? null }); continue; }
-    at(d).workouts.push({ id: s.id, title: s.title, dayType: s.dayType ?? null, source: sourceOf(s), startedAt: s.startedAt });
+    at(d).workouts.push({ id: s.id, title: s.title, dayType: s.dayType ?? null, source: sourceOf(s), startedAt: s.startedAt, tz: s.tz ?? null });
     if (withHolds.has(s.id)) at(d).holds.push({ id: s.id, title: `Holds in ${s.title}`, area: null });
   }
   for (const e of extra) at(e.date).extra.push(e);

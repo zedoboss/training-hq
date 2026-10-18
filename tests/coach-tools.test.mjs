@@ -130,6 +130,7 @@ test('a session started, sets logged by voice-style numbers, the 30% guard and t
   assert.match(st.text, /^Started Legs \(week 3 column\): 2 exercises/);
   assert.match(st.text, /Check-in not done today/);
   const session = list('sessions').find((s) => s.status === 'active');
+  assert.equal(session.tz, TZ, 'a session started by the coach carries the zone of the phone he talks from (A3)');
   assert.ok(session);
   assert.deepEqual(actions.at(-1), { kind: 'open', url: `#/session/${session.id}`, label: 'Open the session' });
   assert.match((await call('start_session')).text, /Session in progress: Legs/, 'one session at a time');

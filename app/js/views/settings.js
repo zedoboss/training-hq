@@ -2,8 +2,8 @@
 // Settings are synced documents (col 'settings', ids 'main' and 'equipment'); every change saves at once.
 import { appVersion, latestVersion, checkForUpdate, reloadAppFiles } from '../lib/sw-client.js';
 import { getState, subscribe } from '../lib/store.js';
-import { ready, pair, unpair, syncNow, newPairingCode, sameOriginMac, saveSettings, saveEquipment } from '../lib/data.js';
-import { formatTime, formatDay, formatHm } from '../lib/time.js';
+import { ready, pair, unpair, syncNow, newPairingCode, sameOriginMac, saveSettings, saveEquipment, saveHomeZone } from '../lib/data.js';
+import { formatTime, formatDay, formatHm, deviceTimeZone, placeOf } from '../lib/time.js';
 import { editMealTimes } from './fuel.js';
 import { REST_CHOICES, restText, SOUNDS, WEEK_DAYS, PLATE_CHOICES, withDefaults, equipmentWithDefaults, cleanWarmupSteps, smallestPlate } from '../lib/settings.js';
 import { EQUIPMENT } from '../lib/exercise-types.js';
@@ -38,6 +38,17 @@ const seg = (name, options, value) => `<div class="seg" role="group">${options.m
 const sw = (name, on) => `<input class="switch" type="checkbox" role="switch" data-s="${name}" ${on ? 'checked' : ''}>`;
 const opt = (text, sub, control) => `<div class="opt"><div class="opt-text">${text}${sub ? `<small>${sub}</small>` : ''}</div>${control}</div>`;
 const restOptions = REST_CHOICES.map((x) => [x, restText(x)]);
+
+/** A3: the home zone (logs without a zone of their own are shown in it), and where this device is now. */
+function zoneRow() {
+  const home = getState().homeZone;
+  const here = deviceTimeZone();
+  let all = [];
+  try { all = Intl.supportedValuesOf('timeZone'); } catch { all = []; }
+  const zones = [...new Set([home, here, ...all].filter(Boolean))];
+  return `${opt('Home time zone', `Old history (Strong, Hevy, and logs from before zones were kept) shows in ${esc(placeOf(home || here))} time. New logs keep the zone they were made in; times from another zone say so ("5:30 AM Skopje time"). Reminders follow this phone: now ${esc(placeOf(here))}.`, '')}
+      <div class="opt"><select class="input" id="home-zone" aria-label="Home time zone">${home ? '' : '<option value="" selected>Not set (this device\'s zone)</option>'}${zones.map((z) => `<option value="${esc(z)}" ${z === home ? 'selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`).join('')}</select></div>`;
+}
 const EQ_LABEL = { smith: 'Smith machine', barbell: 'Barbell', machine: 'Plate machine', cable: 'Cable', plate: 'Plate', kettlebell: 'Kettlebell', dumbbell: 'Dumbbell', band: 'Band', other: 'Other' };
 const BAR_EQUIPMENT = EQUIPMENT.filter((e) => e !== 'bodyweight' && e !== 'band');
 
@@ -110,6 +121,7 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('First day of the week', 'Calendar, weekly sets and streaks', '')}
       ${seg('firstDayOfWeek', WEEK_DAYS, st.firstDayOfWeek)}
+      ${zoneRow()}
     </div>
     <div class="section-label">Gym</div>
     <div class="card opt-list">
@@ -161,6 +173,10 @@ function wirePrefs(box) {
 
   box.addEventListener('change', async (e) => {
     const t = e.target;
+    if (t.id === 'home-zone') {
+      if (t.value) { await saveHomeZone(t.value); toast(`Old history now shows in ${placeOf(t.value)} time.`); }
+      return;
+    }
     if (t.dataset.s) {
       const path = t.dataset.s;
       let v = t.type === 'checkbox' ? t.checked : t.value;

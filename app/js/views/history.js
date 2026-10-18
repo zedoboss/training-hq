@@ -2,7 +2,7 @@
 // (Training HQ, Hevy or Strong). Search by exercise; filter by app. Tap a session to open it.
 import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { ready } from '../lib/data.js';
-import { formatDate, formatTime } from '../lib/time.js';
+import { formatDate, formatTime, timeAt, fullDateAt } from '../lib/time.js';
 import { SOURCE_LABEL } from '../lib/calendar.js';
 import { sessionRows, filterRows, byMonth, sourceCounts } from '../lib/session-list.js';
 
@@ -18,7 +18,7 @@ const mins = (ms) => (ms == null ? '' : `${Math.round(ms / 60000)} min`);
 function row(r) {
   return `<li><a class="lib-row hist-row" href="#/finish/${esc(r.id)}/h">
     <span class="hist-title"><i class="dot t-${esc(r.dayType || 'other')}"></i><span class="lib-name">${esc(r.title)}</span></span>
-    <span class="lib-meta">${esc(formatDate(new Date(r.startedAt)))} · ${esc(formatTime(new Date(r.startedAt)))}${r.durationMs != null ? ` · ${mins(r.durationMs)}` : ''} · ${r.sets} set${r.sets === 1 ? '' : 's'} · ${r.volume.toLocaleString('en-US')} kg</span>
+    <span class="lib-meta">${esc(fullDateAt(r.startedAt, r))} · ${esc(timeAt(r.startedAt, r))}${r.durationMs != null ? ` · ${mins(r.durationMs)}` : ''} · ${r.sets} set${r.sets === 1 ? '' : 's'} · ${r.volume.toLocaleString('en-US')} kg</span>
     ${r.hits ? `<span class="hist-hits">${r.hits.map((h) => esc(h)).join(' · ')}</span>` : ''}
     <span class="tag">${esc((SOURCE_LABEL[r.source] || r.source).toUpperCase())}</span>
   </a></li>`;

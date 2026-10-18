@@ -12,7 +12,7 @@
 // some of the good reps were estimated).
 import SquatCore from './squat-core.js';
 import { setFields } from './exercise-types.js';
-import { isoDate, formatTime } from './time.js';
+import { isoDate, formatTime, zoneOf } from './time.js';
 
 const round1 = (x) => Math.round(x * 10) / 10;
 const rand = () => Math.random().toString(36).slice(2, 8);
@@ -173,6 +173,6 @@ export function squatMarks(runs = [], tz) {
     date: isoDate(new Date(r.startedAt), tz),
     kind: 'squat',
     id: r.id,
-    label: `Squat Depth ${formatTime(new Date(r.startedAt), tz)} · ${runText(r)}${r.exerciseName ? ` · ${r.exerciseName}` : ''}`,
+    label: `Squat Depth ${formatTime(new Date(r.startedAt), zoneOf(r, tz))} · ${runText(r)}${r.exerciseName ? ` · ${r.exerciseName}` : ''}`,
   }));
 }

@@ -7,7 +7,7 @@ import { buildHistory } from '../lib/history.js';
 import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
-import { isoDate, formatTime, formatDay } from '../lib/time.js';
+import { isoDate, formatTime, formatDay, timeAt, zoneOf } from '../lib/time.js';
 import { kg as fmtKg, platesPerSide } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
 import { pickExercises } from '../ui/picker.js';
@@ -151,7 +151,7 @@ export function render(view, params = []) {
       el.querySelector('[data-k="vol"]').textContent = sum.volume.toLocaleString('en-US');
       el.querySelector('[data-k="sets"]').textContent = `${sum.done} / ${sum.total}`;
       el.querySelector('[data-k="started"]').textContent = `EDITING A SAVED SESSION`;
-      el.querySelector('[data-k="eta"]').textContent = `${formatTime(new Date(session.startedAt))} - ${formatTime(new Date(session.endedAt))}`;
+      el.querySelector('[data-k="eta"]').textContent = `${formatTime(new Date(session.startedAt), zoneOf(session))} - ${timeAt(session.endedAt, session)}`;
       return;
     }
     const now = Date.now();
@@ -163,7 +163,7 @@ export function render(view, params = []) {
     el.querySelector('[data-k="paused"]').hidden = !session.pausedAt;
     el.querySelector('[data-k="started"]').textContent = session.logFor
       ? `LOGGING FOR ${formatDay(new Date(`${session.logFor}T12:00:00`)).toUpperCase()}`
-      : `STARTED ${formatTime(new Date(session.startedAt))} · ${elapsedMin} MIN AGO`;
+      : `STARTED ${timeAt(session.startedAt, session).toUpperCase()} · ${elapsedMin} MIN AGO`;
     el.querySelector('[data-k="eta"]').textContent = eta
       ? `FINISH ~${formatTime(new Date(eta.at))} · ${Math.max(0, Math.round(eta.leftMs / 60000))} MIN LEFT`
       : 'FINISH ~ · LOG A FEW SETS';

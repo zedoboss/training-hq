@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { MAX_DEMO_BYTES } from './demos.mjs';
+import { validZone } from '../app/js/lib/time.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -292,7 +293,7 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const emit = (e) => { if (open && !res.writableEnded) res.write(`${JSON.stringify(e)}\n`); };
       const ping = setInterval(() => emit({ type: 'ping' }), 10000);
       try {
-        await coach.send({ text, model, tz: typeof tz === 'string' && tz.length < 64 ? tz : null, deviceId: device.id, emit });
+        await coach.send({ text, model, tz: typeof tz === 'string' && tz.length < 64 && validZone(tz) ? tz : null, deviceId: device.id, emit });
       } catch (e) {
         emit({ type: 'error', error: e.message });
       } finally {
@@ -354,7 +355,7 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const emit = (e) => { if (open && !res.writableEnded) res.write(`${JSON.stringify(e)}\n`); };
       const ping = setInterval(() => emit({ type: 'ping' }), 10000);
       try {
-        await voice.utterance({ bytes, deviceId: device.id, model, tz: tz && tz.length < 64 ? tz : null, emit });
+        await voice.utterance({ bytes, deviceId: device.id, model, tz: tz && tz.length < 64 && validZone(tz) ? tz : null, emit });
       } catch (e) {
         if (!e.status) log(`voice utterance: ${e.stack || e}`);
         emit({ type: 'error', error: e.message });

@@ -4,7 +4,7 @@
 import { ready } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
-import { isoDate, formatDate, formatTime } from '../lib/time.js';
+import { isoDate, formatDate, formatTime, timeAt, zoneOf } from '../lib/time.js';
 import { addMonths, monthOf } from '../lib/stats.js';
 import { elapsedMs } from '../lib/session.js';
 import {
@@ -142,7 +142,7 @@ function dayPanel(day, marks, ctx, today) {
       const mins = s.endedAt ? Math.round(elapsedMs(s) / 60000) : null;
       return `<article class="card day-sess">
         <div class="day-sess-head"><i class="dot t-${c}"></i><b>${esc(s.title)}</b><span class="tag">${esc((SOURCE_LABEL[source] || source).toUpperCase())}</span></div>
-        <div class="hint">${esc(formatTime(new Date(s.startedAt)))}${s.endedAt ? ` - ${esc(formatTime(new Date(s.endedAt)))}` : ''}${mins != null ? ` · ${mins} min` : ''} · ${plural(sets, 'set')}</div>
+        <div class="hint">${esc(s.endedAt ? formatTime(new Date(s.startedAt), zoneOf(s)) : timeAt(s.startedAt, s))}${s.endedAt ? ` - ${esc(timeAt(s.endedAt, s))}` : ''}${mins != null ? ` · ${mins} min` : ''} · ${plural(sets, 'set')}</div>
         ${exercises.map((e) => `<div class="day-ex"><div class="day-ex-name">${esc(e.name)}${e.importedName ? ` <span class="c-faint">(${esc(e.importedName)} in ${esc(SOURCE_LABEL[source] || source)})</span>` : ''}</div>
           <div class="day-sets">${e.sets.map((t) => `<span>${esc(t)}</span>`).join('')}</div></div>`).join('')}
         ${s.note ? `<p class="hint">Note: ${esc(s.note)}</p>` : ''}

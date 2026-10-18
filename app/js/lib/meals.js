@@ -9,7 +9,7 @@
 // meal-estimates written by the Mac only, so his edits and its answers never overwrite each other:
 //                {id: '<mealId>.<kind>', mealId, kind, photoId, round, status: 'done'|'failed', at, model,
 //                 scaleG, items (before) | leftovers (after), notes, error, tries}
-import { isoDate, formatTime } from './time.js';
+import { isoDate, formatTime, zoneOf } from './time.js';
 
 export const MEAL_NAMES = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
 /** Minutes after the before photo when the app asks for the after photo (brief: about 25). */
@@ -194,4 +194,4 @@ export function mealMarks(meals = [], estimates = [], tz) {
 }
 
 /** "Lunch · 1:04 PM" */
-export const mealTitle = (meal, tz) => `${meal.name} · ${formatTime(new Date(meal.at), tz)}`;
+export const mealTitle = (meal, tz) => `${meal.name} · ${formatTime(new Date(meal.at), zoneOf(meal, tz))}`;

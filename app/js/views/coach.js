@@ -6,7 +6,7 @@
 import { ready, syncNow, coachSend, macPost, saveSettings } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
-import { formatDay, formatTimeSec, formatTime, isoDate } from '../lib/time.js';
+import { formatDay, formatTimeSec, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
 import * as rest from '../lib/rest-timer.js';
 import { conversationOf, MODEL_LABEL, toolLabel, runAction, textHtml } from '../lib/coach.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
@@ -228,7 +228,7 @@ function renderNotes(view) {
           || '<p class="hint pad">None set.</p>'}</section>
         <div class="section-label">Notes · ${sorted.length}</div>
         <section class="card supp-group">${sorted.map((n) => `<div class="supp-item" data-note="${esc(n.id)}"><div class="supp-main"><b>${textHtml(n.text)}</b>
-          <span class="hint">${esc(formatDay(new Date(n.at)))}, ${esc(formatTime(new Date(n.at)))}${n.topic ? ` · ${esc(n.topic)}` : ''}</span></div><span class="supp-btns"><button class="btn-ghost small" type="button" data-del>Delete</button></span></div>`).join('')
+          <span class="hint">${esc(dayAt(n.at, n))}, ${esc(timeAt(n.at, n))}${n.topic ? ` · ${esc(n.topic)}` : ''}</span></div><span class="supp-btns"><button class="btn-ghost small" type="button" data-del>Delete</button></span></div>`).join('')
           || '<p class="hint pad">No notes yet.</p>'}</section>`;
       view.querySelectorAll('[data-rem] [data-cancel]').forEach((b) => b.addEventListener('click', async () => {
         const r = rems.find((x) => x.id === b.closest('[data-rem]').dataset.rem);

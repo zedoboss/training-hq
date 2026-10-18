@@ -8,7 +8,7 @@ import SquatCore from '../lib/squat-core.js';
 import { MP_LOCAL as mpLocal, MODEL_LOCAL, offlineStatus, keepOffline, isDownloading, approxBytes, mb } from '../lib/squat-offline.js';
 import { SETTINGS_KEY, startRun, addRepEvent, uncountRep, reviewEstimates, resetReps, summarizeRun, finishRun, fillChoices, fillSet, runText, repDeg, isSquatExercise } from '../lib/squat-log.js';
 import { ready } from '../lib/data.js';
-import { formatDay, formatTime } from '../lib/time.js';
+import { formatDay, formatTime, timeAt, dayAt } from '../lib/time.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import { overlay, actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -805,14 +805,14 @@ async function drawRuns() {
   if (tl) tl.textContent = last ? `LAST ${last.good} REPS · LOW ${Math.round(last.lowDeg)}° · TARGET ${settings.targetDeg}°` : `TARGET ${settings.targetDeg}°`;
   if (!$('runs')) return;
   box.innerHTML = runs.slice(0, 8).map((r) => `<li class="sq-run-row">
-      <div><b>${esc(formatDay(new Date(r.startedAt)))}, ${esc(formatTime(new Date(r.startedAt)))}</b>
+      <div><b>${esc(dayAt(r.startedAt, r))}, ${esc(timeAt(r.startedAt, r))}</b>
         <div class="hint">${esc(runText(r))}${r.exerciseName ? ` · ${esc(r.exerciseName)}` : ''}</div>
         <div class="hud sq-reps">${r.reps.map(repSpan).join(' ')}</div></div>
       <button class="icon-mini" data-run="${esc(r.id)}" type="button" aria-label="Options for this run">···</button></li>`).join('')
     || '<li class="hint pad">No runs yet. Each camera run with at least one rep is kept here and on the calendar.</li>';
   box.querySelectorAll('[data-run]').forEach((b) => b.addEventListener('click', () => {
     const r = runs.find((x) => x.id === b.dataset.run);
-    actionSheet(`${formatDay(new Date(r.startedAt))}, ${formatTime(new Date(r.startedAt))}`, [
+    actionSheet(`${dayAt(r.startedAt, r)}, ${timeAt(r.startedAt, r)}`, [
       { label: 'Delete this run', danger: true, run: async () => { if (await confirmSheet('Delete this Squat Depth run? A set it filled keeps its reps.', { ok: 'Delete', danger: true })) await repo.remove('squats', r.id); } },
     ]);
   }));

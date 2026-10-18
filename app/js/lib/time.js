@@ -103,3 +103,61 @@ export function hmOf(date, tz) {
   const p = parts(date, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, tz);
   return `${p.hour}:${p.minute}`;
 }
+
+// ---- Where a log happened (A3) ------------------------------------------------------------------------------------
+// Every new log records the time zone it was made in (tz). It is shown in that zone's local time, with the place
+// named when that clock differs from this device's now ("5:30 AM Skopje time"). Logs without a zone (all history
+// before this, and imports) are in the home zone (the synced doc settings/zones, set by setHomeZone at start).
+
+/** Collections whose new records carry the zone they were made in. */
+export const LOGGED_COLS = new Set(['sessions', 'meals', 'supp-log', 'sauna', 'squats', 'body-photos', 'measurements', 'body-scans', 'coach-notes', 'coach-messages', 'meal-checks']);
+
+let homeZone = null;
+export const setHomeZone = (tz) => { homeZone = validZone(tz) ? tz : null; };
+export const getHomeZone = () => homeZone;
+
+/** A zone Intl knows. */
+export function validZone(tz) {
+  if (!tz || typeof tz !== 'string') return false;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
+}
+
+/** The zone a record happened in: its own, else `fallback`, else the home zone, else this device's. */
+export const zoneOf = (rec, fallback = null) => (validZone(rec?.tz) ? rec.tz : fallback || homeZone || deviceTimeZone());
+
+/** A new record of a logged collection, stamped with the zone it is made in (kept if it already has one). */
+export const withZone = (col, data, tz = deviceTimeZone()) => (LOGGED_COLS.has(col) && data && typeof data === 'object' && !data.tz ? { ...data, tz } : data);
+
+/** "Ho Chi Minh City", "Skopje", "New York": the place part of an IANA zone. */
+export function placeOf(tz) {
+  const city = String(tz || '').split('/').pop().replace(/_/g, ' ');
+  return city === 'Ho Chi Minh' || city === 'Saigon' ? 'Ho Chi Minh City' : city || 'UTC';
+}
+
+/** Minutes the zone's clock is ahead of UTC at that moment. */
+export function offsetMin(ms, tz) {
+  const p = parts(new Date(ms), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, tz);
+  return Math.round((Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute)) - Math.floor(ms / 60000) * 60000) / 60000);
+}
+
+/** The record's zone when its clock at that moment differs from this device's zone now, else null. */
+export function awayZone(ms, rec, here = deviceTimeZone()) {
+  const z = zoneOf(rec);
+  return z !== here && offsetMin(ms, z) !== offsetMin(ms, here) ? z : null;
+}
+
+/** "5:30 AM", or "5:30 AM Skopje time" when it happened on another clock than this device's. */
+export function timeAt(ms, rec, here) {
+  const z = zoneOf(rec);
+  const away = awayZone(ms, rec, here);
+  return `${formatTime(new Date(ms), z)}${away ? ` ${placeOf(away)} time` : ''}`;
+}
+
+/** The local date where it happened ("2026-10-17"). */
+export const dateAt = (ms, rec) => isoDate(new Date(ms), zoneOf(rec));
+/** "Saturday 10/17" where it happened. */
+export const dayAt = (ms, rec) => formatDay(new Date(ms), zoneOf(rec));
+/** "Tuesday 10/10/2023" where it happened. */
+export const fullDateAt = (ms, rec) => formatDate(new Date(ms), zoneOf(rec));
+/** " · SKOPJE TIME" style tag for headers, or ''. */
+export const awayTag = (ms, rec, here) => { const z = awayZone(ms, rec, here); return z ? `${placeOf(z)} time` : ''; };

@@ -6,6 +6,7 @@ import { setState } from './store.js';
 import { summarizeProgramme } from './programme.js';
 import { withDefaults, equipmentWithDefaults, mergeDeep } from './settings.js';
 import { lineReader } from './coach.js';
+import { setHomeZone, deviceTimeZone } from './time.js';
 
 let repo = null;
 let timer = null;
@@ -43,8 +44,29 @@ async function refreshProgramme() {
 }
 
 async function refreshSettings() {
-  const [main, equipment] = await Promise.all([repo.get('settings', 'main'), repo.get('settings', 'equipment')]);
-  setState({ settings: withDefaults(main), equipment: equipmentWithDefaults(equipment) });
+  const [main, equipment, zones] = await Promise.all([repo.get('settings', 'main'), repo.get('settings', 'equipment'), repo.get('settings', 'zones')]);
+  // A3: logs without a zone of their own (everything before, and imports) are shown in the home zone.
+  setHomeZone(zones?.home || null);
+  setState({ settings: withDefaults(main), equipment: equipmentWithDefaults(equipment), homeZone: zones?.home || null });
+}
+
+/** Save the home zone (settings/zones). */
+export async function saveHomeZone(tz) {
+  await ready;
+  await repo.put('settings', 'zones', { ...((await repo.get('settings', 'zones')) || {}), home: tz, changedAt: Date.now() });
+}
+
+/**
+ * A3: this device's time zone, kept in the synced doc here/<device> whenever it changes (and twice a day), so the
+ * Mac's reminders follow the phone when he travels.
+ */
+async function reportZone() {
+  const tz = deviceTimeZone();
+  const last = await repo.getMeta('zoneReported');
+  if (last?.tz === tz && Date.now() - last.at < 12 * 3600000) return;
+  const phone = /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+  await repo.put('here', repo.device, { device: repo.device, tz, at: Date.now(), phone });
+  await repo.setMeta('zoneReported', { tz, at: Date.now() });
 }
 
 /** Save settings: 'main' takes a patch deep-merged over the current values; 'equipment' is saved whole. */
@@ -325,9 +347,10 @@ function scheduleSync(ms) {
 }
 
 function startLoop() {
+  reportZone().catch(() => {});
   scheduleSync(300);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') scheduleSync(300);
+    if (document.visibilityState === 'visible') { reportZone().catch(() => {}); scheduleSync(300); }
   });
   window.addEventListener('online', () => scheduleSync(300));
 }

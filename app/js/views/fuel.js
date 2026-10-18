@@ -8,7 +8,7 @@ import { MEAL_NAMES } from '../lib/meals.js';
 import { actionSheet, overlay } from '../ui/sheet.js';
 import { formatHm } from '../lib/time.js';
 import { getState, subscribe } from '../lib/store.js';
-import { isoDate, formatDay, formatTime, daysBetween } from '../lib/time.js';
+import { isoDate, formatDay, formatTime, daysBetween, timeAt } from '../lib/time.js';
 import { addDays } from '../lib/rotation.js';
 import { dayTotals, mealTotals, mealState, STATE_SHORT } from '../lib/meals.js';
 import { logMealFromFile, logMealManual, cameraInput } from './meal.js';
@@ -153,7 +153,7 @@ export function render(view, params) {
         const img = thumb.get(m.before?.photoId);
         return `<li><a class="card meal-item" href="#/meal/${esc(m.id)}">
           ${img ? `<img class="meal-thumb" src="${img}" alt="">` : '<span class="meal-thumb is-empty" aria-hidden="true"></span>'}
-          <span class="meal-item-main"><b>${esc(m.name)}</b> <span class="c-muted">${esc(formatTime(new Date(m.at)))}</span>
+          <span class="meal-item-main"><b>${esc(m.name)}</b> <span class="c-muted">${esc(timeAt(m.at, m))}</span>
             <span class="hint">${mt.known ? `${n0(mt.kcal)} kcal · ${Math.round(mt.protein * 10) / 10} g protein${mt.estimated ? ' · estimate' : ''}` : ''}</span></span>
           <span class="hud ${s === 'done' ? 'c-green' : 'c-amber'} meal-state">${esc(STATE_SHORT[s])}</span></a></li>`;
       }).join('')}</ul>`;

@@ -11,7 +11,7 @@
 import { ready, saveSettings, syncNow } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
-import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, hmOf, zonedTime } from '../lib/time.js';
+import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, hmOf, zonedTime, timeAt } from '../lib/time.js';
 import { addDays, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import {
   EVERY_DAYS, PROTOCOL, WHEN, SAFETY_TEXT, SAFETY_ASK, STAFF_QUESTIONS, protocolOf, scanStatus, confirmDate, cancelDate,
@@ -140,7 +140,7 @@ function home(view) {
       <div class="section-label">Scans · ${done.length}</div>
       ${unsaved.map((x) => `<a class="card confirm-card sauna-resume" href="#/body/scan/r/${esc(x.date)}"><span class="hud c-amber">RESULTS NOT SAVED</span><span>${esc(dayName(x.date))}: check and save</span></a>`).join('')}
       <ul class="lib-list" id="sc-history">${done.map((x) => { const notes = conditionNotes(x, items); const key = ['weightKg', 'fatPercent', 'muscleMassKg'].map((k) => [k, metricValue(x, k)]).filter(([, v]) => v != null);
-        return `<li><a class="lib-row sc-hist" href="#/body/scan/r/${esc(x.date)}"><span class="lib-name">${esc(dayName(x.date))}${x.at ? `, ${esc(formatTime(new Date(x.at)))}` : ''}</span>
+        return `<li><a class="lib-row sc-hist" href="#/body/scan/r/${esc(x.date)}"><span class="lib-name">${esc(dayName(x.date))}${x.at ? `, ${esc(timeAt(x.at, x))}` : ''}</span>
           <span class="lib-meta">${key.map(([k, v]) => (k === 'weightKg' ? `${v} kg` : k === 'fatPercent' ? `${v}% fat` : `${v} kg muscle`)).join(' · ') || `${x.metrics.length} numbers`}</span>
           <span class="lib-meta ${notes.length ? 'c-amber' : 'c-green'}">${notes.length ? `Different conditions: ${esc(notes.join('; '))}` : 'Usual conditions'}</span></a></li>`; }).join('') || '<li class="hint pad">No scans yet.</li>'}</ul>
       ${done.length ? `<a class="card supp-card" href="#/body/scan/trends" id="sc-trends"><span class="hud c-cyan">TRENDS</span><span class="supp-card-line">${done.length > 1 ? 'Every number across your scans, beside body weight and training volume' : 'Changes show from your second scan'}</span><span class="pill is-on">Open</span></a>` : ''}
@@ -517,7 +517,7 @@ function trends(view, pick) {
         <span class="hud c-muted">${esc((metric?.label || '').toUpperCase())}${metric?.unit ? ` (${esc(metric.unit.toUpperCase())})` : ''} · ${series.length} SCAN${series.length === 1 ? '' : 'S'}</span>
         <div class="chart-box" id="tr-mchart">${mChart.svg}</div>
         <p class="hint">${pts.some((p) => p.flag) ? 'Hollow amber point: taken under different conditions, not directly comparable. ' : ''}Numbers exactly as the scanner reported them.</p>
-        ${tableView(['Scan', 'Value', 'Conditions'], [...series].reverse().map((p) => [dayName(p.date) + (p.at ? `, ${formatTime(new Date(p.at))}` : ''), val(p), p.notes.length ? `Different: ${p.notes.join('; ')}` : 'Usual']))}
+        ${tableView(['Scan', 'Value', 'Conditions'], [...series].reverse().map((p) => [dayName(p.date) + (p.at ? `, ${timeAt(p.at, p)}` : ''), val(p), p.notes.length ? `Different: ${p.notes.join('; ')}` : 'Usual']))}
       </section>
       <section class="card pad-card chart-card" id="tr-weight">
         <span class="hud c-muted">BODY WEIGHT (${wu.toUpperCase()}) · SAME DATES</span>

@@ -6,7 +6,7 @@
 import { ready } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
-import { isoDate, formatHm, formatDay, formatTime } from '../lib/time.js';
+import { isoDate, formatHm, formatDay, formatTime, timeAt } from '../lib/time.js';
 import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFrom, scheduledOn, logId, streak } from '../lib/supplements.js';
 import { addDays } from '../lib/rotation.js';
 import { actionSheet, promptText, promptLong, confirmSheet } from '../ui/sheet.js';
@@ -93,7 +93,7 @@ function renderDay(view, repo, alive, dateParam) {
       return `<div class="supp-item ${e ? `is-${e.status}` : ''}" data-id="${esc(s.id)}">
         <div class="supp-main"><b>${esc(s.name)}</b><span class="hint">${esc(i.dose)}${restDose ? ' · rest day' : s.doseRest ? ' · training day' : ''}${s.withFood ? ` · ${esc(FOOD_TEXT[s.withFood])}` : ''}${(() => { const k = stockStatus(s, log); return k ? ` · <span class="${k.low ? 'c-amber' : ''}">${k.left} left</span>` : ''; })()}</span>
           ${e?.status === 'skipped' ? `<span class="hint c-amber">Skipped${e.reason ? `: ${esc(e.reason)}` : ''}</span>` : ''}</div>
-        ${e ? `<span class="supp-done"><span class="hud ${e.status === 'taken' ? 'c-green' : 'c-amber'}">${e.status === 'taken' ? `TAKEN ${esc(formatTime(new Date(e.at)))}` : 'SKIPPED'}</span>
+        ${e ? `<span class="supp-done"><span class="hud ${e.status === 'taken' ? 'c-green' : 'c-amber'}">${e.status === 'taken' ? `TAKEN ${esc(timeAt(e.at, e).toUpperCase())}` : 'SKIPPED'}</span>
           <button class="link-btn" type="button" data-undo>Undo</button></span>`
           : '<span class="supp-btns"><button class="btn-primary small" type="button" data-take>Taken</button><button class="btn-ghost small" type="button" data-skip>Skip</button></span>'}
       </div>`;

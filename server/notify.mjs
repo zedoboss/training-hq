@@ -4,7 +4,7 @@
 // late (the Mac was asleep or off) is skipped rather than sent late.
 import { remindersFor, dueNow, reminderState } from '../app/js/lib/reminders.js';
 import { addDays } from '../app/js/lib/rotation.js';
-import { isoDate, deviceTimeZone } from '../app/js/lib/time.js';
+import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 
 const SENT = 'notify:sent';
 
@@ -27,15 +27,28 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
   return [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }));
 }
 
-export function startNotifier({ store, push, log = () => {}, tz = deviceTimeZone(), now = () => Date.now(), everyMs = 60000 }) {
+/**
+ * Where he is (A3: reminders follow the phone's current zone): the zone a phone reported last (doc here/<device>,
+ * written by the app when its zone changes), else any device's latest, else the Mac's own.
+ */
+export function phoneZone(store, fallback = deviceTimeZone()) {
+  const here = store.listRecords('here').filter((r) => !r.deleted).map((r) => r.data).filter((d) => d && validZone(d.tz));
+  const latest = (xs) => xs.sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+  return (latest(here.filter((d) => d.phone)) || latest(here))?.tz || fallback;
+}
+
+export function startNotifier({ store, push, log = () => {}, tz = () => phoneZone(store), now = () => Date.now(), everyMs = 60000 }) {
   let busy = false;
+  let lastZone = null;
   async function tick() {
     if (busy) return [];
     busy = true;
     try {
       const t = now();
+      const zone = typeof tz === 'function' ? tz() : tz;
+      if (zone !== lastZone) { if (lastZone) log(`notify: reminders now follow ${zone}`); lastZone = zone; }
       const sent = store.getMeta(SENT) || {};
-      const items = dueNow(plan(store, t, tz), t, sent);
+      const items = dueNow(plan(store, t, zone), t, sent);
       if (!items.length) return [];
       if (!push.list().length) return [];
       for (const i of items) {
