@@ -29,6 +29,9 @@ export function cleanTranscript(text, hint = '') {
   if (!/[\p{L}\p{N}]/u.test(t)) return '';
   if (MADE_UP.some((re) => re.test(t))) return '';
   const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  // Whisper sometimes writes a short command twice ("Start the timer. Start the timer."): once is what he said.
+  const parts = t.match(/[^.!?]+[.!?]*/g) || [t];
+  t = parts.filter((p, i) => i === 0 || norm(p) !== norm(parts[i - 1])).join('').replace(/\s+/g, ' ').trim();
   const h = norm(hint);
   // Several of the hint's sentences in a row is Whisper repeating its prompt; one short command is him.
   if (h && t.split(/[.!?]+/).filter((x) => x.trim()).length >= 2 && h.includes(norm(t))) return '';

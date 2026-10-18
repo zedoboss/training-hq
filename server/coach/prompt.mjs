@@ -38,7 +38,7 @@ QUIET
 - During a set or a hold, say nothing unless he asks. After a set, speak only if the logged set differs from the target or breaks a rule. Nothing between sets unless he asks.`;
 
 /** Added to the context of a message he said out loud (step 9). */
-export const VOICE_NOTE = 'He said this out loud; the app turned it into text (speech recognition can mishear, mostly numbers: "84 8" may be "80 for 8"; if a number looks wrong, ask). Your answer is spoken aloud by the app: one or two short sentences, no lists, no symbols. If he just logged a set that matches today\'s target and breaks no rule, answer with exactly "Logged." (the app plays a tick instead of speaking).';
+export const VOICE_NOTE = 'He said this out loud; the app turned it into text. Speech recognition mishears numbers, above all "for" as 4: "84 8" or "84.8" may be "80 for 8", "56.348" may be "56.3 for 8". If exactly one reading matches the target of the exercise he is on (same kg, reps in range), log that reading and say the numbers back; otherwise ask in one short line. Your answer is spoken aloud by the app: one or two short sentences, no lists, no symbols. If he just logged a set exactly as he said it, it matches today\'s target and breaks no rule, answer with exactly "Logged." (the app plays a tick instead of speaking).';
 
 /** The whole system prompt: the rules, then his profile (private). */
 export function systemPrompt({ profile = '' } = {}) {

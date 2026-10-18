@@ -177,6 +177,8 @@ test('voice routes: status, calibration, test, forget; a token is needed; strict
 test('transcript cleaning: music marks, made-up lines and the hint repeated back are dropped', async () => {
   const { cleanTranscript } = await import('../server/voice/whisper.mjs');
   assert.equal(cleanTranscript(' 80 for 8.\n'), '80 for 8.');
+  assert.equal(cleanTranscript(' Start the timer.\n Start the timer.\n'), 'Start the timer.');
+  assert.equal(cleanTranscript('Next. Then next.'), 'Next. Then next.');
   assert.equal(cleanTranscript('[Music]'), '');
   assert.equal(cleanTranscript('♪ la la la ♪'), '');
   assert.equal(cleanTranscript('(upbeat music) Next exercise'), 'Next exercise');

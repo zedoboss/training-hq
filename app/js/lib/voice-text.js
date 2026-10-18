@@ -84,3 +84,28 @@ export function sentenceSplitter() {
     flush() { const rest = buf.trim(); buf = ''; return rest ? [rest] : []; },
   };
 }
+
+/**
+ * Quiet rule for spoken replies (9.9, brief section 4): after a set, speak only if it differs from the target or
+ * breaks a rule. The coach answers a plain logged set with exactly "Logged."; that is a tick sound, not words. The
+ * first sentence waits for a second one (or the end) to tell the two apart.
+ * sentence(s) returns the sentences to speak now; end() returns {speak, tick}.
+ */
+export function replyGate() {
+  let first = null; let count = 0;
+  return {
+    sentence(s) {
+      count++;
+      if (count === 1) { first = s; return []; }
+      const out = first != null ? [first, s] : [s];
+      first = null;
+      return out;
+    },
+    end() {
+      const f = first; first = null;
+      if (f == null) return { speak: [], tick: false };
+      if (count === 1 && /^logged\.?$/i.test(f.trim())) return { speak: [], tick: true };
+      return { speak: [f], tick: false };
+    },
+  };
+}

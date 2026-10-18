@@ -8,7 +8,7 @@ import { micSession } from './voice-rec.js';
 import { audioContext } from './voice-mic.js';
 import { createPlayer } from './voice-player.js';
 import { encodeWav } from './wav.js';
-import { sentenceSplitter } from './voice-text.js';
+import { sentenceSplitter, replyGate } from './voice-text.js';
 import { voiceUtterance, voiceSpeech, macGet, macPost, macSendRaw, syncNow } from './data.js';
 import { getState } from './store.js';
 import { withDefaults } from './settings.js';
@@ -79,9 +79,8 @@ async function turn(wav, { overCoach: echo = false } = {}) {
   turnsInFlight++;
   if (!player.speaking) setPhase('thinking');
   const split = sentenceSplitter();
-  const said = []; let first = null; let ok = false;
-  // The first sentence waits for the second (or the end): a lone "Logged." is a tick, not words (quiet rule 9.9).
-  const sentence = (s) => { if (first == null && !said.length) { first = s; return; } if (first != null) { speak(first); said.push(first); first = null; } speak(s); said.push(s); };
+  const gate = replyGate(); let ok = false;
+  const sentence = (s) => { for (const x of gate.sentence(s)) speak(x); };
   try {
     const st = prefs();
     await voiceUtterance({
@@ -102,11 +101,9 @@ async function turn(wav, { overCoach: echo = false } = {}) {
           runAction(e.action, deps);
         } else if (e.type === 'done') {
           for (const s of split.flush()) sentence(s);
-          if (first != null) {
-            if (/^logged\.?$/i.test(first.trim())) play('tick', st.sounds.tickVolume);
-            else speak(first);
-            first = null;
-          }
+          const end = gate.end();
+          for (const x of end.speak) speak(x);
+          if (end.tick && st.voice.speak) play('tick', st.sounds.tickVolume);
         } else if (e.type === 'error') {
           error = e.error;
         }

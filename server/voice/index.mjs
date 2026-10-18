@@ -92,7 +92,8 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
       return null;
     }
     if (!whisper) throw fail(503, 'speech to text not available');
-    const raw = await whisper.transcribe(encodeWav(normalise(c.samples)), hint());
+    // No vocabulary hint: with one, Whisper wrote short commands twice in testing; without, names came out right.
+    const raw = await whisper.transcribe(encodeWav(normalise(c.samples)));
     const text = cleanTranscript(raw.text, hint());
     if (!text) {
       log(`voice: no words (${raw.ms} ms)`);

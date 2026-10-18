@@ -72,3 +72,36 @@ test('sentence splitter: whole sentences as they complete, decimals kept togethe
   assert.deepEqual(s.flush(), ['Drop to 60.']);
   assert.deepEqual(s.flush(), []);
 });
+
+test('quiet rule: a lone "Logged." is a tick; anything more is spoken in order', async () => {
+  const { replyGate } = await import('../app/js/lib/voice-text.js');
+  let g = replyGate();
+  assert.deepEqual(g.sentence('Logged.'), []);
+  assert.deepEqual(g.end(), { speak: [], tick: true });
+  g = replyGate();
+  assert.deepEqual(g.sentence('Logged.'), []);
+  assert.deepEqual(g.sentence('That is a comeback best.'), ['Logged.', 'That is a comeback best.']);
+  assert.deepEqual(g.sentence('Rest 3:00.'), ['Rest 3:00.']);
+  assert.deepEqual(g.end(), { speak: [], tick: false });
+  g = replyGate();
+  assert.deepEqual(g.sentence('Legs today.'), []);
+  assert.deepEqual(g.end(), { speak: ['Legs today.'], tick: false });
+  assert.deepEqual(replyGate().end(), { speak: [], tick: false });
+});
+
+test('quiet times: on while any reason is on; the end is announced once', async () => {
+  const { setQuiet, isQuiet, onQuietEnd } = await import('../app/js/lib/quiet.js');
+  let ends = 0;
+  const off = onQuietEnd(() => ends++);
+  setQuiet('hold', true); setQuiet('set-timer', true);
+  assert.equal(isQuiet(), true);
+  setQuiet('hold', false);
+  assert.equal(isQuiet(), true);
+  assert.equal(ends, 0);
+  setQuiet('set-timer', false);
+  assert.equal(isQuiet(), false);
+  assert.equal(ends, 1);
+  setQuiet('set-timer', false);
+  assert.equal(ends, 1);
+  off();
+});
