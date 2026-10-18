@@ -46,7 +46,7 @@ self.addEventListener('fetch', (event) => {
 
   if (isVendor(url)) {
     event.respondWith(caches.open(VENDOR_CACHE).then(async (cache) => {
-      const hit = await cache.match(req, { ignoreSearch: true });
+      const hit = await cache.match(req, { ignoreSearch: true, ignoreVary: true }); // module imports send Origin, fetch() doesn't
       if (hit) return hit;
       const res = await fetch(req);
       if (res.ok && res.status === 200) await cache.put(new Request(url.origin + url.pathname), res.clone());

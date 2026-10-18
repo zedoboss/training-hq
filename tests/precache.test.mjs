@@ -25,6 +25,17 @@ test('every file the page needs is in the offline list', () => {
   assert.ok(!files.includes('version.json'), 'the latest-version probe is never cached');
 });
 
+test("Squat Depth's pose files (40 MB) stay out of the per-version list; the worker keeps them in their own store", () => {
+  const { files } = buildPrecache(APP);
+  assert.ok(existsSync(`${APP}vendor/mediapipe/models/pose_landmarker_lite.task`), 'vendored model present');
+  assert.ok(!files.some((f) => f.startsWith('vendor/')), 'no vendor file in the app file list');
+  assert.ok(files.includes('js/lib/squat-core.js') && files.includes('css/squat.css'), 'the Squat Depth screen itself is');
+  const sw = readFileSync(fileURLToPath(new URL('../scripts/sw.template.js', import.meta.url)), 'utf8');
+  assert.match(sw, /const VENDOR_CACHE = 'mediapipe-1\.1\.0'/);
+  assert.match(sw, /ignoreVary: true/, 'module imports send Origin; the stored copy must still match');
+  assert.match(readFileSync(`${APP}js/lib/squat-offline.js`, 'utf8'), /export const VENDOR_CACHE = 'mediapipe-1\.1\.0'/, 'same store name on the page');
+});
+
 test('sw.js itself changes when any app file changes, so iPhone Safari sees the update', () => {
   const dir = mkdtempSync(join(tmpdir(), 'thq-pc-'));
   try {

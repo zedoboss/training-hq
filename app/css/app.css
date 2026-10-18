@@ -365,7 +365,9 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .set-tick { width: 36px; height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--on-pale); display: flex; align-items: center; justify-content: center; cursor: pointer; justify-self: end; }
 .set-row.is-done .set-in { background: var(--green-bg); border-color: transparent; }
 .set-row.is-done .set-tick { background: var(--green); border-color: var(--green); color: #04200f; }
-.s-ex-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 2px; }
+.s-ex-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 2px; }
+.s-ex-foot > .hud { flex: 1 1 140px; min-width: 0; }
+.s-ex-foot > .btn-row { margin-left: auto; }
 .rest-bar { position: sticky; bottom: 0; margin: 4px -16px calc(-14px - var(--safe-bottom)); padding: 10px 16px calc(14px + var(--safe-bottom)); background: var(--surface-2); border-top: 1px solid var(--cyan); display: flex; flex-direction: column; gap: 8px; z-index: 6; }
 .rest-track { height: 4px; border-radius: 2px; background: var(--divider); overflow: hidden; }
 .rest-fill { height: 4px; background: var(--cyan); width: 0; transition: width .25s linear; }

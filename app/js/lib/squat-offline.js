@@ -36,7 +36,7 @@ export async function offlineStatus(model = 'lite') {
   let have = 0;
   let bytes = 0;
   for (const f of files) {
-    const hit = await cache.match(key(f));
+    const hit = await cache.match(key(f), { ignoreVary: true });
     if (!hit) continue;
     have += 1;
     bytes += Number(hit.headers.get('content-length')) || 0;
@@ -56,7 +56,7 @@ export function keepOffline(model = 'lite', onProgress = () => {}) {
     const cache = await caches.open(VENDOR_CACHE);
     const files = await filesFor(model);
     const missing = [];
-    for (const f of files) if (!(await cache.match(key(f)))) missing.push(f);
+    for (const f of files) if (!(await cache.match(key(f), { ignoreVary: true }))) missing.push(f);
     let total = approxBytes(model);
     let done = total - missing.reduce((n, f) => n + (SIZE[sizeName(f)] || 0), 0);
     onProgress({ done, total });
@@ -65,17 +65,18 @@ export function keepOffline(model = 'lite', onProgress = () => {}) {
       if (!res.ok) throw new Error(`${res.status} for ${f.split('/').pop()}`);
       const len = Number(res.headers.get('content-length')) || 0;
       if (len) total += len - (SIZE[sizeName(f)] || 0);
-      const parts = [];
-      const reader = res.body.getReader();
-      for (;;) {
-        const { done: end, value } = await reader.read();
-        if (end) break;
-        parts.push(value);
-        done += value.length;
-        onProgress({ done, total });
-      }
-      const body = new Blob(parts);
-      await cache.put(key(f), new Response(body, { headers: { 'Content-Type': res.headers.get('content-type') || 'application/octet-stream', 'Content-Length': String(body.size) } }));
+      // Store the response exactly as it came (a rebuilt one can't be imported as a module from the store);
+      // count the progress on a copy.
+      const counting = (async () => {
+        const reader = res.clone().body.getReader();
+        for (;;) {
+          const { done: end, value } = await reader.read();
+          if (end) break;
+          done += value.length;
+          onProgress({ done, total });
+        }
+      })();
+      await Promise.all([cache.put(key(f), res), counting]);
     }
     // Ask the browser not to clear this store when space runs low (Home Screen apps usually get it).
     try { await navigator.storage?.persist?.(); } catch { /* not offered */ }
