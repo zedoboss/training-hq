@@ -1,13 +1,14 @@
-// Squat Depth's 51 unit tests (angle math, filter, rep state machine), copied unchanged from the Squat Depth app
-// (tests/run-tests.mjs). Only the loading changed: the logic now lives in app/js/lib/squat-core.js instead of a
-// <script id="core"> block in index.html.
+// Squat Depth's unit tests (angle math, filter, rep state machine, the gym regression), copied unchanged from the
+// Squat Depth app (tests/run-tests.mjs). Only the loading changed: the logic now lives in app/js/lib/squat-core.js
+// instead of a <script id="core"> block in index.html, and the gym clips are tests/squat-gym-clips.json.
 
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import SquatCore from '../app/js/lib/squat-core.js';
 
 const C = SquatCore;
-const { RepMachine, AngleTracker, SidePicker, State, kneeAngle, legProblem } = C;
+const { RepMachine, AngleTracker, KneeGuard, SidePicker, State, kneeAngle, legProblem } = C;
 
 const FPS = 30;
 const DT = 1000 / FPS;
@@ -633,4 +634,161 @@ test('regression: far leg picked while standing, hidden once the knees bend: the
 test('default target is 75 degrees', () => {
   assert.equal(C.TARGET_DEG_DEFAULT, 75);
   assert.equal(new RepMachine().targetDeg, 75);
+});
+
+// ---------- Bottom not seen: no shallow call on a rep whose bottom the camera missed ----------
+
+/** Like feed(), but `null` frames have no trusted reading: time passes and the machine hears nothing. */
+function feedWithGaps(machine, angles, fps = FPS) {
+  const dt = 1000 / fps, events = [];
+  let prev = null;
+  machine._t = machine._t ?? 0;
+  angles.forEach((angle, i) => {
+    machine._t += dt;
+    if (angle === null) return;
+    const vel = prev === null ? 0 : (angle - prev) / dt * 1000;
+    prev = angle;
+    const ev = machine.update(angle, vel, machine._t, dt);
+    if (ev && ev.type !== 'armed') events.push({ ...ev, frame: i, at: angle });
+  });
+  return events;
+}
+const blind = (ms, fps = FPS) => Array(Math.round(ms * fps / 1000)).fill(null);
+
+test('blind spot at the bottom: not called shallow, reported as not seen and not counted', () => {
+  const m = noAnticipation();
+  const events = feedWithGaps(m, [...hold(172, STAND), ...ramp(172, 100), ...hold(100, 2), ...blind(200),
+    ...hold(108, 2), ...ramp(108, 172), ...hold(172, 5)]);
+  assert.deepEqual(types(events), ['unseen']);
+  assert.equal(Math.round(events[0].minAngle), 100);
+  assert.equal(m.unseen, 1);
+  assert.equal(m.shallow + m.good + m.dings, 0);
+  assert.equal(m.lastMin, null, 'no number for a rep it could not measure');
+  assert.equal(m.state, State.STANDING);
+  // The next rep is judged normally.
+  assert.deepEqual(types(feedWithGaps(m, squat(80).slice(STAND))), ['depth', 'rep']);
+});
+
+test('blind spot after he was seen coming back up: still a shallow rep', () => {
+  const m = noAnticipation();
+  const events = feedWithGaps(m, [...hold(172, STAND), ...ramp(172, 100), ...hold(100, 2), ...ramp(100, 115),
+    ...blind(200), ...ramp(125, 172), ...hold(172, 5)]);
+  assert.deepEqual(types(events), ['shallow']);
+  assert.equal(m.unseen, 0);
+});
+
+test('blind spot on the way down that comes back deeper: the bottom is still watched', () => {
+  const m = noAnticipation();
+  const events = feedWithGaps(m, [...hold(172, STAND), ...ramp(172, 120), ...blind(200), ...ramp(116, 100),
+    ...hold(100, 2), ...ramp(100, 172), ...hold(172, 5)]);
+  assert.deepEqual(types(events), ['shallow']);
+  assert.equal(Math.round(m.lastMin), 100);
+});
+
+test('a flicker at the bottom shorter than BOTTOM_GAP_MS does not hide it', () => {
+  const m = noAnticipation();
+  assert.ok(2 * DT < C.BOTTOM_GAP_MS);
+  const events = feedWithGaps(m, [...hold(172, STAND), ...ramp(172, 100), ...hold(100, 2), null, // one lost frame
+    ...hold(106, 2), ...ramp(106, 172), ...hold(172, 5)]);
+  assert.deepEqual(types(events), ['shallow']);
+});
+
+test('tracking lost at the bottom: no shallow call; reported as not seen when he is back standing', () => {
+  const m = noAnticipation();
+  m._keepArmed = true;
+  feed(m, [...hold(172, STAND), ...ramp(172, 100), ...hold(100, 3)]);
+  assert.equal(m.update(110, 0, m._t + 600, DT, true), null); // tracking restarts on the way up
+  m._t += 600;
+  const events = feed(m, [...ramp(110, 172), ...hold(172, STAND)]);
+  assert.deepEqual(types(events), ['armed'], 'the ready blip, as after any interruption');
+  assert.equal(events[0].unseen, true);
+  assert.equal(Math.round(events[0].minAngle), 100);
+  assert.equal(m.unseen, 1);
+  assert.equal(m.shallow + m.good + m.dings, 0);
+  // Lost on the way down, before the shallow line: nothing to report.
+  feed(m, ramp(172, 140));
+  assert.equal(m.update(160, 0, m._t + 600, DT, true), null);
+  m._t += 600;
+  const again = feed(m, hold(172, STAND));
+  assert.deepEqual(types(again), ['armed']);
+  assert.equal(again[0].unseen, undefined);
+  assert.equal(m.unseen, 1);
+});
+
+test('tracking lost at the bottom, then held at depth: the late ding judges the rep', () => {
+  const m = noAnticipation();
+  m._keepArmed = true;
+  feed(m, [...hold(172, STAND), ...ramp(172, 100)]);
+  m.update(85, 0, m._t + 600, DT, true);
+  m._t += 600;
+  const events = feed(m, [...hold(85, 12), ...ramp(85, 172), ...hold(172, STAND)]);
+  assert.deepEqual(types(events), ['depth', 'rep']);
+  assert.equal(events[0].late, true);
+  assert.equal(m.unseen, 0);
+});
+
+test('knee guard: an opening knee is only believed if the hip rises with it', () => {
+  const m = noAnticipation(), guard = new KneeGuard();
+  const step = (angle, hipY) => {
+    const ok = guard.check(angle, hipY, 120, m);
+    if (ok) { m._t = (m._t ?? 0) + DT; m.update(angle, 0, m._t, DT); }
+    return ok;
+  };
+  hold(172, STAND).forEach((a) => assert.ok(step(a, 700)));
+  const down = ramp(172, 100);
+  down.forEach((a, i) => assert.ok(step(a, 700 + 120 * (i + 1) / down.length))); // hip sinks to 820
+  // The knee point slides down the shin: the angle opens while the hip is still sinking. Not believed.
+  assert.equal(step(112, 822), false);
+  assert.equal(step(125, 824), false);
+  assert.equal(m.minAngle, 100);
+  // Wobble close to the deepest reading is fine.
+  assert.equal(step(104, 824), true);
+  // Coming back up for real: the hip rises with the knee.
+  assert.equal(step(115, 805), true);
+  assert.equal(step(140, 770), true);
+  assert.deepEqual(types(feed(m, ramp(140, 172))), ['shallow']);
+  assert.equal(guard.check(60, 700, 120, m), true, 'between reps nothing is checked');
+});
+
+// ---------- Regression: a loaded set filmed at the gym ----------
+// Frames read off the leg the app drew on a screen recording of the set (tests/squat-gym-clips.json).
+
+const gym = JSON.parse(readFileSync(new URL('./squat-gym-clips.json', import.meta.url), 'utf8'));
+
+/** One clip through the app's pipeline: knee guard, tracker, rep machine (default target, anticipation on). */
+function runClip(clip, { guard = true } = {}) {
+  const dt = 1000 / gym.fps, tracker = new AngleTracker(), kneeGuard = new KneeGuard(), m = new RepMachine();
+  const events = [];
+  clip.frames.forEach((f, i) => {
+    if (!f) return;
+    const [angle, hipY, thigh] = f;
+    if (guard && !kneeGuard.check(angle, hipY, thigh, m)) return;
+    const s = tracker.update(angle, i * dt);
+    if (!s) return;
+    const ev = m.update(s.angle, s.vel, i * dt, s.dtMs, s.restarted);
+    if (ev && (ev.type !== 'armed' || ev.unseen)) events.push(ev.unseen ? 'unseen' : ev.type);
+  });
+  return { events, m };
+}
+
+test('regression (gym): the rep whose bottom the camera lost is reported as not seen, not shallow', () => {
+  const clip = gym.clips[1];
+  // What the app did: for the deepest half second the knee point sat on the shin (105-126 degrees while he was
+  // still sinking), and the rep was called shallow on the reading from before the bottom.
+  const before = runClip(clip, { guard: false });
+  assert.deepEqual(before.events, ['shallow']);
+  assert.ok(before.m.lastMin > 80 && before.m.lastMin < 85, `shallow at ${before.m.lastMin}`);
+  const after = runClip(clip);
+  assert.deepEqual(after.events, ['unseen']);
+  assert.equal(after.m.shallow + after.m.good, 0);
+  assert.equal(after.m.unseen, 1);
+});
+
+test('regression (gym): the good reps of the same set still ding and count', () => {
+  for (const clip of [gym.clips[0], gym.clips[2], gym.clips[3]]) {
+    const { events, m } = runClip(clip);
+    assert.deepEqual(events, ['depth', 'rep'], clip.name);
+    assert.equal(m.good, 1, clip.name);
+    assert.deepEqual(runClip(clip, { guard: false }).events, ['depth', 'rep'], `${clip.name}, as before`);
+  }
 });

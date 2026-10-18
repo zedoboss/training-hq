@@ -34,6 +34,15 @@ const SquatCore = (() => {
   const DEPTH_HOLD_RANGE_DEG = 12;  // "steadily": every reading in the hold within this band...
   const DEPTH_HOLD_MIN_FRAMES = 6;  // ...and at least this many of them
 
+  // ===== Was the bottom actually seen? =====
+  // A rep that misses the target is only called shallow if its bottom was watched. If tracking drops out at the
+  // bottom, before he is seen coming back up, and he comes back higher, the app says it didn't see the bottom.
+  const BOTTOM_GAP_MS = 100;        // no trusted reading for this long counts as a blind spot
+  const TURN_SEEN_DEG = 10;         // seen this far back above the deepest reading: the turnaround was watched
+  const UNSEEN_MARGIN_DEG = 3;      // back from a blind spot more than this above the deepest reading: the bottom was missed
+  const KNEE_OPEN_DEG = 8;          // a reading this far above the rep's deepest one...
+  const KNEE_HIP_PER_RAD = 0.25;    // ...needs the hip at least this x thigh length x (that opening, in radians) above its lowest point
+
   // ===== Is this really a leg we can measure? =====
   const FRAME_MARGIN = 0.02;        // hip/knee/ankle closer than this to the frame edge count as cut off
   const LIMB_RATIO_MIN = 0.5;       // thigh : shin length seen from the side is close to 1;
@@ -173,12 +182,41 @@ const SquatCore = (() => {
   }
 
   /**
+   * Catches the knee point sliding off the knee at the bottom of a squat. Seen at the gym: with a Smith machine
+   * upright in front of the hip, the pose model lost the knee for the deepest half second of a rep and put it on
+   * the shin, so the angle read 105-126 while he was still sinking, and the rep was called shallow on the reading
+   * from before the bottom. A knee can only open if the hip rises with it, so a reading well above the rep's
+   * deepest one is not believed while the hip is no higher than its lowest point. Call it before the tracker.
+   */
+  class KneeGuard {
+    constructor() { this.reset(); }
+    reset() { this.inRep = false; this.hipLow = -Infinity; this.thigh = 0; }
+    /**
+     * @param raw     this frame's knee angle (deg)
+     * @param hipY    hip height in image px (y grows downward)
+     * @param thigh   hip-to-knee length in image px
+     * @param machine the RepMachine the reading would go to (its state, and the rep's deepest reading so far)
+     * @returns {boolean} false when the knee opened without the hip rising: don't use this frame
+     */
+    check(raw, hipY, thigh, machine) {
+      if (machine.idle) { this.reset(); return true; }
+      if (!this.inRep) { this.inRep = true; this.thigh = thigh; } // the rep has just started: the thigh is at full length
+      this.hipLow = Math.max(this.hipLow, hipY);
+      const opened = raw - machine.minAngle;
+      if (!(opened >= KNEE_OPEN_DEG)) return true;
+      return this.hipLow - hipY >= KNEE_HIP_PER_RAD * this.thigh * opened * Math.PI / 180;
+    }
+  }
+
+  /**
    * The rep state machine. Feed it one filtered angle per frame.
    * update() returns at most one event:
    *   { type: 'depth', anticipated, late, angle } -> play the ding NOW
    *   { type: 'rep', minAngle }              -> good rep finished (back to standing)
    *   { type: 'shallow', minAngle }          -> dipped past the shallow line, never hit target
-   *   { type: 'armed' }                      -> seen standing after not being armed: ready for a rep
+   *   { type: 'unseen', minAngle }           -> back to standing, but the bottom happened out of sight: not counted
+   *   { type: 'armed', unseen }              -> seen standing after not being armed: ready for a rep. unseen (with
+   *                                             minAngle): tracking was lost at the bottom of the rep he just did
    *
    * Double dings are impossible by construction: after 'depth' the machine sits in DEPTH and
    * only re-arms once the angle is back above standDeg. The gap between descendDeg and
@@ -187,6 +225,9 @@ const SquatCore = (() => {
    * A ding also requires an unbroken view of the descent: seen standing, then seen going down,
    * frame after frame. If tracking is interrupted before the ding (`restarted`), the machine
    * disarms and waits to see a standing leg again rather than trust a reading from nowhere.
+   *
+   * A shallow call needs a watched bottom too. A blind spot of BOTTOM_GAP_MS or more (or an interruption) after
+   * the deepest reading and before he is seen coming back up means the bottom wasn't seen: 'unseen', not 'shallow'.
    */
   class RepMachine {
     constructor(cfg = {}) {
@@ -207,10 +248,15 @@ const SquatCore = (() => {
       this.minAngle = Infinity;
       this._armSince = null; this._holdSince = null; this._holdLo = 0; this._holdHi = 0; this._holdFrames = 0;
       this._anticipated = false; this._confirmed = false; this._depthT = 0;
+      this._lastT = null;           // time of the previous reading, to spot blind spots
+      this._turnSeen = false;       // seen coming back up from the deepest reading of this rep
+      this._bottomUnseen = false;   // ...or a blind spot hid the bottom
+      this._lostMin = null;         // tracking was lost at the bottom of a rep: its deepest reading, reported on re-arming
     }
     resetCounts() {
       this.resetState();
       this.good = 0; this.shallow = 0; this.lastMin = null;
+      this.unseen = 0;              // reps whose bottom the camera didn't see: neither good nor shallow
       this.dings = 0;               // total dings
       this.late = 0;                // dings given late, after a hold at depth, because the descent wasn't seen
       this.early = 0;               // dings fired by anticipation, before angle <= target
@@ -224,14 +270,26 @@ const SquatCore = (() => {
     update(angle, velDegPerSec = 0, tMs = 0, frameDtMs = 0, restarted = false) {
       // Tracking was interrupted. Once the ding has sounded that doesn't matter (we only wait for
       // the stand-up), but before it, what we see now may not continue what we saw before.
-      if (restarted && this.state !== State.DEPTH) this.resetState();
+      if (restarted && this.state !== State.DEPTH) {
+        // Lost at the bottom of a rep (past the shallow line, not yet seen coming back up): say so once he's back.
+        const lostMin = this.state === State.DESCENDING && !this._turnSeen && this.minAngle < this.shallowDeg
+          ? this.minAngle : this._lostMin;
+        this.resetState();
+        this._lostMin = lostMin;
+      }
+      const blind = this._lastT !== null && tMs - this._lastT >= BOTTOM_GAP_MS; // no reading since the last one
+      this._lastT = tMs;
       if (this.state === State.UNKNOWN) {
         if (angle >= this.standDeg) {
           this._holdSince = null;
           if (this._armSince === null) this._armSince = tMs;
           if (tMs - this._armSince < ARM_HOLD_MS) return null;
           this.state = State.STANDING;
-          return { type: 'armed' };
+          const lostMin = this._lostMin;
+          this._lostMin = null;
+          if (lostMin === null) return { type: 'armed' };
+          this.unseen++; this.lastMin = null;
+          return { type: 'armed', unseen: true, minAngle: lostMin };
         }
         this._armSince = null;
         // The descent wasn't watched (tracking dropped out on the way down), but he is now sitting
@@ -248,16 +306,22 @@ const SquatCore = (() => {
         return this._depth(false, angle, tMs, true);
       }
       if (this.state === State.STANDING) {
-        if (angle < this.descendDeg) { this.state = State.DESCENDING; this.minAngle = angle; }
+        if (angle < this.descendDeg) {
+          this.state = State.DESCENDING; this.minAngle = angle; this._turnSeen = false; this._bottomUnseen = false;
+        }
         return null; // never ding on the frame a descent starts: depth has to be approached, not appear
       }
-      if (angle < this.minAngle) this.minAngle = angle;
 
       if (this.state === State.DESCENDING) {
+        // Back from a blind spot higher than he went in, before he was seen coming up: the bottom was out of sight.
+        if (blind && !this._turnSeen && angle > this.minAngle + UNSEEN_MARGIN_DEG) this._bottomUnseen = true;
+        if (angle < this.minAngle) { this.minAngle = angle; this._turnSeen = false; this._bottomUnseen = false; }
+        else if (angle >= this.minAngle + TURN_SEEN_DEG) this._turnSeen = true;
         if (angle >= this.standDeg) {
           const min = this.minAngle;
           this.state = State.STANDING; this.minAngle = Infinity;
           if (min >= this.shallowDeg) return null;   // just a wiggle at the top
+          if (this._bottomUnseen) { this.unseen++; this.lastMin = null; return { type: 'unseen', minAngle: min }; }
           this.shallow++; this.lastMin = min;
           return { type: 'shallow', minAngle: min };
         }
@@ -271,6 +335,7 @@ const SquatCore = (() => {
       }
 
       // State.DEPTH
+      if (angle < this.minAngle) this.minAngle = angle;
       if (this._anticipated && !this._confirmed && angle <= this.targetDeg) {
         this._confirmed = true;
         this.earlyConfirmed++;
@@ -287,6 +352,7 @@ const SquatCore = (() => {
     }
     _depth(anticipated, angle, tMs, late = false) {
       this.state = State.DEPTH;
+      this._lostMin = null; // a late ding after losing him judges that rep after all
       this.dings++;
       if (anticipated) this.early++;
       if (late) this.late++;
@@ -325,11 +391,12 @@ const SquatCore = (() => {
   }
 
   return {
-    State, LEG, kneeAngle, legProblem, OneEuroFilter, AngleTracker, RepMachine, SidePicker,
+    State, LEG, kneeAngle, legProblem, OneEuroFilter, AngleTracker, KneeGuard, RepMachine, SidePicker,
     TARGET_DEG_DEFAULT, TARGET_DEG_MIN, TARGET_DEG_MAX,
     STAND_DEG_DEFAULT, STAND_DEG_MIN, STAND_DEG_MAX,
     DESCEND_MARGIN_DEG, SHALLOW_DEG, MIN_VISIBILITY, MAX_DEG_PER_SEC,
     ANTICIPATE_MIN_VEL, ANTICIPATE_MAX_DEG, SIDE_SWITCH_MARGIN, SIDE_SWITCH_FRAMES, GAP_RESET_MS, ARM_HOLD_MS, DEPTH_HOLD_MS, FRAME_MARGIN,
+    BOTTOM_GAP_MS, TURN_SEEN_DEG, UNSEEN_MARGIN_DEG, KNEE_OPEN_DEG,
   };
 })();
 

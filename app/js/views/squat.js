@@ -37,6 +37,7 @@ const HUD_ANGLE_INTERVAL_MS = 100;
 const DEBUG_INTERVAL_MS = 500;
 const FLASH_MS = 280;
 const SHALLOW_BANNER_MS = 1500;
+const UNSEEN_BANNER_MS = 2500;
 const AUDIO_LATENCY_WARN_MS = 60;           // reported output latency above this smells like Bluetooth
 const BLUETOOTH_LABEL_RE = /bluetooth|airpods|buds|beats|headphone|headset|hands-?free/i;
 const LOG_MAX = 300;
@@ -73,6 +74,7 @@ const settings = loadSettings();
 let video = null, overlayCanvas = null, runEl = null, g = null;
 const machine = new C.RepMachine(settings);
 const tracker = new C.AngleTracker();
+const kneeGuard = new C.KneeGuard();
 const sidePicker = new C.SidePicker();
 const stats = { fps: 0, inferMs: 0, frameToDoneMs: 0, dropped: 0, stale: 0, frames: 0, clock: '-', warmupMs: 0 };
 const latencyLog = [];
@@ -410,10 +412,16 @@ function processFrame(meta) {
     side = sidePicker.update(points, !problemL, !problemR);
     const problem = side === 'L' ? problemL : problemR;
     if (!problem) {
-      const [h, k, a] = C.LEG[side];
-      const raw = C.kneeAngle(points[h], points[k], points[a], video.videoWidth, video.videoHeight);
-      sample = tracker.update(raw, tSample);
-      lockText = `LOCK · ${side === 'L' ? 'LEFT' : 'RIGHT'} LEG`; lockCls = 'good';
+      const [hi, ki, ai] = C.LEG[side];
+      const hip = points[hi], knee = points[ki];
+      const raw = C.kneeAngle(hip, knee, points[ai], w, h);
+      const thigh = Math.hypot((hip.x - knee.x) * w, (hip.y - knee.y) * h);
+      if (kneeGuard.check(raw, hip.y * h, thigh, machine)) {
+        sample = tracker.update(raw, tSample);
+        lockText = `LOCK · ${side === 'L' ? 'LEFT' : 'RIGHT'} LEG`; lockCls = 'good';
+      } else {
+        lockText = LEG_PROBLEM_LABEL.knee; lockCls = 'warn'; // the knee opened without the hip rising: not believed
+      }
     } else {
       lockText = LEG_PROBLEM_LABEL[problem]; lockCls = 'warn';
     }
@@ -465,6 +473,7 @@ const LEG_PROBLEM_LABEL = {
   frame: 'PART OF YOU IS OUT OF FRAME',
   hidden: 'LEG HIDDEN',
   shape: 'TURN SIDE-ON',
+  knee: 'LOST YOUR KNEE',   // not from legProblem(): the knee opened at the bottom without the hip rising
 };
 const STATE_LABEL = {
   [C.State.UNKNOWN]: 'STAND TALL',
@@ -492,6 +501,7 @@ function onRepEvent(ev, sample, tFrame, tCb, tDet, clock) {
     console.log('[squat] ding', JSON.stringify(entry));
   } else if (ev.type === 'armed') {
     if (settings.sound) audio.ready();
+    if (ev.unseen) onUnseen(ev); // tracking was lost at the bottom of the rep he just did
   } else if (ev.type === 'rep') {
     renderCounts();
     if (ev.anticipated && !ev.confirmed) console.log(`[squat] early ding was not confirmed: min ${ev.minAngle.toFixed(1)}° vs target ${machine.targetDeg}°`);
@@ -501,8 +511,18 @@ function onRepEvent(ev, sample, tFrame, tCb, tDet, clock) {
     showBanner('TOO SHALLOW', SHALLOW_BANNER_MS);
     renderCounts();
     console.log(`[squat] shallow rep: min ${ev.minAngle.toFixed(1)}°`);
+  } else if (ev.type === 'unseen') {
+    onUnseen(ev);
   }
   addRepEvent(current, ev); // Training HQ: keep the rep for the log (after the ding, never before it)
+}
+
+/** A rep whose bottom the camera didn't see: no buzz (it may well have been deep enough), not counted either way. */
+function onUnseen(ev) {
+  flash('unseen');
+  showBanner("DIDN'T SEE THE BOTTOM", UNSEEN_BANNER_MS, 'warn');
+  renderCounts();
+  console.log(`[squat] bottom not seen: deepest reading before it was lost ${ev.minAngle.toFixed(1)}°`);
 }
 
 // ===== Display =====
@@ -543,6 +563,8 @@ function renderCounts() {
   const sh = $('hudShallow');
   sh.textContent = `shallow ${machine.shallow}`;
   sh.className = 'sq-sub' + (machine.shallow ? ' some' : '');
+  const un = $('hudUnseen');
+  un.hidden = !machine.unseen; un.textContent = `not seen ${machine.unseen}`;
   $('hudLast').textContent = machine.lastMin === null ? 'last –' : `last ${Math.round(machine.lastMin)}°`;
 }
 
@@ -563,14 +585,14 @@ function renderDebug() {
 
 let flashTimer = 0, bannerTimer = 0;
 function flash(cls) {
-  runEl.classList.remove('hit', 'shallow');
+  runEl.classList.remove('hit', 'shallow', 'unseen');
   runEl.classList.add(cls);
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => runEl?.classList.remove(cls), FLASH_MS);
 }
-function showBanner(text, ms = 0, info = false) {
+function showBanner(text, ms = 0, kind = '') { // kind: '' (red), 'warn' (amber), 'info' (dark, small)
   const el = $('banner');
-  el.textContent = text; el.className = info ? 'info' : ''; el.hidden = false;
+  el.textContent = text; el.className = kind; el.hidden = false;
   clearTimeout(bannerTimer);
   if (ms) bannerTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
@@ -584,7 +606,7 @@ function applyDisplaySettings() {
 
 // ===== Start / stop =====
 function resetSession() {
-  machine.resetCounts(); tracker.reset(); sidePicker.reset();
+  machine.resetCounts(); tracker.reset(); kneeGuard.reset(); sidePicker.reset();
   Object.assign(stats, { fps: 0, inferMs: 0, frameToDoneMs: 0, dropped: 0, stale: 0, frames: 0 });
   Object.assign(run, { lastCb: 0, lastPresented: 0, lastMediaTime: -1, staleStreak: 0, detectErrors: 0, lostSince: 0, shownAngle: null, shownState: null });
   $('hudAngle').textContent = '–'; $('hudState').textContent = ' ';
@@ -600,10 +622,10 @@ async function start(mode, fileUrl = null) {
   $('startNotice').hidden = true;
   resetSession(); applyDisplaySettings();
   current = startRun({ mode, targetDeg: settings.targetDeg, standDeg: settings.standDeg, link });
-  showBanner(mode === 'camera' ? 'Starting camera…' : 'Loading video…', 0, true);
+  showBanner(mode === 'camera' ? 'Starting camera…' : 'Loading video…', 0, 'info');
   try {
     if (mode === 'camera') await startCamera(); else await startFile(fileUrl);
-    if (!pose.landmarker) { showBanner('Loading pose model…', 0, true); await (pose.ready || loadPose()); }
+    if (!pose.landmarker) { showBanner('Loading pose model…', 0, 'info'); await (pose.ready || loadPose()); }
     hideBanner();
     run.active = true;
     requestFrame();
@@ -824,7 +846,7 @@ async function copyLog() {
     when: new Date().toISOString(), userAgent: navigator.userAgent, settings, camera: run.camera,
     delegate: pose.delegate, model: pose.model, warmupMs: Math.round(stats.warmupMs),
     fps: +stats.fps.toFixed(1), inferMs: +stats.inferMs.toFixed(1), droppedFrames: stats.dropped, staleFrames: stats.stale,
-    dings: machine.dings, lateDings: machine.late, earlyDings: machine.early, earlyMissed: machine.earlyMissed,
+    dings: machine.dings, lateDings: machine.late, earlyDings: machine.early, earlyMissed: machine.earlyMissed, unseenReps: machine.unseen,
     earlyAvgLeadMs: machine.earlyConfirmed ? +(machine.earlyLeadSumMs / machine.earlyConfirmed).toFixed(1) : null,
     log: latencyLog,
   }, null, 1);
@@ -907,6 +929,7 @@ export function render(view, params = []) {
         <span class="sq-lbl">GOOD REPS</span>
         <span id="sq-hudReps" class="sq-huge">0</span>
         <span id="sq-hudShallow" class="sq-sub">shallow 0</span>
+        <span id="sq-hudUnseen" class="sq-sub" hidden>not seen 0</span>
         <span id="sq-hudLast" class="sq-sub">last &ndash;</span>
       </div>
       <div id="sq-banner" hidden></div>
@@ -941,7 +964,7 @@ export function render(view, params = []) {
   $('btnStop').addEventListener('click', () => stop());
   $('btnReplay').addEventListener('click', replay);
   video.addEventListener('ended', () => {
-    if (run.active && run.mode === 'file') showBanner(`Video ended: ${machine.good} good, ${machine.shallow} shallow. Tap ⟲ to replay, ✕ to finish.`, 0, true);
+    if (run.active && run.mode === 'file') showBanner(`Video ended: ${machine.good} good, ${machine.shallow} shallow${machine.unseen ? `, ${machine.unseen} not seen` : ''}. Tap ⟲ to replay, ✕ to finish.`, 0, 'info');
   });
   $('btnSettings').addEventListener('click', openSettings);
   $('btnSettingsRun').addEventListener('click', openSettings);
@@ -984,7 +1007,7 @@ export function render(view, params = []) {
 
   // For poking at from the console (as in the original), plus feed(): angles straight into the rep logic, as if the
   // camera saw them, for testing without a person in front of it.
-  window.squat = { settings, machine, tracker, stats, latencyLog, pose, run, audio, get current() { return current; },
+  window.squat = { settings, machine, tracker, kneeGuard, stats, latencyLog, pose, run, audio, get current() { return current; },
     feed(angles, fps = 30) {
       const dt = 1000 / fps;
       let t = performance.now();
