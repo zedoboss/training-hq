@@ -37,7 +37,7 @@ export function currentExercise(session, sets) {
   return session.exercises.find((e) => open(e.key)) || null;
 }
 
-/** "set 2 of 3: 56.3 kg total (...) × 8-10 (target)" for the next set of an exercise. */
+/** "set 2 of 3: 60 kg total (...) × 8-10 (target)" for the next set of an exercise. */
 export function nextSetText(ex, sets) {
   const mine = sets.filter((x) => x.exKey === ex.key);
   const i = mine.findIndex((x) => !x.done);
