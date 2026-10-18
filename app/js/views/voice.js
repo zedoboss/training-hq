@@ -27,7 +27,7 @@ function drawMeter(box, level, th) {
   if (t) t.style.left = `${levelPct(th)}%`;
 }
 
-const scoreLine = (st) => (st.self ? `Your own phrases score ${st.self.low} to ${st.self.median} and up against each other; ${STRICT.find(([k]) => k === st.strictness)?.[1].toLowerCase()} needs ${st.threshold}. ${st.self.missRate ? `About ${st.self.missRate}% of your phrases would be missed at this setting.` : 'None of your phrases would be missed.'}` : '');
+const scoreLine = (st) => (st.self ? `Your own phrases match each other at ${st.self.low.toFixed(2)} or better (typically ${st.self.median.toFixed(2)}); ${STRICT.find(([k]) => k === st.strictness)?.[1].toLowerCase()} needs ${st.threshold.toFixed(2)}. ${st.self.missRate ? `About ${st.self.missRate}% of your phrases would be missed at this setting.` : 'None of your phrases would be missed.'}` : '');
 
 function hub(view) {
   let gone = false; let st = null; let err = null;

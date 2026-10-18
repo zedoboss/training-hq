@@ -20,3 +20,4 @@
 .voice-chip.is-listening svg { animation: v-pulse 2s ease-in-out infinite; }
 @keyframes v-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .voice-chip svg { animation: none !important; } }
+.coach-foot a { color: var(--cyan); }

@@ -14,6 +14,7 @@ import { dayTotals } from '../lib/meals.js';
 import { checklist, dayKindFor } from '../lib/supplements.js';
 import { stepsToday } from './body.js';
 import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
+import * as voice from '../lib/voice.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -124,7 +125,7 @@ export function render(view) {
       </div>
 
       <div class="home-status hud">
-        <span class="c-muted">VOICE · STEP 9</span>
+        <span class="c-muted" data-k="voice">VOICE · OFF</span>
         <span class="model-chip" data-k="model">SONNET 5.5 · LOW</span>
       </div>
 
@@ -141,7 +142,7 @@ export function render(view) {
           <div class="dock-voice">
             <div class="hud c-text dock-name">CLAUDE</div>
             <div class="level" aria-hidden="true">${'<span></span>'.repeat(8)}</div>
-            <div class="hud c-muted dock-state">TALK · BY TEXT</div>
+            <div class="hud c-muted dock-state" data-k="dock-voice">TALK · BY TEXT</div>
           </div>
         </div>
         <button class="dock-btn" type="button" data-later="checkin">${CHECK}CHECK IN</button>
@@ -223,5 +224,14 @@ export function render(view) {
     off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages'].includes(c))) refresh(); });
     refresh();
   });
-  return () => { gone = true; clearInterval(timer); unsub(); off(); };
+  // Voice (step 9): whether this device is listening, under the core and in the dock.
+  const VOICE_TEXT = { off: 'OFF', listening: 'LISTENING', hearing: 'HEARING', thinking: 'THINKING', speaking: 'SPEAKING', paused: 'PAUSED', tap: 'TAP THE MIC', error: 'MIC ERROR' };
+  const drawVoice = (st = voice.snapshot()) => {
+    const a = view.querySelector('[data-k="voice"]'); const d = view.querySelector('[data-k="dock-voice"]');
+    if (a) { a.textContent = `VOICE · ${VOICE_TEXT[st.phase] || st.phase.toUpperCase()}`; a.className = st.on ? 'c-cyan' : 'c-muted'; }
+    if (d) d.textContent = st.on ? 'TALK · VOICE ON' : 'TALK · BY TEXT';
+  };
+  drawVoice();
+  const offVoice = voice.onChange(drawVoice);
+  return () => { gone = true; clearInterval(timer); unsub(); off(); offVoice(); };
 }
