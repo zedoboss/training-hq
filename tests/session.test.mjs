@@ -185,7 +185,7 @@ test('repeat a past session; supersets; rest only after the last exercise of a s
 
 test('set timer: counts up, the target is a cue, stopping fills the seconds done', () => {
   const t = { startedAt: 1000, targetS: 30 };
-  assert.deepEqual(setTimerView(t, 1000 + 12400), { elapsedS: 12, targetS: 30, reached: false, text: '0:12 / 0:30' });
+  assert.deepEqual(setTimerView(t, 1000 + 12400), { elapsedS: 12, targetS: 30, reached: false, ready: false, text: '0:12 / 0:30' });
   assert.equal(setTimerView(t, 1000 + 30000).reached, true);
   assert.equal(setTimerView(t, 1000 + 95000).text, '1:35 / 0:30', 'keeps counting past the target');
   assert.equal(setTimerView({ startedAt: 0, targetS: 0 }, 61000).text, '1:01');

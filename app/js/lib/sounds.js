@@ -17,6 +17,9 @@ const PATTERNS = {
   pulse: [[0, 440, 0.12, 'square', 0.35], [0.2, 440, 0.12, 'square', 0.35], [0.4, 440, 0.12, 'square', 0.35], [0.6, 660, 0.2, 'square', 0.35]],
   rise: [[0, 523, 0.15], [0.15, 659, 0.15], [0.3, 784, 0.15], [0.45, 1047, 0.35]],
   tick: [[0, 1900, 0.06, 'triangle']],
+  // A14: the hold's count-in and count-out, and the moment the hold starts.
+  count: [[0, 988, 0.12, 'sine']],
+  go: [[0, 1319, 0.45, 'sine']],
   record: [[0, 784, 0.14, 'triangle'], [0.14, 988, 0.14, 'triangle'], [0.28, 1175, 0.14, 'triangle'], [0.42, 1568, 0.5, 'triangle']],
 };
 

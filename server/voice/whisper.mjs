@@ -13,6 +13,10 @@ export const DEFAULT_PORT = 8179;
 
 // Lines Whisper is known to make up from silence, noise or music.
 const MADE_UP = [/^thanks? (you )?for watching/i, /^thank you for watching/i, /^subtitles? by/i, /^please subscribe/i, /^(and )?(see|bye) you (next time|in the next)/i, /^you$/i, /^\.+$/];
+// A15: grunts, effort sounds and breathing as Whisper writes them. A clip of only these is not words from him, so it
+// never stops the coach mid-set or reaches it ("ow" and "ouch" are words: pain).
+const GRUNT = /^(u+g+h+|u+h+|u+m+|a+h+|o+h+|h+m+|m+h*m+|h+u+h+|h+a+(h+a+)*|a+r+g+h*|g+r+|h*n+g+h*|p+h+e+w+|w+h+e+w+|o+o+f+|h+u+|e+h+|g+a+h+|r+a+h+|h+h+)$/i;
+export const onlyGrunts = (t) => { const w = String(t || '').toLowerCase().split(/[^\p{L}]+/u).filter(Boolean); return w.length > 0 && w.every((x) => GRUNT.test(x)); };
 
 /**
  * Whisper's text, cleaned. Returns '' when nothing he could have said is left (music, noise, a made-up line, or the
@@ -27,6 +31,7 @@ export function cleanTranscript(text, hint = '') {
     .trim();
   if (!/[\p{L}\p{N}]/u.test(t)) return '';
   if (MADE_UP.some((re) => re.test(t))) return '';
+  if (onlyGrunts(t)) return '';
   const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   // Whisper sometimes writes a short command twice ("Start the timer. Start the timer."): once is what he said.
   const parts = t.match(/[^.!?]+[.!?]*/g) || [t];

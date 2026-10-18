@@ -13,6 +13,7 @@ import { unlockAudio, play } from '../lib/sounds.js';
 import { notifyPanel } from '../ui/notify-panel.js';
 import { toast } from '../ui/toast.js';
 import { confirmSheet } from '../ui/sheet.js';
+import { EVERY_LABEL, MOOD_LABEL, MOOD_TEXT } from '../lib/coach-talk.js';
 
 const isPhone = /iPhone|iPad|Android/.test(navigator.userAgent);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -143,6 +144,15 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('The coach thinks with', 'Claude on your Mac. Sonnet at low effort answers in a few seconds; Opus at high effort thinks deeper and takes longer. Also on the Talk screen.', '')}
       ${seg('coach.model', [['fast', 'Sonnet 5.5 · low'], ['deep', 'Opus 5.5 · high']], st.coach.model)}
+      ${opt('Talks during sets and holds', 'In its moods, with lines ready before the set or hold starts. Only your real words stop it. Mute it on the set or hold screen.', sw('coach.talk.during', st.coach.talk.during))}
+      ${opt('How often', 'Lines during a set or a hold.', '')}
+      ${seg('coach.talk.every', EVERY_LABEL, st.coach.talk.every)}
+      ${opt('Intensity', '1 = plain and measured, 5 = everything it has. Never past your targets, the 30% cap or your pain limit.', '')}
+      ${seg('coach.intensity', [1, 2, 3, 4, 5].map((n) => [n, String(n)]), st.coach.intensity)}
+      ${['commander', 'hype', 'dark', 'warrior', 'rival'].map((m) => opt(MOOD_LABEL[m], MOOD_TEXT[m], sw(`coach.moods.${m}`, st.coach.moods[m] !== false))).join('')}
+      ${opt('Calm', MOOD_TEXT.calm, '<span class="hud c-green">ON</span>')}
+      ${opt('Get ready before a hold', 'Seconds to set up after Start, then 3, 2, 1 and the hold.', '')}
+      ${seg('holds.getReadyS', [[10, '10 s'], [15, '15 s'], [20, '20 s']], st.holds.getReadyS)}
     </div>
     <ul class="lib-list">
       <li><a class="lib-row" href="#/voice"><span class="lib-name">Voice</span><span class="lib-meta">Only your voice: calibrate, test, listening</span></a></li>
@@ -214,7 +224,7 @@ function wirePrefs(box) {
     const t = e.target.closest('button');
     if (!t) return;
     if (t.dataset.seg) {
-      const v = t.dataset.seg === 'firstDayOfWeek' ? Number(t.dataset.v) : t.dataset.v;
+      const v = ['firstDayOfWeek', 'coach.intensity', 'holds.getReadyS'].includes(t.dataset.seg) ? Number(t.dataset.v) : t.dataset.v;
       await save(t.dataset.seg, v);
     } else if (t.dataset.test) {
       preview('sounds.restEnd');

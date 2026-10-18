@@ -48,7 +48,11 @@ export const DEFAULT_SETTINGS = {
   // Step 7: which Claude reads body scan result photos on the Mac (Opus 5.5 high by default: every number counts).
   body: { stepGoal: null, scanModel: 'deep' },
   // Step 8: the coach's Claude ('fast' Sonnet 5.5 at low effort, the default; 'deep' Opus 5.5 at high effort).
-  coach: { model: 'fast' },
+  // A15 (brief decision 30): the coach's moods (Calm is always on: it takes over whenever a safety rule applies), how
+  // hard it pushes (1-5), and whether it talks during sets and holds, and how often ('often' | 'steady' | 'once').
+  coach: { model: 'fast', moods: { commander: true, hype: true, dark: true, warrior: true, rival: true }, intensity: 3, talk: { during: true, every: 'steady' } },
+  // A14: tendon holds start with this many seconds of GET READY before the hold itself.
+  holds: { getReadyS: 15 },
   // Step 9: the voice lock's strictness on the Mac ('strict' default, 'normal', 'relaxed'), whether the coach answers
   // out loud, and the silent readout when speech was heard but not acted on. Listening itself is switched on per
   // device (not synced), so the phone and the Mac's browser never both act on the same words.

@@ -12,12 +12,19 @@ import { getState } from '../lib/store.js';
 import { withDefaults, restText } from '../lib/settings.js';
 import { confirmSheet, promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+import { holdScript } from '../lib/coach-talk.js';
+import * as talk from '../lib/talk.js';
 
 /** Rest between holds, from Settings (default 2:00). */
 const holdRestS = () => withDefaults(getState().settings).rest.holdS || 120;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const loadText = (h) => (h.loadKg != null ? `${fmtKg(h.loadKg)} kg` : h.load || 'bodyweight');
+/** Seconds on the ring: whole seconds big for GET READY and the hold (m:ss from a minute), m:ss for rest. */
+const clockText = (left, big) => {
+  const n = Math.ceil(left - 0.001);
+  return big && n < 60 ? String(Math.max(0, n)) : `${Math.floor(n / 60)}:${String(Math.max(0, n) % 60).padStart(2, '0')}`;
+};
 const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); return formatDay(d); };
 // When each area's holds are done: written in the tendon data (timingText), shown for confirmation the first time.
 const timingOf = (a) => a.timingText || 'Not set yet.';
@@ -136,9 +143,28 @@ function renderList(view, repo) {
 }
 
 function renderRun(view, repo, areaId, index) {
+  // Phases: ready (waiting for Start) -> getready (A14: 15 s to set up, then 3, 2, 1) -> holding -> rate -> rest -> ...
   let area; let hold; let session = null; let setNo = 1; let phase = 'ready'; let endsAt = 0; let timer = null; let startedSet = 0; let endedSet = 0;
+  let bank = null; let script = null; let playing = null; let calm = false; let offTalk = () => {};
   const total = () => hold.sets || 3;
   const secs = () => hold.seconds || 30;
+  const getReadyS = () => withDefaults(getState().settings).holds.getReadyS ?? 15;
+
+  // A14/A15: the next hold's lines are worked out and fetched while he gets in position or rests, so they play on time.
+  const plan = () => {
+    script = holdScript({ getReadyS: getReadyS(), holdS: secs(), setNo, bank, ...talk.talkPrefs(), calm: calm || talk.isCalm(), avoid: new Set(talk.recentLines()) });
+    talk.prepare(script);
+  };
+  const begin = () => {
+    rest.unlockAudio(); talk.unlock();
+    if (!script || script.setNo !== setNo) plan();
+    const t0 = Date.now();
+    playing = talk.run(script, { t0 });
+    setQuiet('hold', true);
+    if (script.getReadyS > 0) { phase = 'getready'; endsAt = t0 + script.getReadyS * 1000; } else { phase = 'holding'; startedSet = t0; endsAt = t0 + secs() * 1000; }
+    script = null;
+    tickLoop(); draw();
+  };
 
   const saveSet = async (pain, shaking) => {
     const now = Date.now();
@@ -157,7 +183,7 @@ function renderRun(view, repo, areaId, index) {
   };
 
   const finishRound = async () => {
-    clearInterval(timer);
+    clearInterval(timer); playing?.stop();
     if (session) { session = { ...session, status: 'done', endedAt: Date.now() }; await repo.put('sessions', session.id, session); }
     toast(session ? 'Round saved.' : 'Nothing logged.');
     location.hash = '#/holds';
@@ -174,15 +200,17 @@ function renderRun(view, repo, areaId, index) {
     const left = Math.max(0, (endsAt - Date.now()) / 1000);
     const body = view.querySelector('#h-body');
     if (!body) return;
-    if (phase === 'ready' || phase === 'holding' || phase === 'rest') {
-      const of = phase === 'rest' ? holdRestS() : secs();
+    if (phase === 'ready' || phase === 'getready' || phase === 'holding' || phase === 'rest') {
+      const of = phase === 'rest' ? holdRestS() : phase === 'getready' ? getReadyS() : secs();
       const shown = phase === 'ready' ? secs() : left;
       body.innerHTML = `
-        <div class="hold-ring">${ring(shown, of)}<div class="hold-ring-text"><b>${Math.floor(shown / 60)}:${String(Math.ceil(shown) % 60 === 0 && shown >= 60 ? 0 : Math.ceil(shown) % 60).padStart(2, '0')}</b>
+        <div class="hold-ring ${phase === 'getready' ? 'is-getready' : phase === 'holding' ? 'is-holding' : ''}">${ring(shown, of)}<div class="hold-ring-text">${phase === 'getready' || phase === 'holding' ? `<span class="hold-phase">${phase === 'getready' ? 'GET READY' : 'HOLD'}</span>` : ''}<b>${clockText(shown, phase !== 'rest' && phase !== 'ready')}</b>
           <span class="hud c-muted">${phase === 'rest' ? 'REST' : `SET ${setNo} OF ${total()}`}</span></div></div>
         <div class="btn-row">${phase === 'ready' ? `<button class="btn-primary big" data-h="go" type="button">Start set ${setNo}</button>`
+          : phase === 'getready' ? '<button class="btn-ghost big" data-h="cancel" type="button">Not yet</button>'
           : phase === 'holding' ? '<button class="btn-primary big" data-h="end" type="button">End set</button>'
-          : `<button class="btn-primary big" data-h="next" type="button">Start set ${setNo} now</button>`}</div>`;
+          : `<button class="btn-primary big" data-h="next" type="button">Start set ${setNo} now</button>`}</div>
+        ${phase === 'ready' || phase === 'rest' ? `<p class="hint">Start gives you ${getReadyS()} s to get in position, then 3, 2, 1 and the ${secs()} s hold.</p>` : ''}`;
     } else if (phase === 'rate') {
       body.innerHTML = `
         <section class="card pad-card">
@@ -205,12 +233,17 @@ function renderRun(view, repo, areaId, index) {
       body.querySelector('[data-h="save"]').addEventListener('click', async () => {
         await saveSet(pain, shaking);
         if (setNo >= total()) { await finishRound(); return; }
-        setNo++; phase = 'rest'; endsAt = Date.now() + holdRestS() * 1000; tickLoop(); draw();
+        // Over his 3-4 limit: Calm for the rest of the round (A15).
+        if (!painOk(pain)) calm = true;
+        setNo++; phase = 'rest'; endsAt = Date.now() + holdRestS() * 1000; plan(); tickLoop(); draw();
       });
     }
     body.querySelectorAll('[data-h]').forEach((b) => {
-      if (b.dataset.h === 'go' || b.dataset.h === 'next') b.onclick = () => { rest.unlockAudio(); phase = 'holding'; setQuiet('hold', true); startedSet = Date.now(); endsAt = startedSet + secs() * 1000; tickLoop(); draw(); };
-      if (b.dataset.h === 'end') b.onclick = () => { clearInterval(timer); setQuiet('hold', false); endedSet = Date.now(); rest.beep(1); phase = 'rate'; draw(); };
+      if (b.dataset.h === 'go' || b.dataset.h === 'next') b.onclick = begin;
+      // Not in position yet: back to Start, nothing saved.
+      if (b.dataset.h === 'cancel') b.onclick = () => { clearInterval(timer); playing?.stop(); setQuiet('hold', false); phase = 'ready'; plan(); draw(); };
+      // Stopped early: the seconds actually held are saved.
+      if (b.dataset.h === 'end') b.onclick = () => { clearInterval(timer); playing?.stop(); setQuiet('hold', false); endedSet = Date.now(); rest.beep(1); phase = 'rate'; draw(); };
     });
   };
 
@@ -218,19 +251,23 @@ function renderRun(view, repo, areaId, index) {
     clearInterval(timer);
     timer = setInterval(() => {
       if (Date.now() >= endsAt) {
+        // GET READY is over: the hold starts now (the voice or the sound says so). The hold's time starts here.
+        if (phase === 'getready') { startedSet = endsAt; endsAt = startedSet + secs() * 1000; phase = 'holding'; draw(); return; }
         clearInterval(timer);
-        rest.beep(phase === 'holding' ? 3 : 2);
-        if (phase === 'holding') endedSet = Date.now();
+        // The end of a hold is marked by the script (voice, else its beeps); the end of a rest by two beeps.
+        if (phase !== 'holding') rest.beep(2);
+        if (phase === 'holding') endedSet = endsAt;
         setQuiet('hold', false);
         phase = phase === 'holding' ? 'rate' : 'ready';
+        if (phase === 'ready' && script?.setNo !== setNo) plan();
         draw();
         return;
       }
       const t = view.querySelector('.hold-ring-text b');
       const left = Math.max(0, (endsAt - Date.now()) / 1000);
-      if (t) { t.textContent = `${Math.floor(left / 60)}:${String(Math.ceil(left) % 60 === 0 && left >= 60 ? 0 : Math.ceil(left) % 60).padStart(2, '0')}`; }
+      if (t) t.textContent = clockText(left, phase === 'getready' || phase === 'holding');
       const svg = view.querySelector('.hold-ring');
-      if (svg) svg.firstElementChild.outerHTML = ring(left, phase === 'rest' ? holdRestS() : secs());
+      if (svg) svg.firstElementChild.outerHTML = ring(left, phase === 'rest' ? holdRestS() : phase === 'getready' ? getReadyS() : secs());
     }, 200);
   };
 
@@ -245,19 +282,45 @@ function renderRun(view, repo, areaId, index) {
       hold = c ? { exercise: c.holdName, load: 'load your choice', sets: 3, seconds: 30 } : null;
     } else hold = area?.holds?.[index];
     if (!hold) { view.innerHTML = '<h1 class="view-title">Hold not found</h1><p class="hint"><a href="#/holds">Back</a></p>'; return; }
+    // A15: his lines; Calm when today's check-in eased this area's holds (a safety rule applies).
+    bank = await repo.get('coach-lines', 'bank');
+    const todayDoc = (await repo.list('days')).find((d) => d.date === isoDate(new Date()));
+    calm = (todayDoc?.readiness?.easeHolds || []).includes(areaId);
     view.innerHTML = `
-      <div class="lib-head"><a class="pill" href="#/holds">Back</a><span class="hud c-muted">${esc(area.label.toUpperCase())} · ${esc((PHASE_TEXT[area.phase] || '').split(':')[0].toUpperCase())}</span></div>
-      <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${secs()} s · ${restText(holdRestS())} between</div></div>
+      <div class="lib-head"><a class="pill" href="#/holds">Back</a><span class="hud c-muted">${esc(area.label.toUpperCase())} · ${esc((PHASE_TEXT[area.phase] || '').split(':')[0].toUpperCase())}</span><button class="pill" id="h-mute" type="button" aria-pressed="false">Coach on</button></div>
+      <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${index === 'other' ? `${secs()} s` : `<button class="link-btn" id="h-secs" type="button">${secs()} s</button>`} · ${restText(holdRestS())} between</div></div>
       <div id="h-body"></div>
       <p class="hint">Next-day check: ${esc(tomorrow())}${area.phase === 'heal' ? ', with the morning round' : ''}.</p>
       <button class="btn-ghost" id="h-stop" type="button">End round</button>`;
+    const muteBtn = view.querySelector('#h-mute');
+    const showMute = () => { muteBtn.textContent = talk.isMuted() ? 'Coach muted' : 'Coach on'; muteBtn.setAttribute('aria-pressed', String(talk.isMuted())); muteBtn.classList.toggle('is-on', !talk.isMuted()); };
+    muteBtn.onclick = () => { talk.setMuted(!talk.isMuted()); showMute(); };
+    showMute();
+    offTalk = talk.onChange(showMute);
+    // Hold length per hold (his note: at least 30 s).
+    view.querySelector('#h-secs')?.addEventListener('click', async () => {
+      if (phase === 'getready' || phase === 'holding') return;
+      const t = await promptText('Hold length in seconds (your note: at least 30)', String(secs()), { placeholder: '30' });
+      if (t == null) return;
+      const v = Math.round(Number(t));
+      if (!(v >= 10 && v <= 300)) { toast('Between 10 and 300 seconds.'); return; }
+      const doc = await repo.get('tendons', `area.${area.id}`);
+      if (!doc?.holds?.[index]) return;
+      const holds = doc.holds.map((h, i) => (i === index ? { ...h, seconds: v } : h));
+      await repo.put('tendons', `area.${area.id}`, { ...doc, holds });
+      hold = holds[index];
+      view.querySelector('#h-secs').textContent = `${v} s`;
+      plan(); draw();
+      toast(`${hold.exercise}: ${v} s holds.`);
+    });
     view.querySelector('#h-stop').onclick = async () => {
       if (phase === 'holding' && !(await confirmSheet('End the round now? The hold in progress is not saved.', { ok: 'End round' }))) return;
       finishRound();
     };
+    plan();
     draw();
   })();
-  return () => { clearInterval(timer); setQuiet('hold', false); };
+  return () => { clearInterval(timer); playing?.stop(); offTalk(); talk.setMuted(false); setQuiet('hold', false); };
 }
 
 export function render(view, params = []) {

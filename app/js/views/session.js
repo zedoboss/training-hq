@@ -23,6 +23,8 @@ import { saveSettings } from '../lib/data.js';
 import { withDefaults, equipmentWithDefaults, smallestPlate, restFor, restDefault, weightUnitFor, toUnit, fromUnit, toDistance, fromDistance, REST_CHOICES, restText } from '../lib/settings.js';
 import { play } from '../lib/sounds.js';
 import { isSquatExercise, depthText } from '../lib/squat-log.js';
+import { holdScript, setScript, setStartText, ceilingFor, pickLine } from '../lib/coach-talk.js';
+import * as talk from '../lib/talk.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DAY = { pull: 'PULL', push: 'PUSH', legs: 'LEGS', neck: 'NECK' };
@@ -65,9 +67,15 @@ const minPlate = () => smallestPlate(getState().equipment);
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 async function context(repo, excludeSessionId) {
-  const [sessions, sets, bridge, exercises, meta] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('exercises'), repo.get('programme', 'meta')]);
+  const [sessions, sets, bridge, exercises, meta, bank, todayDoc, programme] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('exercises'), repo.get('programme', 'meta'), repo.get('coach-lines', 'bank'), repo.get('days', isoDate(new Date())), repo.list('programme')]);
   const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
-  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, comebackStart: comebackStartOf(meta) };
+  // A15: his lines, his pre-layoff numbers (the Rival), and Calm on a day the check-in said lighter or rest.
+  const rd = todayDoc?.readiness;
+  const calm = Boolean(rd && /^(lighter|rest|move)/.test(rd.action || ''));
+  // The programme's name for a lift can differ from his (e.g. a machine's name): the ceiling knows both.
+  const alias = new Map(programme.filter((d) => d.kind === 'routine').flatMap((r) => r.exercises || []).filter((e) => e.comebackName && e.hevyName).map((e) => [e.comebackName, e.hevyName]));
+  const ceilings = (meta?.preLayoffCeilings || []).map((c) => ({ ...c, also: alias.has(c.name) ? [alias.get(c.name)] : [] }));
+  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, comebackStart: comebackStartOf(meta), bank, ceilings, calm };
 }
 
 async function startSession(view, routineId, logFor = null) {
@@ -106,6 +114,9 @@ export function render(view, params = []) {
   let typicalMs = null;
   let setTimer = loadSetTimer();
   let setTimerTick = null;
+  // A15: the talk for the set or hold in progress, the next set's talk (fetched during the rest), and which timed set
+  // has a script (its end is then marked by the script, not the plain beep).
+  let talkRun = null; let upcoming = null; let scriptFor = null; let restWas = null; let quietRestEnd = false; let offTalk = () => {};
 
   const exSets = (key) => sets.filter((s) => s.exKey === key).sort((a, b) => a.order - b.order);
   const onFocus = (e) => {
@@ -186,7 +197,7 @@ export function render(view, params = []) {
   const timerLine = (s, prev) => {
     if (setTimer?.setId === s.id) {
       const v = setTimerView(setTimer);
-      return `<div class="set-timer"><button class="btn-primary small" data-a="timer-stop" type="button">Stop</button><span class="hud ${v.reached ? 'c-green' : 'c-cyan'}" data-timer>${v.text}</span></div>`;
+      return `<div class="set-timer"><button class="btn-primary small" data-a="timer-stop" type="button">${v.ready ? 'Not yet' : 'Stop'}</button><span class="hud ${v.reached ? 'c-green' : v.ready ? 'c-amber' : 'c-cyan'}" data-timer>${v.text}</span></div>`;
     }
     const target = s.durationS ?? prev?.durationS ?? 30;
     return `<div class="set-timer"><button class="btn-ghost small" data-a="timer-start" type="button">Start ${target} s</button></div>`;
@@ -200,10 +211,56 @@ export function render(view, params = []) {
     setTimerTick = setInterval(() => {
       if (!setTimer) { clearInterval(setTimerTick); setQuiet('set-timer', false); return; }
       const v = setTimerView(setTimer);
-      if (v.reached && !setTimer.cued) { setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); rest.beep(3); setQuiet('set-timer', false); }
+      if (v.reached && !setTimer.cued) { setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); if (scriptFor !== setTimer.setId) rest.beep(3); setQuiet('set-timer', false); }
       const el = view.querySelector(`[data-set="${CSS.escape(setTimer.setId)}"] [data-timer]`);
-      if (el) { el.textContent = v.text; el.classList.toggle('c-green', v.reached); el.classList.toggle('c-cyan', !v.reached); }
+      if (el) { el.textContent = v.text; el.classList.toggle('c-green', v.reached); el.classList.toggle('c-amber', v.ready); el.classList.toggle('c-cyan', !v.reached && !v.ready); }
     }, 250);
+  };
+
+  // ---- A15: the coach talking during sets (brief decision 30) ----
+  /** The next set he'll do: the rest of this exercise first, then the next exercise with sets left. Timed sets have their own Start. */
+  const nextSetAfter = (ex) => {
+    const order = session.exercises.map((e) => e.key);
+    const keys = [ex.key, ...order.slice(order.indexOf(ex.key) + 1), ...order.slice(0, order.indexOf(ex.key))];
+    for (const k of keys) {
+      const e = session.exercises.find((x) => x.key === k);
+      const open = exSets(k).find((x) => !x.done);
+      if (open) return { ex: e, set: open };
+    }
+    return null;
+  };
+  const isTimed = (ex, s) => s.type === 'hold' || setFields(ex.type, s.type).includes('durationS');
+  /** Worked out and fetched while he rests, so it plays the moment the rest ends. */
+  const planNext = (ex) => {
+    upcoming = null;
+    const n = nextSetAfter(ex);
+    if (!n || isTimed(n.ex, n.set) || !talk.talkOn()) return;
+    const all = exSets(n.ex.key);
+    const work = all.filter((x) => x.type !== 'warmup' && x.type !== 'hold');
+    const t = n.set.target || {};
+    const kgv = n.set.kg ?? t.kg ?? null;
+    const start = setStartText({ setNo: Math.max(1, work.indexOf(n.set) + 1), total: work.length, type: n.set.type, kg: t.bodyweight || t.added ? null : kgv, reps: n.set.reps ?? t.reps ?? null, bodyweight: Boolean(t.bodyweight || t.added || BODYWEIGHT_TYPES.includes(n.ex.type)), added: t.added ? kgv : null });
+    const c = ceilingFor(ctx.ceilings, n.ex.name);
+    const rival = c ? { kg: c.kg, reps: c.reps ?? null, lift: n.ex.name.replace(/\s*\(.*\)\s*/g, ' ').trim().toLowerCase() } : null;
+    const script = setScript({ start, bank: ctx.bank, ...talk.talkPrefs(), calm: ctx.calm || talk.isCalm(), rival, avoid: new Set(talk.recentLines()) });
+    talk.prepare(script);
+    upcoming = { setId: n.set.id, script };
+  };
+  /** The rest is over (it ran out, or he skipped it): the set starts, and so does its talk. */
+  const onRestOver = () => {
+    if (quietRestEnd || editing || !upcoming) return;
+    const u = upcoming; upcoming = null;
+    if (!sets.some((x) => x.id === u.setId && !x.done) || setTimer) return;
+    talkRun = talk.run(u.script);
+  };
+  /** A new comeback best: one proud line (the Rival). */
+  const sayRecord = (ex) => {
+    if (!talk.talkOn()) return;
+    const c = ceilingFor(ctx.ceilings, ex.name);
+    const l = pickLine(ctx.bank, 'record', { ...talk.talkPrefs(), calm: ctx.calm || talk.isCalm(), vars: c ? { rivalKg: c.kg, rivalReps: c.reps ?? null } : {}, avoid: new Set(talk.recentLines()) });
+    if (!l) return;
+    const script = { cues: [{ at: 0, kind: 'record', text: l.text, mood: l.mood }] };
+    talk.prepare(script).then(() => { if (!talk.running()) talk.run(script); });
   };
 
   const setRow = (ex, s, all) => {
@@ -277,18 +334,28 @@ export function render(view, params = []) {
     const s = sets.find((x) => x.id === setId);
     const ex = session.exercises.find((e) => e.key === s.exKey);
     if (action === 'timer-start') {
-      rest.unlockAudio();
-      rest.clear();
+      rest.unlockAudio(); talk.unlock();
+      quietRestEnd = true; rest.clear(); quietRestEnd = false;
       const prev = previousFor(prevOf(ex), exSets(ex.key), s);
-      setTimer = { setId: s.id, startedAt: Date.now(), targetS: s.durationS ?? prev?.durationS ?? 30, cued: false };
+      const now = Date.now();
+      const targetS = s.durationS ?? prev?.durationS ?? 30;
+      // A14: a hold starts with GET READY, then 3, 2, 1; A15: the coach paces it (else sounds mark the same points).
+      const getReadyS = s.type === 'hold' ? prefs().holds.getReadyS ?? 15 : 0;
+      setTimer = { setId: s.id, startedAt: now, targetS, cued: false, readyUntil: getReadyS ? now + getReadyS * 1000 : 0 };
       storeSetTimer(setTimer);
+      const script = holdScript({ getReadyS, holdS: targetS, bank: ctx.bank, ...talk.talkPrefs(), calm: ctx.calm || talk.isCalm(), avoid: new Set(talk.recentLines()) });
+      talk.prepare(script);
+      talkRun = talk.run(script, { t0: now }); scriptFor = s.id; upcoming = null;
       redrawCard(ex.key);
       runSetTimer();
       return;
     }
     if (action === 'timer-stop' || (action === 'tick' && setTimer?.setId === s.id)) {
       const secs = setTimerResult(setTimer);
-      setTimer = null; storeSetTimer(null); clearInterval(setTimerTick);
+      setTimer = null; storeSetTimer(null); clearInterval(setTimerTick); setQuiet('set-timer', false);
+      talkRun?.stop(); scriptFor = null;
+      // Stopped during GET READY: nothing was held, nothing is filled.
+      if (secs == null) { redrawCard(ex.key); return; }
       await saveSet({ ...s, durationS: secs });
       if (!s.done) await onSetAction(setId, 'tick');
       return;
@@ -300,11 +367,13 @@ export function render(view, params = []) {
       const filled = { ...s, ...fillForTick(s, prev), done: true, doneAt: Date.now() };
       const rec = !editing && prefs().show.recordBanner ? setRecord({ set: filled, name: ex.name, sessionId: session.id, otherSets: exSets(ex.key), history: ctx.history, comebackStart: ctx.comebackStart }) : null;
       if (rec) play('record', prefs().sounds.recordVolume); else play('tick', prefs().sounds.tickVolume);
+      if (!editing) talkRun?.stop();
       await saveSet(filled);
       redrawCard(ex.key);
       if (rec) recordBanner(ex, rec);
+      if (rec && !editing) sayRecord(ex);
       const next = exSets(ex.key).find((x) => !x.done);
-      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) rest.start(restFor(ex, s.type, prefs()), ex.name);
+      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name); planNext(ex); }
       if (!editing && prefs().show.supersetJump && ex.supersetId && !restAfter(session.exercises, ex.key)) {
         const keys = session.exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
         view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -436,6 +505,7 @@ export function render(view, params = []) {
       <header class="s-head" id="s-head">
         <div class="s-row1">
           <div class="hud c-amber s-title">${esc(DAY[session.dayType] || session.title.toUpperCase())}${session.week ? ` · WK ${session.week}` : ''} <span data-k="paused" hidden>· PAUSED</span></div>
+          ${editing ? '' : '<button class="pill" id="s-talk" type="button" aria-pressed="false">Coach</button>'}
           <button class="pill" id="s-more" type="button" aria-label="Session options">···</button>
           <a class="pill is-on" href="#/finish/${esc(session.id)}">${editing ? 'Done' : 'Finish'}</a>
         </div>
@@ -537,7 +607,21 @@ export function render(view, params = []) {
     typicalMs = typicalDurationMs(session.dayType, { sessions: ctx.sessions, bridge: ctx.bridge, now: session.startedAt });
     draw();
     drawRest(rest.status());
-    offRest = rest.subscribe(drawRest);
+    restWas = rest.status();
+    offRest = rest.subscribe((st) => { drawRest(st); if (restWas && !st) onRestOver(); restWas = st; });
+    // A15: mute the coach during this session's sets (sounds still mark a hold).
+    const muteKey = 'thq.talk.muted';
+    try { if (sessionStorage.getItem(muteKey) === id) talk.setMuted(true); } catch { /* private mode */ }
+    const showTalk = () => { const b = view.querySelector('#s-talk'); if (!b) return; b.textContent = talk.isMuted() ? 'Muted' : 'Coach'; b.classList.toggle('is-on', !talk.isMuted()); b.setAttribute('aria-pressed', String(talk.isMuted())); };
+    view.querySelector('#s-talk')?.addEventListener('click', () => {
+      talk.setMuted(!talk.isMuted());
+      try { if (talk.isMuted()) sessionStorage.setItem(muteKey, id); else sessionStorage.removeItem(muteKey); } catch { /* private mode */ }
+      toast(talk.isMuted() ? 'Coach muted for this session.' : 'Coach talks during sets again.');
+    });
+    showTalk();
+    offTalk = talk.onChange(showTalk);
+    // The set being rested for when the screen opens mid-rest.
+    if (restWas) { const last = [...sets].filter((x) => x.done && x.doneAt).sort((a, b) => b.doneAt - a.doneAt)[0]; const lex = last && session.exercises.find((e) => e.key === last.exKey); if (lex) planNext(lex); }
     // "Next exercise" said to the coach on the Talk screen in the last 5 minutes: open on that exercise.
     try {
       const f = JSON.parse(sessionStorage.getItem('thq.coach.focus') || 'null');
@@ -562,7 +646,8 @@ export function render(view, params = []) {
 
   return () => {
     window.removeEventListener('thq:coach-focus', onFocus);
-    clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo();
+    clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo(); offTalk();
+    talk.stop(); talk.setMuted(false);
     document.removeEventListener('visibilitychange', onVis);
     wakeLock?.release?.().catch(() => {});
     setQuiet('set-timer', false);

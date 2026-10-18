@@ -26,6 +26,7 @@ import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
 import { addMinutesHm } from '../../app/js/lib/time.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
+import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -167,8 +168,16 @@ export function contextLine({ store, tz, now }) {
   const lines = [...rotationLines(s).slice(0, 3), comingUp(s, 6)];
   const active = s.active();
   if (active) lines.push(activeText(s, active));
+  lines.push(moodLine(s));
   lines.push(...recoveryContext(s));
   return lines.join('\n');
+}
+
+/** A15: his mood settings, so the coach's replies follow the same dial as the app's lines. */
+function moodLine(s) {
+  const c = s.settings().coach;
+  const on = ['commander', 'hype', 'dark', 'warrior', 'rival'].filter((m) => c.moods?.[m] !== false);
+  return `Coach moods (his settings): ${on.length ? on.map((m) => MOOD_LABEL[m]).join(', ') : 'none (plain)'}, plus Calm always; intensity ${c.intensity ?? 3} of 5; the app talks during sets and holds: ${c.talk?.during === false ? 'off' : `on (${c.talk?.every || 'steady'})`}.`;
 }
 
 // ---- recovery (A13) -----------------------------------------------------------------------------------------------

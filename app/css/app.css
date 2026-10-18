@@ -402,6 +402,11 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .hold-ring { position: relative; width: 240px; height: 240px; align-self: center; margin: 4px auto; }
 .hold-ring-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
 .hold-ring-text b { font: 600 56px/1 var(--mono); }
+/* A14: GET READY 15, then HOLD 30, big. */
+.hold-phase { font: 600 15px/1 var(--mono); letter-spacing: .22em; color: var(--cyan); }
+.hold-ring.is-getready .hold-phase { color: var(--amber); }
+.hold-ring.is-getready circle + circle { stroke: var(--amber); }
+.hold-ring.is-getready b, .hold-ring.is-holding b { font-size: 76px; }
 .pain-grid { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 3px; }
 .pain { height: 40px; border: 1px solid var(--border-strong); border-radius: 6px; background: transparent; color: var(--pale); font: 500 12px/1 var(--mono); padding: 0; cursor: pointer; }
 .pain.over { color: var(--amber); border-color: #5a4320; }

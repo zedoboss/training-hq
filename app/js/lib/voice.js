@@ -16,6 +16,8 @@ import { runAction } from './coach.js';
 import { isQuiet, onQuietEnd } from './quiet.js';
 import * as rest from './rest-timer.js';
 import { play } from './sounds.js';
+import * as talk from './talk.js';
+import { callsForCalm } from './coach-talk.js';
 
 const KEY = 'thq.voice.listen';
 const SEEN = 'thq.voice.used';
@@ -69,7 +71,10 @@ const deps = {
 
 function speak(sentence) {
   if (!prefs().voice.speak) return;
-  if (isQuiet()) { quietQueue.push(sentence); return; }
+  // A15 (brief decision 30): the coach talks during sets and holds, so its answers no longer wait for them to end,
+  // unless he switched that off (then the old quiet rule holds them back).
+  if (isQuiet() && prefs().coach.talk.during === false) { quietQueue.push(sentence); return; }
+  talk.stop();
   player.say(sentence);
 }
 onQuietEnd(() => { while (quietQueue.length) player.say(quietQueue.shift()); });
@@ -91,8 +96,11 @@ async function turn(wav, { overCoach: echo = false } = {}) {
           // Not him. A clip that began while the coach was talking is mostly its own echo: no readout for that.
           if (!e.ok) { if (!(echo && e.reason === 'not-you')) showReadout(e.reason, e.score); return; }
           ok = true;
-          // His voice, confirmed: whatever the coach was saying stops (barge-in).
+          // His voice, confirmed: whatever the coach was saying stops (barge-in), the set or hold talk too (only real
+          // words get this far: grunts and breathing are dropped on the Mac). Pain, stop or anything off: Calm.
           if (player.speaking) player.stop();
+          talk.stop();
+          if (callsForCalm(e.text)) talk.setCalm();
           quietQueue.length = 0;
           setPhase('thinking');
         } else if (e.type === 'text') {
@@ -144,11 +152,11 @@ async function openListening() {
       mic = await micSession({
         onClip: (wav) => { clearTimeout(bargeTimer); turn(wav, { overCoach }); overCoach = false; },
         onEvent: (e) => {
-          if (e.type === 'start') { overCoach = player.speaking; if (player.speaking) bargeCheck(); else if (!turnsInFlight) setPhase('hearing'); }
+          if (e.type === 'start') { overCoach = player.speaking || talk.playing(); if (player.speaking) bargeCheck(); else if (!turnsInFlight && !overCoach) setPhase('hearing'); }
           else if (e.type === 'noise' && phase === 'hearing') setPhase('listening');
         },
         // While the coach talks, its own sound must be louder than usual to count as someone speaking.
-        onLevel: () => { mic?.vad.setBoost(player.speaking ? 1 + 4 * player.level : 1); },
+        onLevel: () => { const lv = Math.max(player.level, talk.talkLevel()); mic?.vad.setBoost(player.speaking || talk.playing() ? 1 + 4 * lv : 1); },
         onEnded: () => { mic = null; letSleep(); setPhase(listening() ? 'tap' : 'off'); },
       });
       error = null;
