@@ -84,3 +84,14 @@ test('monthly report: sessions, totals vs last month, top exercises, bests above
   assert.deepEqual(m.topExercises[0], { name: 'Bench', sets: 3 });
   assert.deepEqual(m.bests, [{ name: 'Bench', kg: 55, previous: 45 }], 'curl and pull-up were new this month: not bests');
 });
+
+test('most-logged exercises in a period', async () => {
+  const { topExercises } = await import('../app/js/lib/stats.js');
+  const rows = [
+    { date: '2026-10-12', name: 'Bench', exerciseId: 'bench', sessionId: 'a' }, { date: '2026-10-12', name: 'Bench', exerciseId: 'bench', sessionId: 'a' },
+    { date: '2026-10-17', name: 'Bench', exerciseId: 'bench', sessionId: 'b' }, { date: '2026-10-17', name: 'Curl', exerciseId: 'curl', sessionId: 'b' },
+    { date: '2026-09-01', name: 'Curl', exerciseId: 'curl', sessionId: 'c' }, { date: '2026-09-01', name: 'Curl', exerciseId: 'curl', sessionId: 'c' },
+  ];
+  assert.deepEqual(topExercises(rows, '2026-10-01', '2026-10-19'), [{ name: 'Bench', exerciseId: 'bench', sets: 3, sessions: 2 }, { name: 'Curl', exerciseId: 'curl', sets: 1, sessions: 1 }]);
+  assert.deepEqual(topExercises(rows, '2026-08-01', '2026-10-19', 1).map((x) => x.name), ['Bench']);
+});

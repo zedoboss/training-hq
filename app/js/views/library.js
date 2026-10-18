@@ -4,15 +4,20 @@ import { mergeLibrary, searchLibrary, newCustomExercise, slug, exerciseUsed, rou
 import { TYPES, MUSCLES, EQUIPMENT, muscleLabel } from '../lib/exercise-types.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
+import { activeBridge } from '../lib/history.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const state = { q: '', muscle: null, equipment: null };
 
-/** Ids of exercises from the most recent sessions (history bridge now, real sessions from step 2.6). */
-export async function recentExerciseIds(repo) {
-  const bridge = await repo.get('bridge', 'last-loads');
+/** Ids of exercises from the most recent finished sessions (P32), then the Hevy bridge while it is still in use. */
+export async function recentExerciseIds(repo, max = 40) {
+  const [sessions, bridge] = await Promise.all([repo.list('sessions'), repo.get('bridge', 'last-loads')]);
   const ids = [];
-  for (const s of bridge?.lastSessions || []) for (const n of s.exercises) { const id = slug(n); if (!ids.includes(id)) ids.push(id); }
+  const add = (id) => { if (id && !ids.includes(id) && ids.length < max) ids.push(id); };
+  for (const s of sessions.filter((x) => x.status === 'done' && x.kind !== 'holds').sort((a, b) => b.startedAt - a.startedAt).slice(0, 20)) {
+    for (const e of s.exercises || []) add(e.exerciseId || slug(e.name));
+  }
+  for (const s of activeBridge(bridge, sessions)?.lastSessions || []) for (const n of s.exercises) add(slug(n));
   return ids;
 }
 

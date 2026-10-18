@@ -1,6 +1,7 @@
-// STATISTICS (#/stats, #/stats/month/<YYYY-MM>) (2.18): totals against the previous period, sets per muscle per week,
-// muscle distribution, volume over time, and a monthly report. Finished Training HQ sessions now; the imported
-// history joins in step 3. Every chart has its numbers in text or a table too, so nothing depends on hover or colour.
+// STATISTICS (#/stats, #/stats/month/<YYYY-MM>) (2.18, P38, P41): the last 7 days on a body map, totals against the
+// previous period, sets per muscle per week, muscle distribution, most-logged exercises, volume over time, and a
+// monthly report, over Training HQ sessions and the imported Hevy and Strong history. Every chart has its numbers in
+// text or a table too, so nothing depends on hover or colour.
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { getState } from '../lib/store.js';
@@ -10,8 +11,9 @@ import { muscleLabel } from '../lib/exercise-types.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import {
   setRows, PERIODS, periodRange, totals, distribution, weeklyMuscleSets, weeklyVolume, changePct, monthReport,
-  monthOf, addMonths, addDays, muscleSets,
+  monthOf, addMonths, addDays, muscleSets, topExercises, weekStartOf,
 } from '../lib/stats.js';
+import { bodyMap } from '../ui/body-map.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const md = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
@@ -20,6 +22,7 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const monthName = (ym) => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 let period = '4w';
+let bodyWhen = '7d';
 
 /** 1,284 · 12.9K · 1.2M */
 export function compact(n) {
@@ -161,14 +164,25 @@ export function render(view, params = []) {
     const head = `<div class="lib-head"><a class="pill" href="#/train">Back</a></div><h1 class="view-title">Statistics</h1>
       <nav class="seg" aria-label="Statistics"><a class="pill ${mode === 'overview' ? 'is-on' : ''}" href="#/stats">Overview</a><a class="pill ${mode === 'month' ? 'is-on' : ''}" href="#/stats/month">Monthly report</a></nav>`;
     const empty = !rows.length
-      ? '<p class="hint">No finished sessions logged in Training HQ yet. These fill in as you log, and your Hevy and Strong history joins with the import in step 3.</p>'
-      : `<p class="hint">From sessions logged in Training HQ. Your Hevy and Strong history joins with the import in step 3.${st.warmup.countInStats ? ' Warm-ups count as sets (Settings).' : ''}</p>`;
+      ? '<p class="hint">No finished sessions yet. These fill in as you log, or import your Hevy and Strong history (Settings > Import and export).</p>'
+      : `<p class="hint">From every finished session: logged in Training HQ or imported from Hevy and Strong.${st.warmup.countInStats ? ' Warm-ups count as sets (Settings).' : ''}</p>`;
 
     if (mode === 'overview') {
       const p = periodRange(period, today);
       const what = `previous ${PERIODS[period].label}`;
       const vWeeks = Math.round(p.days / 7);
+      // P38/P41: the last 7 days (or this week so far) on the body map.
+      const bFrom = bodyWhen === 'week' ? weekStartOf(today, firstDay) : addDays(today, -6);
+      const bTo = addDays(today, 1);
+      const bWhat = bodyWhen === 'week' ? 'this week' : 'last 7 days';
+      const bSessions = totals(sessions, rows, bFrom, bTo).sessions;
+      const tops = topExercises(rows, p.from, p.to);
       view.innerHTML = `${head}
+        <div class="section-label">${bodyWhen === 'week' ? 'This week' : 'Last 7 days'}</div>
+        <div class="seg" role="group" aria-label="Body map period">${[['7d', 'Last 7 days'], ['week', 'This week']].map(([k, l]) => `<button class="pill ${k === bodyWhen ? 'is-on' : ''}" data-body="${k}" type="button" aria-pressed="${k === bodyWhen}">${l}</button>`).join('')}</div>
+        <p class="hint">${bSessions} session${bSessions === 1 ? '' : 's'} ${bodyWhen === 'week' ? `since ${esc(dayName(bFrom))}` : `from ${esc(dayName(bFrom))} to today`}. Sets per muscle: brighter = more.</p>
+        ${bodyMap(muscleSets(rows.filter((r) => r.date >= bFrom && r.date < bTo)), bWhat)}
+        <div class="section-label">Period</div>
         <div class="seg" role="group" aria-label="Period">${Object.entries(PERIODS).map(([k, v]) => `<button class="pill ${k === period ? 'is-on' : ''}" data-period="${k}" type="button" aria-pressed="${k === period}">${v.label}</button>`).join('')}</div>
         ${empty}
         ${tiles(totals(sessions, rows, p.from, p.to), totals(sessions, rows, p.prevFrom, p.prevTo), what)}
@@ -177,9 +191,12 @@ export function render(view, params = []) {
         ${heatGrid(rows, { key: period, today, firstDay })}
         <div class="section-label">Muscle distribution</div>
         ${distBars(distribution(rows, p))}
+        <div class="section-label">Most-logged exercises</div>
+        ${tops.length ? `<ul class="best-list">${tops.map((e) => `<li><a class="best top-ex" href="#/exercise/${esc(e.exerciseId)}"><span>${esc(e.name)}<br><span class="c-faint">${e.sessions} session${e.sessions === 1 ? '' : 's'}</span></span><b>${e.sets} set${e.sets === 1 ? '' : 's'}</b></a></li>`).join('')}</ul>` : '<p class="hint">No sets in this period.</p>'}
         <div class="section-label">Volume per week · kg</div>
         ${volumeChart(weeklyVolume(rows, { weeks: vWeeks, today, firstDay }))}`;
       view.querySelectorAll('[data-period]').forEach((b) => b.addEventListener('click', () => { period = b.dataset.period; draw(repo); }));
+      view.querySelectorAll('[data-body]').forEach((b) => b.addEventListener('click', () => { bodyWhen = b.dataset.body; draw(repo); }));
     } else {
       const month = /^\d{4}-\d{2}$/.test(params[1] || '') ? params[1] : monthOf(today);
       const r = monthReport({ sessions, rows, month });

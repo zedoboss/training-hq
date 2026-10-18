@@ -1,4 +1,4 @@
-// Statistics (2.18) over finished Training HQ sessions; the imported Hevy and Strong history joins in step 3.
+// Statistics (2.18) over every finished session: logged in Training HQ or imported from Hevy and Strong (step 3).
 // Sets per muscle: the primary muscle counts 1, each secondary muscle 0.5. Holds never count. Warm-ups count as sets
 // only when Settings says so, and never toward volume. Dates are the session's local date (YYYY-MM-DD).
 import { effectiveKg } from './exercise-types.js';
@@ -140,4 +140,18 @@ export function monthReport({ sessions, rows, month, tz }) {
     muscles: distribution(rows, { from, to, prevFrom, prevTo: from }),
     bests: bests.sort((a, b) => a.name.localeCompare(b.name)),
   };
+}
+
+/** Most-logged exercises in [from, to): [{name, exerciseId, sets, sessions}], most sets first. */
+export function topExercises(rows, from, to, n = 8) {
+  const by = new Map();
+  for (const r of rows) {
+    if (!inRange(r.date, from, to)) continue;
+    const cur = by.get(r.name) || { name: r.name, exerciseId: r.exerciseId, sets: 0, ids: new Set() };
+    cur.sets += 1;
+    cur.ids.add(r.sessionId);
+    by.set(r.name, cur);
+  }
+  return [...by.values()].map(({ ids, ...x }) => ({ ...x, sessions: ids.size }))
+    .sort((a, b) => b.sets - a.sets || a.name.localeCompare(b.name)).slice(0, n);
 }

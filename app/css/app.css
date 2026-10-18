@@ -574,3 +574,26 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .rec-list .rec b { text-align: right; }
 .rec-list .rec span.c-faint, .rec-list .rec b .c-faint { font-size: 11px; }
 .rep-table a { color: var(--pale); }
+
+/* ---------- Body map (statistics) ---------- */
+.body-map { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.body-map svg { width: 100%; max-width: 420px; height: auto; margin: 0 auto; display: block; }
+.body-map .bm { fill: var(--surface-2); stroke: var(--bg); stroke-width: 1; }
+.body-map .bm.h1 { fill: color-mix(in oklab, var(--cyan) 22%, var(--surface-2)); }
+.body-map .bm.h2 { fill: color-mix(in oklab, var(--cyan) 45%, var(--surface-2)); }
+.body-map .bm.h3 { fill: color-mix(in oklab, var(--cyan) 70%, var(--surface-2)); }
+.body-map .bm.h4 { fill: var(--cyan); }
+.body-map .bm:hover { stroke: var(--pale); }
+.body-map .bm-head { fill: var(--surface); stroke: var(--border); }
+.body-map .bm-body { fill: var(--bg-2); stroke: var(--divider); stroke-width: 1; }
+.body-map .bm-cap { fill: var(--faint); font: 500 7px var(--mono); letter-spacing: .2em; }
+.bm-list { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.bm-list span { display: inline-flex; align-items: center; gap: 6px; }
+.bm-list b { color: var(--text); font: 600 12px var(--mono); }
+.bm-key { width: 10px; height: 10px; border-radius: 3px; background: var(--surface-2); display: inline-block; }
+.bm-key.h1 { background: color-mix(in oklab, var(--cyan) 22%, var(--surface-2)); }
+.bm-key.h2 { background: color-mix(in oklab, var(--cyan) 45%, var(--surface-2)); }
+.bm-key.h3 { background: color-mix(in oklab, var(--cyan) 70%, var(--surface-2)); }
+.bm-key.h4 { background: var(--cyan); }
+.top-ex { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-m); background: var(--surface); color: var(--text); text-decoration: none; align-items: center; }
+.top-ex .c-faint { font-size: 11px; }
