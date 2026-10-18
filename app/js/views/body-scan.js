@@ -97,7 +97,7 @@ function home(view) {
     const rem = next ? [-3, -2, -1, 0].flatMap((k) => scanReminders({ date: addDays(next.date, k), tz: deviceTimeZone(), plan, scans, days: ctx.days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin })) : [];
     const remOn = n.kinds?.scan !== false;
     const p = st.proposal;
-    const restWhy = p.baseMaybe ? `may be a rest day (today's ${LABEL[p.open]} isn't logged yet)` : 'is a rest day in the rotation';
+    const restWhy = p.baseMaybe ? `may be a rest day, as today's ${LABEL[p.open]} isn't logged yet` : 'is a rest day in the rotation';
     const why = (p.lastDate
       ? (p.shifted ? `4 weeks after your last scan (${dayName(p.lastDate)}) is ${dayName(p.base)}, which ${restWhy}, so the next training day.` : `4 weeks after your last scan (${dayName(p.lastDate)}), the same weekday.`)
       : `Your first scan: the next training day${p.shifted ? ` (tomorrow ${restWhy})` : ''}.`)
