@@ -166,3 +166,146 @@ export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, even
   }
   return [];
 }
+
+// ---- Results (7.5) ----
+// A scan with results: 'body-scans' scan.<date> {..., status 'done', at (time of the scan), metrics: [{key, label,
+// value, text, unit, unsure}], conditions: {fasted, trainedBefore, unusual, unticked: [ids]}, photos: [photo ids],
+// source 'photo'|'manual', confirmedAt, note}. Every metric is stored exactly as the scanner reported it (label, the
+// number as printed, unit); `key` links the usual ones across scans for the trends (7.6), others keep key null.
+// Photos: 'scan-photos' {id, scanId, date, dataUrl, at}; what the Mac read: 'scan-reads' <photo id> (Mac only).
+
+/** The usual Evolt 360 metrics (for typing them in and for trends). Labels on his scanner may differ; any label works. */
+export const METRICS = [
+  { key: 'weightKg', label: 'Weight', unit: 'kg', main: true, alias: ['weight', 'body weight', 'total weight', 'total body weight'] },
+  { key: 'fatPercent', label: 'Body fat', unit: '%', main: true, alias: ['body fat', 'body fat percentage', 'body fat percent', 'percent body fat', 'pbf', 'fat percentage', 'fat percent', 'bf'] },
+  { key: 'fatMassKg', label: 'Body fat mass', unit: 'kg', main: true, alias: ['body fat mass', 'fat mass', 'total fat mass', 'total body fat mass', 'bfm'] },
+  { key: 'leanMassKg', label: 'Lean body mass', unit: 'kg', main: true, alias: ['lean body mass', 'lean mass', 'lbm', 'fat free mass', 'ffm', 'total lean mass'] },
+  { key: 'muscleMassKg', label: 'Skeletal muscle mass', unit: 'kg', main: true, alias: ['skeletal muscle mass', 'skeletal muscle', 'smm', 'muscle mass'] },
+  { key: 'waterL', label: 'Total body water', unit: 'L', main: true, alias: ['total body water', 'tbw', 'body water', 'water'] },
+  { key: 'visceralFat', label: 'Visceral fat level', unit: '', main: true, alias: ['visceral fat level', 'visceral fat', 'visceral fat rating', 'vfl', 'visceral fat index'] },
+  { key: 'bmrKcal', label: 'BMR', unit: 'kcal', main: true, alias: ['bmr', 'basal metabolic rate', 'resting metabolic rate', 'rmr'] },
+  { key: 'icwL', label: 'Intracellular water', unit: 'L', alias: ['intracellular water', 'icw'] },
+  { key: 'ecwL', label: 'Extracellular water', unit: 'L', alias: ['extracellular water', 'ecw'] },
+  { key: 'ecwRatio', label: 'ECW/TBW', unit: '', alias: ['ecw tbw', 'ecw ratio', 'ecw tbw ratio', 'extracellular water ratio'] },
+  { key: 'proteinKg', label: 'Protein', unit: 'kg', alias: ['protein', 'protein mass'] },
+  { key: 'mineralKg', label: 'Minerals', unit: 'kg', alias: ['minerals', 'mineral', 'mineral mass', 'bone mineral content', 'bone mass', 'bmc'] },
+  { key: 'subcutFatKg', label: 'Subcutaneous fat mass', unit: 'kg', alias: ['subcutaneous fat mass', 'subcutaneous fat', 'sfm'] },
+  { key: 'visceralAreaCm2', label: 'Visceral fat area', unit: 'cm²', alias: ['visceral fat area', 'vfa'] },
+  { key: 'bmi', label: 'BMI', unit: '', alias: ['bmi', 'body mass index'] },
+  { key: 'bioAge', label: 'Biological age', unit: 'years', alias: ['biological age', 'bio age', 'metabolic age', 'body age'] },
+  ...[['RightArm', 'right arm'], ['LeftArm', 'left arm'], ['Trunk', 'trunk'], ['RightLeg', 'right leg'], ['LeftLeg', 'left leg']].flatMap(([k, part]) => [
+    { key: `lean${k}Kg`, label: `Lean mass · ${part[0].toUpperCase()}${part.slice(1)}`, unit: 'kg', part, seg: 'lean' },
+    { key: `fat${k}Kg`, label: `Fat mass · ${part[0].toUpperCase()}${part.slice(1)}`, unit: 'kg', part, seg: 'fat' },
+  ]),
+];
+export const metricOf = (key) => METRICS.find((m) => m.key === key) || null;
+const KEYS = new Set(METRICS.map((m) => m.key));
+const words = (s) => String(s || '').toLowerCase().replace(/\((kg|lbs?|%|l|kcal|cm2|cm²|level|years?|ratio)\)/g, ' ').replace(/[^a-z0-9%]+/g, ' ').trim();
+
+/**
+ * The usual metric a printed label stands for, or null. Segmental lines need the body part and lean/muscle or fat in
+ * the label ("Segmental lean · Right arm"). A % unit on a fat label means body fat %, a kg unit fat mass.
+ */
+export function keyFor(label, unit = '') {
+  const w = words(label); const u = String(unit || '').toLowerCase().trim();
+  if (!w) return null;
+  const seg = METRICS.find((m) => m.part && w.includes(m.part));
+  if (seg) {
+    if (u === '%') return null; // a segment's % of normal: kept, not trended
+    const kind = /\bfat\b/.test(w) ? 'fat' : /\b(lean|muscle|ffm|fat free)\b/.test(w) ? 'lean' : null;
+    return kind ? METRICS.find((m) => m.part === seg.part && m.seg === kind).key : null;
+  }
+  const exact = METRICS.find((m) => m.alias?.includes(w));
+  if (exact) {
+    if (exact.key === 'fatMassKg' && u === '%') return 'fatPercent';
+    if (exact.key === 'fatPercent' && /^(kg|lb|lbs)$/.test(u)) return 'fatMassKg';
+    return exact.key;
+  }
+  if (/\bfat\b/.test(w) && !/visceral|subcutaneous|free/.test(w)) return u === '%' || /%|percent/.test(w) ? 'fatPercent' : /^(kg|lb|lbs)$/.test(u) ? 'fatMassKg' : null;
+  return null;
+}
+
+/** A number as printed ("82,4", "18.2 %", "1,845") or null. */
+export function numberOf(text) {
+  const s = String(text ?? '').trim().replace(/\s/g, '');
+  if (!s) return null;
+  const m = /^[<>~≈]?(-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:[.,]\d+)?)/.exec(s);
+  if (!m) return null;
+  const t = /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(m[1]) ? m[1].replace(/,/g, '') : m[1].replace(',', '.');
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Metrics tidied: label as reported, the number as printed (text) and as a number, unit, key (checked or found). */
+export function cleanMetrics(list = []) {
+  const out = [];
+  for (const m of Array.isArray(list) ? list : []) {
+    const label = String(m?.label ?? '').trim().slice(0, 80);
+    const text = String(m?.text ?? (m?.value ?? '')).trim().slice(0, 40);
+    if (!label || !text) continue;
+    const unit = String(m?.unit ?? '').trim().slice(0, 16);
+    const value = Number.isFinite(Number(m?.value)) && m?.value !== '' && m?.value !== null ? Number(m.value) : numberOf(text);
+    const key = KEYS.has(m?.key) ? m.key : keyFor(label, unit);
+    out.push({ key: key || null, label, value, text, unit, ...(m?.unsure ? { unsure: true } : {}) });
+  }
+  // One metric per key: the first one wins, a later duplicate keeps its label but loses the key.
+  const seen = new Set();
+  return out.map((m) => { if (!m.key) return m; if (seen.has(m.key)) return { ...m, key: null }; seen.add(m.key); return m; });
+}
+
+/** Everything the Mac read from his photos of one scan, in photo order, duplicates (same key or label) left out. */
+export function mergeReads(reads = []) {
+  const out = []; const keys = new Set(); const labels = new Set();
+  for (const r of reads.filter((x) => x?.status === 'done')) {
+    for (const m of cleanMetrics(r.metrics)) {
+      const l = words(m.label);
+      if ((m.key && keys.has(m.key)) || labels.has(l)) continue;
+      if (m.key) keys.add(m.key);
+      labels.add(l);
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+/** The conditions a scan starts with, from its checklist ticks: fasted, trained before, the lines left unticked. */
+export function conditionsFrom(rec, items) {
+  const ticks = rec?.prep?.ticks || {};
+  const has = (id) => (rec?.prep?.items?.length ? rec.prep.items : items).some((i) => i.id === id);
+  return {
+    fasted: has('fasted') ? (ticks.fasted ? true : null) : null,
+    trainedBefore: has('first-thing') ? (ticks['first-thing'] ? false : null) : null,
+    unusual: '',
+    unticked: unticked(rec, items).map((i) => i.id),
+  };
+}
+
+/** Conditions that differ from the protocol, in words (empty = taken the usual way). */
+export function conditionNotes(scan, items) {
+  const c = scan?.conditions || {};
+  const out = [];
+  if (c.fasted === false) out.push('not fasted');
+  if (c.trainedBefore === true) out.push('trained before');
+  const byId = new Map((scan?.prep?.items?.length ? scan.prep.items : items).map((i) => [i.id, i]));
+  if (c.unticked?.length && c.unticked.length >= byId.size) out.push('checklist not ticked');
+  else if (c.unticked?.length) out.push(`not ticked: ${c.unticked.map((id) => byId.get(id)?.text.replace(/\.$/, '') || id).join('; ')}`);
+  if (c.unusual) out.push(c.unusual);
+  return out;
+}
+
+/** The scan record with its results saved (status 'done'). */
+export function withResults(rec, { date, at, metrics, conditions, photos = [], source, note = '' }, now = Date.now()) {
+  const base = rec || { id: scanId(date), date, createdAt: now };
+  return { ...base, id: scanId(date), date, status: 'done', at, metrics: cleanMetrics(metrics), conditions, photos, source, note: String(note || '').trim(), confirmedAt: now };
+}
+
+/** A usual metric's value on a scan, or null. */
+export const metricValue = (scan, key) => scan?.metrics?.find((m) => m.key === key && m.value != null)?.value ?? null;
+
+/** Calendar markers: one per scan with results. */
+export function scanMarks(scans = []) {
+  return scans.filter(isDone).map((s) => {
+    const parts = [['weightKg', 'kg'], ['fatPercent', '% fat'], ['muscleMassKg', 'kg muscle']].map(([k, u]) => { const v = metricValue(s, k); return v == null ? null : `${v} ${u}`.replace(' %', '%'); }).filter(Boolean);
+    return { date: s.date, kind: 'scan', id: s.id, label: `Body scan${parts.length ? `: ${parts.join(' · ')}` : ''}` };
+  });
+}

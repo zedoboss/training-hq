@@ -3,22 +3,27 @@
 //   #/body/scan            the next scan (proposed or confirmed) and its reminders, the scanner's safety notice once,
 //                          the preparation checklist he ticks, what the gym's staff said
 //   #/body/scan/protocol   change the checklist (his gym's instructions win), dated
-import { ready, saveSettings } from '../lib/data.js';
-import { getState } from '../lib/store.js';
+//   #/body/scan/r/<date>   a scan's results: photos of the results screen or printout read by Claude on the Mac (or typed
+//                          in), every number as reported, checked by him; the conditions (time, fasted, trained before,
+//                          checklist lines not ticked, anything unusual)
+import { ready, saveSettings, syncNow } from '../lib/data.js';
+import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
-import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone } from '../lib/time.js';
+import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, hmOf, zonedTime } from '../lib/time.js';
 import { addDays, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import {
   EVERY_DAYS, PROTOCOL, WHEN, SAFETY_TEXT, SAFETY_ASK, STAFF_QUESTIONS, protocolOf, scanStatus, confirmDate, cancelDate,
   withTick, unticked, withProtocol, scanReminders, expectedOn, scanId,
+  METRICS, keyFor, cleanMetrics, mergeReads, conditionsFrom, withResults, metricValue, isDone, conditionNotes,
 } from '../lib/scans.js';
+import { fileToJpeg, newPhotoId } from '../lib/photos.js';
 import { overlay, confirmSheet, promptLong, promptTime } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const dayName = (iso) => formatDay(new Date(`${iso}T12:00:00`));
 const savePlan = (repo, plan) => repo.put('scan-plan', 'main', { ...plan, id: 'main' });
-const COLS = ['scan-plan', 'body-scans', 'days', 'sessions', 'settings'];
+const COLS = ['scan-plan', 'body-scans', 'scan-photos', 'days', 'sessions', 'settings'];
 const REM_TEXT = { 'scan-alcohol': 'no alcohol from now', 'scan-eve': 'the preparation list', 'scan-arrive': 'at the gym, scan first' };
 
 async function loadAll(repo) {
@@ -26,7 +31,8 @@ async function loadAll(repo) {
     repo.get('scan-plan', 'main'), repo.list('body-scans'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days'),
   ]);
   const days = daysByDate(dayList);
-  return { plan: planDoc || {}, scans: scans.filter((s) => s?.date), last: lastRotationSession(sessions, bridge), days };
+  const photoScans = (await repo.list('scan-photos')).map((p) => p.scanId);
+  return { plan: planDoc || {}, scans: scans.filter((s) => s?.date), last: lastRotationSession(sessions, bridge), days, photoScans };
 }
 
 /** "Thursday 10/22 (Legs)" with the day type the rotation expects then, when it is a training day. */
@@ -37,8 +43,10 @@ function withType(iso, ctx, today) {
 
 export function render(view, params = []) {
   if (params[0] === 'protocol') return protocolEditor(view);
+  if (params[0] === 'r' && /^\d{4}-\d{2}-\d{2}$/.test(params[1] || '')) return results(view, params[1]);
   return home(view);
 }
+
 
 function home(view) {
   view.innerHTML = '<div class="lib-head"><a class="pill" href="#/body">Body</a></div><h1 class="view-title">Body scan</h1><p class="view-sub">Loading…</p>';
@@ -54,6 +62,9 @@ function home(view) {
     const n = withDefaults(getState().settings).notify;
     const next = st.next;
     const rec = st.prep;
+    const done = scans.filter(isDone).sort((a, b) => (a.date < b.date ? 1 : -1));
+    const withPhotos = new Set(ctx.photoScans);
+    const unsaved = scans.filter((x) => !isDone(x) && withPhotos.has(x.id));
     // Ticks open from the day before the scan (the evening lines) to the day itself.
     const canTick = next && today >= addDays(next.date, -1);
     const open = next ? unticked(rec, items) : items;
@@ -99,6 +110,7 @@ function home(view) {
           <div class="btn-row"><button class="btn-primary" type="button" id="sc-confirm">Confirm</button><button class="btn-ghost" type="button" id="sc-pick">Pick another date</button></div>
         </section>`}
 
+      ${next && next.date === today ? `<a class="btn-primary center big" id="sc-results" href="#/body/scan/r/${today}">Scan done: add the results</a>` : ''}
       <div class="section-label">Preparation · the same every time</div>
       <section class="card sauna-check" id="sc-check">
         ${WHEN.map(([w, label]) => { const list = items.filter((i) => (i.when === 'before' ? 'before' : 'day') === w); return list.length ? `<div class="hud c-muted scan-when">${esc(label.toUpperCase())}</div>${list.map(tick).join('')}` : ''; }).join('')}
@@ -116,6 +128,13 @@ function home(view) {
             <p class="hint">Their instructions win over this starting checklist: change it to match.</p>`}
         <button class="btn-ghost" type="button" id="sc-staff-add">${(plan.staff || []).length ? 'Add to what they said' : 'Record what they said'}</button>
       </section>
+      <div class="section-label">Scans · ${done.length}</div>
+      ${unsaved.map((x) => `<a class="card confirm-card sauna-resume" href="#/body/scan/r/${esc(x.date)}"><span class="hud c-amber">RESULTS NOT SAVED</span><span>${esc(dayName(x.date))}: check and save</span></a>`).join('')}
+      <ul class="lib-list" id="sc-history">${done.map((x) => { const notes = conditionNotes(x, items); const key = ['weightKg', 'fatPercent', 'muscleMassKg'].map((k) => [k, metricValue(x, k)]).filter(([, v]) => v != null);
+        return `<li><a class="lib-row sc-hist" href="#/body/scan/r/${esc(x.date)}"><span class="lib-name">${esc(dayName(x.date))}${x.at ? `, ${esc(formatTime(new Date(x.at)))}` : ''}</span>
+          <span class="lib-meta">${key.map(([k, v]) => (k === 'weightKg' ? `${v} kg` : k === 'fatPercent' ? `${v}% fat` : `${v} kg muscle`)).join(' · ') || `${x.metrics.length} numbers`}</span>
+          <span class="lib-meta ${notes.length ? 'c-amber' : 'c-green'}">${notes.length ? `Different conditions: ${esc(notes.join('; '))}` : 'Usual conditions'}</span></a></li>`; }).join('') || '<li class="hint pad">No scans yet.</li>'}</ul>
+      <button class="btn-ghost" type="button" id="sc-other">Add the results of a scan</button>
       ${plan.safety?.readAt ? `<p class="hint">Scanner safety notice read ${esc(formatDate(new Date(plan.safety.readAt)))}.</p>` : ''}`;
 
     const $ = (s) => view.querySelector(s);
@@ -144,6 +163,19 @@ function home(view) {
       const cur = await repo.get('body-scans', scanId(next.date));
       await repo.put('body-scans', scanId(next.date), withTick(cur, next.date, items, id, !cur?.prep?.ticks?.[id]));
     }));
+    $('#sc-other').addEventListener('click', () => {
+      const { el, close } = overlay(`<form class="sheet-form"><label class="hud c-muted sheet-title" for="sc-rdate">DAY OF THE SCAN</label>
+        <input class="input" type="date" id="sc-rdate" max="${today}" value="${today}" required>
+        <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Cancel</button><button class="btn-primary" type="submit">Next</button></div></form>`);
+      el.querySelector('[data-cancel]').onclick = () => close();
+      el.querySelector('form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const d = el.querySelector('#sc-rdate').value;
+        if (!d || d > today) { toast('Today or earlier.'); return; }
+        close();
+        location.hash = `#/body/scan/r/${d}`;
+      });
+    });
     $('#sc-staff-add').addEventListener('click', async () => {
       const t = await promptLong("What the gym's staff said", '', { placeholder: 'How to prepare; whether the results can be exported' });
       if (!t) return;
@@ -236,4 +268,180 @@ function noteFor(before, after) {
   const changed = after.filter((x) => b.has(x.id) && (b.get(x.id).text !== x.text.trim() || (b.get(x.id).when === 'before') !== (x.when === 'before'))).length;
   const parts = [added && `added ${added}`, changed && `changed ${changed}`, removed && `removed ${removed}`].filter(Boolean);
   return parts.length ? `${parts.join(', ').replace(/^./, (c) => c.toUpperCase())} line${added + changed + removed === 1 ? '' : 's'}` : 'Reordered';
+}
+
+/**
+ * A scan's results (7.5). Photos of the results screen or printout go to the Mac, where Claude reads every number;
+ * they appear here to check and correct, or he types them in. Saved as reported, with the conditions.
+ */
+function results(view, date) {
+  let alive = true; let off = () => {}; let repo = null; let pollTimer = null; let pollStart = 0;
+  let rows = null; let fromReads = false; let dirty = false; let cond = null; let hm = null; let usedAt = 0;
+  const today = isoDate(new Date());
+
+  const draw = async () => {
+    const [rec, plan, photos, reads, dayDoc] = await Promise.all([
+      repo.get('body-scans', scanId(date)), repo.get('scan-plan', 'main'), repo.list('scan-photos'), repo.list('scan-reads'), repo.get('days', date),
+    ]);
+    if (!alive) return;
+    const items = protocolOf(plan || {});
+    const mine = photos.filter((p) => p.scanId === scanId(date) && p.dataUrl).sort((a, b) => a.at - b.at);
+    const readsOf = new Map(reads.map((r) => [r.photoId, r]));
+    const myReads = mine.map((p) => readsOf.get(p.id)).filter((r) => r && (r.round ?? 0) >= (mine.find((p) => p.id === r.photoId)?.round ?? 0));
+    const merged = mergeReads(myReads);
+    // Rows: his saved numbers, else what the Mac read, else the usual ones to type in.
+    if (!rows) {
+      if (isDone(rec)) rows = rec.metrics.map((m) => ({ ...m }));
+      else if (merged.length) { rows = merged.map((m) => ({ ...m })); fromReads = true; }
+      else rows = METRICS.filter((m) => m.main).map((m) => ({ key: m.key, label: m.label, text: '', unit: m.unit }));
+    } else if (!dirty && !isDone(rec) && merged.length && (!fromReads || merged.length !== rows.length)) {
+      rows = merged.map((m) => ({ ...m })); fromReads = true;
+    }
+    if (!cond) cond = isDone(rec) ? { ...rec.conditions } : conditionsFrom(rec, items);
+    if (hm == null) hm = rec?.at ? hmOf(new Date(rec.at)) : dayDoc?.sessionTime || (date === today ? hmOf(new Date()) : '');
+    const st = getState();
+    const offline = st.paired && st.mac?.reachable === false;
+    const waiting = mine.filter((p) => { const r = readsOf.get(p.id); return !r || (r.round ?? 0) < (p.round ?? 0) || (r.status === 'failed' && (r.tries || 0) < 3); });
+    const newerReads = merged.length && (isDone(rec) ? myReads.some((r) => r.status === 'done' && r.at > Math.max(rec.confirmedAt, usedAt)) : dirty);
+    const photoLine = (p) => {
+      const r = readsOf.get(p.id);
+      if (r && (r.round ?? 0) >= (p.round ?? 0) && r.status === 'done') return `Read: ${r.metrics.length} numbers${r.metrics.some((m) => m.unsure) ? `, ${r.metrics.filter((m) => m.unsure).length} hard to read` : ''}${r.notes ? `. ${r.notes}` : ''}`;
+      if (r && (r.round ?? 0) >= (p.round ?? 0) && r.status === 'failed') return `Not read${r.error ? `: ${r.error}` : ''}.${(r.tries || 0) >= 3 ? ' Ask again, or type the numbers in.' : ' Trying again in a few minutes.'}`;
+      return offline ? 'Mac unreachable. The photo is kept on this phone and read as soon as the Mac is back.' : 'Sent to your Mac. Claude is reading it (about a minute).';
+    };
+    const sel = (name, val, opts) => `<span class="seg">${opts.map(([v, l]) => `<button class="pill ${val === v ? 'is-on' : ''}" type="button" data-${name}="${v}" aria-pressed="${val === v}">${esc(l)}</button>`).join('')}</span>`;
+
+    view.innerHTML = `
+      <div class="lib-head"><a class="pill" href="#/body/scan">Body scan</a><span class="hud c-muted">${esc(dayName(date).toUpperCase())}</span></div>
+      <h1 class="view-title">Scan results</h1>
+      <p class="hint">Photograph the results screen or printout: Claude on your Mac reads every number, you check them. Or type them in.</p>
+      <section class="card pad-card" id="sr-photos"><div class="hud c-cyan">PHOTOS OF THE RESULTS</div>
+        ${mine.map((p) => `<div class="sr-photo"><img src="${p.dataUrl}" alt="Results photo"><span class="hint ${readsOf.get(p.id)?.status === 'failed' || offline ? 'c-amber' : ''}">${esc(photoLine(p))}</span>
+          <span class="btn-row"><button class="link-btn" type="button" data-again="${esc(p.id)}">Ask again</button><button class="link-btn c-red" type="button" data-rmphoto="${esc(p.id)}">Remove</button></span></div>`).join('')}
+        <div class="btn-row"><label class="btn-primary center" for="sr-cam">Take photo</label><label class="btn-ghost center" for="sr-lib">From Photos</label></div>
+      </section>
+      ${newerReads ? `<section class="card pad-card confirm-card" id="sr-newer"><span class="c-text">The Mac read ${merged.length} numbers from your photo.</span><button class="btn-ghost" type="button" id="sr-use">Use them instead of what you typed</button></section>` : ''}
+      <div class="section-label">Numbers · as the scanner reported them</div>
+      ${fromReads && !isDone(rec) ? `<p class="hint">From your photo. Check each number against the screen${rows.some((r) => r.unsure) ? '; amber ones were hard to read' : ''}.</p>` : ''}
+      <section class="card pad-card sr-rows" id="sr-rows">
+        ${rows.map((r, i) => `<div class="sr-row ${r.unsure ? 'is-unsure' : ''}">
+          <input class="input" data-label="${i}" value="${esc(r.label)}" aria-label="Name" maxlength="80">
+          <input class="input num" data-text="${i}" value="${esc(r.text)}" inputmode="decimal" aria-label="${esc(r.label)} value" placeholder="—">
+          <input class="input" data-unit="${i}" value="${esc(r.unit)}" aria-label="Unit" maxlength="16">
+          <button class="icon-mini" type="button" data-rm="${i}" aria-label="Remove ${esc(r.label)}">×</button></div>`).join('')}
+        <div class="btn-row"><button class="btn-ghost" type="button" id="sr-add">+ Another number</button><button class="btn-ghost" type="button" id="sr-more">+ Usual Evolt numbers</button></div>
+      </section>
+      <div class="section-label">Conditions</div>
+      <section class="card pad-card sr-cond">
+        <label class="opt"><span>Time of the scan</span><input class="input mini" type="time" id="sr-time" value="${esc(hm)}"></label>
+        <div class="opt"><span>Fasted</span>${sel('fasted', cond.fasted, [[true, 'Yes'], [false, 'No']])}</div>
+        <div class="opt"><span>Trained before the scan</span>${sel('trained', cond.trainedBefore, [[false, 'No'], [true, 'Yes']])}</div>
+        <p class="hint" id="sr-ticks">${(() => { const open = unticked(rec, items); return open.length ? `Checklist, not ticked: ${esc(open.map((x) => x.text.replace(/\.$/, '')).join('; '))}. <a href="#/body/scan">Tick them</a> if you did them.` : 'Checklist: every line ticked.'; })()}</p>
+        <label class="opt col"><span>Anything unusual</span><textarea class="input area" rows="2" id="sr-unusual" maxlength="300" placeholder="e.g. slept badly, ate late last night">${esc(cond.unusual || '')}</textarea></label>
+      </section>
+      <button class="btn-primary big" type="button" id="sr-save">${isDone(rec) ? 'Save changes' : 'Looks right: save'}</button>
+      ${isDone(rec) ? `<p class="hint">Saved ${esc(formatDate(new Date(rec.confirmedAt)))}${rec.source === 'photo' ? ', read from your photo' : ''}.</p><button class="link-btn c-red" type="button" id="sr-del">Delete this scan</button>` : ''}`;
+
+    const $ = (q) => view.querySelector(q);
+    const keep = () => {
+      view.querySelectorAll('[data-label]').forEach((x) => { const r = rows[Number(x.dataset.label)]; if (r.label !== x.value) { r.label = x.value; r.key = keyFor(x.value, r.unit) || (METRICS.find((m) => m.key === r.key)?.label === x.value ? r.key : null); } });
+      view.querySelectorAll('[data-text]').forEach((x) => { rows[Number(x.dataset.text)].text = x.value.trim(); });
+      view.querySelectorAll('[data-unit]').forEach((x) => { rows[Number(x.dataset.unit)].unit = x.value.trim(); });
+      hm = $('#sr-time').value; cond.unusual = $('#sr-unusual').value.trim();
+    };
+    // Every keystroke goes into rows at once, so a redraw (a sync, a read arriving) never loses what he typed.
+    view.querySelectorAll('[data-label], [data-text], [data-unit]').forEach((x) => x.addEventListener('input', () => {
+      dirty = true; keep();
+      const r = rows[Number(x.dataset.text ?? x.dataset.label ?? x.dataset.unit)];
+      if (r && x.dataset.text != null) r.unsure = false;
+    }));
+    $('#sr-time').addEventListener('input', keep);
+    $('#sr-unusual').addEventListener('input', keep);
+    view.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => { keep(); dirty = true; rows.splice(Number(b.dataset.rm), 1); draw(); }));
+    $('#sr-add').onclick = () => { keep(); dirty = true; rows.push({ key: null, label: '', text: '', unit: '' }); draw().then(() => view.querySelector(`[data-label="${rows.length - 1}"]`)?.focus()); };
+    $('#sr-more').onclick = () => {
+      keep(); dirty = true;
+      const have = new Set(rows.map((r) => r.key).filter(Boolean));
+      rows.push(...METRICS.filter((m) => !have.has(m.key)).map((m) => ({ key: m.key, label: m.label, text: '', unit: m.unit })));
+      draw();
+    };
+    $('#sr-use')?.addEventListener('click', () => { rows = merged.map((m) => ({ ...m })); fromReads = true; dirty = false; usedAt = Math.max(...myReads.map((r) => r.at || 0)); draw(); });
+    view.querySelectorAll('[data-fasted]').forEach((b) => b.addEventListener('click', () => { keep(); const v = b.dataset.fasted === 'true'; cond.fasted = cond.fasted === v ? null : v; draw(); }));
+    view.querySelectorAll('[data-trained]').forEach((b) => b.addEventListener('click', () => { keep(); const v = b.dataset.trained === 'true'; cond.trainedBefore = cond.trainedBefore === v ? null : v; draw(); }));
+    view.querySelectorAll('[data-again]').forEach((b) => b.addEventListener('click', async () => {
+      const p = mine.find((x) => x.id === b.dataset.again);
+      const hint = await promptLong('Tell the Mac what to look out for (optional)', p.hint || '', { placeholder: 'e.g. the second column is last scan, ignore it', ok: 'Ask again' });
+      if (hint == null) return;
+      keep();
+      await repo.put('scan-photos', p.id, { ...p, hint, round: (p.round || 0) + 1, askedAt: Date.now() });
+      dirty = false; rows = isDone(rec) ? rows : null; fromReads = false;
+      syncNow(); poll();
+    }));
+    view.querySelectorAll('[data-rmphoto]').forEach((b) => b.addEventListener('click', async () => {
+      if (!(await confirmSheet('Remove this photo? Numbers already in the list stay.', { ok: 'Remove', danger: true }))) return;
+      keep();
+      await repo.remove('scan-photos', b.dataset.rmphoto);
+    }));
+    $('#sr-save').onclick = async () => {
+      keep();
+      const metrics = cleanMetrics(rows.filter((r) => r.label.trim() && r.text).map((r) => ({ key: r.key, label: r.label, text: r.text, unit: r.unit, unsure: false })));
+      if (!metrics.length) { toast('Type at least one number, or take a photo of the results.'); return; }
+      if (!/^\d{2}:\d{2}$/.test(hm)) { toast('Set the time of the scan.'); return; }
+      const cur = await repo.get('body-scans', scanId(date));
+      const conditions = { fasted: cond.fasted ?? null, trainedBefore: cond.trainedBefore ?? null, unusual: cond.unusual || '', unticked: unticked(cur, items).map((i) => i.id) };
+      await repo.put('body-scans', scanId(date), withResults(cur, { date, at: zonedTime(date, hm), metrics, conditions, photos: mine.map((p) => p.id), source: fromReads && mine.length ? 'photo' : 'manual', note: cur?.note }));
+      syncNow();
+      toast(`Scan saved: ${metrics.length} numbers.`);
+      location.hash = '#/body/scan';
+    };
+    $('#sr-del')?.addEventListener('click', async () => {
+      if (!(await confirmSheet(`Delete the scan of ${dayName(date)}, its numbers and photos?`, { ok: 'Delete', danger: true }))) return;
+      for (const p of mine) await repo.remove('scan-photos', p.id);
+      await repo.remove('body-scans', scanId(date));
+      location.hash = '#/body/scan';
+    });
+    if (waiting.length && !offline) poll(); else stopPoll();
+  };
+
+  // While the Mac reads a photo, pull every 3 s for up to 4 minutes.
+  const stopPoll = () => { clearInterval(pollTimer); pollTimer = null; };
+  const poll = () => {
+    if (pollTimer) return;
+    pollStart = Date.now();
+    pollTimer = setInterval(() => { if (!alive || Date.now() - pollStart > 240000) stopPoll(); else syncNow(); }, 3000);
+  };
+
+  const addPhoto = async (file) => {
+    if (!file) return;
+    const dataUrl = await fileToJpeg(file, { max: 1600, quality: 0.85 });
+    const id = newPhotoId();
+    if (!(await repo.get('body-scans', scanId(date)))) await repo.put('body-scans', scanId(date), { id: scanId(date), date, status: 'prep', createdAt: Date.now() });
+    await repo.put('scan-photos', id, { id, scanId: scanId(date), date, dataUrl, at: Date.now() });
+    syncNow(); poll();
+  };
+
+  view.innerHTML = '<div class="lib-head"><a class="pill" href="#/body/scan">Body scan</a></div><h1 class="view-title">Scan results</h1><p class="view-sub">Loading…</p>';
+  // The file inputs live outside the part that redraws, so a read arriving while the camera is open can't swap them out.
+  const inputs = document.createElement('div');
+  inputs.innerHTML = '<input type="file" accept="image/*" capture="environment" hidden id="sr-cam"><input type="file" accept="image/*" hidden id="sr-lib">';
+  document.body.append(inputs);
+  for (const inp of inputs.querySelectorAll('input')) inp.addEventListener('change', async () => { const f = inp.files?.[0]; inp.value = ''; await addPhoto(f); });
+
+  // The Mac going away or coming back changes what the photo lines say.
+  let net = null;
+  const unsub = subscribe((st) => { const k = `${st.paired}|${st.mac?.reachable}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
+  ready.then((r) => {
+    repo = r;
+    // A change while he is typing waits until he leaves the field (redrawing would close the keyboard).
+    let stale = false;
+    view.addEventListener('focusout', () => setTimeout(() => { if (stale && alive && !view.contains(document.activeElement)) { stale = false; draw(); } }, 0));
+    off = repo.onChange((cols) => {
+      if (!cols.some((c) => ['body-scans', 'scan-photos', 'scan-reads', 'scan-plan'].includes(c))) return;
+      const a = document.activeElement;
+      if (a && view.contains(a) && a.matches('input, textarea')) { stale = true; return; }
+      draw();
+    });
+    draw();
+  });
+  return () => { alive = false; off(); unsub(); stopPoll(); inputs.remove(); };
 }

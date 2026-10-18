@@ -139,3 +139,42 @@ test('scan reminders join the day plan (kind scan, can be switched off) and the 
   const fixed = fixedReminders(state, today, 3, at(today, '00:00'));
   assert.deepEqual(fixed.filter((r) => r.kind === 'scan').map((r) => r.id.split(':')[0]), ['scan-alcohol', 'scan-eve', 'scan-arrive']);
 });
+
+test('results: labels matched to the usual metrics, numbers as printed, photos merged without duplicates', async () => {
+  const { keyFor, numberOf, cleanMetrics, mergeReads } = await import('../app/js/lib/scans.js');
+  assert.equal(keyFor('Body Fat (%)', '%'), 'fatPercent');
+  assert.equal(keyFor('Fat', 'kg'), 'fatMassKg');
+  assert.equal(keyFor('Fat Mass (Left Leg)', 'kg'), 'fatLeftLegKg');
+  assert.equal(keyFor('Segmental Lean · Trunk', 'kg'), 'leanTrunkKg');
+  assert.equal(keyFor('Right arm', '%'), null);
+  assert.equal(keyFor('Visceral Fat Level', ''), 'visceralFat');
+  assert.equal(keyFor('Hydration', ''), null);
+  assert.deepEqual(['82,4', '1,845', '18.2 %', '<5', 'Good', ''].map(numberOf), [82.4, 1845, 18.2, 5, null, null]);
+  const c = cleanMetrics([{ label: ' Weight ', text: '82,4', unit: 'kg' }, { label: 'Body weight', text: '82.5', unit: 'kg' }, { label: '', text: '1' }, { label: 'Note', text: '' }]);
+  assert.deepEqual(c, [{ key: 'weightKg', label: 'Weight', value: 82.4, text: '82,4', unit: 'kg' }, { key: null, label: 'Body weight', value: 82.5, text: '82.5', unit: 'kg' }]);
+  const m = mergeReads([
+    { status: 'done', metrics: [{ label: 'Weight', text: '82.4', unit: 'kg' }, { label: 'BMR', text: '1845', unit: 'kcal' }] },
+    { status: 'failed', metrics: [{ label: 'Protein', text: '9', unit: 'kg' }] },
+    { status: 'done', metrics: [{ label: 'weight', text: '82.4', unit: 'kg' }, { label: 'Protein', text: '11.6', unit: 'kg' }] },
+  ]);
+  assert.deepEqual(m.map((x) => x.label), ['Weight', 'BMR', 'Protein']);
+});
+
+test('results saved with the conditions; different conditions named; calendar marker', async () => {
+  const { conditionsFrom, withResults, conditionNotes, metricValue, scanMarks, isDone } = await import('../app/js/lib/scans.js');
+  let rec = null;
+  for (const i of PROTOCOL.filter((x) => x.id !== 'barefoot')) rec = withTick(rec, '2026-01-22', PROTOCOL, i.id, true);
+  const cond = conditionsFrom(rec, PROTOCOL);
+  assert.deepEqual(cond, { fasted: true, trainedBefore: false, unusual: '', unticked: ['barefoot'] });
+  assert.deepEqual(conditionsFrom(null, PROTOCOL), { fasted: null, trainedBefore: null, unusual: '', unticked: PROTOCOL.map((i) => i.id) });
+  const done = withResults(rec, { date: '2026-01-22', at: 5, metrics: [{ label: 'Weight', text: '82.4', unit: 'kg' }, { label: 'Body Fat', text: '18.2', unit: '%' }], conditions: { ...cond, unusual: 'Slept badly' }, photos: ['p1'], source: 'photo' }, 9);
+  assert.equal(isDone(done), true);
+  assert.equal(done.confirmedAt, 9);
+  assert.equal(done.prep.ticks.fasted, true, 'the ticks stay on the record');
+  assert.equal(metricValue(done, 'fatPercent'), 18.2);
+  assert.equal(metricValue(done, 'muscleMassKg'), null);
+  assert.deepEqual(conditionNotes(done, PROTOCOL), ['not ticked: Barefoot', 'Slept badly']);
+  assert.deepEqual(conditionNotes({ conditions: { fasted: false, trainedBefore: true, unticked: [] } }, PROTOCOL), ['not fasted', 'trained before']);
+  assert.deepEqual(conditionNotes({ conditions: { unticked: PROTOCOL.map((i) => i.id) } }, PROTOCOL), ['checklist not ticked']);
+  assert.deepEqual(scanMarks([done, { date: '2026-01-01', status: 'prep' }]), [{ date: '2026-01-22', kind: 'scan', id: 'scan.2026-01-22', label: 'Body scan: 82.4 kg · 18.2% fat' }]);
+});

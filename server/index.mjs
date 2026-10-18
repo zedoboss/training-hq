@@ -11,6 +11,7 @@ import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
 import { startNotifier } from './notify.mjs';
 import { openMealVision } from './meal-vision.mjs';
+import { openScanVision } from './scan-vision.mjs';
 import { findClaude } from './claude.mjs';
 import { openHealth, defaultHealthDir } from './health.mjs';
 import { join } from 'node:path';
@@ -43,10 +44,16 @@ const notifier = startNotifier({ store, push, log });
 const vision = openMealVision({ store, log });
 log(`claude: ${findClaude() || 'not found (meal photos wait until the Claude app is installed)'}`);
 const kickVision = () => vision.kick().catch((e) => log(`meal vision: ${e.stack || e}`));
-setTimeout(kickVision, 3000).unref();
-const visionTimer = setInterval(kickVision, 2 * 60000);
+// Body scan result photos (7.5): the same way, into 'scan-reads'.
+const scanVision = openScanVision({ store, log });
+const kickScans = () => scanVision.kick().catch((e) => log(`scan vision: ${e.stack || e}`));
+setTimeout(() => { kickVision(); kickScans(); }, 3000).unref();
+const visionTimer = setInterval(() => { kickVision(); kickScans(); }, 2 * 60000);
 visionTimer.unref();
-const onSync = (cols) => { if (cols.has('meals') || cols.has('meal-photos')) kickVision(); };
+const onSync = (cols) => {
+  if (cols.has('meals') || cols.has('meal-photos')) kickVision();
+  if (cols.has('scan-photos') || cols.has('body-scans')) kickScans();
+};
 
 // Apple Health (step 7): the iPhone Shortcut's file in iCloud Drive, read at start and every 5 minutes.
 const health = openHealth({ store, dir: config.healthDir || defaultHealthDir(), log });

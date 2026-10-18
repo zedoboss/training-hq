@@ -129,3 +129,11 @@ test('progress photos go in as photos/progress-<date>-<pose>.jpg; the CSV keeps 
   assert.match(csv, /\(file, \d+ KB\)/);
   assert.doesNotMatch(csv, /base64/);
 });
+
+test('body scan result photos go in as photos/scan-<date>-<id>.jpg', () => {
+  const url = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 3]).toString('base64')}`;
+  const { files, counts } = exportFiles({ 'scan-photos': [{ id: 'scanphoto-a', scanId: 'scan.2026-10-22', date: '2026-10-22', dataUrl: url }] }, { tz: TZ });
+  assert.equal(counts.photos, 1);
+  assert.ok(files.some((f) => f.name === 'photos/scan-2026-10-22-scanphoto-a.jpg'));
+  assert.doesNotMatch(files.find((f) => f.name === 'data/scan-photos.csv').data, /base64/);
+});

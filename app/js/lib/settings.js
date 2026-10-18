@@ -43,7 +43,8 @@ export const DEFAULT_SETTINGS = {
   // times [{name, time 'HH:MM'}] (none until he sets them: brief section 10).
   fuel: { visionModel: 'fast', mealTimes: [] },
   // Step 7: a daily step goal of his own for the Body chart and the core's steps ring (none until he sets one).
-  body: { stepGoal: null },
+  // Step 7: which Claude reads body scan result photos on the Mac (Opus 5.5 high by default: every number counts).
+  body: { stepGoal: null, scanModel: 'deep' },
 };
 
 export const DEFAULT_EQUIPMENT = {
