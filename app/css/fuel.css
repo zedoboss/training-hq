@@ -67,3 +67,9 @@
 .meal-edit .me-row .input { padding: 0 6px; font-size: 14px; height: 40px; }
 .meal-edit .me-left { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; }
 .meal-edit .me-left .input { width: 90px; }
+
+.fuel-bar .mono { font: 500 12px/1 var(--mono); white-space: nowrap; }
+.fuel-totals .link-btn { grid-column: 1 / -1; justify-self: start; }
+.fuel-times .ex-head { display: flex; justify-content: space-between; align-items: center; }
+.fuel-times .hint { margin: 6px 0 0; }
+.meal-edit .mt-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 32px; gap: 6px; align-items: center; }

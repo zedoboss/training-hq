@@ -3,7 +3,8 @@
 import { appVersion, latestVersion, checkForUpdate, reloadAppFiles } from '../lib/sw-client.js';
 import { getState, subscribe } from '../lib/store.js';
 import { ready, pair, unpair, syncNow, newPairingCode, sameOriginMac, saveSettings, saveEquipment } from '../lib/data.js';
-import { formatTime, formatDay } from '../lib/time.js';
+import { formatTime, formatDay, formatHm } from '../lib/time.js';
+import { editMealTimes } from './fuel.js';
 import { REST_CHOICES, restText, SOUNDS, WEEK_DAYS, PLATE_CHOICES, withDefaults, equipmentWithDefaults, cleanWarmupSteps, smallestPlate } from '../lib/settings.js';
 import { EQUIPMENT } from '../lib/exercise-types.js';
 import { warmupSets } from '../lib/plates.js';
@@ -119,6 +120,7 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('Meal photos are read by', 'Claude on your Mac. Sonnet answers in about 5 seconds; Opus takes longer and looks harder.', '')}
       ${seg('fuel.visionModel', [['fast', 'Sonnet 5.5 · fast'], ['deep', 'Opus 5.5 · careful']], st.fuel.visionModel)}
+      ${opt('Usual meal times', st.fuel.mealTimes?.length ? st.fuel.mealTimes.map((t) => `${esc(t.name)} ${formatHm(t.time)}`).join(' · ') : 'None set: no meal-time reminders', '<button class="btn-ghost small" id="meal-times" type="button">Change</button>')}
     </div>`;
 }
 
@@ -179,6 +181,7 @@ function wirePrefs(box) {
   });
 
   box.addEventListener('click', async (e) => {
+    if (e.target.closest('#meal-times')) { editMealTimes(); return; }
     const t = e.target.closest('button');
     if (!t) return;
     if (t.dataset.seg) {

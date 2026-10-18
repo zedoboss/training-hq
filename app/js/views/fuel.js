@@ -1,6 +1,12 @@
-// FUEL (#/fuel, #/fuel/<YYYY-MM-DD>): the day's meals and totals, LOG MEAL (camera), meals without a photo.
+// FUEL (#/fuel, #/fuel/<YYYY-MM-DD>): the day's meals and totals against his daily targets, LOG MEAL (camera), meals
+// without a photo, his meal times. #/fuel/check/<date>/<HHMM> answers a meal-time reminder: eaten, cooking or skipping.
 // Supplements and the sauna join this screen later in step 6.
-import { ready } from '../lib/data.js';
+import { ready, saveSettings } from '../lib/data.js';
+import { withDefaults } from '../lib/settings.js';
+import { mealTimesOf } from '../lib/fuel-reminders.js';
+import { MEAL_NAMES } from '../lib/meals.js';
+import { actionSheet, overlay } from '../ui/sheet.js';
+import { formatHm } from '../lib/time.js';
 import { getState, subscribe } from '../lib/store.js';
 import { isoDate, formatDay, formatTime, daysBetween } from '../lib/time.js';
 import { addDays } from '../lib/rotation.js';
@@ -13,8 +19,79 @@ const CAMERA = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 2
 const n0 = (x) => Math.round(x || 0).toLocaleString('en-US');
 const dayLabel = (iso) => formatDay(new Date(`${iso}T12:00:00`));
 
-export function render(view, [dateParam]) {
+/** His daily targets from the fuel plan (brief section 3, decision 19), or null before the first sync. */
+export const targetsOf = (plan) => (plan && plan.kcal ? { kcal: Number(plan.kcal), proteinG: Number(plan.proteinG) } : null);
+
+/** Meal times editor (Settings > Fuel and the Fuel screen). Saves settings fuel.mealTimes. */
+export function editMealTimes() {
+  return new Promise((resolve) => {
+    let rows = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes).map((t) => ({ ...t }));
+    const { el, close } = overlay(`<form class="sheet-form meal-edit"><div class="hud c-muted sheet-title">YOUR USUAL MEAL TIMES</div>
+      <p class="hint">When one passes with nothing logged, the app asks: eaten, cooking, or skipping? None set: no meal-time reminders.</p>
+      <div class="me-rows"></div><button class="btn-ghost" type="button" data-add>+ Add a meal time</button>
+      <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Cancel</button><button class="btn-primary" type="submit">Save</button></div></form>`, () => resolve());
+    const box = el.querySelector('.me-rows');
+    const read = () => [...box.querySelectorAll('.mt-row')].map((r) => ({ name: r.querySelector('[data-f=name]').value.trim(), time: r.querySelector('[data-f=time]').value }));
+    const draw = () => {
+      box.innerHTML = rows.map((t, i) => `<div class="mt-row" data-i="${i}"><input class="input" data-f="name" value="${esc(t.name)}" maxlength="30" aria-label="Meal name">
+        <input class="input" type="time" data-f="time" value="${esc(t.time)}" aria-label="Time"><button class="icon-mini" type="button" data-del aria-label="Remove">✕</button></div>`).join('') || '<p class="hint">None yet.</p>';
+      box.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { rows = read(); rows.splice(Number(b.closest('.mt-row').dataset.i), 1); draw(); }));
+    };
+    draw();
+    el.querySelector('[data-add]').onclick = () => { rows = read(); rows.push({ name: MEAL_NAMES.find((n) => !rows.some((r) => r.name === n)) || 'Meal', time: '12:00' }); draw(); };
+    el.querySelector('[data-cancel]').onclick = () => close();
+    el.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const clean = mealTimesOf(read());
+      if (clean.length !== read().length) { toast('Each meal time needs a name and a time.'); return; }
+      await saveSettings({ fuel: { mealTimes: clean } });
+      toast(clean.length ? `Meal times saved: ${clean.map((t) => `${t.name} ${formatHm(t.time)}`).join(', ')}.` : 'No meal times: no meal-time reminders.');
+      close();
+    });
+  });
+}
+
+/** Targets editor: kcal and protein per day, saved in the fuel plan with a dated change note. */
+async function editTargets(repo) {
+  const plan = await repo.get('fuel', 'plan') || {};
+  const { el, close } = overlay(`<form class="sheet-form"><div class="hud c-muted sheet-title">DAILY TARGETS</div>
+    <p class="hint">${esc(plan.source || 'Your own numbers.')}</p>
+    <label class="opt"><span>Kcal per day</span><input class="input mini num" id="t-kcal" inputmode="decimal" value="${plan.kcal ?? ''}"></label>
+    <label class="opt"><span>Protein per day (g)</span><input class="input mini num" id="t-prot" inputmode="decimal" value="${plan.proteinG ?? ''}"></label>
+    <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Cancel</button><button class="btn-primary" type="submit">Save</button></div></form>`);
+  el.querySelector('[data-cancel]').onclick = () => close();
+  el.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const kcal = Number(el.querySelector('#t-kcal').value); const p = Number(el.querySelector('#t-prot').value);
+    if (!(kcal >= 800 && kcal <= 8000) || !(p >= 20 && p <= 500)) { toast('Kcal 800-8,000 and protein 20-500 g.'); return; }
+    if (kcal === plan.kcal && p === plan.proteinG) { close(); return; }
+    const on = isoDate(new Date());
+    await repo.put('fuel', 'plan', { ...plan, kind: 'plan', kcal, proteinG: p, changes: [...(plan.changes || []), { on, text: `Changed in the app: ${kcal} kcal, ${p} g protein (was ${plan.kcal ?? 'none'} kcal, ${plan.proteinG ?? 'none'} g).` }] });
+    toast('Targets saved.');
+    close();
+  });
+}
+
+const ANSWER = { eaten: 'Eaten', cooking: 'Cooking', skipped: 'Skipping' };
+
+/** "Eaten, cooking, or skipping?" for one meal time (from a reminder). */
+async function answerCheck(repo, date, hmId) {
+  const slot = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes).find((t) => t.time.replace(':', '') === hmId);
+  const name = slot?.name || 'Meal';
+  const save = (answer) => repo.put('meal-checks', `${date}.${hmId}`, { id: `${date}.${hmId}`, date, slot: slot?.time ?? null, name, answer, at: Date.now() });
+  actionSheet(`${name}: eaten, cooking, or skipping?`, [
+    // The camera must open inside the tap itself (iPhone rule), so it is clicked before the answer is saved.
+    { label: 'Eaten: take the photo now', run: () => { document.querySelector('#f-cam')?.click(); save('eaten'); } },
+    { label: 'Eaten: log it without a photo', run: () => { document.querySelector('#f-manual')?.click(); save('eaten'); } },
+    { label: 'Cooking: ask me again in 30 minutes', run: async () => { await save('cooking'); toast('Asking again in 30 minutes.'); } },
+    { label: 'Skipping it', run: async () => { await save('skipped'); toast(`${name} skipped.`); } },
+  ]);
+}
+
+export function render(view, params) {
   const today = isoDate(new Date());
+  const checking = params[0] === 'check';
+  const dateParam = checking ? params[1] : params[0];
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') ? dateParam : today;
   view.innerHTML = `<div id="f-body"><p class="view-sub">Loading…</p></div>${cameraInput('f-cam')}`;
   const body = view.querySelector('#f-body');
@@ -27,8 +104,15 @@ export function render(view, [dateParam]) {
   });
 
   const draw = async () => {
-    const [meals, estimates, photos] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos')]);
+    const [meals, estimates, photos, plan, checks] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks')]);
     if (!alive) return;
+    const tg = targetsOf(plan);
+    const times = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes);
+    const dayChecks = checks.filter((c) => c.date === date && c.answer !== 'eaten');
+    const n1 = (x) => String(Math.round((x || 0) * 10) / 10);
+    const bar = (label, val, target, unit, cls, f = n0) => `<div class="fuel-bar"><span class="hud c-muted">${label}</span>
+      <span class="fuel-track"><span class="fuel-fill ${cls}" style="width:${Math.min(100, Math.round((val / target) * 100))}%"></span></span>
+      <span class="mono">${f(val)}${unit} <span class="c-faint">/ ${f(target)}${unit}</span></span></div>`;
     const list = meals.filter((m) => m.date === date).sort((a, b) => a.at - b.at);
     const t = dayTotals(meals, estimates, date);
     const thumb = new Map(photos.filter((p) => p.kind === 'before').map((p) => [p.id, p.dataUrl]));
@@ -43,9 +127,11 @@ export function render(view, [dateParam]) {
       </div>
       <h1 class="view-title">Fuel</h1>
       <section class="card pad-card fuel-totals" id="f-totals">
-        <div class="fuel-total"><span class="hud c-muted">KCAL</span><b>${n0(t.kcal)}</b></div>
-        <div class="fuel-total"><span class="hud c-muted">PROTEIN</span><b>${Math.round(t.protein * 10) / 10} g</b></div>
+        <div class="fuel-total"><span class="hud c-muted">KCAL</span><b>${n0(t.kcal)}</b>${tg ? `<small>${tg.kcal > t.kcal ? `${n0(tg.kcal - t.kcal)} to go` : 'target reached'}</small>` : ''}</div>
+        <div class="fuel-total"><span class="hud c-muted">PROTEIN</span><b>${Math.round(t.protein * 10) / 10} g</b>${tg ? `<small>${tg.proteinG > t.protein ? `${n1(tg.proteinG - t.protein)} g to go` : 'target reached'}</small>` : ''}</div>
         <div class="fuel-total"><span class="hud c-muted">MEALS</span><b>${t.meals}</b></div>
+        ${tg ? `${bar('KCAL', t.kcal, tg.kcal, '', '')}${bar('PROTEIN', t.protein, tg.proteinG, ' g', 'is-protein', n1)}
+          <button class="link-btn" id="f-targets" type="button">Targets: ${n0(tg.kcal)} kcal · ${tg.proteinG} g protein a day</button>` : '<p class="hint">Targets arrive with the first sync from your Mac.</p>'}
         ${t.estimated || t.unread ? `<p class="hint">${[t.estimated ? `${t.estimated} meal${t.estimated === 1 ? '' : 's'} still an estimate (not confirmed)` : '', t.unread ? `${t.unread} still being read by the Mac` : ''].filter(Boolean).join(' · ')}.</p>` : ''}
       </section>
       ${date === today ? `<div class="fuel-log">
@@ -53,6 +139,9 @@ export function render(view, [dateParam]) {
         <button class="btn-ghost" id="f-manual" type="button">No photo</button></div>
         <p class="hint">Take the before photo with the kitchen scale in it if you weighed the food. The Mac reads it and estimates items, grams, kcal and protein; you confirm or fix.</p>` : ''}
       ${queued ? '<p class="hint c-amber">Mac unreachable: photos are kept on this phone and read when it is back.</p>' : ''}
+      ${date === today ? `<section class="card pad-card fuel-times"><div class="ex-head"><span class="hud c-muted">MEAL TIMES</span><button class="link-btn" id="f-times" type="button">${times.length ? 'Change' : 'Set them'}</button></div>
+        ${times.length ? `<p class="hint c-text">${times.map((x) => `${esc(x.name)} ${formatHm(x.time)}`).join(' · ')}</p>` : '<p class="hint">Not set yet, so no meal-time reminders. Set your usual times and the app asks when one passes with nothing logged.</p>'}
+        ${dayChecks.length ? `<p class="hint">${dayChecks.map((c) => `${esc(c.name)}: ${ANSWER[c.answer].toLowerCase()}`).join(' · ')}</p>` : ''}</section>` : ''}
       <div class="section-label">${list.length ? `Meals · ${list.length}` : 'No meals logged'}</div>
       <ul class="meal-list">${list.map((m) => {
         const mt = mealTotals(m, estimates);
@@ -64,6 +153,8 @@ export function render(view, [dateParam]) {
             <span class="hint">${mt.known ? `${n0(mt.kcal)} kcal · ${Math.round(mt.protein * 10) / 10} g protein${mt.estimated ? ' · estimate' : ''}` : ''}</span></span>
           <span class="hud ${s === 'done' ? 'c-green' : 'c-amber'} meal-state">${esc(STATE_SHORT[s])}</span></a></li>`;
       }).join('')}</ul>`;
+    body.querySelector('#f-targets')?.addEventListener('click', () => editTargets(repo));
+    body.querySelector('#f-times')?.addEventListener('click', () => editMealTimes());
     const man = body.querySelector('#f-manual');
     if (man) man.onclick = async () => {
       const id = await logMealManual();
@@ -79,8 +170,8 @@ export function render(view, [dateParam]) {
   const unsub = subscribe((s) => { const k = `${s.paired}|${s.mac.reachable}|${s.sync.pending > 0}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings'].includes(c))) draw(); });
-    draw();
+    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks'].includes(c))) draw(); });
+    draw().then(() => { if (checking && alive) answerCheck(repo, date, params[2]); });
   });
   return () => { alive = false; off(); unsub(); };
 }

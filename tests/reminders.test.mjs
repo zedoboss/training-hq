@@ -129,3 +129,36 @@ test('the Mac notifier: sends what is due once, skips what is stale, nothing wit
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cooking asks again; after photo at 25 min', async () => {
+  const { mealReminders } = await import('../app/js/lib/fuel-reminders.js');
+  const date = '2026-01-20';
+  const settings = { fuel: { mealTimes: [{ name: 'Breakfast', time: '07:30' }, { name: 'Lunch', time: '12:30' }] } };
+  const breakfast = { id: 'm1', date, at: at(date, '07:40'), name: 'Breakfast', source: 'photo', before: { photoId: 'p1', at: at(date, '07:40') }, after: null };
+  let items = remindersFor({ ...base, date, last: null, settings, meals: [breakfast] }).filter((i) => i.kind === 'meals');
+  const k = byKind(items);
+  assert.equal(items.length, 3);
+  const lunch = items.find((i) => i.id === `meal:${date}:1230`);
+  assert.equal(lunch.at, at(date, '13:15'));
+  assert.equal(lunch.title, 'Lunch time');
+  assert.equal(lunch.body, '1:15 PM, nothing logged since breakfast. Eaten, cooking, or skipping?');
+  assert.equal(lunch.url, `#/fuel/check/${date}/1230`);
+  assert.equal(lunch.due, true);
+  assert.equal(items.find((i) => i.id === `meal:${date}:0730`).due, false);
+  assert.equal(k['meal-after'].at, at(date, '08:05'));
+  assert.equal(k['meal-after'].due, true);
+  // Cooking: no lunch reminder, a follow-up 30 minutes after the answer until a meal is logged.
+  const checks = [{ id: `${date}.1230`, date, slot: '12:30', answer: 'cooking', at: at(date, '13:16') }];
+  items = mealReminders({ date, tz: TZ, meals: [breakfast], checks, mealTimes: settings.fuel.mealTimes });
+  assert.equal(items.find((i) => i.id === `meal:${date}:1230`).due, false);
+  const again = items.find((i) => i.id.startsWith('meal-cooking'));
+  assert.equal(again.at, at(date, '13:46'));
+  assert.equal(again.due, true);
+  const lunchMeal = { id: 'm2', date, at: at(date, '13:40'), name: 'Lunch', source: 'manual', before: { photoId: null } };
+  items = mealReminders({ date, tz: TZ, meals: [breakfast, lunchMeal], checks, mealTimes: settings.fuel.mealTimes });
+  assert.equal(items.find((i) => i.id.startsWith('meal-cooking')).due, false);
+  // No meal times set: only the after photo. Switched off: nothing.
+  assert.deepEqual(remindersFor({ ...base, date, last: null, meals: [breakfast] }).filter((i) => i.kind === 'meals').map((i) => i.id), ['meal-after:m1']);
+  assert.equal(remindersFor({ ...base, date, last: null, meals: [breakfast], settings: { notify: { kinds: { meals: false } } } }).filter((i) => i.kind === 'meals').length, 0);
+  assert.equal(dueNow(items, at(date, '13:20')).length, 0);
+});

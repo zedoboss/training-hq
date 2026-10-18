@@ -15,6 +15,7 @@ export function stateFrom(store, tz) {
   return reminderState({
     sessions: list('sessions'), sets: list('sets'), tendons: list('tendons'), bridge: one('bridge', 'last-loads'),
     settings: one('settings', 'main'), meta: one('programme', 'meta'), days: list('days'), neck: one('schedule', 'neck'),
+    meals: list('meals'), mealChecks: list('meal-checks'),
   }, tz);
 }
 

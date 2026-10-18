@@ -9,6 +9,7 @@ import { weekColumn } from './programme.js';
 import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
 import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
+import { mealReminders } from './fuel-reminders.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -16,6 +17,7 @@ export const KINDS = [
   ['holds', 'Tendon holds (morning, evening, rest days)'],
   ['evening', 'Evening: what is still open, and tomorrow'],
   ['neck', 'Neck is still unplanned (weekly)'],
+  ['meals', 'Meal times with nothing logged; the after photo'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };
@@ -35,9 +37,11 @@ const holdText = (s) => `${s.label}: ${s.exercise}${s.also?.length ? ` then ${s.
  * @param {object} [o.table]     readiness table (which soreness is asked)
  * @param {Set<string>} [o.trainedDates]  dates with a workout started or done
  * @param {object} [o.neck]      {planned, lastAskedOn} (4.9)
+ * @param {Array} [o.meals]      meals (step 6), any date
+ * @param {Array} [o.mealChecks] answers to "eaten, cooking, or skipping?" 
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null }) {
+export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [] }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -118,6 +122,8 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
       });
     }
   }
+  // Meals (6.3): his meal times with nothing logged, and the after photo.
+  if (on('meals')) out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
   return out.sort((a, b) => a.at - b.at);
 }
 
@@ -129,7 +135,7 @@ export function dueNow(items, now, sent = {}, graceMs = 30 * 60000) {
 }
 
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
-export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null }, tz) {
+export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [] }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
   return {
     tz,
@@ -142,5 +148,7 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     table: tendons.find((d) => d?.kind === 'readiness') ?? null,
     trainedDates: new Set(sessions.filter((s) => s.kind !== 'holds' && s.startedAt).map((s) => isoDate(new Date(s.startedAt), tz))),
     neck,
+    meals,
+    mealChecks,
   };
 }
