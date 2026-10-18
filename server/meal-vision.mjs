@@ -5,17 +5,22 @@
 // unreachable are simply read on the next sync. One photo at a time; a failed read is tried again up to 3 times.
 import { runOnce, imageBlock, parseJsonAnswer, MODELS } from './claude.mjs';
 import { cleanItems } from '../app/js/lib/meals.js';
+import { withUsda } from '../app/js/lib/foods.js';
+import { foodsDb, myFoods } from './foods.mjs';
 
 export const MAX_TRIES = 3;
 const RETRY_MS = 5 * 60000;
 
 export const SYSTEM_BEFORE = `You read meal photos for a personal food log. Look at the photo and estimate what is on the plate.
 - If a kitchen scale is visible, read its display in grams (scaleGrams). Assume the scale was zeroed with the plate on it, so the reading is the food only, and make the items' grams add up to it. No scale visible: scaleGrams null.
-- One item per food. grams, kcal and protein (grams of protein) for the amount in the photo, from typical nutrition values. Cooked weights for cooked food.
+- One item per food, with grams for the amount in the photo (cooked weight for cooked food, raw weight for raw food).
+- name: his name for it when it is one of his usual foods, else a plain name. fdcId: the number in [fdcId ...] after his usual food when it is one of them, else null.
+- usda: the USDA FoodData Central description of the closest entry, in USDA's own words (for example "Rice, white, long-grain, regular, unenriched, cooked without salt" or "Egg, whole, cooked, fried"). The app computes kcal and protein from USDA's per-100 g values for that entry.
+- kcal and protein (grams of protein): your own estimate, used only when no USDA entry matches.
 - unsure: true when you are guessing what the food is or how much there is.
 - notes: one short sentence only if something matters (for example "Scale shows 412 g including a bowl?"), else "".
 Reply with JSON only, no other text:
-{"scaleGrams": number|null, "items": [{"name": string, "grams": number, "kcal": number, "protein": number, "unsure": boolean}], "notes": string}`;
+{"scaleGrams": number|null, "items": [{"name": string, "fdcId": number|null, "usda": string, "grams": number, "kcal": number, "protein": number, "unsure": boolean}], "notes": string}`;
 
 export const SYSTEM_AFTER = `You read the AFTER photo of a meal for a personal food log: what is left on the plate after eating.
 You get the list of items that were on the plate before, numbered from 0. For each item with something left, give its index and the grams left (never more than it had). Items fully eaten are left out. An empty plate: "leftovers": [].
@@ -27,7 +32,7 @@ Reply with JSON only, no other text:
 /** The text sent with a photo: his usual foods (from the private data) and any note he added. */
 export function promptText({ kind, meal, plan, before = [] }) {
   const lines = [];
-  if (plan?.foods?.length) lines.push(`Foods he often eats (use these names when they match): ${plan.foods.map((f) => f.name).join('; ')}.`);
+  if (plan?.foods?.length) lines.push(`Foods he often eats (use these names when they match): ${plan.foods.map((f) => (f.fdcId ? `${f.name} [fdcId ${f.fdcId}]` : f.name)).join('; ')}.`);
   if (kind === 'after') lines.push(`On the plate before:\n${before.map((x, i) => `${i}. ${x.name}: ${x.grams} g`).join('\n')}`);
   lines.push(kind === 'after' ? 'This is the after photo.' : 'This is the before photo.');
   if (meal.hint) lines.push(`His note about this meal. It overrides the photo and the list of usual foods: name the items and amounts the way he says.\n${meal.hint}`);
@@ -59,7 +64,7 @@ export function readAnswer(kind, text, before = []) {
  * @param {ReturnType<import('./store.mjs').openStore>} o.store
  * @param {typeof runOnce} [o.run]   Claude call (tests pass a fake)
  */
-export function openMealVision({ store, run = runOnce, log = () => {}, now = () => Date.now() }) {
+export function openMealVision({ store, run = runOnce, log = () => {}, now = () => Date.now(), foods = () => foodsDb(log) }) {
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
   let busy = false; let again = false;
 
@@ -108,6 +113,9 @@ export function openMealVision({ store, run = runOnce, log = () => {}, now = () 
       const content = [imageBlock(photo.dataUrl), { type: 'text', text: promptText({ kind, meal, plan, before }) }];
       const res = await run({ system: kind === 'before' ? SYSTEM_BEFORE : SYSTEM_AFTER, content, model, effort });
       const ans = readAnswer(kind, res.text, before || []);
+      // A5: kcal and protein from USDA FoodData Central for every item that matches; the rest stay estimates.
+      const db = kind === 'before' ? foods() : null;
+      if (db) ans.items = cleanItems(withUsda(db, ans.items, { prefer: myFoods(plan) }));
       store.writeLocal('meal-estimates', id, { ...base, status: 'done', at: now(), ms: res.ms, tries: tries + 1, ...ans });
       log(`meal ${id}: read in ${res.ms} ms (${kind === 'before' ? `${ans.items.length} items` : `${ans.leftovers.length} leftovers`})`);
       return true;

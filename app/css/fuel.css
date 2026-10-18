@@ -144,3 +144,11 @@
 .cal-sauna { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid var(--cyan); }
 .cal-sauna.is-symptoms { border-bottom-color: var(--red); }
 .cal-key-sauna { display: inline-block; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid var(--cyan); }
+/* A5: the item editor's food suggestions and where each item's numbers come from. */
+.meal-edit .me-item { display: flex; flex-direction: column; gap: 2px; }
+.meal-edit .me-src { font-size: 11px; line-height: 1.3; min-height: 0; padding-left: 4px; }
+.meal-edit .me-src:empty { display: none; }
+.meal-edit .me-sugg { display: flex; flex-direction: column; border: 1px solid var(--divider); border-radius: 10px; background: var(--panel, #0b1620); overflow: hidden; }
+.meal-edit .me-pick { display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left; padding: 10px 12px; min-height: 44px; border: 0; border-bottom: 1px solid var(--divider); background: transparent; color: var(--text); font: 400 14px var(--sans, inherit); cursor: pointer; }
+.meal-edit .me-pick:last-child { border-bottom: 0; }
+.meal-row .src-tag { font: 500 10px var(--mono); letter-spacing: 0.08em; color: var(--faint); margin-left: 6px; }

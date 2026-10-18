@@ -20,6 +20,8 @@ import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
+import { withUsda } from '../../app/js/lib/foods.js';
+import { foodsDb, myFoods } from '../foods.mjs';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -331,7 +333,20 @@ async function checkIn(a, ctx) {
 
 // ---- meals --------------------------------------------------------------------------------------------------------
 
-const ITEMS = { type: 'array', minItems: 1, maxItems: 30, items: obj({ name: { type: 'string' }, grams: { type: 'number', minimum: 0 }, kcal: { type: 'number', minimum: 0 }, protein: { type: 'number', minimum: 0, description: 'grams of protein' } }, ['name', 'grams', 'kcal', 'protein']) };
+const ITEMS = { type: 'array', minItems: 1, maxItems: 30, items: obj({ name: { type: 'string' }, grams: { type: 'number', minimum: 0 }, usda: { type: 'string', description: 'the USDA FoodData Central description of the food, in USDA words, if you know it' }, kcal: { type: 'number', minimum: 0, description: 'only if HE gave it' }, protein: { type: 'number', minimum: 0, description: 'grams of protein, only if HE gave it' } }, ['name', 'grams']) };
+
+/**
+ * A5: kcal and protein from USDA FoodData Central for each item that matches (his own foods first); numbers he gave
+ * himself are kept as his ('typed'); an item with no match and no numbers is estimated from nothing, so it is refused.
+ */
+function mealItems(s, items) {
+  const db = foodsDb();
+  const marked = (items || []).map((x) => (x.kcal != null || x.protein != null ? { ...x, source: 'typed', kcal: x.kcal ?? 0, protein: x.protein ?? 0 } : x));
+  const out = cleanItems(db ? withUsda(db, cleanItems(marked), { prefer: myFoods(s.one('fuel', 'plan')) }) : marked);
+  const unknown = out.filter((x, i) => x.source !== 'usda' && marked[i].kcal == null && marked[i].protein == null);
+  return { items: out, unknown };
+}
+const itemText = (x) => `${x.name} ${Math.round(x.grams)} g${x.source === 'usda' ? '' : x.source === 'typed' ? ' (his numbers)' : ' (estimate)'}`;
 
 const momentOf = (s, date, hm) => (hm ? zonedTime(date || s.today, hm, s.tz) : s.now);
 
@@ -340,7 +355,8 @@ async function logMeal(a, ctx) {
   const at = momentOf(s, a.date, a.time);
   if (at > s.now + 3600000) return refuse('That time is in the future. Meals are logged once eaten.');
   const id = newId('meal');
-  const items = cleanItems(a.items);
+  const { items, unknown } = mealItems(s, a.items);
+  if (unknown.length) return refuse(`No USDA match for ${unknown.map((x) => `"${x.name}"`).join(', ')}. Give its USDA FoodData Central description (usda), or ask him for the kcal and protein. Nothing logged yet.`);
   const meal = newMeal({ id, at, name: a.name ? String(a.name).slice(0, 40) : defaultMealName(at, s.settings().fuel?.mealTimes, s.tz), tz: s.tz });
   meal.before = { ...meal.before, items, confirmedAt: s.now };
   meal.by = 'coach';
@@ -348,7 +364,7 @@ async function logMeal(a, ctx) {
   put(s, 'meals', id, meal);
   const t = itemTotals(items);
   const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
-  return wrote(`Logged ${meal.name}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein.\n${day}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+  return wrote(`Logged ${meal.name}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
 }
 
 async function correctMeal(a, ctx) {
@@ -357,13 +373,17 @@ async function correctMeal(a, ctx) {
   if (!meal) return refuse(`No meal with id ${a.meal}. The meals tool lists the ids.`);
   if (a.remove) { del(s, 'meals', meal.id); return wrote(`Deleted ${meal.name} (${timeText(meal.at, s.tz)}, ${dayText(meal.date, s.today)}).`, `${meal.name} deleted`); }
   const next = { ...meal };
-  if (a.items) next.before = { ...(meal.before || {}), items: cleanItems(a.items), confirmedAt: s.now, edited: true };
+  if (a.items) {
+    const { items, unknown } = mealItems(s, a.items);
+    if (unknown.length) return refuse(`No USDA match for ${unknown.map((x) => `"${x.name}"`).join(', ')}. Give its USDA FoodData Central description (usda), or ask him for the kcal and protein. Nothing changed.`);
+    next.before = { ...(meal.before || {}), items, confirmedAt: s.now, edited: true };
+  }
   if (a.name) next.name = String(a.name).slice(0, 40);
   if (a.time) { next.at = zonedTime(meal.date, a.time, s.tz); }
   if (a.note !== undefined) next.note = String(a.note).slice(0, 300);
   put(s, 'meals', meal.id, next);
   const t = itemTotals(next.before?.items || []);
-  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${meal.after && !meal.after.none ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
+  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map(itemText).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${meal.after && !meal.after.none ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
 }
 
 // ---- supplements --------------------------------------------------------------------------------------------------
@@ -620,7 +640,7 @@ export const WRITE_TOOLS = [
   write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),
   write('next_exercise', 'Next exercise', 'Move his phone to the next exercise with sets left and say its next set.', obj(), nextExercise),
   write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
-  write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams, kcal and protein. Use his own numbers; where he gave none, estimate from typical values and say they are estimates. Time defaults to now.', obj({ items: ITEMS, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default from the time' }, time: HM, date: ISO, note: { type: 'string' } }, ['items']), logMeal),
+  write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now.', obj({ items: ITEMS, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default from the time' }, time: HM, date: ISO, note: { type: 'string' } }, ['items']), logMeal),
   write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
   write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),

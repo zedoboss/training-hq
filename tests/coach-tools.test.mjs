@@ -191,14 +191,20 @@ test('supplements: taken and skipped are logged as he said, with the stock warni
 
 test('a meal he describes is logged with confirmed items, and can be corrected', async () => {
   const r = await call('log_meal', { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }, { name: 'Eggs', grams: 100, kcal: 143, protein: 12.6 }], time: '02:30' });
-  assert.match(r.text, /^Logged [A-Za-z]+, 2:30 AM \[id meal-[^\]]+\]: Rice 200 g, Eggs 100 g; 403 kcal, 17\.6 g protein\./);
+  assert.match(r.text, /^Logged [A-Za-z]+, 2:30 AM \[id meal-[^\]]+\]: Rice 200 g \(his numbers\), Eggs 100 g \(his numbers\); 403 kcal, 17\.6 g protein\./);
   assert.match(r.text, /Tuesday 1\/20: 403 kcal, 17\.6 g protein \(targets 2000 kcal, 150 g protein/);
   const meal = list('meals')[0];
   assert.equal(meal.source, 'manual');
   assert.ok(meal.before.confirmedAt);
   const fix = await call('correct_meal', { meal: meal.id, items: [{ name: 'Rice', grams: 150, kcal: 195, protein: 3.8 }] });
-  assert.match(fix.text, /Rice 150 g; 195 kcal, 3\.8 g protein/);
+  assert.match(fix.text, /Rice 150 g \(his numbers\); 195 kcal, 3\.8 g protein/);
   assert.match((await call('log_meal', { items: [{ name: 'X', grams: 1, kcal: 1, protein: 0 }], time: '20:00' })).text, /in the future/);
+  // A5: no numbers from him: USDA values; a food USDA doesn't know and no numbers: refused.
+  const u = await call('log_meal', { items: [{ name: 'Rice', grams: 450, usda: 'Rice, white, long-grain, regular, unenriched, cooked without salt' }, { name: 'Eggs', grams: 100 }], time: '02:00' });
+  assert.match(u.text, /Rice 450 g, Eggs 100 g; 728 kcal, 24\.7 g protein \(USDA values\)/);
+  const usda = list('meals').find((m) => m.before.items.some((x) => x.grams === 450)).before.items;
+  assert.deepEqual(usda.map((x) => [x.fdcId, x.source]), [[169757, 'usda'], [171287, 'usda']]);
+  assert.match((await call('log_meal', { items: [{ name: 'Nuoc cham', grams: 20 }] })).text, /No USDA match for "Nuoc cham"\. .*Nothing logged yet/);
 });
 
 test('sauna: a symptom ends the running session at once; the hard-stop words come back', async () => {

@@ -12,6 +12,9 @@ import {
   netItems, mealState, STATE_TEXT, afterPhotoAt,
 } from '../lib/meals.js';
 import { actionSheet, confirmSheet, promptText, promptLong, overlay } from '../ui/sheet.js';
+import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE } from '../lib/foods.js';
+
+const SOURCE_LABEL = 'SR Legacy and Foundation Foods';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -48,45 +51,113 @@ export async function logMealManual({ at = Date.now() } = {}) {
  */
 export const cameraInput = (id) => `<input type="file" accept="image/*" capture="environment" hidden id="${id}">`;
 
-/** Item editor sheet. Resolves to the new items, or null if cancelled. Changing grams keeps kcal and protein per gram. */
+/** His own foods (fuel plan) with a USDA id: suggested first, named his way. */
+async function myFoodsList() {
+  const plan = await (await ready).get('fuel', 'plan');
+  return (plan?.foods || []).filter((f) => f?.fdcId).map((f) => ({ fdcId: Number(f.fdcId), name: f.name }));
+}
+
+const SOURCE_TEXT = { usda: 'USDA', typed: 'your numbers', estimate: 'estimate', label: 'pack label' };
+
+/**
+ * Item editor sheet. Resolves to the new items, or null if cancelled.
+ * A5: the food box suggests his own foods, then USDA FoodData Central foods; a USDA food's kcal and protein follow its
+ * grams exactly. Typing kcal or protein makes them his numbers. On Save, a typed name with no numbers is matched to
+ * USDA when it can be.
+ */
 export function editItems(title, items) {
   return new Promise((resolve) => {
     let result = null;
     let rows = cleanItems(items);
     if (!rows.length) rows = [{ name: '', grams: 0, kcal: 0, protein: 0, unsure: false }];
+    let db = null; let mine = [];
+    const dbReady = Promise.all([loadFoods(), myFoodsList()]).then(([d, m]) => { db = d; mine = m; }).catch(() => {});
     const { el, close } = overlay(`<form class="sheet-form meal-edit"><div class="hud c-muted sheet-title">${esc(title)}</div>
       <div class="me-head hud c-faint"><span>FOOD</span><span>G</span><span>KCAL</span><span>PROT</span><span></span></div>
       <div class="me-rows"></div>
       <button class="btn-ghost" type="button" data-add>+ Add item</button>
+      <p class="hint">${esc(SOURCE_NOTE)} (${esc(SOURCE_LABEL)}).</p>
       <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Cancel</button><button class="btn-primary" type="submit">Save</button></div></form>`,
     () => resolve(result));
     el.querySelector('.sheet').classList.add('sheet-tall');
     const box = el.querySelector('.me-rows');
-    const read = () => [...box.querySelectorAll('.me-row')].map((r) => ({
-      name: r.querySelector('[data-f=name]').value.trim(), grams: Number(r.querySelector('[data-f=grams]').value) || 0,
-      kcal: Number(r.querySelector('[data-f=kcal]').value) || 0, protein: Number(r.querySelector('[data-f=protein]').value) || 0, unsure: false,
+    const val = (r, f) => r.querySelector(`[data-f=${f}]`).value;
+    // The row's numbers as shown, keeping what the screen doesn't show (USDA id, where the numbers came from).
+    const read = () => [...box.querySelectorAll('.me-row')].map((r, i) => ({
+      ...rows[i], name: val(r, 'name').trim(), grams: Number(val(r, 'grams')) || 0, kcal: Number(val(r, 'kcal')) || 0, protein: Number(val(r, 'protein')) || 0, unsure: false,
     }));
+    const usdaFor = (x) => (db && x.fdcId && x.source === 'usda' ? db.byId.get(x.fdcId) : null);
+    const line = (x) => {
+      const f = usdaFor(x);
+      if (f) return `USDA · ${f.name} · ${Math.round(per100(db, f, 'kcal') ?? 0)} kcal, ${per100(db, f, 'protein') ?? 0} g protein per 100 g`;
+      return x.source ? SOURCE_TEXT[x.source] || '' : '';
+    };
     const draw = () => {
-      box.innerHTML = rows.map((x, i) => `<div class="me-row" data-i="${i}">
-        <input class="input" data-f="name" value="${esc(x.name)}" placeholder="Food" aria-label="Food" maxlength="80">
+      box.innerHTML = rows.map((x, i) => `<div class="me-item" data-i="${i}"><div class="me-row">
+        <input class="input" data-f="name" value="${esc(x.name)}" placeholder="Food" aria-label="Food" maxlength="80" autocomplete="off">
         <input class="input" data-f="grams" inputmode="decimal" value="${x.grams || ''}" aria-label="Grams">
         <input class="input" data-f="kcal" inputmode="decimal" value="${x.kcal || ''}" aria-label="Kcal">
         <input class="input" data-f="protein" inputmode="decimal" value="${x.protein || ''}" aria-label="Protein grams">
-        <button class="icon-mini" type="button" data-del aria-label="Remove">✕</button></div>`).join('');
-      box.querySelectorAll('[data-f=grams]').forEach((inp) => inp.addEventListener('change', () => {
-        const i = Number(inp.closest('.me-row').dataset.i);
-        const cur = read();
-        const old = rows[i];
-        if (old?.grams) cur[i] = regram({ ...cur[i], grams: old.grams, kcal: cur[i].kcal, protein: cur[i].protein }, Number(inp.value) || 0);
-        rows = cur;
-        draw();
-      }));
-      box.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { rows = read(); rows.splice(Number(b.closest('.me-row').dataset.i), 1); draw(); }));
+        <button class="icon-mini" type="button" data-del aria-label="Remove">✕</button></div>
+        <div class="me-src hint">${esc(line(x))}</div><div class="me-sugg" hidden></div></div>`).join('');
+      box.querySelectorAll('.me-item').forEach((item) => {
+        const i = Number(item.dataset.i);
+        const name = item.querySelector('[data-f=name]');
+        const sugg = item.querySelector('.me-sugg');
+        let t = null;
+        name.addEventListener('input', () => {
+          clearTimeout(t);
+          t = setTimeout(async () => {
+            await dbReady;
+            const q = name.value.trim();
+            if (!db || q.length < 2) { sugg.hidden = true; return; }
+            const found = searchFoods(db, q, { limit: 6, prefer: mine.map((m) => m.fdcId) });
+            const minesFirst = mine.filter((m) => m.name.toLowerCase().includes(q.toLowerCase()) && !found.some((r) => r.food.id === m.fdcId)).map((m) => ({ food: db.byId.get(m.fdcId) })).filter((r) => r.food);
+            const list = [...minesFirst, ...found].slice(0, 6);
+            sugg.innerHTML = list.map((r) => { const m = mine.find((y) => y.fdcId === r.food.id); return `<button class="me-pick" type="button" data-id="${r.food.id}"><span>${esc(m ? m.name : r.food.name)}</span><span class="hud ${m ? 'c-cyan' : 'c-faint'}">${m ? 'YOUR FOOD' : 'USDA'}</span></button>`; }).join('');
+            sugg.hidden = !list.length;
+            sugg.querySelectorAll('.me-pick').forEach((b) => b.addEventListener('mousedown', (e) => e.preventDefault()));
+            sugg.querySelectorAll('.me-pick').forEach((b) => b.addEventListener('click', () => {
+              const food = db.byId.get(Number(b.dataset.id));
+              const cur = read();
+              const m = mine.find((y) => y.fdcId === food.id);
+              cur[i] = foodItem(db, food, cur[i].grams || 0, { name: m ? m.name : shortName(food.name) });
+              rows = cur; draw();
+              box.querySelector(`.me-item[data-i="${i}"] [data-f=grams]`)?.focus();
+            }));
+          }, 150);
+        });
+        name.addEventListener('blur', () => setTimeout(() => { sugg.hidden = true; }, 150));
+        item.querySelector('[data-f=grams]').addEventListener('change', (e) => {
+          const cur = read();
+          const f = usdaFor(rows[i]);
+          if (f) cur[i] = foodItem(db, f, Number(e.target.value) || 0, { name: cur[i].name });
+          else if (rows[i]?.grams) cur[i] = regram({ ...cur[i], grams: rows[i].grams, kcal: cur[i].kcal, protein: cur[i].protein }, Number(e.target.value) || 0);
+          rows = cur; draw();
+        });
+        for (const f of ['kcal', 'protein']) {
+          item.querySelector(`[data-f=${f}]`).addEventListener('change', () => { const cur = read(); cur[i] = { ...cur[i], source: 'typed' }; rows = cur; draw(); });
+        }
+        item.querySelector('[data-del]').addEventListener('click', () => { rows = read(); rows.splice(i, 1); draw(); });
+      });
     };
     draw();
-    el.querySelector('[data-add]').onclick = () => { rows = [...read(), { name: '', grams: 0, kcal: 0, protein: 0 }]; draw(); box.querySelector('.me-row:last-child [data-f=name]').focus(); };
+    el.querySelector('[data-add]').onclick = () => { rows = [...read(), { name: '', grams: 0, kcal: 0, protein: 0 }]; draw(); box.querySelector('.me-item:last-child [data-f=name]').focus(); };
     el.querySelector('[data-cancel]').onclick = () => close();
-    el.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); result = cleanItems(read().filter((x) => x.name || x.grams || x.kcal)); close(); });
+    el.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await dbReady;
+      // A typed name with no numbers of his: USDA values when it matches.
+      const list = read().filter((x) => x.name || x.grams || x.kcal);
+      result = cleanItems(list.map((x) => {
+        if (!db) return x;
+        if (x.fdcId && x.source === 'usda') return withUsda(db, [x], { prefer: mine })[0];
+        if (x.fdcId || x.kcal || x.protein || x.source) return x;
+        const [y] = withUsda(db, [{ ...x, source: undefined }], { prefer: mine });
+        return y.source === 'usda' ? y : { ...x, source: 'typed' };
+      }));
+      close();
+    });
   });
 }
 
@@ -182,12 +253,13 @@ export function render(view, [id]) {
         <span class="meal-scale-in"><input class="input" id="m-scale" inputmode="decimal" value="${scaleG ?? ''}" aria-label="Grams on the scale"><span class="c-muted">g</span></span></label>` : ''}
       <section class="card meal-est">
         <div class="meal-est-head hud c-muted"><span>${headTag}</span><span>G · KCAL · PROTEIN</span></div>
-        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
+        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'estimate' ? '<span class="src-tag">EST.</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
           : `<p class="hint">${waiting ? 'Waiting for the estimate.' : meal.source === 'manual' ? 'Nothing yet. Tap Fix to type what you ate.' : 'No items.'}</p>`}
         ${l.items.length ? `<div class="meal-left hud c-amber">LEFT ON THE PLATE${l.estimated ? ' · ESTIMATE' : ''}</div>${l.items.map((x) => `<div class="meal-row c-muted"><span>− ${esc(leftName(x.index) || x.name)}</span><span class="mono">${n0(x.grams)} g</span></div>`).join('')}` : ''}
         ${l.pending && meal.after?.photoId ? '<p class="hint">Leftovers: waiting for the Mac to read the after photo.</p>' : ''}
         <div class="meal-total"><span>${meal.after ? 'Eaten' : 'Total'}</span><span class="mono c-cyan">${n0(tot.grams)} · ${n0(tot.kcal)} · ${n1(tot.protein)}</span></div>
         ${estB?.notes && b.estimated ? `<p class="hint">${esc(estB.notes)}</p>` : ''}
+        ${items.some((x) => x.source === 'usda') ? `<p class="hint" id="m-usda">${esc(SOURCE_NOTE)}${items.some((x) => x.source === 'estimate') ? '; EST. = no USDA match, the Mac\'s estimate' : ''}.</p>` : ''}
         <p class="hint">The after photo subtracts what's left on the plate.</p>
       </section>
       <div class="meal-actions">

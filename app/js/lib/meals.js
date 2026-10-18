@@ -3,7 +3,9 @@
 //
 // meals          {id, date, at, name, before: {photoId, at, scaleG, items, confirmedAt} | null,
 //                 after: {photoId, at, scaleG, leftovers, none, confirmedAt} | null, hint, round, note, source}
-//                 items: [{name, grams, kcal, protein, unsure}]; leftovers: [{name, grams, index}]
+//                 items: [{name, grams, kcal, protein, unsure, fdcId?, source?}]; leftovers: [{name, grams, index}]
+//                 fdcId: the USDA FoodData Central food; source 'usda' (kcal and protein computed from it, A5),
+//                 'estimate' (the Mac's guess, no USDA match), 'typed' (his own numbers), 'label' (a pack's label).
 //                 after.none = he ate everything (no after photo needed). source 'photo' or 'manual'.
 // meal-photos    {id, mealId, kind: 'before'|'after', dataUrl, at}: kept on the phone until the Mac has them.
 // meal-estimates written by the Mac only, so his edits and its answers never overwrite each other:
@@ -51,6 +53,7 @@ export function newMeal({ id, at, photoId = null, name, tz }) {
 }
 
 /** Clean a list of food items (from the Mac's estimate or typed in). */
+export const ITEM_SOURCES = ['usda', 'estimate', 'typed', 'label'];
 export function cleanItems(items) {
   return (Array.isArray(items) ? items : []).map((x) => ({
     name: String(x?.name ?? '').trim().slice(0, 80) || 'Food',
@@ -58,6 +61,9 @@ export function cleanItems(items) {
     kcal: Math.max(0, num(x?.kcal) ?? 0),
     protein: Math.max(0, num(x?.protein) ?? 0),
     unsure: !!x?.unsure,
+    ...(Number.isInteger(num(x?.fdcId)) && num(x.fdcId) > 0 ? { fdcId: num(x.fdcId) } : {}),
+    ...(ITEM_SOURCES.includes(x?.source) ? { source: x.source } : {}),
+    ...(x?.usda ? { usda: String(x.usda).slice(0, 200) } : {}),
   }));
 }
 
