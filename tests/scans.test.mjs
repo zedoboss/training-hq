@@ -117,9 +117,18 @@ test('reminders: two evenings before (alcohol), the evening before (the list), a
   assert.equal(eve[0].fixed, true);
   assert.equal(eve[0].url, '#/body/scan');
   const day = scanReminders({ date: '2026-01-22', tz: TZ, plan, days });
-  assert.equal(day[0].id, 'scan-arrive:2026-01-22');
-  assert.equal(day[0].at, at('2026-01-22', '04:30'));
-  assert.equal(day[0].due, true);
+  assert.equal(day[0].id, 'scan-morning:2026-01-22');
+  assert.equal(day[0].at, at('2026-01-22', '04:00'));
+  assert.equal(day[0].body, 'First thing at the gym, before the workout. No training beforehand. Nothing eaten before the scan. Normal water intake. No caffeine or pre-workout before the scan. Bathroom first. Barefoot.');
+  assert.equal(day[1].id, 'scan-arrive:2026-01-22');
+  assert.equal(day[1].at, at('2026-01-22', '04:30'));
+  assert.equal(day[1].due, true);
+  // A10: three days before; the gym one stands down once the arrival automation asked.
+  const three = scanReminders({ date: '2026-01-19', tz: TZ, plan, days });
+  assert.equal(three[0].id, 'scan-3days:2026-01-22');
+  assert.equal(three[0].title, 'Body scan in three days');
+  assert.equal(three[0].body, 'Thursday 1/22, first thing at the gym, before the workout. Coming up: No alcohol in the 24 to 48 hours before. Eat, salt and take supplements as usual.');
+  assert.equal(scanReminders({ date: '2026-01-22', tz: TZ, plan, days: { '2026-01-22': { ...days['2026-01-22'], arrivedAt: 1 } } })[1].due, false);
   // No session time: the evening one asks for it, and nothing on the day.
   assert.match(scanReminders({ date: '2026-01-21', tz: TZ, plan, days: {} })[0].body, /Set tomorrow's session time/);
   assert.deepEqual(scanReminders({ date: '2026-01-22', tz: TZ, plan, days: {} }), []);
@@ -137,7 +146,17 @@ test('scan reminders join the day plan (kind scan, can be switched off) and the 
   assert.ok(!off.some((i) => i.kind === 'scan'));
   const state = { tz: TZ, last, days: dayDocs, areas: [], rounds: {}, scanPlan: plan, scans: [] };
   const fixed = fixedReminders(state, today, 3, at(today, '00:00'));
-  assert.deepEqual(fixed.filter((r) => r.kind === 'scan').map((r) => r.id.split(':')[0]), ['scan-alcohol', 'scan-eve', 'scan-arrive']);
+  assert.deepEqual(fixed.filter((r) => r.kind === 'scan').map((r) => r.id.split(':')[0]), ['scan-alcohol', 'scan-eve', 'scan-morning', 'scan-arrive']);
+});
+
+test('arrival at the gym (A10): the scan first on a scan day with results still to come; else nothing', async () => {
+  const { arrivalMessage } = await import('../app/js/lib/scans.js');
+  const plan = confirmDate({}, '2026-01-22', { proposedDate: '2026-01-22' });
+  const m = arrivalMessage({ plan, date: '2026-01-22' });
+  assert.equal(m.title, 'Body scan first'); assert.equal(m.url, '#/body/scan');
+  assert.match(m.body, /^You're at the gym: scan before the workout\. First thing at the gym/);
+  assert.equal(arrivalMessage({ plan, date: '2026-01-21' }), null);
+  assert.equal(arrivalMessage({ plan, date: '2026-01-22', scans: [done('2026-01-22')] }), null);
 });
 
 test('results: labels matched to the usual metrics, numbers as printed, photos merged without duplicates', async () => {
@@ -208,4 +227,40 @@ test('trends: metrics across scans, flagged when not comparable, changes told as
   assert.equal(ch.days, 28);
   assert.equal(ch.reasons.length, 2);
   assert.equal(latestChange([a]), null);
+});
+
+test('the arrival link (A10): only its secret works; the day is noted; the scan message is pushed once in 30 minutes', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { openArrive } = await import('../server/arrive.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-arrive-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    let t = at('2026-01-22', '04:20');
+    const sent = [];
+    const push = { list: () => [1], notify: async (m) => { sent.push(m); return { sent: 1 }; } };
+    const a = openArrive({ store, push, tz: TZ, now: () => t });
+    const { path } = a.link();
+    const k = new URL(`http://x${path}`).searchParams.get('k');
+    assert.equal(a.link().path, path, 'the same link until renewed');
+    await assert.rejects(a.arrive('nope'), /wrong link/);
+    // Not a scan day: noted, nothing sent.
+    let r = await a.arrive(k);
+    assert.deepEqual([r.date, r.message, r.sent], ['2026-01-22', null, 0]);
+    assert.ok(store.getRecord('days', '2026-01-22').data.arrivedAt);
+    // A scan day: "Body scan first" once; again within 30 minutes: quiet.
+    store.writeLocal('scan-plan', 'main', confirmDate({}, '2026-01-23', { proposedDate: '2026-01-23' }));
+    t = at('2026-01-23', '04:20');
+    r = await a.arrive(k);
+    assert.equal(r.message, 'Body scan first'); assert.equal(sent[0].url, '#/body/scan');
+    t += 10 * 60000;
+    r = await a.arrive(k);
+    assert.equal(r.repeat, true); assert.equal(sent.length, 1);
+    // Renewed: the old link stops working.
+    const k2 = new URL(`http://x${a.link({ renew: true }).path}`).searchParams.get('k');
+    assert.notEqual(k2, k);
+    await assert.rejects(a.arrive(k), /wrong link/);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

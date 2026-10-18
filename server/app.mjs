@@ -85,7 +85,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -122,6 +122,11 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
     const device = m && store.deviceForToken(m[1]);
     if (!device) throw new HttpError(401, 'not paired');
     return device;
+  }
+
+  async function arriveCall(url) {
+    if (!arrive) throw new HttpError(404, 'not available');
+    try { return await arrive.arrive(url.searchParams.get('k')); } catch (e) { throw new HttpError(e.status || 500, e.message); }
   }
 
   function pairingLocked() {
@@ -279,6 +284,17 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       if (!r.sent) throw new HttpError(502, r.dropped ? 'This phone\'s subscription has expired. Turn notifications off and on again.' : 'The push service did not accept the test.');
       return r;
     },
+
+    // "When I arrive at the gym" (A10): the link for his iPhone Shortcut (paired devices only), and the call itself
+    // (the link's own secret; no device token: the Shortcut has none).
+    'POST /api/arrive/link': async (req) => {
+      auth(req);
+      if (!arrive) throw new HttpError(404, 'not available');
+      const { renew } = await readJson(req);
+      return arrive.link({ renew: !!renew });
+    },
+    'GET /api/arrive': async (req, url) => arriveCall(url),
+    'POST /api/arrive': async (req, url) => arriveCall(url),
 
     // The coach (step 8). A message is answered as a stream of JSON lines (the reply as it is written, the tools it
     // used, actions for the phone); the turn runs to the end and is saved even if the phone drops off half-way.

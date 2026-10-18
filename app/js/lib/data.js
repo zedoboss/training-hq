@@ -354,3 +354,19 @@ function startLoop() {
   });
   window.addEventListener('online', () => scheduleSync(300));
 }
+
+/** A10: the link for his iPhone "arrive at the gym" Shortcut: the Mac address this device uses + the private path. */
+export async function arriveLink({ renew = false } = {}) {
+  const out = await postJson('/api/arrive/link', { renew }, 30000);
+  return (await repo.getMeta('macUrl')) + out.path;
+}
+
+/** Call the link the way the Shortcut will (a test from the app). */
+export async function arriveTest(link) {
+  let res;
+  try { res = await fetch(link, { cache: 'no-store' }); } catch { throw new Error('Mac unreachable. Try again when it is connected.'); }
+  const j = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(j?.error || `Mac answered ${res.status}`);
+  syncNow(); // the arrival noted on the Mac comes back with the next sync; don't wait for it
+  return j;
+}

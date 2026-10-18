@@ -8,7 +8,7 @@
 //   #/body/scan/r/<date>   a scan's results: photos of the results screen or printout read by Claude on the Mac (or typed
 //                          in), every number as reported, checked by him; the conditions (time, fasted, trained before,
 //                          checklist lines not ticked, anything unusual)
-import { ready, saveSettings, syncNow } from '../lib/data.js';
+import { ready, saveSettings, syncNow, arriveLink, arriveTest } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, hmOf, zonedTime, timeAt } from '../lib/time.js';
@@ -32,7 +32,19 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const dayName = (iso) => formatDay(new Date(`${iso}T12:00:00`));
 const savePlan = (repo, plan) => repo.put('scan-plan', 'main', { ...plan, id: 'main' });
 const COLS = ['scan-plan', 'body-scans', 'scan-photos', 'days', 'sessions', 'settings'];
-const REM_TEXT = { 'scan-alcohol': 'no alcohol from now', 'scan-eve': 'the preparation list', 'scan-arrive': 'at the gym, scan first' };
+let arriveNote = null; // the last answer from the arrival link (Copy / Test / New link)
+
+/** The iPhone Shortcuts steps for the arrival automation (A10). Menu names can differ a little between iOS versions. */
+const ARRIVE_STEPS = (gym) => [
+  'Open Shortcuts, tap Automation at the bottom, then + (New Automation).',
+  'Choose "Arrive". Location: Choose, and search for your gym' + (gym ? ` (${gym})` : '') + '. Done.',
+  'Pick "Run Immediately" (and switch off "Notify When Run" if you like). Next.',
+  'Tap "New Blank Automation", then Add Action, search "Get Contents of URL" and add it.',
+  'Tap the URL field and paste the link (Copy the link below). Done.',
+  'Test it below. On a scan day, your Mac sends "Body scan first" when you walk in.',
+];
+
+const REM_TEXT = { 'scan-3days': 'three days to go', 'scan-alcohol': 'no alcohol from now', 'scan-eve': 'the preparation list', 'scan-morning': 'this morning: the list', 'scan-arrive': 'at the gym, scan first' };
 
 async function loadAll(repo) {
   const [planDoc, scans, sessions, bridge, dayList] = await Promise.all([
@@ -78,7 +90,7 @@ function home(view) {
     const canTick = next && today >= addDays(next.date, -1);
     const open = next ? unticked(rec, items) : items;
     const hm = next ? ctx.days[next.date]?.sessionTime || null : null;
-    const rem = next ? [-2, -1, 0].flatMap((k) => scanReminders({ date: addDays(next.date, k), tz: deviceTimeZone(), plan, scans, days: ctx.days, eveningHm: n.scanEvening })) : [];
+    const rem = next ? [-3, -2, -1, 0].flatMap((k) => scanReminders({ date: addDays(next.date, k), tz: deviceTimeZone(), plan, scans, days: ctx.days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin })) : [];
     const remOn = n.kinds?.scan !== false;
     const p = st.proposal;
     const why = p.lastDate
@@ -137,6 +149,15 @@ function home(view) {
             <p class="hint">Their instructions win over this starting checklist: change it to match.</p>`}
         <button class="btn-ghost" type="button" id="sc-staff-add">${(plan.staff || []).length ? 'Add to what they said' : 'Record what they said'}</button>
       </section>
+      <div class="section-label">At the gym</div>
+      <section class="card pad-card" id="sc-arrive">
+        <div class="hud c-cyan">IPHONE AUTOMATION · WHEN YOU ARRIVE AT THE GYM</div>
+        <p class="hint c-text">On a scan day your phone asks "Body scan first" the moment you arrive, with the checklist. A web app can't see where you are, so the iPhone's Shortcuts app tells your Mac. Set it up once:</p>
+        <ol class="scan-steps">${ARRIVE_STEPS(withDefaults(getState().settings).gym?.name).map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+        <div class="btn-row"><button class="btn-ghost" type="button" id="sc-arrive-copy">Copy the link</button><button class="btn-ghost" type="button" id="sc-arrive-test">Test it</button></div>
+        <p class="hint" id="sc-arrive-out">${esc(arriveNote || 'The link only lets the Shortcut say "I\'m at the gym". New link makes the old one stop working.')}</p>
+        <button class="link-btn" type="button" id="sc-arrive-new">New link</button>
+      </section>
       <div class="section-label">Scans · ${done.length}</div>
       ${unsaved.map((x) => `<a class="card confirm-card sauna-resume" href="#/body/scan/r/${esc(x.date)}"><span class="hud c-amber">RESULTS NOT SAVED</span><span>${esc(dayName(x.date))}: check and save</span></a>`).join('')}
       <ul class="lib-list" id="sc-history">${done.map((x) => { const notes = conditionNotes(x, items); const key = ['weightKg', 'fatPercent', 'muscleMassKg'].map((k) => [k, metricValue(x, k)]).filter(([, v]) => v != null);
@@ -185,6 +206,24 @@ function home(view) {
         close();
         location.hash = `#/body/scan/r/${d}`;
       });
+    });
+    // A10: the arrival automation's link (made on the Mac, shown here for the Shortcut on this phone).
+    // The answer stays on screen when the arrival syncs back and the screen redraws.
+    const arriveOut = { set textContent(t) { arriveNote = t; const el = document.querySelector('#sc-arrive-out'); if (el) el.textContent = t; } };
+    const linkFor = async (renew = false) => arriveLink({ renew });
+    $('#sc-arrive-copy').addEventListener('click', async () => {
+      try { const link = await linkFor(); await navigator.clipboard.writeText(link); arriveOut.textContent = 'Copied. Paste it into "Get Contents of URL" in the automation.'; }
+      catch (e) { arriveOut.textContent = e.message || 'Could not copy. Try again with the Mac connected.'; }
+    });
+    $('#sc-arrive-test').addEventListener('click', async () => {
+      try {
+        const r = await arriveTest(await linkFor());
+        arriveOut.textContent = r.repeat ? 'Your Mac heard it (an arrival in the last 30 minutes, so nothing new was sent).' : r.message ? `Your Mac heard it and sent "${r.message}".` : 'Your Mac heard it. No scan today, so nothing to send.';
+      } catch (e) { arriveOut.textContent = e.message; }
+    });
+    $('#sc-arrive-new').addEventListener('click', async () => {
+      if (!(await confirmSheet('Make a new link? The old one stops working: paste the new one into the automation.', { ok: 'New link' }))) return;
+      try { await navigator.clipboard.writeText(await linkFor(true)); arriveOut.textContent = 'New link copied. Paste it into the automation.'; } catch (e) { arriveOut.textContent = e.message || 'Could not make a new link.'; }
     });
     $('#sc-staff-add').addEventListener('click', async () => {
       const t = await promptLong("What the gym's staff said", '', { placeholder: 'How to prepare; whether the results can be exported' });

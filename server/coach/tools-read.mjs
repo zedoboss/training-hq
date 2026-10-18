@@ -138,6 +138,8 @@ function scanLine(s) {
 /** Everything that matters today, in lines (the 'today' tool). */
 export function todayText(s) {
   const lines = [...rotationLines(s)];
+  const arrived = s.days()[s.today]?.arrivedAt;
+  if (arrived) lines.push(`At the gym since ${timeText(arrived, s.tz)} (his iPhone arrival automation).`);
   const active = s.active();
   if (active) lines.push(activeText(s, active));
   lines.push(...holdLines(s), suppLine(s), foodLine(s), scanLine(s));

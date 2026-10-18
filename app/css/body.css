@@ -98,3 +98,5 @@ a.chip.is-on { color: var(--on-pale); }
 .tr-line { margin: 6px 0 0; font-family: var(--mono); font-size: 13px; }
 #tr-change { display: flex; flex-direction: column; gap: 2px; }
 #tr-flag { margin-top: 8px; }
+/* A10: the arrival automation's steps. */
+.scan-steps { margin: 6px 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; color: var(--text); }

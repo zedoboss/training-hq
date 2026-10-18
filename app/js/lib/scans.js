@@ -10,7 +10,7 @@
 // body-scans  'scan.<date>': {id, date, status: 'prep'|'done', prep: {ticks: {<item id>: true}, items: [{id, when,
 //             text}], at}, ... results added in 7.5}
 import { addDays, rotationDay } from './rotation.js';
-import { daysBetween, zonedTime, formatDay, hmOf, zoneOf } from './time.js';
+import { daysBetween, zonedTime, formatDay, hmOf, zoneOf, addMinutesHm } from './time.js';
 
 /** Every 4 weeks (brief: scanning more often mostly measures day-to-day water changes). */
 export const EVERY_DAYS = 28;
@@ -143,13 +143,22 @@ const joinTexts = (items) => items.map((i) => i.text.replace(/^The day before: (
  * A web app can't tell when he walks into the gym, so "on arrival" is his session time that day (he sets it the day
  * before, decision 15). Two evenings before, a heads-up for the no-alcohol line (24 to 48 hours).
  */
-export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, eveningHm = '20:00' }) {
+/**
+ * The scan's reminder ladder (his answer, Sun 10/18): three days before and two evenings before (the alcohol window
+ * starts), the evening before (the list), the morning of (with his check-in, before he leaves), and at the gym (at his
+ * session time, unless the iPhone arrival automation already asked: days[date].arrivedAt).
+ */
+export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, eveningHm = '20:00', morningLeadMin = 30 }) {
   const d = plan?.next?.date;
   if (!d) return [];
   const due = !scans.some((s) => s.date === d && isDone(s));
   const items = protocolOf(plan);
   const base = { kind: 'scan', url: '#/body/scan', tag: `scan-${d}`, fixed: true, due };
   const hm = days[d]?.sessionTime || null;
+  if (date === addDays(d, -3)) {
+    const before = items.filter((i) => i.when === 'before');
+    return [{ ...base, id: `scan-3days:${d}`, at: zonedTime(date, eveningHm, tz), title: 'Body scan in three days', body: `${dayText(d)}, first thing at the gym, before the workout.${before.length ? ` Coming up: ${joinTexts(before)}.` : ''}` }];
+  }
   if (date === addDays(d, -2)) {
     const alcohol = items.find((i) => i.id === 'no-alcohol');
     return [{ ...base, id: `scan-alcohol:${d}`, at: zonedTime(date, eveningHm, tz), title: 'Body scan in two days', body: `${dayText(d)}, first thing at the gym.${alcohol ? ` ${alcohol.text}` : ''}` }];
@@ -162,9 +171,20 @@ export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, even
     }];
   }
   if (date === d && hm) {
-    return [{ ...base, id: `scan-arrive:${d}`, at: zonedTime(d, hm, tz), title: 'Body scan first', body: 'At the gym: scan before the workout. Tick the checklist.' }];
+    const on = items.filter((i) => i.when !== 'before');
+    return [
+      { ...base, id: `scan-morning:${d}`, at: zonedTime(d, addMinutesHm(hm, -morningLeadMin), tz), title: 'Body scan this morning', body: `${joinTexts(on)}.` },
+      { ...base, id: `scan-arrive:${d}`, at: zonedTime(d, hm, tz), title: 'Body scan first', body: 'At the gym: scan before the workout. Tick the checklist.', due: due && !days[d]?.arrivedAt },
+    ];
   }
   return [];
+}
+
+/** What the Mac sends when the iPhone says he arrived at the gym (A10): the scan first, on a scan day; else nothing. */
+export function arrivalMessage({ plan = {}, scans = [], date }) {
+  if (plan?.next?.date !== date || scans.some((s) => s.date === date && isDone(s))) return null;
+  const on = protocolOf(plan).filter((i) => i.when !== 'before');
+  return { title: 'Body scan first', body: `You're at the gym: scan before the workout. ${joinTexts(on)}. Tick the checklist.`, url: '#/body/scan', tag: `scan-${date}` };
 }
 
 // ---- Results (7.5) ----
