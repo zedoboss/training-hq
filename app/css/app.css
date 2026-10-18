@@ -637,3 +637,5 @@ a.card-note.c-amber { color: var(--amber); }
 .rem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .rem { display: grid; grid-template-columns: 76px 1fr; gap: 8px; font-size: 14px; line-height: 1.4; }
 .rem.is-done { opacity: 0.55; }
+.bk-steps summary { cursor: pointer; padding: 8px 0; color: var(--pale); }
+.bk-steps ol { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; line-height: 1.5; display: flex; flex-direction: column; gap: 6px; }

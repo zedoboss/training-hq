@@ -3,21 +3,53 @@ import { getState } from '../lib/store.js';
 import { ready, saveSettings } from '../lib/data.js';
 import { withDefaults } from '../lib/settings.js';
 import { KINDS, remindersFor, reminderState } from '../lib/reminders.js';
-import { isoDate, formatTime } from '../lib/time.js';
+import { isoDate, formatTime, formatDay } from '../lib/time.js';
+import { fixedReminders, shortcutPayload, shortcutUrl, icsFor, icsName } from '../lib/backup-reminders.js';
 import { pushSupported, isStandalone, permission, currentSubscription, enablePush, disablePush, testPush, pushStatus } from '../lib/push.js';
 import { toast } from './toast.js';
 
 const isPhone = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
 const esc = (x) => String(x ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-/** Today's reminders worked out on this device, the same way the Mac does. */
-export async function todaysReminders(date = isoDate(new Date())) {
+async function loadState() {
   const repo = await ready;
   const [sessions, sets, tendons, bridge, settings, meta, days, neck] = await Promise.all([
     repo.list('sessions'), repo.list('sets'), repo.list('tendons'), repo.get('bridge', 'last-loads'), repo.get('settings', 'main'),
     repo.get('programme', 'meta'), repo.list('days'), repo.get('schedule', 'neck'),
   ]);
-  return remindersFor({ ...reminderState({ sessions, sets, tendons, bridge, settings, meta, days, neck }), date });
+  return reminderState({ sessions, sets, tendons, bridge, settings, meta, days, neck });
+}
+
+/** Today's reminders worked out on this device, the same way the Mac does. */
+export async function todaysReminders(date = isoDate(new Date())) {
+  return remindersFor({ ...(await loadState()), date });
+}
+
+const SHORTCUT_STEPS = [
+  'Open the Shortcuts app, tap +, and name the new shortcut exactly: Training HQ Reminders.',
+  'If the top of the editor says "Receive ... input from ...", set it to receive Text.',
+  'Add the action "Get Dictionary from Input" (input: Shortcut Input).',
+  'Optional, to replace old ones: add "Find Reminders" where List is Training HQ and Is Completed is off, then "Remove Reminders" (switch off "Confirm Before Removing" if it is shown).',
+  'Add "Get Dictionary Value": Get Value for "items" in Dictionary.',
+  'Add "Repeat with Each" item in Dictionary Value.',
+  'Inside the repeat: "Get Dictionary Value" for "due" in Repeat Item, then "Get Dates from Input" (input: that Dictionary Value).',
+  'Still inside: "Add New Reminder": the title is Repeat Item\'s "title" (tap the variable, choose Repeat Item, then key title), list Training HQ (create the list in Reminders first), turn on "Remind Me" At Time with Dates, notes = Repeat Item\'s "notes".',
+  'Done. Back in Training HQ, tap "Send to Reminders": Shortcuts opens, runs, and the reminders appear in the Training HQ list.',
+];
+
+function backupHtml(items) {
+  const first = items[0]; const last = items[items.length - 1];
+  return `<div class="hud c-muted rem-head">BACKUP REMINDERS ON THIS IPHONE</div>
+    <section class="card pad-card" id="backup">
+      <p class="hint c-text">If your Mac is off or offline, notifications stop. This puts the next 7 days' fixed reminders (check-ins and sessions you set a time for, tendon holds) into the iPhone's own Reminders or Calendar, so they ring anyway. Do it again after you change a time.</p>
+      <p class="hint" id="backup-count">${items.length ? `${items.length} reminders, ${esc(formatDay(new Date(first.at)))} to ${esc(formatDay(new Date(last.at)))}.` : 'Nothing to add for the next 7 days.'}</p>
+      <div class="btn-row"><button class="btn-primary" id="bk-shortcut" type="button" ${items.length ? '' : 'disabled'}>Send to Reminders</button>
+        <button class="btn-ghost" id="bk-ics" type="button" ${items.length ? '' : 'disabled'}>Calendar file</button></div>
+      <details class="bk-steps"><summary>Make the Shortcut once (about 3 minutes)</summary>
+        <ol>${SHORTCUT_STEPS.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+        <p class="hint">"Calendar file" needs no Shortcut: it opens the calendar file; tap Add All. Re-adding can make doubles; delete the old ones in Calendar first.</p>
+      </details>
+    </section>`;
 }
 
 function prefsHtml(n) {
@@ -46,7 +78,7 @@ export function notifyPanel(el) {
       on = !!local && permission() === 'granted' && server?.subscribed !== false;
       top = `
       <dl class="card kv">
-        <dt>This device</dt><dd id="push-state">${on ? '<span class="c-green">On</span>' : permission() === 'denied' ? '<span class="c-amber">Blocked in iPhone Settings</span>' : 'Off'}${server == null ? ' <span class="c-muted">(Mac unreachable)</span>' : ''}</dd>
+        <dt>This device</dt><dd id="push-state">${on ? '<span class="c-green">On</span>' : permission() === 'denied' ? `<span class="c-amber">Blocked in ${isPhone() ? 'iPhone Settings' : 'this browser\'s settings'}</span>` : 'Off'}${server == null ? ' <span class="c-muted">(Mac unreachable)</span>' : ''}</dd>
       </dl>
       <div class="btn-row">${on
         ? '<button class="btn-ghost" id="push-test" type="button">Send a test</button><button class="btn-ghost" id="push-off" type="button">Turn off</button>'
@@ -56,12 +88,14 @@ export function notifyPanel(el) {
     el.innerHTML = `${top}
       ${prefsHtml(withDefaults(s.settings).notify)}
       <div class="hud c-muted rem-head">TODAY'S REMINDERS</div>
-      <ul class="rem-list" id="rem-list"><li class="hint">…</li></ul>`;
+      <ul class="rem-list" id="rem-list"><li class="hint">…</li></ul>
+      <div id="backup-box"></div>`;
+    drawBackup();
     el.querySelectorAll('[data-kind]').forEach((c) => c.addEventListener('change', () => saveSettings({ notify: { kinds: { [c.dataset.kind]: c.checked } } }).then(listToday)));
     el.querySelectorAll('[data-n]').forEach((c) => c.addEventListener('change', () => {
       const v = c.dataset.n === 'readinessMin' ? Number(c.value) : c.value;
       if (c.type === 'time' && !/^\d\d:\d\d$/.test(v)) return;
-      saveSettings({ notify: { [c.dataset.n]: v } }).then(listToday);
+      saveSettings({ notify: { [c.dataset.n]: v } }).then(() => { listToday(); drawBackup(); });
     }));
     listToday();
     const onBtn = el.querySelector('#push-on');
@@ -81,6 +115,30 @@ export function notifyPanel(el) {
     if (off) off.onclick = async () => { await disablePush(); toast('Notifications off on this device.'); draw(); };
   };
 
+  async function drawBackup() {
+    const box = el.querySelector('#backup-box');
+    if (!box) return;
+    const st = await loadState();
+    const today = isoDate(new Date());
+    const items = fixedReminders(st, today, 7);
+    box.innerHTML = backupHtml(items);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    box.querySelector('#bk-shortcut').onclick = () => {
+      saveSettings({ notify: { backupSentOn: today } });
+      location.href = shortcutUrl(shortcutPayload(items, tz));
+    };
+    box.querySelector('#bk-ics').onclick = () => {
+      const blob = new Blob([icsFor(items)], { type: 'text/calendar' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = icsName(today);
+      document.body.append(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      saveSettings({ notify: { backupSentOn: today } });
+    };
+  }
+
   async function listToday() {
     const ul = el.querySelector('#rem-list');
     if (!ul) return;
@@ -92,5 +150,14 @@ export function notifyPanel(el) {
       : '<li class="hint">Nothing today. Set a session time on Train to get the check-in and session reminders.</li>';
   }
   draw();
+  // Keep the lists current when data arrives by sync or changes elsewhere (not the whole panel: no fighting a tap).
+  let pending = null;
+  ready.then((repo) => {
+    draw.off = repo.onChange((cols) => {
+      if (!cols.some((c) => ['days', 'settings', 'sessions', 'sets', 'tendons', 'programme', 'schedule'].includes(c))) return;
+      clearTimeout(pending);
+      pending = setTimeout(() => { listToday(); drawBackup(); }, 300);
+    });
+  });
   return draw;
 }

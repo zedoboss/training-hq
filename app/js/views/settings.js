@@ -341,5 +341,5 @@ export function render(view) {
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   view.querySelector('#set-installed').textContent = standalone ? 'Home Screen app' : 'Browser tab';
   ready.then((repo) => { view.querySelector('#set-device').textContent = repo.device; });
-  return unsub;
+  return () => { unsub(); redrawNotify.off?.(); };
 }
