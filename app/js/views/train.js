@@ -1,54 +1,54 @@
 // TRAIN: next session from the rotation, today's tendon holds, routines grouped in folders.
 import { ready } from '../lib/data.js';
-import { groupByFolder, newRoutine, duplicateRoutine, moveFolder, nextDayType, newId } from '../lib/routines.js';
+import { groupByFolder, newRoutine, duplicateRoutine, moveFolder, newId } from '../lib/routines.js';
 import { weekColumn } from '../lib/programme.js';
+import { rotationDay, lastRotationSession, daysByDate, withRest, REST_TEXT, LABEL } from '../lib/rotation.js';
 import { isoDate, formatDay } from '../lib/time.js';
 import { actionSheet, promptText, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)' };
-const LABEL = { pull: 'Pull', push: 'Push', legs: 'Legs' };
 const day = (iso) => formatDay(new Date(`${iso}T12:00:00`));
-
-/** Last completed workout: Training HQ sessions first, then the Hevy bridge. */
-export async function lastCompleted(repo) {
-  const own = (await repo.list('sessions')).filter((s) => s.status === 'done' && s.kind !== 'holds' && s.dayType)
-    .sort((a, b) => b.startedAt - a.startedAt)[0];
-  const bridge = (await repo.get('bridge', 'last-loads'))?.lastSessions?.find((s) => s.dayType);
-  const ownIso = own ? isoDate(new Date(own.startedAt)) : null;
-  if (own && (!bridge || ownIso >= bridge.date)) return { dayType: own.dayType, date: ownIso };
-  return bridge ? { dayType: bridge.dayType, date: bridge.date } : null;
-}
 
 export function render(view) {
   view.innerHTML = '<p class="view-sub">Loading…</p>';
   let repo;
 
   const draw = async () => {
-    const [folders, routines, meta, last, active] = await Promise.all([
-      repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), lastCompleted(repo),
-      repo.list('sessions').then((ss) => ss.find((s) => s.status === 'active' && s.kind !== 'holds')),
+    const [folders, routines, meta, sessions, bridge, dayList] = await Promise.all([
+      repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days'),
     ]);
-    const next = nextDayType(last?.dayType);
+    const active = sessions.find((s) => s.status === 'active' && s.kind !== 'holds');
     const today = isoDate(new Date());
-    const wk = meta ? weekColumn(meta.firstSessions?.[next], today) : null;
+    const days = daysByDate(dayList);
+    const last = lastRotationSession(sessions, bridge);
+    const rot = rotationDay({ last, today, days });
+    const next = rot.next.dayType;
+    const wk = meta ? weekColumn(meta.firstSessions?.[next], rot.next.date) : null;
     const nextRoutine = routines.filter((r) => r.dayType === next && r.folderId === 'comeback').sort((a, b) => a.order - b.order)[0]
       || routines.find((r) => r.dayType === next);
     const lastByRoutine = new Map();
-    const bridge = await repo.get('bridge', 'last-loads');
     for (const s of bridge?.lastSessions || []) if (s.dayType && !lastByRoutine.has(s.dayType)) lastByRoutine.set(s.dayType, s.date);
+    const t = rot.today;
+    const headline = t.kind === 'train' ? `Today · ${LABEL[next]}` : t.kind === 'done' ? `Today · ${LABEL[t.dayType]} done` : 'Today · Rest';
+    const nextLine = t.kind === 'train' ? '' : `Next: ${LABEL[next]}, ${day(rot.next.date)}`;
+    const undoable = t.kind === 'rest' && t.reason !== 'rotation';
 
     view.innerHTML = `
       ${active ? `<a class="card resume" href="#/session/${esc(active.id)}"><span class="hud c-amber">SESSION IN PROGRESS</span><b>${esc(active.title)}</b><span class="pill is-on">Resume</span></a>` : ''}
-      <section class="card next-card">
-        <div class="hud c-muted next-top"><span>NEXT FROM ROTATION</span><span>${last ? `AFTER ${esc(LABEL[last.dayType] || last.dayType).toUpperCase()} · ${esc(day(last.date)).toUpperCase()}` : ''}</span></div>
-        <div class="next-title"><span>${esc(LABEL[next])}</span>${wk ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
+      <section class="card next-card" data-today="${esc(t.kind)}">
+        <div class="hud c-muted next-top"><span>ROTATION</span><span>${last ? `LAST ${esc(LABEL[last.dayType]).toUpperCase()} · ${esc(day(last.date)).toUpperCase()}` : ''}</span></div>
+        <div class="next-title"><span>${esc(headline)}</span>${wk && t.kind === 'train' ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
+        ${t.kind === 'rest' ? `<p class="hint c-text rest-why">${esc(REST_TEXT[t.reason] || REST_TEXT.added)}. Tendon holds as planned.</p>` : ''}
+        ${nextLine ? `<p class="hint next-line">${esc(nextLine)}${wk ? ` · week ${wk} column` : ''}</p>` : ''}
         <p class="hint">${nextRoutine ? `${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
         <div class="btn-row next-btns">
-          ${nextRoutine ? `<a class="btn-primary center" href="#/session/start/${esc(nextRoutine.id)}">Start ${esc(LABEL[next])}</a>` : ''}
+          ${nextRoutine ? `<a class="${t.kind === 'train' ? 'btn-primary' : 'btn-ghost'} center" href="#/session/start/${esc(nextRoutine.id)}">${t.kind === 'train' ? `Start ${esc(LABEL[next])}` : `${esc(LABEL[next])} now`}</a>` : ''}
           <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
         </div>
+        ${t.kind === 'train' ? '<button class="link-btn" id="rest-today" type="button">Rest today instead</button>' : ''}
+        ${undoable ? '<button class="link-btn" id="undo-rest" type="button">Undo rest day</button>' : ''}
       </section>
       <a class="card holds-link" href="#/holds"><span><span class="hud c-muted">TENDON HOLDS</span><br>Shoulder, knees, wrist</span><span class="pill">Open</span></a>
       ${groupByFolder(folders, routines).map(({ folder, routines: rs }) => `
@@ -72,6 +72,17 @@ export function render(view) {
       </div>
       <div class="btn-row three"><a class="btn-ghost center" href="#/calendar">Calendar</a><a class="btn-ghost center" href="#/history">History</a><a class="btn-ghost center" href="#/stats">Statistics</a></div>`;
 
+    const restBtn = view.querySelector('#rest-today');
+    if (restBtn) restBtn.onclick = async () => {
+      if (!(await confirmSheet(`Rest today? ${LABEL[next]} stays next and moves to tomorrow; nothing is made up twice.`, { ok: 'Rest today' }))) return;
+      await repo.put('days', today, withRest(days[today], today, 'added'));
+      toast(`Rest day. ${LABEL[next]} is next.`);
+    };
+    const undoBtn = view.querySelector('#undo-rest');
+    if (undoBtn) undoBtn.onclick = async () => {
+      await repo.put('days', today, withRest(days[today], today, null));
+      toast('Rest day taken back.');
+    };
     view.querySelector('#new-routine').onclick = async () => {
       const title = await promptText('New routine', '', { placeholder: 'Name' });
       if (!title) return;
@@ -114,7 +125,7 @@ export function render(view) {
   let off = () => {};
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days'].includes(c))) draw(); });
     draw();
   });
   return () => off();

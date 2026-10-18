@@ -6,13 +6,7 @@ let n = 0;
 export const newKey = () => `e${Date.now().toString(36)}${(++n).toString(36)}`;
 export const newId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-const ROTATION = ['pull', 'push', 'legs'];
-
-/** Next day type after the last completed one (Pull, Push, Legs, Rest rotation; rest days are not sessions). */
-export function nextDayType(lastDayType) {
-  const i = ROTATION.indexOf(lastDayType);
-  return i < 0 ? 'pull' : ROTATION[(i + 1) % ROTATION.length];
-}
+export { nextDayType } from './rotation.js';
 
 export function newRoutine({ title = 'New routine', folderId = null, order = 0 } = {}) {
   return { id: newId('routine'), title, folderId, order, dayType: null, notes: '', exercises: [], createdAt: Date.now() };

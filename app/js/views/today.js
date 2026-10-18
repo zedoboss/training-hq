@@ -3,7 +3,10 @@
 import { coreSvg } from '../ui/core.js';
 import { toast } from '../ui/toast.js';
 import { getState, subscribe } from '../lib/store.js';
-import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset } from '../lib/time.js';
+import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, formatDay } from '../lib/time.js';
+import { ready } from '../lib/data.js';
+import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
+import { weekColumn } from '../lib/programme.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -37,8 +40,24 @@ function spokeText(s) {
   return `Programme loaded: ${p.routineCount} routines, ${p.exerciseCount} exercises. Training, fuel and coaching arrive in the next steps.`;
 }
 
-function readout(cls, label, value, colorCls) {
-  return `<div class="core-readout ${cls}"><span class="${colorCls}">${label}</span><br><span class="c-text">${value}</span></div>`;
+function readout(cls, label, value, colorCls, key = '') {
+  return `<div class="core-readout ${cls}"><span class="${colorCls}">${label}</span><br><span class="c-text"${key ? ` data-k="${key}"` : ''}>${value}</span></div>`;
+}
+
+const dayOf = (iso) => formatDay(new Date(`${iso}T12:00:00`));
+
+/** Today's place in the rotation, for the TRAIN readout and the status line. */
+async function trainToday(repo) {
+  const [sessions, bridge, dayList, meta] = await Promise.all([repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days'), repo.get('programme', 'meta')]);
+  const today = isoDate(new Date());
+  const rot = rotationDay({ last: lastRotationSession(sessions, bridge), today, days: daysByDate(dayList) });
+  const wk = weekColumn(meta?.firstSessions?.[rot.next.dayType], rot.next.date);
+  const next = LABEL[rot.next.dayType];
+  const t = rot.today;
+  if (t.kind === 'train') return { readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, line: `Today: ${next}${wk ? `, week ${wk} column` : ''}.` };
+  const nextText = `Next: ${next}, ${dayOf(rot.next.date)}${wk ? `, week ${wk} column` : ''}.`;
+  if (t.kind === 'done') return { readout: `${LABEL[t.dayType]} DONE`, progress: 1, line: `${LABEL[t.dayType]} done today. ${nextText}` };
+  return { readout: 'REST', progress: null, line: `${REST_TEXT[t.reason] || 'Rest day'}. ${nextText}` };
 }
 
 export function render(view) {
@@ -69,7 +88,7 @@ export function render(view) {
       <div class="core-wrap">
         <div data-k="core"></div>
         ${readout('tl', 'TENDONS', '—', 'c-muted')}
-        ${readout('tr', 'TRAIN', '—', 'c-amber')}
+        ${readout('tr', 'TRAIN', '—', 'c-amber', 'r-train')}
         ${readout('bl', 'STEPS', '—', 'c-cyan')}
         ${readout('br', 'FUEL', '—', 'c-green')}
       </div>
@@ -130,20 +149,29 @@ export function render(view) {
     set('session', `HQ-${String(isoWeek(now)).padStart(4, '0')} SESSION-${isoDate(now).slice(5).replace('-', '')}`);
   };
 
+  let train = null;
   const draw = (s) => {
     set('weekcols', weekColumnsLine(s));
+    set('r-train', train ? train.readout : '—');
     const m = macLine(s);
     set('mac', `<span class="${m.cls}">${m.text}</span>`);
     set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone.toUpperCase().replace('_', ' '));
-    set('spoke', spokeText(s));
+    set('spoke', s.paired && s.programme && train ? train.line : spokeText(s));
     set('spoke-actions', s.paired ? '' : '<a class="btn-ghost spoke-btn" href="#/settings">PAIR WITH MAC</a>');
-    set('core', coreSvg({ train: null, fuel: null, steps: null, tendons: null },
-      'AI core. Nothing logged yet today: training, fuel, steps and tendons arrive in later steps.'));
+    set('core', coreSvg({ train: train?.progress ?? null, fuel: null, steps: null, tendons: null },
+      `AI core. ${train ? train.line : 'Nothing logged yet today.'}`));
   };
 
   tick();
   draw(getState());
   const timer = setInterval(tick, 1000);
   const unsub = subscribe(draw);
-  return () => { clearInterval(timer); unsub(); };
+  let off = () => {};
+  let gone = false;
+  ready.then((repo) => {
+    const refresh = async () => { train = await trainToday(repo); if (!gone) draw(getState()); };
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'days', 'bridge', 'programme'].includes(c))) refresh(); });
+    refresh();
+  });
+  return () => { gone = true; clearInterval(timer); unsub(); off(); };
 }
