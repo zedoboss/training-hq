@@ -1,15 +1,14 @@
-// Speech to text on the Mac (9.5): the whisper-server already installed for the Obsidian globe plugin, started by
+// Speech to text on the Mac (9.5): the whisper-server already installed for his voice assistant, started by
 // Training HQ as its own process (its own port, so the two never clash), with the plugin's settings: English, about
 // 10 s per request at most, no temperature fallback. Started on first use, stopped after 20 minutes without voice.
 // cleanTranscript (9.4) drops what Whisper writes for music or noise ("[Music]", "♪", "Thanks for watching").
 import { spawn as spawnProc } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { encodeWav } from '../../app/js/lib/wav.js';
 
 export const DEFAULT_BIN = '/opt/homebrew/bin/whisper-server';
-export const DEFAULT_MODEL = join(homedir(), 'Documents', 'gods-eye-view-voice', 'ggml-large-v3-turbo-q5_0.bin');
+// The model file is his (config/voice.json whisperModel, from scripts/voice-setup.mjs); no default path here.
+export const DEFAULT_MODEL = null;
 export const DEFAULT_PORT = 8179;
 
 // Lines Whisper is known to make up from silence, noise or music.
@@ -61,7 +60,7 @@ export function openWhisper({ bin = DEFAULT_BIN, model = DEFAULT_MODEL, port = D
   async function start() {
     if (await up()) return; // already running (started earlier, or left over from a restart)
     if (!existsSync(bin)) throw Object.assign(new Error(`whisper-server not found at ${bin}`), { status: 503 });
-    if (!existsSync(model)) throw Object.assign(new Error(`Whisper model not found at ${model}`), { status: 503 });
+    if (!model || !existsSync(model)) throw Object.assign(new Error(model ? `Whisper model not found at ${model}` : 'no Whisper model set (whisperModel in config/voice.json: run node scripts/voice-setup.mjs)'), { status: 503 });
     const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-t', String(threads), '-l', 'en', '-ac', '512', '-bo', '1', '-nf'];
     const t = Date.now();
     child = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -119,6 +118,6 @@ export function openWhisper({ bin = DEFAULT_BIN, model = DEFAULT_MODEL, port = D
     ensure,
     transcribe,
     stop,
-    status: () => ({ running: !!child, starting: !!starting, port, error: lastError, bin: existsSync(bin), model: existsSync(model) }),
+    status: () => ({ running: !!child, starting: !!starting, port, error: lastError, bin: existsSync(bin), model: !!model && existsSync(model) }),
   };
 }
