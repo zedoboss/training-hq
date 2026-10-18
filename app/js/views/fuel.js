@@ -12,6 +12,8 @@ import { isoDate, formatDay, formatTime, daysBetween } from '../lib/time.js';
 import { addDays } from '../lib/rotation.js';
 import { dayTotals, mealTotals, mealState, STATE_SHORT } from '../lib/meals.js';
 import { logMealFromFile, logMealManual, cameraInput } from './meal.js';
+import { dayKindOn } from './supps.js';
+import { checklist } from '../lib/supplements.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -154,6 +156,15 @@ export function render(view, params) {
             <span class="hint">${mt.known ? `${n0(mt.kcal)} kcal · ${Math.round(mt.protein * 10) / 10} g protein${mt.estimated ? ' · estimate' : ''}` : ''}</span></span>
           <span class="hud ${s === 'done' ? 'c-green' : 'c-amber'} meal-state">${esc(STATE_SHORT[s])}</span></a></li>`;
       }).join('')}</ul>`;
+    // Supplements card: taken of due today, and the next time with something open.
+    const line = body.querySelector('#f-supps-line');
+    if (line) {
+      const [supps, slog, dk] = await Promise.all([repo.list('supplements'), repo.list('supp-log'), dayKindOn(repo, date)]);
+      const groups = checklist({ supps, log: slog, date, dayKind: dk });
+      const due = groups.flatMap((g) => g.items);
+      const next = groups.find((g) => g.open.length);
+      if (alive) line.textContent = due.length ? `${due.filter((i) => i.entry?.status === 'taken').length} of ${due.length} taken${next ? ` · next: ${next.label}${next.time ? ` ${formatHm(next.time)}` : ''}` : ' · all answered'}` : 'Nothing scheduled today';
+    }
     body.querySelector('#f-targets')?.addEventListener('click', () => editTargets(repo));
     body.querySelector('#f-times')?.addEventListener('click', () => editMealTimes());
     const man = body.querySelector('#f-manual');
@@ -171,7 +182,7 @@ export function render(view, params) {
   const unsub = subscribe((s) => { const k = `${s.paired}|${s.mac.reachable}|${s.sync.pending > 0}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log'].includes(c))) draw(); });
     draw().then(() => { if (checking && alive) answerCheck(repo, date, params[2]); });
   });
   return () => { alive = false; off(); unsub(); };

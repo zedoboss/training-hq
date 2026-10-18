@@ -13,7 +13,7 @@ test('times of day, day rules and the dated status history', () => {
   assert.equal(partOf('07:00'), 'Morning');
   assert.equal(partOf('12:30'), 'Midday');
   assert.equal(partOf('15:00'), 'Afternoon');
-  assert.equal(partOf('20:59'), 'Evening');
+  assert.equal(partOf('21:00'), 'Evening');
   assert.equal(partOf('22:00'), 'Night');
   assert.equal(partOf(null), null);
   const d3 = supp('d3', { days: { type: 'perWeek', count: 6, offDay: null } });

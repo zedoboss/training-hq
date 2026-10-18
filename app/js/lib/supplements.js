@@ -12,7 +12,7 @@ import { addDays } from './rotation.js';
 export const LOW_DAYS = 7;
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const FOOD_TEXT = { with: 'with food', without: 'without food', either: 'with or without food' };
-const PARTS = [['Morning', 0, 660], ['Midday', 660, 840], ['Afternoon', 840, 1020], ['Evening', 1020, 1260], ['Night', 1260, 1440]];
+const PARTS = [['Morning', 0, 660], ['Midday', 660, 840], ['Afternoon', 840, 1020], ['Evening', 1020, 1320], ['Night', 1320, 1440]];
 
 const weekday = (iso) => new Date(`${iso}T12:00:00Z`).getUTCDay();
 const mins = (hm) => { const [h, m] = String(hm).split(':').map(Number); return h * 60 + m; };
@@ -49,6 +49,15 @@ export const scheduledOn = (supp, date) => statusOn(supp, date) === 'active' && 
 export const doseFor = (supp, dayKind) => (dayKind === 'rest' && supp.doseRest ? supp.doseRest : supp.dose);
 /** Servings one tick uses, by day type. */
 export const servingsFor = (supp, dayKind) => Math.max(0, Number(supp.perTake?.[dayKind === 'rest' ? 'rest' : 'train'] ?? 1));
+
+/**
+ * Training day or rest day, for magnesium's dose: a planned day from the rotation (Pull, Push, Legs = training day;
+ * a done session counts too), a past day from what happened (a workout logged = training day).
+ */
+export function dayKindFor(date, { today, rotKind, workoutDates = new Set() }) {
+  if (date >= today) return rotKind === 'rest' ? 'rest' : 'train';
+  return workoutDates.has(date) ? 'train' : 'rest';
+}
 
 /** "6 days a week · day off not set", "Mon, Wed, Fri", "every day". */
 export function daysText(days) {
