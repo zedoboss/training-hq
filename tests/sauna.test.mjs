@@ -147,3 +147,29 @@ test('the steps that end a session (shared by the round screen and the coach)', 
   assert.deepEqual([ans.after.answeredAt, ans.after.symptoms, ans.after.what], [9000, true, ['Headache']]);
   assert.deepEqual(afterAnswerState(end, { symptoms: false, now: 9000 }).after.what, []);
 });
+
+test('planning sauna days (A9): rest days first, never before lifting, two a week while building up, one at his level', async () => {
+  const { proposeSaunaDays, planSaunaDay, SAUNA_TIME } = await import('../app/js/lib/sauna.js');
+  const rotation = [
+    { date: '2026-10-19', kind: 'train', dayType: 'legs' }, { date: '2026-10-20', kind: 'rest', dayType: null },
+    { date: '2026-10-21', kind: 'train', dayType: 'pull' }, { date: '2026-10-22', kind: 'train', dayType: 'push' },
+    { date: '2026-10-23', kind: 'train', dayType: 'legs' }, { date: '2026-10-24', kind: 'rest', dayType: null },
+    { date: '2026-10-25', kind: 'train', dayType: 'pull' },
+  ];
+  const today = '2026-10-18';
+  let p = proposeSaunaDays({ rotation, today });
+  assert.equal(p.perWeek, 2); assert.equal(p.time, SAUNA_TIME);
+  assert.deepEqual(p.items.map((x) => [x.date, x.kind]), [['2026-10-20', 'rest'], ['2026-10-24', 'rest']]);
+  // One already planned: one more; his own time.
+  p = proposeSaunaDays({ rotation, today, plan: { time: '18:30', planned: [{ date: '2026-10-20', time: '18:30' }] } });
+  assert.deepEqual(p.items.map((x) => [x.date, x.time]), [['2026-10-24', '18:30']]);
+  // No rest day free: after a training day's session; never a day whose session is after the sauna time.
+  p = proposeSaunaDays({ rotation: rotation.filter((d) => d.kind === 'train'), today, days: { '2026-10-19': { sessionTime: '18:00' } } });
+  assert.deepEqual(p.items.map((x) => [x.date, x.kind, x.dayType]), [['2026-10-21', 'after-training', 'pull'], ['2026-10-22', 'after-training', 'push']]);
+  // At his chosen maintenance level: once a week.
+  assert.equal(proposeSaunaDays({ rotation, today, plan: { maintenanceStep: 0 } }).perWeek, 1);
+  // Planning: before lifting is refused.
+  assert.match(planSaunaDay({}, { date: '2026-10-19', time: '17:00' }, { today, kind: 'train', sessionTime: '18:00' }).error, /Never before lifting/);
+  assert.deepEqual(planSaunaDay({}, { date: '2026-10-20' }, { today, kind: 'rest' }).plan.planned, [{ date: '2026-10-20', time: SAUNA_TIME }]);
+  assert.match(planSaunaDay({}, { date: '2026-10-01' }, { today }).error, /today or later/);
+});

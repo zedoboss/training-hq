@@ -338,3 +338,21 @@ test('log_meal by packs and counts (A7): his foods sized from his packs; unknown
   assert.match(await call('meals').then((m) => m.text), /No kitchen scale: he goes by packs and counts: Raw almonds, pack 200 g; Eggs, 1 egg = 50 g/);
   assert.match((await call('log_meal', { items: [{ name: 'cashews', packs: 1 }] })).text, /No grams for "cashews"/);
 });
+
+test('sauna_plan (A9): proposes from the rotation with his checklist and no fasting; plans what he agrees to', async () => {
+  // Today (Tue 1/20) is Legs; Wed 1/21 is the rest day after Legs.
+  const p = await call('sauna_plan', { action: 'propose' });
+  assert.match(p.text, /^Proposal \(not planned yet; he decides\): Wednesday 1\/21 at 5:00 PM \(rest day\)/);
+  assert.match(p.text, /I've eaten and drunk water in the last few hours/);
+  assert.match(p.text, /never tell him to fast/);
+  assert.doesNotMatch(p.text, /\bfast(ed|ing)? before\b/i);
+  assert.ok(!store.getRecord('sauna-plan', 'main'), 'a proposal writes nothing');
+  const r = await call('sauna_plan', { action: 'plan', dates: [{ date: '2026-01-21' }] });
+  assert.equal(r.wrote, true);
+  assert.deepEqual(store.getRecord('sauna-plan', 'main').data.planned, [{ date: '2026-01-21', time: '17:00' }]);
+  assert.match((await call('sauna')).text, /Planned sauna days: Wednesday 1\/21 5:00 PM/);
+  store.writeLocal('days', '2026-01-22', { date: '2026-01-22', sessionTime: '18:00' });
+  assert.match((await call('sauna_plan', { action: 'plan', dates: [{ date: '2026-01-22', time: '17:00' }] })).text, /Never before lifting/);
+  await call('sauna_plan', { action: 'set_time', time: '19:00' });
+  assert.equal(store.getRecord('sauna-plan', 'main').data.time, '19:00');
+});

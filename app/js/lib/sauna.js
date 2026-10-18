@@ -200,3 +200,53 @@ export function saunaMarks(sessions = []) {
 
 /** The planned time of day for a sauna reminder ("HH:MM"), else midday. */
 export const plannedHm = (p) => (/^\d{2}:\d{2}$/.test(p?.time || '') ? p.time : addMinutesHm('12:00', 0));
+
+// ---- Planning sauna days (A9) --------------------------------------------------------------------------------------
+// The coach proposes days and times from his schedule; he confirms (brief section 11, his answer Sun 10/18):
+// - while building up, about two sessions a week on separate days; at his maintenance level (or the goal) once a week;
+// - rest days first; a training day only after that day's lifting (never before lifting);
+// - at his usual sauna time (plan.time), 5:00 PM until he sets one;
+// - the checklist is the brief's own (eaten and drunk in the last few hours, no alcohol, ...). No other food rule.
+
+/** Default time of day for a proposed sauna session, his to change (sauna-plan time). */
+export const SAUNA_TIME = '17:00';
+
+/**
+ * @param {object} o
+ * @param {Array} o.sessions  sauna sessions
+ * @param {object} o.plan     sauna-plan doc
+ * @param {Array} o.rotation  the coming days from the rotation: [{date, kind: 'train'|'rest', dayType}]
+ * @param {object} [o.days]   day records by date (session times)
+ * @param {string} o.today
+ * @returns {{perWeek: number, time: string, step: number, items: Array<{date, time, kind: 'rest'|'after-training', dayType}>}}
+ */
+export function proposeSaunaDays({ sessions = [], plan = {}, rotation = [], days = {}, today }) {
+  const st = ladderState(sessions, today, plan);
+  const perWeek = st.step >= st.cap ? 1 : 2;
+  const time = /^\d{2}:\d{2}$/.test(plan.time || '') ? plan.time : SAUNA_TIME;
+  const window = rotation.filter((d) => d.date > today);
+  const end = window.at(-1)?.date || today;
+  const planned = (plan.planned || []).filter((p) => p.date > today && p.date <= end);
+  const taken = new Set([...planned.map((p) => p.date), ...sessions.map((s) => s.date)]);
+  const want = Math.max(0, perWeek - planned.length);
+  // Never before lifting: a training day only when its session is set earlier than the sauna time (or not set: he
+  // trains before sunrise).
+  const ok = (d) => d.kind === 'rest' || !days[d.date]?.sessionTime || days[d.date].sessionTime < time;
+  const order = [...window.filter((d) => d.kind === 'rest'), ...window.filter((d) => d.kind !== 'rest')];
+  const items = [];
+  for (const d of order) {
+    if (items.length >= want) break;
+    if (taken.has(d.date) || !ok(d)) continue;
+    items.push({ date: d.date, time, kind: d.kind === 'rest' ? 'rest' : 'after-training', dayType: d.dayType || null });
+    taken.add(d.date);
+  }
+  return { perWeek, time, step: st.step, items: items.sort((a, b) => a.date.localeCompare(b.date)) };
+}
+
+/** Plan a day, refusing one before lifting. Returns {plan} or {error}. */
+export function planSaunaDay(plan = {}, { date, time }, { today, kind = null, sessionTime = null } = {}) {
+  if (!date || date < today) return { error: 'Pick today or later.' };
+  const hm = /^\d{2}:\d{2}$/.test(time || '') ? time : (plan.time || SAUNA_TIME);
+  if (kind === 'train' && sessionTime && sessionTime >= hm) return { error: `Never before lifting: that day's session is at ${sessionTime}. Plan the sauna after it, or on a rest day.` };
+  return { plan: { ...plan, planned: [...(plan.planned || []).filter((p) => p.date !== date), { date, time: hm }].sort((a, b) => a.date.localeCompare(b.date)) } };
+}

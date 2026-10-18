@@ -10,12 +10,13 @@ import { isoDate, formatTime, formatDay, formatDate, formatHm } from '../lib/tim
 import {
   LADDER, GOAL_STEP, PASSES_TO_UNLOCK, OVERDUE_MIN, SYMPTOMS, GET_OUT, CHECKLIST, DOCTOR_QUESTION, DOCTOR_ANSWERS,
   stepText, stepShort, ladderState, todayStep, doctorDue, gates, phaseOf, fluidLost, hadSymptoms, passed,
-  feelOffState, endHereState, afterAnswerState,
+  feelOffState, endHereState, afterAnswerState, proposeSaunaDays, planSaunaDay, SAUNA_TIME,
 } from '../lib/sauna.js';
-import { rotationDay, lastRotationSession, daysByDate } from '../lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
+import { projectRotation, expectedOn } from '../lib/scans.js';
 import { newId } from '../lib/routines.js';
 import * as alarm from '../lib/alarm.js';
-import { confirmSheet } from '../ui/sheet.js';
+import { confirmSheet, promptTime } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -34,6 +35,22 @@ async function liftingLeft(repo) {
   const today = isoDate(new Date());
   const rot = rotationDay({ last: lastRotationSession(sessions, bridge), today, days: daysByDate(dayList) });
   return { left: rot.today.kind === 'train', energy: daysByDate(dayList)[today]?.readiness?.ratings?.E ?? null };
+}
+
+/** The rotation ahead (for proposing sauna days): last session, day records, the next 8 days. */
+async function schedule(repo) {
+  const [sessions, bridge, dayList] = await Promise.all([repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days')]);
+  const days = daysByDate(dayList);
+  const last = lastRotationSession(sessions, bridge);
+  return { last, days, rotation: projectRotation({ last, days, from: isoDate(new Date()), n: 8 }) };
+}
+
+function suggestHtml(p) {
+  if (!p.items.length) return `<p class="hint">Nothing to suggest this week: ${p.perWeek === 1 ? 'once a week at your level' : 'about two a week while building up'}, already planned or no day fits.</p>`;
+  return `<div class="hud c-cyan">SUGGESTED · ${p.perWeek === 1 ? 'ONCE A WEEK AT YOUR LEVEL' : 'ABOUT TWO A WEEK WHILE BUILDING UP'}</div>
+    ${p.items.map((x, i) => `<div class="ex-head"><span>${esc(formatDay(new Date(`${x.date}T12:00:00`)))}, ${esc(formatHm(x.time))} <span class="hint">${x.kind === 'rest' ? 'rest day' : `after ${esc(LABEL[x.dayType] || 'the session')}`}</span></span><button class="pill" type="button" data-plan-i="${i}">Plan</button></div>`).join('')}
+    <p class="hint">Rest days first; never before lifting. You decide.</p>
+    ${p.items.length > 1 ? '<button class="btn-ghost small" id="s-plan-all" type="button">Plan all</button>' : ''}`;
 }
 
 function ladderHtml(step) {
@@ -57,6 +74,8 @@ function renderHome(view, repo, alive) {
     const doc = doctorDue(plan, st, st.step);
     const history = sessions.filter((s) => s.status !== 'active').sort((a, b) => b.startedAt - a.startedAt);
     const planned = (plan.planned || []).filter((p) => p.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+    const sched = await schedule(repo);
+    const proposal = proposeSaunaDays({ sessions, plan, rotation: projectRotation({ last: sched.last, days: sched.days, from: today, n: 8 }), days: sched.days, today });
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/fuel">Fuel</a><a class="pill" href="#/sauna/settings">Settings</a></div>
       <h1 class="view-title">Sauna</h1>
@@ -74,6 +93,8 @@ function renderHome(view, repo, alive) {
       ${active ? '' : `<a class="btn-primary center big" href="#/sauna/check" id="s-start" ${doc ? 'aria-disabled="true" style="opacity:.45;pointer-events:none"' : ''}>Before a session: checklist</a>`}
       <div class="section-label">Planned · ${planned.length}</div>
       <section class="card pad-card">${planned.map((p, i) => `<div class="ex-head"><span>${esc(formatDay(new Date(`${p.date}T12:00:00`)))}${p.time ? `, ${formatHm(p.time)}` : ''}</span><button class="link-btn" type="button" data-unplan="${i}">Remove</button></div>`).join('') || '<p class="hint">No sauna days planned.</p>'}
+        <div id="s-suggest">${suggestHtml(proposal)}</div>
+        <p class="hint">Your usual sauna time: <button class="link-btn" id="s-time" type="button">${esc(formatHm(proposal.time))}</button></p>
         <p class="hint">While building up, two or three short sessions a week on separate days; the goal is once a week. Your call. Never before lifting.</p>
         <button class="btn-ghost" type="button" id="s-plan">Plan a sauna day</button></section>
       <div class="section-label">History · ${history.length}</div>
@@ -88,15 +109,18 @@ function renderHome(view, repo, alive) {
     view.querySelector('#s-plan').onclick = async () => {
       const { overlay } = await import('../ui/sheet.js');
       const { el, close } = overlay(`<form class="sheet-form"><div class="hud c-muted sheet-title">PLAN A SAUNA DAY</div>
-        <input class="input" type="date" id="pd" min="${today}" value="${today}" required><input class="input" type="time" id="pt" value="17:00" required>
+        <input class="input" type="date" id="pd" min="${today}" value="${today}" required><input class="input" type="time" id="pt" value="${esc(plan.time || SAUNA_TIME)}" required>
         <p class="hint">A reminder comes at that time with the day's step and the checklist.</p>
         <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Cancel</button><button class="btn-primary" type="submit">Plan it</button></div></form>`);
       el.querySelector('[data-cancel]').onclick = () => close();
       el.querySelector('form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const date = el.querySelector('#pd').value; const time = el.querySelector('#pt').value;
-        if (!date || date < today) { toast('Pick today or later.'); return; }
-        await savePlan(repo, { ...plan, planned: [...(plan.planned || []).filter((p) => p.date !== date), { date, time }] });
+        const sc = await schedule(repo); // fresh: a session time may have been set since the screen was drawn
+        const exp = date >= today ? expectedOn({ last: sc.last, days: sc.days, today, date }) : null;
+        const r = planSaunaDay(plan, { date, time }, { today, kind: exp?.kind, sessionTime: sc.days[date]?.sessionTime || null });
+        if (r.error) { toast(r.error); return; }
+        await savePlan(repo, r.plan);
         close();
       });
     };
@@ -104,13 +128,29 @@ function renderHome(view, repo, alive) {
       if (!(await confirmSheet('Delete this sauna session? Only for a test: a real session, symptoms included, belongs in the ladder.', { ok: 'Delete', danger: true }))) return;
       await repo.remove('sauna', b.dataset.del);
     }));
+    // A9: proposed days (rest days first, never before lifting); he plans each, or all.
+    const planOne = async (d) => {
+      const cur = (await loadAll(repo)).plan;
+      const sc = await schedule(repo);
+      const exp = expectedOn({ last: sc.last, days: sc.days, today, date: d.date });
+      const r = planSaunaDay(cur, d, { today, kind: exp?.kind, sessionTime: sc.days[d.date]?.sessionTime || null });
+      if (r.error) { toast(r.error); return; }
+      await savePlan(repo, r.plan);
+    };
+    view.querySelectorAll('[data-plan-i]').forEach((b) => b.addEventListener('click', () => planOne(proposal.items[Number(b.dataset.planI)])));
+    const all = view.querySelector('#s-plan-all');
+    if (all) all.onclick = async () => { for (const d of proposal.items) await planOne(d); toast('Planned. A reminder comes at each time with the step and the checklist.'); };
+    view.querySelector('#s-time').onclick = async () => {
+      const hm = await promptTime('Your usual sauna time', proposal.time);
+      if (hm) await savePlan(repo, { ...(await loadAll(repo)).plan, time: hm });
+    };
     view.querySelectorAll('[data-unplan]').forEach((b) => b.addEventListener('click', async () => {
       const p = planned[Number(b.dataset.unplan)];
       await savePlan(repo, { ...plan, planned: (plan.planned || []).filter((x) => x.date !== p.date) });
     }));
   };
   draw();
-  return repo.onChange((cols) => { if (cols.some((c) => ['sauna', 'sauna-plan'].includes(c))) draw(); });
+  return repo.onChange((cols) => { if (cols.some((c) => ['sauna', 'sauna-plan', 'days', 'sessions'].includes(c))) draw(); });
 }
 
 function renderCheck(view, repo, alive) {

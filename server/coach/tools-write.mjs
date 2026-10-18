@@ -5,7 +5,7 @@
 // rest timer, showing a screen) go to it as actions. Nothing here can bend a fixed rule: the 30% guard warns, the
 // sauna ladder and hard stops are untouched, supplements are only what he says he took.
 import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByName, wrote, refuse, k, formatHm } from './shared.mjs';
-import { currentExercise, nextSetText, activeText, mealsText, suppDayKind } from './tools-read.mjs';
+import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
 import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId } from '../../app/js/lib/session.js';
 import { guardCheck } from '../../app/js/lib/targets.js';
@@ -16,8 +16,8 @@ import { currentBodyweight } from '../../app/js/lib/health.js';
 import { newId } from '../../app/js/lib/routines.js';
 import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
-import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics } from '../../app/js/lib/scans.js';
-import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS } from '../../app/js/lib/sauna.js';
+import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedOn } from '../../app/js/lib/scans.js';
+import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
 import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods.js';
@@ -626,6 +626,48 @@ async function schedule(a, ctx) {
   return refuse('action is set_time, clear_time, rest_today or undo_rest.');
 }
 
+// ---- sauna days (A9) -----------------------------------------------------------------------------------------------
+
+const checklistText = () => CHECKLIST.map((c) => c.text.replace(/\.$/, '') + (c.optional ? ' (if possible)' : '')).join('; ');
+
+/** Propose sauna days from his schedule, plan the ones he agrees to, take one off, or set his usual sauna time. */
+function saunaPlan(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const plan = s.one('sauna-plan', 'main') || {};
+  const save = (next) => put(s, 'sauna-plan', 'main', { id: 'main', ...next });
+  if (a.action === 'propose') {
+    const p = saunaProposal(s);
+    const st = ladderState(s.list('sauna'), s.today, plan);
+    if (!p.items.length) return { text: `Nothing to propose: ${p.perWeek} a week and the coming week already has ${p.perWeek === 1 ? 'one' : 'them'} planned, or no day fits (never before lifting).`, summary: 'nothing to propose' };
+    return { text: `Proposal (not planned yet; he decides): ${p.items.map((x) => `${dayText(x.date, s.today)} at ${formatHm(x.time)} (${x.kind === 'rest' ? 'rest day' : `after ${LABEL[x.dayType] || 'the session'}, never before lifting`})`).join('; ')}. Step: ${stepText(st.step)}. ${p.perWeek === 1 ? 'Once a week at his level.' : 'While building up: about two a week on separate days (he decides).'} His checklist before each: ${checklistText()}. Say only this checklist about food and drink; never tell him to fast. Plan with action plan once he says yes.`, summary: `${p.items.length} day${p.items.length === 1 ? '' : 's'} proposed` };
+  }
+  if (a.action === 'set_time') {
+    if (!a.time) return refuse('Give the time (HH:MM).');
+    save({ ...plan, time: a.time });
+    return wrote(`Usual sauna time: ${formatHm(a.time)}. Proposals use it from now on.`, `sauna time ${a.time}`);
+  }
+  if (a.action === 'remove') {
+    if (!(plan.planned || []).some((p) => p.date === a.date)) return refuse(`No sauna planned on ${a.date ? dayText(a.date, s.today) : 'that day'}.`);
+    save({ ...plan, planned: plan.planned.filter((p) => p.date !== a.date) });
+    return wrote(`Sauna on ${dayText(a.date, s.today)} taken off the plan.`, 'sauna day removed');
+  }
+  if (a.action === 'plan') {
+    const list = a.dates?.length ? a.dates : [];
+    if (!list.length) return refuse('Which days? Give dates (and times) he agreed to.');
+    let next = plan; const done = [];
+    for (const d of list) {
+      const exp = expectedOn({ last: s.last(), days: s.days(), today: s.today, date: d.date });
+      const r = planSaunaDay(next, d, { today: s.today, kind: exp?.kind, sessionTime: s.days()[d.date]?.sessionTime || null });
+      if (r.error) return refuse(`${dayText(d.date, s.today)}: ${r.error} Nothing planned.`);
+      next = r.plan; done.push(`${dayText(d.date, s.today)} ${formatHm(next.planned.find((p) => p.date === d.date).time)}`);
+    }
+    save(next);
+    ctx.action({ kind: 'open', url: '#/sauna', label: 'Open the sauna screen' });
+    return wrote(`Sauna planned: ${done.join('; ')}. A reminder comes at each time with the day's step and his checklist.`, `${done.length} sauna day${done.length === 1 ? '' : 's'} planned`);
+  }
+  return refuse('action is propose, plan, remove or set_time.');
+}
+
 // ---- Diet.html supplement lines (A6) ----------------------------------------------------------------------------------
 
 /** His answer about a Diet.html line that differs from his list: use it (the supplement changes) or keep his list. */
@@ -678,6 +720,7 @@ export const WRITE_TOOLS = [
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
   write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
+  write('sauna_plan', 'Sauna days', "Plan sauna days WITH him: propose (from his rotation: rest days first, never before lifting, about two a week on separate days while building up, once a week at his level; at his usual sauna time), then plan the dates he agrees to, remove one, or set his usual sauna time. The ladder decides each session's step. About food and drink say only his checklist line (eaten and drunk in the last few hours); never tell him to fast.", obj({ action: { type: 'string', enum: ['propose', 'plan', 'remove', 'set_time'] }, dates: { type: 'array', items: obj({ date: ISO, time: HM }, ['date']) }, date: ISO, time: HM }, ['action']), saunaPlan),
   write('supplement_review', 'Diet.html line', "His answer about a line of his Diet.html that differs from his supplement list (the supplements tool lists the open ones): use = change the supplement to the Diet.html line, keep = leave his list. Only his answer; never decide for him.", obj({ supplement: { type: 'string' }, answer: { type: 'string', enum: ['use', 'keep'] } }, ['supplement', 'answer']), supplementReview),
   write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
