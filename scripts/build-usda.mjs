@@ -25,7 +25,7 @@ export const NUTRIENTS = [
   ['fiber', 'Fiber', 'g', [1079]],
   ['sugars', 'Sugars', 'g', [2000]],
   ['satFat', 'Saturated fat', 'g', [1258]],
-  ['vitA', 'Vitamin A (RAE)', 'mcg', [1106]],
+  ['vitA', 'Vitamin A (RAE)', 'mcg', [1106]], // no 1106: computed from retinol and carotenoids (raeFrom)
   ['vitD', 'Vitamin D', 'mcg', [1114]],
   ['vitE', 'Vitamin E', 'mg', [1109]],
   ['vitK1', 'Vitamin K1 (phylloquinone)', 'mcg', [1185]],
@@ -52,6 +52,24 @@ export const NUTRIENTS = [
   ['epa', 'EPA (20:5 n-3)', 'g', [1278]],
   ['dha', 'DHA (22:6 n-3)', 'g', [1272]],
 ];
+
+// Vitamin A when an entry has no RAE value (nutrient 1106): many Foundation Foods entries give only retinol and the
+// carotenoids (his Greek yogurt 2259794: retinol 38.13 mcg). RAE by its definition (IOM 2001): retinol + beta-carotene
+// / 12 + alpha-carotene / 24 + beta-cryptoxanthin / 24; beta-carotene from its cis + trans parts when only those are given.
+const RAE_PARTS = { retinol: 1105, betaCarotene: 1107, alphaCarotene: 1108, cryptoxanthin: 1120, cisBeta: 1159, transBeta: 2028 };
+export function raeFrom(v) {
+  const g = (id) => v[String(id)];
+  const beta = g(RAE_PARTS.betaCarotene) ?? (g(RAE_PARTS.cisBeta) != null || g(RAE_PARTS.transBeta) != null ? (g(RAE_PARTS.cisBeta) || 0) + (g(RAE_PARTS.transBeta) || 0) : null);
+  const retinol = g(RAE_PARTS.retinol); const carotenoids = [beta, g(RAE_PARTS.alphaCarotene), g(RAE_PARTS.cryptoxanthin)];
+  const fromCarotenoids = (carotenoids[0] || 0) / 12 + (carotenoids[1] || 0) / 24 + (carotenoids[2] || 0) / 24;
+  const anyCarotenoid = carotenoids.some((x) => x != null);
+  // Retinol and carotenoids both measured: the sum. Only retinol, above 0 (an animal food): retinol. Only carotenoids,
+  // above 0 (a plant): their share. Anything else (retinol 0 with no carotenoid data, as for some vegetables, or
+  // carotenoids 0 with retinol not measured, as for egg yolk) stays unknown rather than 0.
+  if (retinol != null && anyCarotenoid) return retinol + fromCarotenoids;
+  if (retinol != null) return retinol > 0 ? retinol : null;
+  return fromCarotenoids > 0 ? fromCarotenoids : null;
+}
 
 /** Rows of a CSV file as objects (quoted fields, doubled quotes). */
 function* csvRows(text) {
@@ -115,7 +133,7 @@ async function main() {
     const keep = new Map();
     for (const r of csvRows(read(dir, 'food.csv'))) if (r.data_type === ds.type) keep.set(r.fdc_id, r);
     const values = new Map();
-    const wanted = new Set(NUTRIENTS.flatMap(([, , , ids]) => ids.map(String)));
+    const wanted = new Set([...NUTRIENTS.flatMap(([, , , ids]) => ids.map(String)), ...Object.values(RAE_PARTS).map(String)]);
     for (const r of csvRows(read(dir, 'food_nutrient.csv'))) {
       if (!keep.has(r.fdc_id) || !wanted.has(r.nutrient_id) || r.amount === '') continue;
       if (!values.has(r.fdc_id)) values.set(r.fdc_id, {});
@@ -135,7 +153,7 @@ async function main() {
     }
     for (const [id, f] of keep) {
       const v = values.get(id) || {};
-      const row = NUTRIENTS.map(([, , , ids]) => sig(ids.map((x) => v[String(x)]).find((x) => x != null) ?? null));
+      const row = NUTRIENTS.map(([key, , , ids]) => sig(ids.map((x) => v[String(x)]).find((x) => x != null) ?? (key === 'vitA' ? raeFrom(v) : null)));
       if (row[0] == null && row[1] == null) continue; // nothing usable
       const cat = cats.get(f.food_category_id) || 'Other';
       if (!catIndex.has(cat)) { catIndex.set(cat, categories.length); categories.push(cat); }
