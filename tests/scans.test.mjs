@@ -178,3 +178,34 @@ test('results saved with the conditions; different conditions named; calendar ma
   assert.deepEqual(conditionNotes({ conditions: { unticked: PROTOCOL.map((i) => i.id) } }, PROTOCOL), ['checklist not ticked']);
   assert.deepEqual(scanMarks([done, { date: '2026-01-01', status: 'prep' }]), [{ date: '2026-01-22', kind: 'scan', id: 'scan.2026-01-22', label: 'Body scan: 82.4 kg · 18.2% fat' }]);
 });
+
+test('trends: metrics across scans, flagged when not comparable, changes told as numbers', async () => {
+  const { metricsAvailable, scanSeries, notComparable, changeLines, latestChange } = await import('../app/js/lib/scans.js');
+  const at = (iso, h, m) => { const [y, mo, d] = iso.split('-').map(Number); return new Date(y, mo - 1, d, h, m).getTime(); };
+  const usual = { fasted: true, trainedBefore: false, unusual: '', unticked: [] };
+  const scan = (date, h, metrics, conditions = usual) => ({ id: `scan.${date}`, date, status: 'done', at: at(date, h, 30), metrics, conditions });
+  const M = (label, text, unit) => ({ label, text, unit, value: Number(text.replace(',', '.')), key: undefined });
+  const { cleanMetrics } = await import('../app/js/lib/scans.js');
+  const a = scan('2026-10-22', 4, cleanMetrics([M('Weight', '82.4', 'kg'), M('Body Fat %', '18.2', '%'), M('Skeletal Muscle Mass', '38.1', 'kg'), M('Hydration Score', '7', '')]));
+  const b = scan('2026-11-19', 4, cleanMetrics([M('Weight', '81.6', 'kg'), M('Body Fat %', '17.5', '%'), M('Skeletal Muscle Mass', '38.6', 'kg'), M('Hydration Score', '8', '')]));
+  const c = scan('2026-12-17', 9, cleanMetrics([M('Weight', '81.6', 'kg'), M('Body Fat %', '17.9', '%')]), { ...usual, fasted: false });
+  const av = metricsAvailable([c, a, b, { status: 'prep' }]);
+  assert.deepEqual(av.map((m) => [m.id, m.count]), [['weightKg', 3], ['fatPercent', 3], ['muscleMassKg', 2], ['label:hydration score', 2]]);
+  assert.equal(av[1].label, 'Body fat');
+  const s = scanSeries([c, a, b], 'fatPercent');
+  assert.deepEqual(s.map((p) => [p.date, p.value, p.notes]), [['2026-10-22', 18.2, []], ['2026-11-19', 17.5, []], ['2026-12-17', 17.9, ['not fasted']]]);
+  assert.deepEqual(scanSeries([a, b], 'label:hydration score').map((p) => p.text), ['7', '8']);
+  assert.deepEqual(notComparable(a, b), []);
+  const nc = notComparable(b, c);
+  assert.equal(nc.length, 2);
+  assert.match(nc[0], /^\w+day 12\/17: not fasted$/);
+  assert.equal(nc[1], 'a different time of day');
+  assert.deepEqual(changeLines(a, b).map((l) => l.text), [
+    'Weight: 82.4 kg to 81.6 kg (−0.8 kg)', 'Body fat: 18.2% to 17.5% (−0.7 points)', 'Skeletal muscle mass: 38.1 kg to 38.6 kg (+0.5 kg)']);
+  assert.equal(changeLines(b, c)[0].text, 'Weight: 81.6 kg to 81.6 kg (no change)');
+  const ch = latestChange([a, c, b]);
+  assert.equal(ch.prev.date, '2026-11-19');
+  assert.equal(ch.days, 28);
+  assert.equal(ch.reasons.length, 2);
+  assert.equal(latestChange([a]), null);
+});

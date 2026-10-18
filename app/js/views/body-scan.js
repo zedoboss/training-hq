@@ -3,6 +3,8 @@
 //   #/body/scan            the next scan (proposed or confirmed) and its reminders, the scanner's safety notice once,
 //                          the preparation checklist he ticks, what the gym's staff said
 //   #/body/scan/protocol   change the checklist (his gym's instructions win), dated
+//   #/body/scan/trends     each metric across scans, beside body weight and weekly training volume (one chart each,
+//                          same dates); scans under different conditions flagged as not directly comparable
 //   #/body/scan/r/<date>   a scan's results: photos of the results screen or printout read by Claude on the Mac (or typed
 //                          in), every number as reported, checked by him; the conditions (time, fasted, trained before,
 //                          checklist lines not ticked, anything unusual)
@@ -15,7 +17,13 @@ import {
   EVERY_DAYS, PROTOCOL, WHEN, SAFETY_TEXT, SAFETY_ASK, STAFF_QUESTIONS, protocolOf, scanStatus, confirmDate, cancelDate,
   withTick, unticked, withProtocol, scanReminders, expectedOn, scanId,
   METRICS, keyFor, cleanMetrics, mergeReads, conditionsFrom, withResults, metricValue, isDone, conditionNotes,
+  metricsAvailable, scanSeries, latestChange,
 } from '../lib/scans.js';
+import { weightSeries, dailyWeights, withBodyweights, dailyWeightsOf } from '../lib/health.js';
+import { setRows, weeklyVolume, weekStartOf } from '../lib/stats.js';
+import { mergeLibrary } from '../lib/library.js';
+import { toUnit } from '../lib/settings.js';
+import { timeLine, columnChart, bindTips, bindCrosshair, tableView } from '../ui/charts.js';
 import { fileToJpeg, newPhotoId } from '../lib/photos.js';
 import { overlay, confirmSheet, promptLong, promptTime } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -43,6 +51,7 @@ function withType(iso, ctx, today) {
 
 export function render(view, params = []) {
   if (params[0] === 'protocol') return protocolEditor(view);
+  if (params[0] === 'trends') return trends(view, params[1] ? decodeURIComponent(params[1]) : null);
   if (params[0] === 'r' && /^\d{4}-\d{2}-\d{2}$/.test(params[1] || '')) return results(view, params[1]);
   return home(view);
 }
@@ -134,6 +143,7 @@ function home(view) {
         return `<li><a class="lib-row sc-hist" href="#/body/scan/r/${esc(x.date)}"><span class="lib-name">${esc(dayName(x.date))}${x.at ? `, ${esc(formatTime(new Date(x.at)))}` : ''}</span>
           <span class="lib-meta">${key.map(([k, v]) => (k === 'weightKg' ? `${v} kg` : k === 'fatPercent' ? `${v}% fat` : `${v} kg muscle`)).join(' · ') || `${x.metrics.length} numbers`}</span>
           <span class="lib-meta ${notes.length ? 'c-amber' : 'c-green'}">${notes.length ? `Different conditions: ${esc(notes.join('; '))}` : 'Usual conditions'}</span></a></li>`; }).join('') || '<li class="hint pad">No scans yet.</li>'}</ul>
+      ${done.length ? `<a class="card supp-card" href="#/body/scan/trends" id="sc-trends"><span class="hud c-cyan">TRENDS</span><span class="supp-card-line">${done.length > 1 ? 'Every number across your scans, beside body weight and training volume' : 'Changes show from your second scan'}</span><span class="pill is-on">Open</span></a>` : ''}
       <button class="btn-ghost" type="button" id="sc-other">Add the results of a scan</button>
       ${plan.safety?.readAt ? `<p class="hint">Scanner safety notice read ${esc(formatDate(new Date(plan.safety.readAt)))}.</p>` : ''}`;
 
@@ -444,4 +454,93 @@ function results(view, date) {
     draw();
   });
   return () => { alive = false; off(); unsub(); stopPoll(); inputs.remove(); };
+}
+
+/**
+ * Trends (7.6): one metric across scans, with body weight and weekly training volume over the same dates as separate
+ * charts (never two scales on one chart). Scans under different conditions are hollow amber points with the reason in
+ * the tooltip and the table. Changes are told as numbers; the app never judges or diagnoses.
+ */
+function trends(view, pick) {
+  let alive = true; let off = () => {}; let untip = () => {}; let unx = [];
+  view.innerHTML = '<div class="lib-head"><a class="pill" href="#/body/scan">Body scan</a></div><h1 class="view-title">Scan trends</h1><p class="view-sub">Loading…</p>';
+  const draw = async (repo) => {
+    const [scans, plan, health, measurements, rawSessions, sets, exercises, daily] = await Promise.all([
+      repo.list('body-scans'), repo.get('scan-plan', 'main'), repo.list('health'), repo.list('measurements'),
+      repo.list('sessions'), repo.list('sets'), repo.list('exercises'), dailyWeightsOf(repo),
+    ]);
+    if (!alive) return;
+    const items = protocolOf(plan || {});
+    const st = withDefaults(getState().settings);
+    const wu = st.units.weight;
+    const today = isoDate(new Date());
+    const done = scans.filter(isDone).sort((a, b) => (a.date < b.date ? -1 : 1));
+    const avail = metricsAvailable(done);
+    const id = avail.some((m) => m.id === pick) ? pick : (avail.find((m) => m.id === 'fatPercent') || avail[0])?.id;
+    const metric = avail.find((m) => m.id === id);
+    const series = id ? scanSeries(done, id, items) : [];
+    const ch = latestChange(done, items);
+    // Same dates for all three charts: from the start of the week 4 weeks before the first scan (at least 12 weeks
+    // back) to today.
+    const from0 = done.length ? [addDays(done[0].date, -28), addDays(today, -84)].sort()[0] : addDays(today, -84);
+    const from = weekStartOf(from0, st.firstDayOfWeek);
+    const t = (iso) => Date.parse(`${iso}T12:00:00`);
+    const pts = series.map((p) => ({ t: t(p.date), value: p.value, flag: p.notes.length > 0, p }));
+    const domain = [t(from), t(today)];
+    const mChart = timeLine(pts, { label: `${metric?.label || 'Metric'} across scans`, fmt: (v) => String(v), domain });
+    const weights = dailyWeights(weightSeries(health, measurements)).filter((w) => w.date >= from);
+    const wPts = weights.map((w) => ({ t: t(w.date), value: toUnit(w.kg, wu), w }));
+    const wChart = timeLine(wPts, { label: `Body weight in ${wu}`, fmt: (v) => String(v), domain });
+    const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
+    const rows = setRows({ sessions: withBodyweights(rawSessions, daily), sets, lib, countWarmups: st.warmup.countInStats });
+    const nWeeks = Math.min(104, Math.floor((t(today) - t(from)) / (7 * 86400000)) + 1);
+    const weeks = weeklyVolume(rows, { weeks: nWeeks, today, firstDay: st.firstDayOfWeek });
+    const scanIn = (w) => done.filter((s) => s.date >= w.start && s.date < addDays(w.start, 7));
+    const vItems = weeks.map((w) => ({ value: w.volume || null, axis: `${Number(w.start.slice(5, 7))}/${Number(w.start.slice(8, 10))}`,
+      tip: `Week of ${dayName(w.start)}: ${w.volume ? `${Math.round(w.volume).toLocaleString('en-US')} kg, ${w.sets} sets` : 'no training'}${scanIn(w).length ? ` · scan ${scanIn(w).map((s) => dayName(s.date)).join(', ')}` : ''}` }));
+    const kStep = (v) => (v >= 1000 ? `${Math.round(v / 100) / 10}K`.replace('.0K', 'K') : String(Math.round(v)));
+    const unitOf = (p) => p.unit || metric?.unit || '';
+    const val = (p) => `${p.text}${unitOf(p) && unitOf(p) !== '%' ? ' ' : ''}${unitOf(p)}`;
+
+    view.innerHTML = `
+      <div class="lib-head"><a class="pill" href="#/body/scan">Body scan</a></div>
+      <h1 class="view-title">Scan trends</h1>
+      ${!done.length ? '<p class="hint">No scans yet. Trends show once your first scan\'s results are in.</p>' : `
+      <section class="card pad-card" id="tr-change">
+        ${ch ? `<div class="hud c-muted">LATEST CHANGE · ${esc(dayName(ch.prev.date).toUpperCase())} TO ${esc(dayName(ch.cur.date).toUpperCase())} · ${Math.round(ch.days / 7 * 10) / 10} WEEKS</div>
+          ${ch.lines.map((l) => `<p class="c-text tr-line">${esc(l.text)}</p>`).join('') || '<p class="hint">The two scans share none of the usual numbers.</p>'}
+          ${ch.reasons.length ? `<p class="hint c-amber" id="tr-flag">Not directly comparable: ${esc(ch.reasons.join('; '))}. Part of the change may be water or timing, not real change.</p>` : '<p class="hint">Both scans taken under the usual conditions.</p>'}`
+        : '<p class="hint">One scan so far. Changes show from your second scan.</p>'}
+      </section>
+      <div class="chips wrap" role="group" aria-label="Metric">${avail.map((m) => `<a class="chip ${m.id === id ? 'is-on' : ''}" href="#/body/scan/trends/${encodeURIComponent(m.id)}" aria-pressed="${m.id === id}">${esc(m.label)}</a>`).join('')}</div>
+      <section class="card pad-card chart-card" id="tr-metric">
+        <span class="hud c-muted">${esc((metric?.label || '').toUpperCase())}${metric?.unit ? ` (${esc(metric.unit.toUpperCase())})` : ''} · ${series.length} SCAN${series.length === 1 ? '' : 'S'}</span>
+        <div class="chart-box" id="tr-mchart">${mChart.svg}</div>
+        <p class="hint">${pts.some((p) => p.flag) ? 'Hollow amber point: taken under different conditions, not directly comparable. ' : ''}Numbers exactly as the scanner reported them.</p>
+        ${tableView(['Scan', 'Value', 'Conditions'], [...series].reverse().map((p) => [dayName(p.date) + (p.at ? `, ${formatTime(new Date(p.at))}` : ''), val(p), p.notes.length ? `Different: ${p.notes.join('; ')}` : 'Usual']))}
+      </section>
+      <section class="card pad-card chart-card" id="tr-weight">
+        <span class="hud c-muted">BODY WEIGHT (${wu.toUpperCase()}) · SAME DATES</span>
+        <div class="chart-box" id="tr-wchart">${wChart.svg}</div>
+        <p class="hint">Apple Health weigh-ins and your measurements, one per day. ${done.map((s) => dayName(s.date)).join(', ')}: scan${done.length === 1 ? '' : 's'}.</p>
+        ${wPts.length ? tableView(['Day', `Weight (${wu})`], [...wPts].reverse().slice(0, 120).map((p) => [`${dayName(p.w.date)}${done.some((s) => s.date === p.w.date) ? ' (scan)' : ''}`, String(p.value)])) : ''}
+      </section>
+      <section class="card pad-card chart-card" id="tr-volume">
+        <span class="hud c-muted">TRAINING VOLUME PER WEEK (KG) · SAME DATES</span>
+        ${columnChart(vItems, { label: 'Training volume per week', fmt: kStep })}
+        <p class="hint">Weight × reps of every working set, as on Statistics. Tap a week: its volume, and the scan in it.</p>
+        ${tableView(['Week of', 'Volume (kg)', 'Sets', 'Scan'], [...weeks].reverse().map((w) => [dayName(w.start), w.volume ? Math.round(w.volume).toLocaleString('en-US') : '-', String(w.sets), scanIn(w).map((s) => dayName(s.date)).join(', ') || '']))}
+      </section>`}`;
+    unx.forEach((f) => f()); unx = [];
+    const mBox = view.querySelector('#tr-mchart');
+    if (mBox) unx.push(bindCrosshair(mBox, mChart, (q) => `${dayName(q.p.date)}: ${val(q.p)}${q.p.notes.length ? ` · different conditions: ${q.p.notes.join('; ')}` : ' · usual conditions'}`));
+    const wBox = view.querySelector('#tr-wchart');
+    if (wBox) unx.push(bindCrosshair(wBox, wChart, (q) => `${dayName(q.w.date)}: ${q.value} ${wu}${done.some((s) => s.date === q.w.date) ? ' · scan day' : ''}`));
+  };
+  untip = bindTips(view);
+  ready.then((repo) => {
+    off = repo.onChange((cols) => { if (cols.some((c) => ['body-scans', 'scan-plan', 'health', 'measurements', 'sessions', 'sets'].includes(c))) draw(repo); });
+    draw(repo);
+  });
+  return () => { alive = false; off(); untip(); unx.forEach((f) => f()); };
 }

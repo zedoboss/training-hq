@@ -309,3 +309,78 @@ export function scanMarks(scans = []) {
     return { date: s.date, kind: 'scan', id: s.id, label: `Body scan${parts.length ? `: ${parts.join(' · ')}` : ''}` };
   });
 }
+
+// ---- Trends (7.6) ----
+// Each metric across scans, beside body weight and training volume (separate charts, one scale each). A scan taken
+// under different conditions is flagged as not directly comparable. Changes are told as numbers, never judged.
+
+/** How a metric is followed across scans: its key, else its printed label (lower case words). */
+const idOf = (m) => m.key || `label:${words(m.label)}`;
+
+/** Metrics with a number in any scan: [{id, label, unit, count}], the usual ones in their order first. */
+export function metricsAvailable(scans = []) {
+  const seen = new Map();
+  for (const s of scans.filter(isDone)) {
+    for (const m of s.metrics || []) {
+      if (m.value == null) continue;
+      const id = idOf(m);
+      const cur = seen.get(id) || { id, label: metricOf(m.key)?.label || m.label, unit: m.unit || metricOf(m.key)?.unit || '', count: 0 };
+      cur.count++;
+      seen.set(id, cur);
+    }
+  }
+  const order = (x) => { const i = METRICS.findIndex((m) => m.key === x.id); return i < 0 ? 1000 : i; };
+  return [...seen.values()].sort((a, b) => order(a) - order(b) || a.label.localeCompare(b.label));
+}
+
+/** One metric across scans, oldest first: [{date, at, value, text, unit, notes}] (notes: why not comparable). */
+export function scanSeries(scans = [], id, items = PROTOCOL) {
+  return scans.filter(isDone).sort((a, b) => (a.date < b.date ? -1 : 1)).flatMap((s) => {
+    const m = (s.metrics || []).find((x) => idOf(x) === id && x.value != null);
+    return m ? [{ date: s.date, at: s.at, value: m.value, text: m.text, unit: m.unit, notes: conditionNotes(s, items), scan: s }] : [];
+  });
+}
+
+/** Minutes after midnight of a scan's time, in the device's zone. */
+const minuteOfDay = (at) => { const d = new Date(at); return d.getHours() * 60 + d.getMinutes(); };
+export const TIME_SLACK_MIN = 120;
+
+/**
+ * Why two scans are not directly comparable (empty = comparable): either was taken under different conditions, or
+ * at a different time of day (more than 2 hours apart; the protocol says the same time of day every time).
+ */
+export function notComparable(a, b, items = PROTOCOL) {
+  const out = [];
+  for (const s of [a, b]) {
+    const n = conditionNotes(s, items);
+    if (n.length) out.push(`${formatDay(new Date(`${s.date}T12:00:00`))}: ${n.join('; ')}`);
+  }
+  if (a?.at && b?.at && Math.abs(minuteOfDay(a.at) - minuteOfDay(b.at)) > TIME_SLACK_MIN) out.push('a different time of day');
+  return out;
+}
+
+const r1 = (n) => Math.round(n * 10) / 10;
+const signed = (n) => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${Math.abs(n)}`;
+
+/** "Body fat: 18.2% to 17.5% (−0.7 points)" for each usual main metric both scans have. */
+export function changeLines(prev, cur, ids = METRICS.filter((m) => m.main).map((m) => m.key)) {
+  const out = [];
+  for (const id of ids) {
+    const a = (prev.metrics || []).find((m) => idOf(m) === id && m.value != null);
+    const b = (cur.metrics || []).find((m) => idOf(m) === id && m.value != null);
+    if (!a || !b) continue;
+    const unit = b.unit || metricOf(id)?.unit || '';
+    const d = r1(b.value - a.value);
+    const sp = unit && unit !== '%' ? ' ' : '';
+    out.push({ id, text: `${metricOf(id)?.label || b.label}: ${a.text}${sp}${unit} to ${b.text}${sp}${unit} (${d === 0 ? 'no change' : `${signed(d)}${unit === '%' ? ' points' : unit ? ` ${unit}` : ''}`})` });
+  }
+  return out;
+}
+
+/** The latest scan against the one before: {cur, prev, days, lines, reasons}, or null with fewer than two scans. */
+export function latestChange(scans = [], items = PROTOCOL) {
+  const list = scans.filter(isDone).sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (list.length < 2) return null;
+  const cur = list.at(-1); const prev = list.at(-2);
+  return { cur, prev, days: daysBetween(prev.date, cur.date), lines: changeLines(prev, cur), reasons: notComparable(prev, cur, items) };
+}

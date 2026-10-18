@@ -54,11 +54,12 @@ export function columnChart(items, { label, fmt = (v) => String(Math.round(v)), 
  * flagged points (not comparable) are drawn hollow. o.fmt formats values; o.zero starts the axis at 0.
  * Returns {svg, xy, W, H} so a crosshair can follow the finger.
  */
-export function timeLine(points, { label, fmt = (v) => String(v), zero = false, H = 170 } = {}) {
-  const pts = points.filter((p) => p.value != null);
+export function timeLine(points, { label, fmt = (v) => String(v), zero = false, H = 170, domain = null } = {}) {
+  const pts = points.filter((p) => p.value != null && (!domain || (p.t >= domain[0] && p.t <= domain[1])));
   if (!pts.length) return { svg: '<p class="hint">Nothing to chart yet.</p>', xy: [], pts };
   const W = 340; const L = 40; const R = 16; const T = 20; const B = 22;
-  const t0 = pts[0].t; const t1 = pts.at(-1).t;
+  // o.domain [t0, t1]: a fixed time range, so charts shown one above the other line up by date.
+  const t0 = domain ? domain[0] : pts[0].t; const t1 = domain ? domain[1] : pts.at(-1).t;
   const x = (v) => (t1 === t0 ? (L + W - R) / 2 : L + ((v - t0) / (t1 - t0)) * (W - L - R));
   const vs = pts.map((p) => p.value);
   let lo = Math.min(...vs); let hi = Math.max(...vs);

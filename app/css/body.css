@@ -91,3 +91,10 @@ a.sc-hist { display: flex; flex-direction: column; align-items: flex-start; gap:
 .sr-row { grid-template-columns: minmax(0, 1fr) 74px 46px 24px; }
 .sr-row .input[data-label] { font-size: 13px; }
 .sr-cond a { color: var(--cyan); }
+
+/* Scan trends (7.6) */
+a.chip { text-decoration: none; color: var(--text); }
+a.chip.is-on { color: var(--on-pale); }
+.tr-line { margin: 6px 0 0; font-family: var(--mono); font-size: 13px; }
+#tr-change { display: flex; flex-direction: column; gap: 2px; }
+#tr-flag { margin-top: 8px; }
