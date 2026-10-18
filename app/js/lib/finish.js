@@ -1,25 +1,34 @@
 // Finishing a session: records, the "update routine?" check, and turning a session into a routine.
 import { heaviestOf } from './history.js';
+import { isoDate } from './time.js';
 import { newId, newKey } from './routines.js';
 
-export const COMEBACK_START = '2026-09-24';
+/** The comeback's first day: the earliest first session in the programme data (synced from the Mac), or null. */
+export const comebackStartOf = (meta) => Object.entries(meta?.firstSessions || {})
+  .filter(([, v]) => /^\d{4}-\d{2}-\d{2}$/.test(String(v))).map(([, v]) => v).sort()[0] ?? null;
+const since = (start) => (e) => !start || e.date >= start;
 
 /**
- * Bests in this session compared with history. "Comeback best" = heaviest working set since the comeback
- * started; "all-time" needs the full history (step 3 import), so it is only claimed when history is complete.
+ * Bests in this session against the sessions before it (heaviest working set). "Comeback best" = above everything
+ * since the comeback started; "all-time" = above everything ever, claimed only with the full history imported
+ * (fullHistory). A session from before the comeback can only have all-time bests. Never on a first-ever session.
  */
-export function sessionBests(session, sets, history, { comebackStart = COMEBACK_START, fullHistory = false, isFirstEver = (n) => !history.all(n).length } = {}) {
+export function sessionBests(session, sets, history, { comebackStart = null, fullHistory = false, tz } = {}) {
   const out = [];
+  const day = isoDate(new Date(session.startedAt), tz);
   for (const ex of session.exercises) {
     const mine = sets.filter((s) => s.exKey === ex.key && s.done).map((s) => ({ ...s, hold: s.type === 'hold' }));
     const best = heaviestOf(mine);
-    if (!best?.kg || isFirstEver(ex.name)) continue;
-    const past = history.all(ex.name).filter((e) => e.sessionId !== session.id);
-    const sinceComeback = past.filter((e) => e.date >= comebackStart && e.heaviest?.kg != null);
-    const prevComeback = sinceComeback.reduce((m, e) => Math.max(m, e.heaviest.kg), 0);
-    const prevAll = past.reduce((m, e) => Math.max(m, e.heaviest?.kg ?? 0), 0);
-    if (best.kg > prevComeback) {
-      out.push({ name: ex.name, kg: best.kg, reps: best.reps, kind: fullHistory && best.kg > prevAll ? 'all-time' : 'comeback', previous: prevComeback || null });
+    const past = history.all(ex.name).filter((e) => e.sessionId !== session.id && (e.at != null ? e.at < session.startedAt : e.date < day));
+    if (!best?.kg || !past.length) continue;
+    const top = (list) => list.reduce((m, e) => Math.max(m, e.heaviest?.kg ?? 0), 0);
+    const prevAll = top(past);
+    const allTime = fullHistory && best.kg > prevAll;
+    if (!comebackStart || day >= comebackStart) {
+      const prevComeback = top(past.filter(since(comebackStart)));
+      if (allTime || (prevComeback > 0 && best.kg > prevComeback)) out.push({ name: ex.name, kg: best.kg, reps: best.reps, kind: allTime ? 'all-time' : 'comeback', previous: (allTime ? prevAll : prevComeback) || null });
+    } else if (allTime) {
+      out.push({ name: ex.name, kg: best.kg, reps: best.reps, kind: 'all-time', previous: prevAll || null });
     }
   }
   return out;
@@ -30,11 +39,11 @@ export function sessionBests(session, sets, history, { comebackStart = COMEBACK_
  * the comeback started and the sets already ticked in this session. Never on an exercise's first-ever session.
  * @returns {{kg:number, reps:number|null, previous:number|null}|null}
  */
-export function setRecord({ set, name, sessionId, otherSets = [], history, comebackStart = COMEBACK_START }) {
+export function setRecord({ set, name, sessionId, otherSets = [], history, comebackStart = null }) {
   if (!set?.done || set.kg == null || set.type === 'warmup' || set.type === 'hold') return null;
   const past = history.all(name).filter((e) => e.sessionId !== sessionId);
   if (!past.length) return null;
-  const prevComeback = past.filter((e) => e.date >= comebackStart && e.heaviest?.kg != null).reduce((m, e) => Math.max(m, e.heaviest.kg), 0);
+  const prevComeback = past.filter((e) => since(comebackStart)(e) && e.heaviest?.kg != null).reduce((m, e) => Math.max(m, e.heaviest.kg), 0);
   const today = heaviestOf(otherSets.filter((x) => x.done && x.id !== set.id).map((x) => ({ ...x, hold: x.type === 'hold' })))?.kg ?? 0;
   const bar = Math.max(prevComeback, today);
   if (set.kg <= bar) return null;

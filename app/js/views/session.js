@@ -12,7 +12,7 @@ import { pickExercises } from '../ui/picker.js';
 import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
 import { warmupSets } from '../lib/plates.js';
-import { setRecord } from '../lib/finish.js';
+import { setRecord, comebackStartOf } from '../lib/finish.js';
 import { demoPanel } from '../ui/demo-panel.js';
 import { actionSheet, confirmSheet, promptText, overlay } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -62,9 +62,9 @@ const minPlate = () => smallestPlate(getState().equipment);
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 async function context(repo, excludeSessionId) {
-  const [sessions, sets, bridge, exercises] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('exercises')]);
+  const [sessions, sets, bridge, exercises, meta] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('exercises'), repo.get('programme', 'meta')]);
   const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
-  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge };
+  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, comebackStart: comebackStartOf(meta) };
 }
 
 async function startSession(view, routineId, logFor = null) {
@@ -284,7 +284,7 @@ export function render(view, params = []) {
       if (s.done) { await saveSet({ ...s, done: false, doneAt: null }); redrawCard(ex.key); return; }
       const prev = previousFor(prevOf(ex), exSets(ex.key), s);
       const filled = { ...s, ...fillForTick(s, prev), done: true, doneAt: Date.now() };
-      const rec = !editing && prefs().show.recordBanner ? setRecord({ set: filled, name: ex.name, sessionId: session.id, otherSets: exSets(ex.key), history: ctx.history }) : null;
+      const rec = !editing && prefs().show.recordBanner ? setRecord({ set: filled, name: ex.name, sessionId: session.id, otherSets: exSets(ex.key), history: ctx.history, comebackStart: ctx.comebackStart }) : null;
       if (rec) play('record', prefs().sounds.recordVolume); else play('tick', prefs().sounds.tickVolume);
       await saveSet(filled);
       redrawCard(ex.key);

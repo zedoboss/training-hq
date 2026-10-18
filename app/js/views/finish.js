@@ -5,7 +5,7 @@ import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { summarize, elapsedMs, copySession } from '../lib/session.js';
 import { fileToJpeg, newPhotoId } from '../lib/photos.js';
-import { sessionBests, structureChanged, routineFromSession, previousSame } from '../lib/finish.js';
+import { sessionBests, structureChanged, routineFromSession, previousSame, comebackStartOf } from '../lib/finish.js';
 import { dayMarks, workoutDates, weekStreak, SOURCE_LABEL, sourceOf } from '../lib/calendar.js';
 import { changePct } from '../lib/stats.js';
 import { isoDate, formatDate, formatDay, formatTime } from '../lib/time.js';
@@ -22,8 +22,10 @@ const localInput = (ms) => { const d = new Date(ms); const p = (n) => String(n).
 
 export function render(view, params = []) {
   const id = params[0];
-  // Opened from the calendar (#/finish/<id>/c/<day>) or the history list (#/finish/<id>/h): Back returns there.
-  const back = params[1] === 'c' && /^\d{4}-\d{2}-\d{2}$/.test(params[2] || '') ? `#/calendar/${params[2]}` : params[1] === 'h' ? '#/history' : null;
+  // Opened from the calendar (#/finish/<id>/c/<day>), the history list (#/finish/<id>/h) or an exercise page
+  // (#/finish/<id>/e/<exercise id>): Back returns there.
+  const back = params[1] === 'c' && /^\d{4}-\d{2}-\d{2}$/.test(params[2] || '') ? `#/calendar/${params[2]}`
+    : params[1] === 'h' ? '#/history' : params[1] === 'e' && params[2] ? `#/exercise/${encodeURIComponent(params[2])}` : null;
   let repo;
 
   const draw = async () => {
@@ -78,7 +80,10 @@ export function render(view, params = []) {
     ]);
     const history = buildHistory({ sessions, sets, bridge });
     const done = all.filter((s) => s.done);
-    const bests = sessionBests(session, done, history);
+    const fullHistory = !activeBridge(bridge, sessions) && sessions.some((s) => s.source === 'hevy' && s.status === 'done');
+    const comebackStart = comebackStartOf(await repo.get('programme', 'meta'));
+    const bests = sessionBests(session, done, history, { fullHistory, comebackStart });
+    const inComeback = !comebackStart || isoDate(new Date(session.startedAt)) >= comebackStart;
     const workouts = sessions.filter((s) => s.status === 'done' && s.kind !== 'holds');
     const number = workouts.filter((s) => s.startedAt <= session.startedAt).length + (activeBridge(bridge, sessions)?.sessionCount ?? 0);
     // P29: week streak as of this session, and volume against the last session of the same kind.
@@ -108,9 +113,9 @@ export function render(view, params = []) {
       </section>
       <p class="hint">Streak: ${streak} week${streak === 1 ? '' : 's'}${prev ? ` · Volume ${pct == null ? 'not comparable' : `${pct > 0 ? '▲' : pct < 0 ? '▼' : '='} ${Math.abs(pct)}%`} vs the last ${esc(prev.title)} (${esc(formatDate(new Date(prev.startedAt)))}, ${prevVol.toLocaleString('en-US')} kg)` : ''}</p>
       <section class="card pad-card">
-        <div class="hud c-muted">COMEBACK BESTS · ${bests.length}</div>
-        ${bests.map((b) => `<div class="best"><span>${esc(b.name)}</span><b>${fmtKg(b.kg)} × ${b.reps}</b></div>`).join('') || '<p class="hint">None this time.</p>'}
-        <p class="hint">All-time records arrive with your full history in step 3. Your pre-layoff numbers are higher for now.</p>
+        <div class="hud c-muted">${inComeback ? 'COMEBACK BESTS' : 'ALL-TIME BESTS'} · ${bests.length}</div>
+        ${bests.map((b) => `<div class="best"><span>${esc(b.name)}${b.kind === 'all-time' ? ' <span class="tag tag-main">ALL-TIME</span>' : ''}</span><b>${fmtKg(b.kg)} × ${b.reps}${b.previous ? ` <span class="c-faint">was ${fmtKg(b.previous)}</span>` : ''}</b></div>`).join('') || '<p class="hint">None this time.</p>'}
+        <p class="hint">${fullHistory ? (inComeback ? 'Heaviest working set since the comeback started, against the sessions before this one. ALL-TIME: heaviest ever, Hevy and Strong included.' : 'Heaviest working set ever at the time, Hevy and Strong included.') : 'All-time bests show once your Hevy history is imported (Settings > Import and export).'}</p>
       </section>
       ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>

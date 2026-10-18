@@ -557,3 +557,20 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .hist-hits { grid-row: 3; font-size: 12px; color: var(--cyan); }
 .hist-row .tag { grid-row: 1 / span 3; }
 @media (min-width: 1024px) { .view-history { max-width: 760px; width: 100%; margin: 0 auto; } }
+
+/* ---------- Exercise charts and records ---------- */
+.chart-card { display: flex; flex-direction: column; gap: 10px; }
+.chart-box { position: relative; }
+.line-chart { width: 100%; height: auto; display: block; overflow: visible; touch-action: pan-y; }
+.line-chart .line { fill: none; stroke: var(--cyan); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.line-chart .area { fill: var(--cyan); opacity: .1; }
+.line-chart .grid { stroke: var(--divider); stroke-width: 1; }
+.line-chart .axis { fill: var(--muted); font: 500 9px var(--mono); }
+.line-chart .pt, .line-chart .xdot { fill: var(--cyan); stroke: var(--surface); stroke-width: 2; }
+.line-chart .pt-label { fill: var(--text); font: 600 10px var(--mono); }
+.line-chart .xhair { stroke: var(--muted); stroke-width: 1; }
+.line-chart .hit { fill: transparent; cursor: crosshair; }
+.rec-list li > .rec { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-m); background: var(--surface); color: var(--text); text-decoration: none; align-items: center; }
+.rec-list .rec b { text-align: right; }
+.rec-list .rec span.c-faint, .rec-list .rec b .c-faint { font-size: 11px; }
+.rep-table a { color: var(--pale); }

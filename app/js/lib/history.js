@@ -45,10 +45,10 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
   for (const s of done) {
     const ss = (setsBySession.get(s.id) || []).sort((a, b) => a.order - b.order);
     for (const ex of s.exercises || []) {
-      const mine = ss.filter((x) => x.exKey === ex.key).map((x) => ({ type: x.type, kg: x.kg ?? null, reps: x.reps ?? null, durationS: x.durationS ?? null, hold: x.type === 'hold' }));
+      const mine = ss.filter((x) => x.exKey === ex.key).map((x) => ({ type: x.type, kg: x.kg ?? null, reps: x.reps ?? null, durationS: x.durationS ?? null, distanceM: x.distanceM ?? null, hold: x.type === 'hold' }));
       if (!mine.length) continue;
       const date = isoDate(new Date(s.startedAt));
-      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, sets: mine, heaviest: heaviestOf(mine) });
+      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine) });
       ownDates.set(`${ex.name}|${date}`, true);
     }
   }
