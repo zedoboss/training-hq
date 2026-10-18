@@ -19,6 +19,8 @@ import { readProfile } from './coach/profile.mjs';
 import { TOOLS, contextLine } from './coach/tools.mjs';
 import { openEngine } from './voice/engine.mjs';
 import { openVoice } from './voice/index.mjs';
+import { openWhisper } from './voice/whisper.mjs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -75,7 +77,10 @@ const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.data
 
 // Voice (step 9): the voice lock runs here (speaker check, music check), his voiceprint stays in data/voice.
 const engine = openEngine({ modelsDir: config.voiceModelsDir || p.voiceModelsDir, log });
-const voice = openVoice({ store, dataDir: p.dataDir, engine, log });
+let voiceConfig = {};
+try { voiceConfig = JSON.parse(readFileSync(join(p.configDir, 'voice.json'), 'utf8')); } catch { /* defaults */ }
+const whisper = openWhisper({ ...(voiceConfig.whisperPath ? { bin: voiceConfig.whisperPath } : {}), ...(voiceConfig.whisperModel ? { model: voiceConfig.whisperModel } : {}), ...(config.whisperPort ? { port: config.whisperPort } : {}), log });
+const voice = openVoice({ store, dataDir: p.dataDir, engine, whisper, coach, log });
 log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
 
 const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, onSync, log });
@@ -90,6 +95,7 @@ const shutdown = (sig) => {
   clearInterval(visionTimer);
   clearInterval(healthTimer);
   coach.close().catch(() => {});
+  whisper.stop('server stopping');
   server.close(() => { store.close(); process.exit(0); });
   setTimeout(() => process.exit(0), 3000).unref();
 };

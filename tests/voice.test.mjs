@@ -173,3 +173,63 @@ test('voice routes: status, calibration, test, forget; a token is needed; strict
     server.close(); store.close(); rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('transcript cleaning: music marks, made-up lines and the hint repeated back are dropped', async () => {
+  const { cleanTranscript } = await import('../server/voice/whisper.mjs');
+  assert.equal(cleanTranscript(' 80 for 8.\n'), '80 for 8.');
+  assert.equal(cleanTranscript('[Music]'), '');
+  assert.equal(cleanTranscript('♪ la la la ♪'), '');
+  assert.equal(cleanTranscript('(upbeat music) Next exercise'), 'Next exercise');
+  assert.equal(cleanTranscript('Thanks for watching!'), '');
+  assert.equal(cleanTranscript(' . . '), '');
+  assert.equal(cleanTranscript('Next exercise. Start the timer.', '80 for 8. Next exercise. Start the timer. Add 15 seconds.'), '');
+  assert.equal(cleanTranscript('Start the timer', 'Next exercise. Start the timer.'), 'Start the timer', 'a short command is his, even if it is in the hint');
+});
+
+test('utterance: refused clips stop at "heard"; his words go to the coach as spoken; a second device is dropped', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-voice-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  let clock = 1000;
+  const sent = [];
+  const coach = { send: async (o) => { sent.push(o); o.emit({ type: 'done', message: { role: 'assistant', text: 'Logged.' } }); return { text: 'Logged.' }; } };
+  let whisperText = '80 for 8.';
+  const whisper = { transcribe: async () => ({ text: whisperText, ms: 5 }), status: () => ({ running: true }), ensure: async () => {} };
+  store.writeLocal('supplements', 's1', { name: 'Creatine monohydrate' });
+  const voice = openVoice({ store, dataDir: dir, engine: fakeEngine(), whisper, coach, now: () => clock });
+  try {
+    const run = async (o, dev = 'phone') => { const ev = []; await voice.utterance({ bytes: encodeWav(clip(o)), deviceId: dev, emit: (e) => ev.push(e) }); return ev; };
+    // Not calibrated yet: never acted on.
+    assert.deepEqual((await run({ who: 1 }))[0], { type: 'heard', ok: false, reason: 'not-calibrated', score: null });
+    for (let i = 0; i < ROUND_MIN; i++) voice.enrol({ bytes: encodeWav(clip({ who: 1 })), condition: 'home' });
+    let ev = await run({ who: 2 });
+    assert.equal(ev.length, 1);
+    assert.equal(ev[0].reason, 'not-you');
+    assert.equal((await run({ who: 1, music: 0.9 }))[0].reason, 'music');
+    assert.equal(sent.length, 0, 'nothing reached the coach');
+    ev = await run({ who: 1 });
+    assert.equal(ev[0].ok, true);
+    assert.equal(ev[0].text, '80 for 8.');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].via, 'voice');
+    assert.equal(sent[0].deviceId, 'phone');
+    assert.match(voice.hint(), /Creatine monohydrate/);
+    // The Mac's browser heard the same words a moment later: dropped.
+    clock += 1500;
+    ev = await run({ who: 1 }, 'mac');
+    assert.equal(ev[0].reason, 'duplicate');
+    // The same device saying it again is a new set.
+    ev = await run({ who: 1 }, 'phone');
+    assert.equal(ev[0].ok, true);
+    whisperText = '[Music]';
+    clock += 10000;
+    assert.equal((await run({ who: 1 }))[0].reason, 'empty');
+    assert.equal(sent.length, 2);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('coach: a spoken message carries the voice note and is marked as spoken', async () => {
+  const { turnText, VOICE_NOTE } = await import('../server/coach/prompt.mjs');
+  const t = turnText({ text: '80 for 8', now: Date.UTC(2026, 0, 5, 1), tz: 'UTC', voice: true });
+  assert.ok(t.includes(VOICE_NOTE));
+  assert.ok(!turnText({ text: 'hi', now: 0, tz: 'UTC' }).includes(VOICE_NOTE));
+});

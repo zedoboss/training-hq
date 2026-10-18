@@ -6,10 +6,14 @@
 import { join } from 'node:path';
 import { openVoiceprint, thresholdFor, DEFAULT_STRICTNESS } from './voiceprint.mjs';
 import { decide } from './gate.mjs';
-import { decodeWav, resample, VOICE_RATE } from '../../app/js/lib/wav.js';
+import { cleanTranscript } from './whisper.mjs';
+import { decodeWav, encodeWav, resample, normalise, VOICE_RATE } from '../../app/js/lib/wav.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
 
 export const MAX_CLIP_SEC = 15;
+/** The same words from two devices within this time are one utterance (the phone and the Mac both listening). */
+export const DUPLICATE_MS = 5000;
+const HINT = '80 for 8. 62.5 for 10. Next exercise. Start the timer. Add 15 seconds. Skip the rest. Smith machine.';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
@@ -18,8 +22,11 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
  * @param {ReturnType<import('../store.mjs').openStore>} o.store
  * @param {string} o.dataDir  the private folder's data/
  * @param {ReturnType<import('./engine.mjs').openEngine>} o.engine
+ * @param {ReturnType<import('./whisper.mjs').openWhisper>} [o.whisper]
+ * @param {ReturnType<import('../coach/index.mjs').openCoach>} [o.coach]
  */
-export function openVoice({ store, dataDir, engine, log = () => {}, now = () => Date.now() }) {
+export function openVoice({ store, dataDir, engine, whisper = null, coach = null, log = () => {}, now = () => Date.now() }) {
+  let lastHeard = null; // {text, device, at}: to drop the same words heard by a second device
   const print = openVoiceprint(join(dataDir, 'voice'));
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
   const strictness = () => withDefaults(one('settings', 'main')).voice?.strictness || DEFAULT_STRICTNESS;
@@ -64,8 +71,52 @@ export function openVoice({ store, dataDir, engine, log = () => {}, now = () => 
     return { ...c.decision, threshold: c.threshold, speechSec: Math.round(c.analysis.speechSec * 10) / 10, tags: c.analysis.tags, test: t, status: status() };
   }
 
+  /** Whisper's vocabulary hint: the usual commands and his own supplement names (from his list on the Mac). */
+  const hint = () => {
+    const names = store.listRecords('supplements').map((r) => r.data).filter((x) => x && !x.removedAt).map((x) => String(x.name || '').replace(/\s*\(.*?\)\s*/g, ' ').trim()).filter(Boolean);
+    return `${HINT}${names.length ? ` ${names.slice(0, 12).join(', ')}.` : ''}`;
+  };
+
+  /**
+   * One stretch of speech from a listening device. Refused clips get only {type:'heard', ok:false, reason, score}:
+   * nothing is transcribed, saved or answered, and the audio is gone when this returns. His words go to the coach
+   * like a typed message (marked as spoken); the coach's events follow on `emit`.
+   */
+  async function utterance({ bytes, deviceId = null, model = 'fast', tz = null, emit = () => {} }) {
+    const t0 = now();
+    const c = check(bytes);
+    const d = c.decision;
+    if (!d.ok) {
+      log(`voice: ignored (${d.reason}${d.score != null ? ` ${d.score}` : ''})`);
+      emit({ type: 'heard', ok: false, reason: d.reason, score: d.score });
+      return null;
+    }
+    if (!whisper) throw fail(503, 'speech to text not available');
+    const raw = await whisper.transcribe(encodeWav(normalise(c.samples)), hint());
+    const text = cleanTranscript(raw.text, hint());
+    if (!text) {
+      log(`voice: no words (${raw.ms} ms)`);
+      emit({ type: 'heard', ok: false, reason: 'empty', score: d.score });
+      return null;
+    }
+    const key = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (lastHeard && lastHeard.key === key && lastHeard.device !== deviceId && now() - lastHeard.at < DUPLICATE_MS) {
+      log('voice: same words from a second device, dropped');
+      emit({ type: 'heard', ok: false, reason: 'duplicate', score: d.score });
+      return null;
+    }
+    lastHeard = { key, device: deviceId, at: now() };
+    log(`voice: heard you (${d.score}), ${raw.ms} ms to text, ${now() - t0} ms in all`);
+    emit({ type: 'heard', ok: true, score: d.score, text, ms: now() - t0 });
+    if (!coach) throw fail(503, 'coach not available');
+    return coach.send({ text, model, deviceId, tz, via: 'voice', emit });
+  }
+
   return {
-    status,
+    status: () => ({ ...status(), whisper: whisper?.status() || null }),
+    utterance,
+    warm: () => whisper?.ensure().then(() => true).catch((e) => { log(`whisper: ${e.message}`); return false; }),
+    hint,
     enrol,
     check,
     test,

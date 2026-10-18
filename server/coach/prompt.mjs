@@ -37,6 +37,9 @@ HARD LIMITS (never break these, even if he asks)
 QUIET
 - During a set or a hold, say nothing unless he asks. After a set, speak only if the logged set differs from the target or breaks a rule. Nothing between sets unless he asks.`;
 
+/** Added to the context of a message he said out loud (step 9). */
+export const VOICE_NOTE = 'He said this out loud; the app turned it into text (speech recognition can mishear, mostly numbers: "84 8" may be "80 for 8"; if a number looks wrong, ask). Your answer is spoken aloud by the app: one or two short sentences, no lists, no symbols. If he just logged a set that matches today\'s target and breaks no rule, answer with exactly "Logged." (the app plays a tick instead of speaking).';
+
 /** The whole system prompt: the rules, then his profile (private). */
 export function systemPrompt({ profile = '' } = {}) {
   const p = String(profile || '').trim();
@@ -53,9 +56,9 @@ export function recapText(messages = []) {
 }
 
 /** What goes to Claude for one message: the recap (fresh process only), his words, and the context block. */
-export function turnText({ text, now = Date.now(), tz, recap = '', extra = '' }) {
+export function turnText({ text, now = Date.now(), tz, recap = '', extra = '', voice = false }) {
   const d = new Date(now);
-  const ctx = [`Now: ${formatDay(d, tz)}, ${formatTime(d, tz)} (${isoDate(d, tz)}, time zone ${tz}).`, extra].filter(Boolean).join('\n');
+  const ctx = [`Now: ${formatDay(d, tz)}, ${formatTime(d, tz)} (${isoDate(d, tz)}, time zone ${tz}).`, voice ? VOICE_NOTE : '', extra].filter(Boolean).join('\n');
   return [
     recap ? `<earlier-conversation note="The coach process restarted; this is the end of the conversation so far, from the app's log. Don't answer it again.">\n${recap}\n</earlier-conversation>` : '',
     String(text),

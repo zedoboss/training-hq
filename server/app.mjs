@@ -339,6 +339,36 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       return voiceCall(() => voice.enrol({ bytes, condition: url.searchParams.get('condition'), phrase: url.searchParams.get('phrase') || '' }));
     },
 
+    // One stretch of speech while listening: answered as a stream of JSON lines like /api/coach/send, starting with
+    // {type:'heard'}; when the voice lock refuses it, that is the only line (nothing else happens).
+    'POST /api/voice/utterance': async (req, url, res) => {
+      const device = auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      const bytes = await readRaw(req, MAX_CLIP_BYTES);
+      const model = url.searchParams.get('model') === 'deep' ? 'deep' : 'fast';
+      const tz = url.searchParams.get('tz');
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
+      let open = true;
+      res.on('close', () => { open = false; });
+      const emit = (e) => { if (open && !res.writableEnded) res.write(`${JSON.stringify(e)}\n`); };
+      const ping = setInterval(() => emit({ type: 'ping' }), 10000);
+      try {
+        await voice.utterance({ bytes, deviceId: device.id, model, tz: tz && tz.length < 64 ? tz : null, emit });
+      } catch (e) {
+        if (!e.status) log(`voice utterance: ${e.stack || e}`);
+        emit({ type: 'error', error: e.message });
+      } finally {
+        clearInterval(ping);
+        if (!res.writableEnded) res.end();
+      }
+    },
+
+    'POST /api/voice/warm': async (req) => {
+      auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      return { whisper: await voice.warm(), ...voice.status() };
+    },
+
     'POST /api/voice/forget': async (req) => {
       auth(req);
       if (!voice) throw new HttpError(404, 'voice not available');

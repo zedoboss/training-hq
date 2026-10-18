@@ -74,7 +74,7 @@ export function openCoach({ store, tools = [], profile = () => '', context = nul
    * Send one message and wait for the reply. emit receives: {type:'user', message}, {type:'text', delta},
    * {type:'tool-start', name}, {type:'tool', tool}, {type:'action', action}, {type:'done', message}.
    */
-  async function send({ text, model = 'fast', deviceId = null, tz: tzIn = null, emit = () => {} }) {
+  async function send({ text, model = 'fast', deviceId = null, tz: tzIn = null, via = 'text', emit = () => {} }) {
     const words = String(text ?? '').trim().slice(0, MAX_TEXT);
     if (!words) throw new Error('Nothing to send.');
     const key = MODELS[model] ? model : 'fast';
@@ -82,7 +82,8 @@ export function openCoach({ store, tools = [], profile = () => '', context = nul
     const at = now();
     const turnId = `turn.${at.toString(36)}.${rand()}`;
     const earlier = conversation(store);
-    const userMsg = save({ id: messageId(at), role: 'user', text: words, at, device: deviceId, turnId, model: key });
+    const voice = via === 'voice';
+    const userMsg = save({ id: messageId(at), role: 'user', text: words, at, device: deviceId, turnId, model: key, ...(voice ? { via: 'voice' } : {}) });
     emit({ type: 'user', message: userMsg });
     const t = { turnId, tz: zone, deviceId, tools: [], actions: [], emit };
     let reply;
@@ -95,10 +96,10 @@ export function openCoach({ store, tools = [], profile = () => '', context = nul
           const recap = fresh ? recapText(earlier.slice(-RECAP_MESSAGES)) : '';
           let extra = '';
           try { extra = context ? context({ store, tz: zone, now: now() }) : ''; } catch (e) { log(`coach context: ${e.stack || e}`); }
-          return turnText({ text: words, now: now(), tz: zone, recap, extra });
+          return turnText({ text: words, now: now(), tz: zone, recap, extra, voice });
         },
       });
-      reply = { role: 'assistant', text: res.text || '(no answer)', model: key, ms: res.ms };
+      reply = { role: 'assistant', text: res.text || '(no answer)', model: key, ms: res.ms, ...(voice ? { via: 'voice' } : {}) };
     } catch (e) {
       reply = { role: 'assistant', text: e.message, error: true, model: key };
     } finally {
