@@ -80,10 +80,11 @@ function readRaw(req, limit) {
  * @param {ReturnType<import('./health.mjs').openHealth>} [o.health] Apple Health files (step 7)
  * @param {ReturnType<import('./coach/index.mjs').openCoach>} [o.coach] the coach (step 8)
  * @param {ReturnType<import('./voice/index.mjs').openVoice>} [o.voice] voice (step 9)
+ * @param {ReturnType<import('./voice/tts.mjs').openTts>} [o.tts] the coach's voice (step 9)
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -361,6 +362,22 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
         clearInterval(ping);
         if (!res.writableEnded) res.end();
       }
+    },
+
+    // The coach's voice: one sentence in, raw 24 kHz 16-bit audio out as it is made (ElevenLabs via the Mac; the key
+    // never leaves the Mac). X-Voice says which voice spoke.
+    'POST /api/voice/speak': async (req, url, res) => {
+      auth(req);
+      if (!tts) throw new HttpError(404, 'voice not available');
+      const { text } = await readJson(req);
+      if (typeof text !== 'string' || !text.trim()) throw new HttpError(400, 'nothing to say');
+      const ctrl = new AbortController();
+      res.on('close', () => ctrl.abort());
+      let started = false;
+      const start = (engine) => { if (!started) { started = true; res.writeHead(200, { 'Content-Type': 'audio/L16; rate=24000; channels=1', 'Cache-Control': 'no-store', 'X-Voice': engine, 'Access-Control-Expose-Headers': 'X-Voice' }); } };
+      const out = await tts.speak(text, (chunk, engine) => { start(engine); if (!res.writableEnded) res.write(chunk); }, { signal: ctrl.signal });
+      start(out.engine);
+      if (!res.writableEnded) res.end();
     },
 
     'POST /api/voice/warm': async (req) => {

@@ -233,3 +233,47 @@ test('coach: a spoken message carries the voice note and is marked as spoken', a
   assert.ok(t.includes(VOICE_NOTE));
   assert.ok(!turnText({ text: 'hi', now: 0, tz: 'UTC' }).includes(VOICE_NOTE));
 });
+
+test('the coach voice: ElevenLabs with the private key, the Mac voice without one or when it fails', async () => {
+  const { openTts } = await import('../server/voice/tts.mjs');
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const { EventEmitter } = await import('node:events');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-tts-'));
+  try {
+    const calls = [];
+    const fakeSpawn = (bin, args) => {
+      calls.push(['say', args.at(-1)]);
+      const p = new EventEmitter();
+      setImmediate(() => { writeFileSync(args[1], Buffer.concat([Buffer.from('RIFF....WAVEfmt '), Buffer.alloc(20), Buffer.from('data'), Buffer.alloc(4), Buffer.from([1, 2, 3, 4])])); p.emit('exit', 0); });
+      return p;
+    };
+    let status = 200;
+    const fakeFetch = async (url, o) => {
+      calls.push(['eleven', url, o.headers['xi-api-key'], JSON.parse(o.body)]);
+      if (status !== 200) return { ok: false, status, text: async () => 'quota' };
+      return { ok: true, status: 200, body: (async function* () { yield new Uint8Array([9, 9]); yield new Uint8Array([8, 8]); })() };
+    };
+    const tts = openTts({ configDir: dir, fetchFn: fakeFetch, spawn: fakeSpawn });
+    const got = [];
+    let r = await tts.speak('Pull at 4:30 AM.', (c) => got.push(...c));
+    assert.equal(r.engine, 'mac');
+    assert.deepEqual(got, [1, 2, 3, 4]);
+    assert.equal(calls[0][1], 'Pull at 4:30 A M.');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'elevenlabs.json'), JSON.stringify({ apiKey: 'sk_test_0123456789' }));
+    writeFileSync(join(dir, 'voice.json'), JSON.stringify({ elevenVoiceId: 'voice1', elevenModel: 'model1' }));
+    got.length = 0;
+    r = await tts.speak('Logged 60 kg x 8.', (c) => got.push(...c));
+    assert.equal(r.engine, 'elevenlabs');
+    assert.deepEqual(got, [9, 9, 8, 8]);
+    const e = calls.find((c) => c[0] === 'eleven');
+    assert.match(e[1], /voice1\/stream\?output_format=pcm_24000/);
+    assert.equal(e[2], 'sk_test_0123456789');
+    assert.deepEqual(e[3], { text: 'Logged 60 kilos for 8.', model_id: 'model1' });
+    assert.equal(tts.status().elevenlabs, true);
+    status = 401;
+    r = await tts.speak('Next.', () => {});
+    assert.equal(r.engine, 'mac');
+    assert.match(tts.status().error, /401/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

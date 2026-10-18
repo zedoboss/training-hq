@@ -53,3 +53,22 @@ test('VAD: a long speech is cut at the limit; boost makes it harder to start', (
   run(v2, [[800, 0.05], [900, 0.002]]);
   assert.deepEqual(ev2.map((e) => e.type), ['start', 'end']);
 });
+
+test('spoken text: times with A M / P M, dates as month and day, kilos, no symbols', async () => {
+  const { speechText } = await import('../app/js/lib/voice-text.js');
+  assert.equal(speechText('Pull at 4:30 AM, Sunday 10/11. Readiness check at 4:00 AM.'), 'Pull at 4:30 A M, Sunday October 11. Readiness check at 4:00 A M.');
+  assert.equal(speechText('**Squat** 65 kg x 8 · 2 sets'), 'Squat 65 kilos for 8, 2 sets');
+  assert.equal(speechText('- Smith bench: 41.3 kg total (11.3 kg bar + 15 kg a side)'), 'Smith bench: 41.3 kilos total (11.3 kilos bar + 15 kilos a side)');
+  assert.equal(speechText('at 7:30pm.'), 'at 7:30 P M.');
+});
+
+test('sentence splitter: whole sentences as they complete, decimals kept together', async () => {
+  const { sentenceSplitter } = await import('../app/js/lib/voice-text.js');
+  const s = sentenceSplitter();
+  assert.deepEqual(s.push('Logged 62.5 kg'), []);
+  assert.deepEqual(s.push(' for 10. That\'s over'), ['Logged 62.5 kg for 10.']);
+  assert.deepEqual(s.push(' your cap! Drop'), ["That's over your cap!"]);
+  assert.deepEqual(s.push(' to 60.'), []);
+  assert.deepEqual(s.flush(), ['Drop to 60.']);
+  assert.deepEqual(s.flush(), []);
+});

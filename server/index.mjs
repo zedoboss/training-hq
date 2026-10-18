@@ -20,6 +20,7 @@ import { TOOLS, contextLine } from './coach/tools.mjs';
 import { openEngine } from './voice/engine.mjs';
 import { openVoice } from './voice/index.mjs';
 import { openWhisper } from './voice/whisper.mjs';
+import { openTts } from './voice/tts.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -81,9 +82,11 @@ let voiceConfig = {};
 try { voiceConfig = JSON.parse(readFileSync(join(p.configDir, 'voice.json'), 'utf8')); } catch { /* defaults */ }
 const whisper = openWhisper({ ...(voiceConfig.whisperPath ? { bin: voiceConfig.whisperPath } : {}), ...(voiceConfig.whisperModel ? { model: voiceConfig.whisperModel } : {}), ...(config.whisperPort ? { port: config.whisperPort } : {}), log });
 const voice = openVoice({ store, dataDir: p.dataDir, engine, whisper, coach, log });
+// The coach's voice: ElevenLabs with his key in config/elevenlabs.json (never sent to the phone), else the Mac's voice.
+const tts = openTts({ configDir: p.configDir, log });
 log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, onSync, log });
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });

@@ -243,6 +243,43 @@ export async function coachSend({ text, model, tz, onEvent, signal }) {
   lines.end();
 }
 
+// Voice (step 9). A stretch of speech goes to the Mac; the answer streams back like a typed message's, after a first
+// {type:'heard'} line (the voice lock's verdict). The coach's voice comes back as raw audio, one sentence at a time.
+export async function voiceUtterance({ wav, model, tz, onEvent, signal }) {
+  await ready;
+  const url = await repo.getMeta('macUrl');
+  const token = await repo.getMeta('token');
+  if (!url || !token) throw new Error('Pair with your Mac first (Settings).');
+  let res;
+  try {
+    res = await fetch(`${url}/api/voice/utterance?model=${encodeURIComponent(model || 'fast')}&tz=${encodeURIComponent(tz || '')}`, { method: 'POST', signal, headers: { 'content-type': 'audio/wav', authorization: `Bearer ${token}` }, body: wav });
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e;
+    setState({ mac: { reachable: false } });
+    throw new Error('Mac unreachable.');
+  }
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Mac answered ${res.status}`);
+  setState({ mac: { reachable: true, lastSeen: Date.now() } });
+  const lines = lineReader(onEvent);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    lines.push(dec.decode(value, { stream: true }));
+  }
+  lines.push(dec.decode());
+  lines.end();
+}
+
+/** The coach's voice for one sentence: a streaming response of raw 24 kHz 16-bit audio. */
+export async function voiceSpeech(text, signal) {
+  await ready;
+  const url = await repo.getMeta('macUrl');
+  const token = await repo.getMeta('token');
+  return fetch(`${url}/api/voice/speak`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text }) });
+}
+
 /** Ask the Mac for a pairing code for another device. */
 export async function newPairingCode() {
   await ready;

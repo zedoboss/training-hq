@@ -34,3 +34,53 @@ export const ENROL_PROBLEM = {
   'too-short': "Didn't catch enough of that. Say it again, a bit closer.",
   'not-like-the-others': "That didn't sound like your other phrases (someone else, or noise?). Say it again.",
 };
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * Text as it should be spoken: no markdown or symbols, times with the letters "A M" / "P M" (brief section 4), dates
+ * as "October 20", "kg" as "kilos", "60 x 8" as "60 for 8".
+ */
+export function speechText(text) {
+  return String(text ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[*_`#>|]+/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*[-•]\s+/gm, '')
+    .replace(/\b(\d{1,2}(?::\d{2})?)\s*([AaPp])\.\s?[Mm]\./g, (_, t, ap) => `${t} ${ap.toUpperCase()} M`)
+    .replace(/\b(\d{1,2}(?::\d{2})?)\s*([AaPp])[Mm]\b/g, (_, t, ap) => `${t} ${ap.toUpperCase()} M`)
+    .replace(/\b(1[0-2]|0?[1-9])\/(3[01]|[12]\d|0?[1-9])(?:\/(\d{2,4}))?\b/g, (_, m, d, y) => `${MONTHS[Number(m) - 1]} ${Number(d)}${y ? `, ${y.length === 2 ? `20${y}` : y}` : ''}`)
+    .replace(/(\d)\s*(kg)?\s*[x×]\s*(\d)/g, (_, a, kg, b) => `${a}${kg ? ' kg' : ''} for ${b}`)
+    .replace(/(\d)\s*(?:kg|KG)\b/g, '$1 kilos')
+    .replace(/\bkg\b/g, 'kilos')
+    .replace(/\s*·\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Splits a reply arriving in pieces into whole sentences, so each can be spoken as soon as it is complete.
+ * push(delta) returns the sentences finished by it; flush() returns what is left.
+ */
+export function sentenceSplitter() {
+  let buf = '';
+  // A full stop after a number ("62.5") or a short abbreviation is not the end of a sentence.
+  const END = /([.!?…]+["')\]]*)(\s+)|\n+/g;
+  return {
+    push(delta) {
+      buf += delta;
+      const out = [];
+      let from = 0;
+      END.lastIndex = 0;
+      let m;
+      while ((m = END.exec(buf))) {
+        const cut = m.index + (m[1] ? m[1].length : 0);
+        const piece = buf.slice(from, cut).trim();
+        if (piece.length >= 2) { out.push(piece); from = m.index + m[0].length; }
+      }
+      buf = buf.slice(from);
+      return out;
+    },
+    flush() { const rest = buf.trim(); buf = ''; return rest ? [rest] : []; },
+  };
+}
