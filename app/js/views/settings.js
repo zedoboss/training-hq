@@ -151,6 +151,7 @@ function prefsHtml(st, eq) {
       ${seg('coach.intensity', [1, 2, 3, 4, 5].map((n) => [n, String(n)]), st.coach.intensity)}
       ${['commander', 'hype', 'dark', 'warrior', 'rival'].map((m) => opt(MOOD_LABEL[m], MOOD_TEXT[m], sw(`coach.moods.${m}`, st.coach.moods[m] !== false))).join('')}
       ${opt('Calm', MOOD_TEXT.calm, '<span class="hud c-green">ON</span>')}
+      ${opt('Rep calls on squat-camera sets', '"Two more", "Last one", only while you stand at the top. Off until it is checked on your iPhone that the depth ding is not slowed or covered; while off, the coach stays silent during squat-camera sets.', sw('coach.squatCalls', st.coach.squatCalls === true))}
       ${opt('Get ready before a hold', 'Seconds to set up after Start, then 3, 2, 1 and the hold.', '')}
       ${seg('holds.getReadyS', [[10, '10 s'], [15, '15 s'], [20, '20 s']], st.holds.getReadyS)}
     </div>

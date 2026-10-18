@@ -13,7 +13,7 @@ import { voiceUtterance, voiceSpeech, macGet, macPost, macSendRaw, syncNow } fro
 import { getState } from './store.js';
 import { withDefaults } from './settings.js';
 import { runAction } from './coach.js';
-import { isQuiet, onQuietEnd } from './quiet.js';
+import { isQuiet, onQuietEnd, quietFor } from './quiet.js';
 import * as rest from './rest-timer.js';
 import { play } from './sounds.js';
 import * as talk from './talk.js';
@@ -73,7 +73,8 @@ function speak(sentence) {
   if (!prefs().voice.speak) return;
   // A15 (brief decision 30): the coach talks during sets and holds, so its answers no longer wait for them to end,
   // unless he switched that off (then the old quiet rule holds them back).
-  if (isQuiet() && prefs().coach.talk.during === false) { quietQueue.push(sentence); return; }
+  // A16: never while the squat camera runs a set (the depth ding must stay clear): it waits until the set is over.
+  if (isQuiet() && (prefs().coach.talk.during === false || quietFor('squat'))) { quietQueue.push(sentence); return; }
   talk.stop();
   player.say(sentence);
 }

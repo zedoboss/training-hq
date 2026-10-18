@@ -134,7 +134,7 @@ export function run(script, { t0 = Date.now(), onCue = null } = {}) {
         if (recent.size > 40) recent.delete(recent.values().next().value);
       } else if (cue.sound) play(cue.sound, vol());
       const how = voice ? 'voice' : cue.sound ? 'sound' : 'none';
-      fired.push({ kind: cue.kind, how, text: cue.text || '', at: Date.now() });
+      fired.push({ kind: cue.kind, how, text: cue.text || '', at: Date.now(), perf: performance.now(), durMs: voice ? Math.round(buf.duration * 1000) : 0 });
       if (fired.length > 60) fired.shift();
       onCue?.(cue, how);
     }, Math.max(0, wait)));
@@ -145,6 +145,7 @@ export function run(script, { t0 = Date.now(), onCue = null } = {}) {
 /** Stop the script playing now (his words, the end of a set, leaving the screen). */
 export function stop() {
   if (!current) return;
+  if (current.sources.size) fired.push({ kind: 'cut', how: 'stop', text: '', at: Date.now(), perf: performance.now(), durMs: 0 });
   current.stopped = true;
   current.timers.forEach(clearTimeout);
   stopVoice();

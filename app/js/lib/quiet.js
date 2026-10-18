@@ -3,12 +3,14 @@
 const on = new Set();
 const subs = new Set();
 
-/** Mark a quiet reason ('hold', 'set-timer') on or off. */
+/** Mark a quiet reason ('hold', 'set-timer', 'squat') on or off. */
 export function setQuiet(reason, value) {
   const before = on.size > 0;
   if (value) on.add(reason); else on.delete(reason);
   if (before && !on.size) for (const f of subs) f();
 }
 export const isQuiet = () => on.size > 0;
+/** One reason in particular (A16: 'squat' holds the coach's answers even though it talks during sets). */
+export const quietFor = (reason) => on.has(reason);
 /** Called when the last quiet reason ends. */
 export function onQuietEnd(fn) { subs.add(fn); return () => subs.delete(fn); }

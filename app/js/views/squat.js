@@ -12,6 +12,11 @@ import { formatDay, formatTime, timeAt, dayAt } from '../lib/time.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import { overlay, actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+import { watchReps } from '../lib/squat-calls.js';
+import { setQuiet } from '../lib/quiet.js';
+import * as talk from '../lib/talk.js';
+import { getState } from '../lib/store.js';
+import { withDefaults } from '../lib/settings.js';
 
 const C = SquatCore;
 const $ = (id) => document.getElementById(`sq-${id}`);
@@ -93,6 +98,9 @@ const nextMpTs = (t) => (mpTs = Math.max(Math.round(t), mpTs + 1));
 // Training HQ: the run being recorded (lib/squat-log.js) and the set it is for.
 let current = null;
 let link = null;
+// A16: the rep calls ("two more") watch the machine from their own timer, never from the frame loop below.
+let stopCalls = () => {};
+const callsOn = () => withDefaults(getState().settings).coach.squatCalls === true;
 
 // ===== Audio: built once on the Start tap, then kept hot =====
 const audio = {
@@ -660,6 +668,11 @@ async function start(mode, fileUrl = null) {
     requestFrame();
     acquireWakeLock();
     checkAudioRoute();
+    // A16: started after the camera and the frame loop, outside them. The coach's other talk waits until the set is
+    // over (only the rep calls, at the top, can speak), so nothing masks the ding.
+    setQuiet('squat', true);
+    talk.stop();
+    if (callsOn()) stopCalls = watchReps({ talk, read: () => ({ good: machine.good, state: machine.state }), targetReps: link?.targetReps ?? null, standing: C.State.STANDING });
   } catch (e) {
     console.error('[squat] start failed', e);
     stop({ quiet: true });
@@ -674,6 +687,8 @@ async function start(mode, fileUrl = null) {
 /** quiet: leaving the screen or a failed start, so keep the run but ask nothing. */
 function stop({ quiet = false } = {}) {
   run.active = false;
+  stopCalls(); stopCalls = () => {};
+  setQuiet('squat', false);
   audio.shutdown();
   stopSource();
   releaseWakeLock();
@@ -1051,6 +1066,10 @@ export function render(view, params = []) {
       const { choices, defaultId } = fillChoices(session, sets, { exKey: ex.key });
       const c = choices.find((x) => x.setId === defaultId);
       link.setId = c?.setId ?? null;
+      // A16: the set's target reps for the rep calls; their clips are fetched now, before the camera starts.
+      const tset = sets.find((x) => x.id === link.setId);
+      link.targetReps = tset?.target?.reps ?? null;
+      if (link.targetReps && callsOn() && talk.talkOn()) talk.prepare({ cues: ['Two more.', 'Last one.', "That's the target."].map((text) => ({ text })) });
       const line = c ? `${c.label === 'W' ? 'Warm-up' : `Set ${c.label}`}${c.kg != null ? ` · ${fmtKg(c.kg)} kg` : ''}` : '';
       $('for').hidden = false;
       $('for').innerHTML = `<span class="hud c-cyan">FOR ${esc(session.title.toUpperCase())}</span><b>${esc(ex.name)}${line ? ` · ${esc(line)}` : ''}</b>

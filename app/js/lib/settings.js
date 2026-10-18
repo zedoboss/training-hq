@@ -50,7 +50,9 @@ export const DEFAULT_SETTINGS = {
   // Step 8: the coach's Claude ('fast' Sonnet 5.5 at low effort, the default; 'deep' Opus 5.5 at high effort).
   // A15 (brief decision 30): the coach's moods (Calm is always on: it takes over whenever a safety rule applies), how
   // hard it pushes (1-5), and whether it talks during sets and holds, and how often ('often' | 'steady' | 'once').
-  coach: { model: 'fast', moods: { commander: true, hype: true, dark: true, warrior: true, rival: true }, intensity: 3, talk: { during: true, every: 'steady' } },
+  // A16: rep calls ("two more") on squat sets with the camera: off until an iPhone test shows the ding is untouched;
+  // until then the coach is silent during squat-camera sets.
+  coach: { model: 'fast', moods: { commander: true, hype: true, dark: true, warrior: true, rival: true }, intensity: 3, talk: { during: true, every: 'steady' }, squatCalls: false },
   // A14: tendon holds start with this many seconds of GET READY before the hold itself.
   holds: { getReadyS: 15 },
   // Step 9: the voice lock's strictness on the Mac ('strict' default, 'normal', 'relaxed'), whether the coach answers
