@@ -1,6 +1,6 @@
 // Exercise history from two sources: finished sessions (logged in Training HQ or imported from Hevy and Strong) and
 // the Hevy history bridge, a stand-in for the last few Hevy sessions that is ignored once Hevy history is imported.
-// Newest first. Each entry: {date, source, dayType, routineId, sets:[{type, kg, reps, durationS, hold}], heaviest:{kg, reps}|null}.
+// Newest first. Each entry: {date, source, dayType, routineId, sets:[{type, kg, reps, durationS, hold, depth?}], heaviest:{kg, reps}|null}.
 import { isoDate } from './time.js';
 
 const isWorking = (s) => !s.hold && s.type !== 'warmup' && s.type !== 'hold';
@@ -45,7 +45,7 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
   for (const s of done) {
     const ss = (setsBySession.get(s.id) || []).sort((a, b) => a.order - b.order);
     for (const ex of s.exercises || []) {
-      const mine = ss.filter((x) => x.exKey === ex.key).map((x) => ({ type: x.type, kg: x.kg ?? null, reps: x.reps ?? null, durationS: x.durationS ?? null, distanceM: x.distanceM ?? null, hold: x.type === 'hold' }));
+      const mine = ss.filter((x) => x.exKey === ex.key).map((x) => ({ type: x.type, kg: x.kg ?? null, reps: x.reps ?? null, durationS: x.durationS ?? null, distanceM: x.distanceM ?? null, hold: x.type === 'hold', ...(x.depth ? { depth: x.depth } : {}) }));
       if (!mine.length) continue;
       const date = isoDate(new Date(s.startedAt));
       push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine) });
