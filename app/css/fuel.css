@@ -105,3 +105,4 @@
 .cal-supps.is-all { background: var(--amber); }
 .cal-key-meals { width: 10px; height: 3px; border-radius: 2px; background: var(--green); display: inline-block; }
 .cal-key-supps { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); display: inline-block; }
+.supp-low { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 14px; }

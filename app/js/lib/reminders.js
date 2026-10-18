@@ -9,7 +9,7 @@ import { weekColumn } from './programme.js';
 import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
 import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
-import { mealReminders, suppReminders } from './fuel-reminders.js';
+import { mealReminders, suppReminders, planReminders } from './fuel-reminders.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -18,7 +18,7 @@ export const KINDS = [
   ['evening', 'Evening: what is still open, and tomorrow'],
   ['neck', 'Neck is still unplanned (weekly)'],
   ['meals', 'Meal times with nothing logged; the after photo'],
-  ['supps', 'Supplements at their times, asked again until answered'],
+  ['supps', 'Supplements at their times, asked again until answered; running low; weekly planning'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };
@@ -42,9 +42,10 @@ const holdText = (s) => `${s.label}: ${s.exercise}${s.also?.length ? ` then ${s.
  * @param {Array} [o.mealChecks] answers to "eaten, cooking, or skipping?"
  * @param {Array} [o.supplements] his supplement list (step 6)
  * @param {Array} [o.suppLog]    taken / skipped answers
+ * @param {Array} [o.suppAnswers] restock and weekly planning answers
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [] }) {
+export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [] }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -97,6 +98,7 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   // Supplements (6.6): at his times, then again every 45 minutes until each is answered.
   const supps = on('supps') ? suppReminders({ date, tz, supps: supplements, log: suppLog, dayKind: rot.today.kind === 'rest' ? 'rest' : 'train', follow: { everyMin: n.suppFollowMin, max: n.suppFollowMax } }) : { items: [], open: [] };
   out.push(...supps.items);
+  if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday }));
 
   // Evening: holds and supplements still open today, and tomorrow's session (or a nudge to set its time).
   if (on('evening')) {
@@ -143,7 +145,7 @@ export function dueNow(items, now, sent = {}, graceMs = 30 * 60000) {
 }
 
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
-export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [] }, tz) {
+export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [] }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
   return {
     tz,
@@ -160,5 +162,6 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     mealChecks,
     supplements,
     suppLog,
+    suppAnswers,
   };
 }

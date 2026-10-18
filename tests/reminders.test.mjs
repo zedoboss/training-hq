@@ -193,3 +193,25 @@ test('supplements (6.6): at his times, again every 45 minutes until answered, op
   assert.equal(items.filter((i) => i.kind === 'supps').length, 0);
   assert.doesNotMatch(items.find((i) => i.kind === 'evening')?.body || '', /Supplements/);
 });
+
+test('supplements (6.7): running low asks every evening until answered for that count; weekly planning on Sundays', async () => {
+  const { logEntry } = await import('../app/js/lib/supplements.js');
+  const date = '2026-01-18'; // a Sunday
+  const cr = { id: 'cr', name: 'Creatine monohydrate', short: 'creatine', dose: '5 g', time: null, days: { type: 'daily' }, history: [{ on: '2026-01-01', status: 'active' }], stock: { servings: 8, countedAt: at('2026-01-15', '00:00') }, perTake: { train: 1, rest: 1 } };
+  const log = [logEntry({ supp: cr, date: '2026-01-17', dayKind: 'train', status: 'taken', at: at('2026-01-17', '08:00') })];
+  let items = remindersFor({ ...base, date, last: null, supplements: [cr], suppLog: log }).filter((i) => i.kind === 'supps');
+  const low = items.find((i) => i.id.startsWith('supps-low:cr'));
+  assert.equal(low.body, 'Creatine: 7 servings left, about a week. Restocking?');
+  assert.equal(low.at, at(date, '20:40'));
+  assert.equal(low.url, '#/supps/plan/cr');
+  assert.equal(low.due, true);
+  const plan = items.find((i) => i.id === `supps-plan:${date}`);
+  assert.equal(plan.at, at(date, '20:45'));
+  assert.equal(plan.due, true);
+  const answers = [{ kind: 'low', suppId: 'cr', countedAt: cr.stock.countedAt, answer: 'restock', date }, { kind: 'weekly', date: '2026-01-13', answer: 'nothing' }];
+  items = remindersFor({ ...base, date, last: null, supplements: [cr], suppLog: log, suppAnswers: answers }).filter((i) => i.kind === 'supps');
+  assert.equal(items.find((i) => i.id.startsWith('supps-low:cr')).due, false);
+  assert.equal(items.find((i) => i.id === `supps-plan:${date}`).due, false);
+  // Not on other weekdays; a new count after restocking starts over.
+  assert.equal(remindersFor({ ...base, date: '2026-01-19', last: null, supplements: [cr] }).some((i) => i.id.startsWith('supps-plan')), false);
+});

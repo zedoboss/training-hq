@@ -32,16 +32,19 @@ function describe(a, b) {
   return out.join(', ');
 }
 
-export function render(view, [id]) {
+export function render(view, [param]) {
   view.innerHTML = '<p class="view-sub">Loading…</p>';
   let repo; let alive = true;
+  // #/supp/new?name=...&from=<considering id>: adding something from the considering list.
+  const [id, query = ''] = String(param || '').split('?');
+  const q = new URLSearchParams(query);
   const isNew = id === 'new';
 
   const draw = async () => {
     const today = isoDate(new Date());
     const [all, log] = await Promise.all([repo.list('supplements'), repo.list('supp-log')]);
     if (!alive) return;
-    const cur = isNew ? { id: newId('supp'), kind: 'supplement', name: '', short: '', dose: '', doseRest: null, time: null, withFood: null, days: { type: 'daily' }, status: 'active',
+    const cur = isNew ? { id: newId('supp'), kind: 'supplement', name: q.get('name') || '', short: '', dose: '', doseRest: null, time: null, withFood: null, days: { type: 'daily' }, status: 'active',
       history: [{ on: today, status: 'active' }], stock: null, perTake: { train: 1, rest: 1 }, note: '', order: all.length, source: `Added in the app, ${today}`, changes: [] }
       : all.find((x) => x.id === id);
     if (!cur) { view.innerHTML = '<div class="lib-head"><a class="pill" href="#/supps/list">Back</a></div><p class="hint">Not found.</p>'; return; }
@@ -122,6 +125,8 @@ export function render(view, [id]) {
       if (!what) { location.hash = '#/supps/list'; return; }
       next.changes = [...(cur.changes || []), { on: today, text: isNew ? what : `Changed in the app: ${what}.` }];
       await repo.put('supplements', next.id, next);
+      const from = q.get('from') && await repo.get('supp-considering', q.get('from'));
+      if (isNew && from) await repo.put('supp-considering', from.id, { ...from, status: 'added', addedToList: today, suppId: next.id });
       toast(isNew ? `${name} added to your list.` : 'Saved.');
       location.hash = '#/supps/list';
     });

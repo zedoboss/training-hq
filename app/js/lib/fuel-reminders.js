@@ -3,7 +3,8 @@
 // photo. Supplements and the sauna add theirs here too.
 import { zonedTime, formatHm, addMinutesHm } from './time.js';
 import { afterPhotoAt } from './meals.js';
-import { checklist, shortName } from './supplements.js';
+import { checklist, shortName, statusOn, stockStatus, lastsText } from './supplements.js';
+import { addDays } from './rotation.js';
 
 /** Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. */
 export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, cookingMin: 30 };
@@ -91,4 +92,35 @@ export function suppReminders({ date, tz, supps = [], log = [], dayKind = 'train
     }
   }
   return { items, open: groups.flatMap((g) => g.open.map((i) => shortName(i.supp))) };
+}
+
+/** The latest planning answer about one supplement's current stock count, or the latest weekly one. */
+export const lowAnswered = (supp, answers = []) => answers.some((a) => a.kind === 'low' && a.suppId === supp.id && a.countedAt === supp.stock?.countedAt);
+export function weeklyAnsweredSince(answers = [], fromIso) {
+  return answers.some((a) => a.kind === 'weekly' && a.date >= fromIso);
+}
+
+/**
+ * Stock and planning (6.7): "Creatine: 7 servings left, about a week. Restocking?" every evening until he answers for
+ * that count, and roughly once a week "planning to get anything?" (brief section 6). The app records his answer and
+ * changes nothing on the list.
+ */
+export function planReminders({ date, tz, supps = [], log = [], answers = [], eveningHm = '20:30', weekday = 0 }) {
+  const out = [];
+  for (const s of supps.filter((x) => statusOn(x, date) === 'active')) {
+    const st = stockStatus(s, log);
+    if (!st?.low) continue;
+    out.push({
+      id: `supps-low:${s.id}:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 10), tz), url: `#/supps/plan/${s.id}`, tag: `supps-low-${s.id}`, fixed: false,
+      title: `${s.name}: running low`, body: `${cap1(shortName(s))}: ${st.left} serving${st.left === 1 ? '' : 's'} left, ${lastsText(st.days)}. Restocking?`, due: !lowAnswered(s, answers),
+    });
+  }
+  if (new Date(`${date}T12:00:00Z`).getUTCDay() === weekday && supps.some((x) => statusOn(x, date) === 'active')) {
+    out.push({
+      id: `supps-plan:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 15), tz), url: '#/supps/plan', tag: 'supps-plan', fixed: false,
+      title: 'Supplements: planning to get anything?', body: 'Restock anything, or add something new? Tap to answer.',
+      due: !weeklyAnsweredSince(answers, addDays(date, -6)),
+    });
+  }
+  return out;
 }
