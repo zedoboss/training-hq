@@ -9,3 +9,15 @@
 .hk-code { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-2); }
 .hk-code code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 11px; line-height: 1.45; }
 .hk-code .btn-ghost { flex-shrink: 0; }
+
+/* Body screen */
+.body-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.body-tile { display: flex; flex-direction: column; gap: 6px; padding: 12px 10px; color: var(--text); text-decoration: none; min-width: 0; }
+.body-tile b { font: 600 18px/1.1 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.body-tile small { font: 400 11px/1.35 var(--sans); color: var(--muted); }
+.seg-mini { flex-wrap: nowrap; }
+.seg-mini .pill { flex: 0 0 auto; height: 30px; font-size: 10px; padding: 0 10px; }
+.body-chart .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
+.body-chart .ref-label { fill: var(--muted); font: 500 9px var(--mono); }
+.line-chart .pt-flag { fill: var(--surface); stroke: var(--amber); stroke-width: 2; }
+#b-steps, #b-sleep, #b-weight { scroll-margin-top: 12px; }

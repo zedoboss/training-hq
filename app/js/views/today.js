@@ -12,6 +12,7 @@ import { roundsByDate, holdSlots } from '../lib/holds.js';
 import { logMealFromFile, cameraInput } from './meal.js';
 import { dayTotals } from '../lib/meals.js';
 import { checklist, dayKindFor } from '../lib/supplements.js';
+import { stepsToday } from './body.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -117,7 +118,7 @@ export function render(view) {
         <div data-k="core"></div>
         ${readout('tl', 'TENDONS', '—', 'c-muted', 'r-tendons')}
         ${readout('tr', 'TRAIN', '—', 'c-amber', 'r-train')}
-        ${readout('bl', 'STEPS', '—', 'c-cyan')}
+        ${readout('bl', 'STEPS', '—', 'c-cyan', 'r-steps')}
         ${readout('br', 'FUEL', '—', 'c-green', 'r-fuel')}
       </div>
 
@@ -186,17 +187,19 @@ export function render(view) {
 
   let train = null;
   let fuel = null;
+  let steps = null;
   const draw = (s) => {
     set('weekcols', weekColumnsLine(s));
     set('r-train', train ? train.readout : '—');
     set('r-fuel', fuel ? `<a class="readout-link" href="#/fuel">${fuel.readout}</a>` : '—');
     set('r-tendons', train ? `<a class="readout-link" href="#/holds">${train.holds.readout}</a>` : '—');
+    set('r-steps', steps ? `<a class="readout-link" href="#/body">${steps.steps.toLocaleString('en-US')}${steps.asOf ? `<br>AS OF ${formatTime(new Date(steps.asOf))}` : ''}</a>` : '<a class="readout-link" href="#/body">—</a>');
     const m = macLine(s);
     set('mac', `<span class="${m.cls}">${m.text}</span>`);
     set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone.toUpperCase().replace('_', ' '));
     set('spoke', s.paired && s.programme && train ? train.line : spokeText(s));
     set('spoke-actions', s.paired ? '' : '<a class="btn-ghost spoke-btn" href="#/settings">PAIR WITH MAC</a>');
-    set('core', coreSvg({ train: train?.progress ?? null, fuel: fuel?.progress ?? null, steps: null, tendons: train?.holds.progress ?? null },
+    set('core', coreSvg({ train: train?.progress ?? null, fuel: fuel?.progress ?? null, steps: steps?.goal ? Math.min(1, steps.steps / steps.goal) : null, tendons: train?.holds.progress ?? null },
       `AI core. ${train ? train.line : 'Nothing logged yet today.'}`));
   };
 
@@ -207,8 +210,8 @@ export function render(view) {
   let off = () => {};
   let gone = false;
   ready.then((repo) => {
-    const refresh = async () => { train = await trainToday(repo); fuel = await fuelToday(repo); if (!gone) draw(getState()); };
-    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log'].includes(c))) refresh(); });
+    const refresh = async () => { train = await trainToday(repo); fuel = await fuelToday(repo); steps = await stepsToday(repo); if (!gone) draw(getState()); };
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health'].includes(c))) refresh(); });
     refresh();
   });
   return () => { gone = true; clearInterval(timer); unsub(); off(); };

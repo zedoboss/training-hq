@@ -362,6 +362,25 @@ export function weightNear(daily, date, maxDays = 21) {
   return best && bestGap <= maxDays ? best.kg : null;
 }
 
+/**
+ * Sessions logged without a bodyweight (imported from Hevy and Strong) get the weight nearest their date, so pull-up
+ * and dip volume counts the body (P46). Only in memory: the stored sessions are not changed.
+ */
+export function withBodyweights(sessions, daily, maxDays = 21) {
+  if (!daily.length) return sessions;
+  return sessions.map((s) => {
+    if (s.bodyweightKg != null || !s.startedAt) return s;
+    const kg = weightNear(daily, isoDate(new Date(s.startedAt)), maxDays);
+    return kg == null ? s : { ...s, bodyweightKg: kg, bodyweightFrom: 'health' };
+  });
+}
+
+/** Daily weights from a repo (Apple Health days and body measurements). */
+export async function dailyWeightsOf(repo) {
+  const [docs, measurements] = await Promise.all([repo.list('health'), repo.list('measurements')]);
+  return dailyWeights(weightSeries(docs, measurements));
+}
+
 /** "7 h 25 min" */
 export function hoursText(min) {
   if (min == null) return '-';

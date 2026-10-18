@@ -2,6 +2,7 @@
 // previous period, sets per muscle per week, muscle distribution, most-logged exercises, volume over time, and a
 // monthly report, over Training HQ sessions and the imported Hevy and Strong history. Every chart has its numbers in
 // text or a table too, so nothing depends on hover or colour.
+import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { getState } from '../lib/store.js';
@@ -154,7 +155,8 @@ export function render(view, params = []) {
   let alive = true;
 
   const draw = async (repo) => {
-    const [sessions, sets, exercises, photos] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.list('exercises'), mode === 'month' ? repo.list('photos') : []]);
+    const [rawSessions, sets, exercises, photos, daily] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.list('exercises'), mode === 'month' ? repo.list('photos') : [], dailyWeightsOf(repo)]);
+    const sessions = withBodyweights(rawSessions, daily);
     if (!alive) return;
     const st = withDefaults(getState().settings);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));

@@ -1,5 +1,6 @@
 // FINISH (#/finish/<id>): save an active session, then its summary: time, volume, sets, bests,
 // tendon hold prompt, "update routine?", save as routine, delete.
+import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
@@ -29,8 +30,10 @@ export function render(view, params = []) {
   let repo;
 
   const draw = async () => {
-    const session = await repo.get('sessions', id);
-    if (!session) { view.innerHTML = '<h1 class="view-title">Session not found</h1>'; return; }
+    const daily = await dailyWeightsOf(repo);
+    const stored = await repo.get('sessions', id);
+    if (!stored) { view.innerHTML = '<h1 class="view-title">Session not found</h1>'; return; }
+    const [session] = withBodyweights([stored], daily);
     const all = (await repo.list('sets')).filter((s) => s.sessionId === id);
     const sum = summarize(session, all);
     const durMin = Math.round(elapsedMs(session) / 60000);
@@ -64,7 +67,7 @@ export function render(view, params = []) {
         const minutes = Number(view.querySelector('#f-dur').value) || durMin;
         for (const s of all.filter((x) => !x.done)) await repo.remove('sets', s.id);
         await repo.put('sessions', id, {
-          ...session, title: view.querySelector('#f-title').value.trim() || session.title, note: view.querySelector('#f-note').value,
+          ...stored, title: view.querySelector('#f-title').value.trim() || session.title, note: view.querySelector('#f-note').value,
           gym: view.querySelector('#f-gym').value.trim() || null, startedAt, endedAt: startedAt + minutes * 60000 + (session.pausedMs || 0), pausedAt: null, status: 'done',
         });
         rest.clear();
@@ -76,7 +79,7 @@ export function render(view, params = []) {
 
     // Saved session summary.
     const [sessions, sets, bridge, routine, exercises] = await Promise.all([
-      repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), session.routineId ? repo.get('routines', session.routineId) : null, repo.list('exercises'),
+      repo.list('sessions').then((list) => withBodyweights(list, daily)), repo.list('sets'), repo.get('bridge', 'last-loads'), session.routineId ? repo.get('routines', session.routineId) : null, repo.list('exercises'),
     ]);
     const history = buildHistory({ sessions, sets, bridge });
     const done = all.filter((s) => s.done);

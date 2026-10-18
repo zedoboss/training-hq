@@ -229,3 +229,18 @@ test('the days are counted in his time zone, whatever zone the tests run in', ()
   assert.equal(docs[0].date, isoDate(new Date('2026-10-17T23:30:00Z'), TZ));
   assert.equal(docs[0].date, '2026-10-18');
 });
+
+test('imported sessions without a bodyweight get the nearest weigh-in (in memory only)', async () => {
+  const { withBodyweights } = await import('../app/js/lib/health.js');
+  const daily = [{ date: '2026-10-01', kg: 79 }, { date: '2026-10-15', kg: 78 }];
+  const ses = [
+    { id: 'a', startedAt: at('2026-10-14', '04:30') },
+    { id: 'b', startedAt: at('2026-10-14', '04:30'), bodyweightKg: 80 },
+    { id: 'c', startedAt: at('2025-01-01', '04:30') },
+  ];
+  const out = withBodyweights(ses, daily);
+  assert.deepEqual(out.map((s) => s.bodyweightKg ?? null), [78, 80, null]);
+  assert.equal(out[0].bodyweightFrom, 'health');
+  assert.equal(ses[0].bodyweightKg, undefined);
+  assert.equal(withBodyweights(ses, []), ses);
+});

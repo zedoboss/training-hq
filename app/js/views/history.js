@@ -1,5 +1,6 @@
 // HISTORY (#/history) (3.8): every finished session, newest first, grouped by month, with the app it came from
 // (Training HQ, Hevy or Strong). Search by exercise; filter by app. Tap a session to open it.
+import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { ready } from '../lib/data.js';
 import { formatDate, formatTime } from '../lib/time.js';
 import { SOURCE_LABEL } from '../lib/calendar.js';
@@ -64,7 +65,8 @@ export function render(view) {
   };
 
   const load = async (repo) => {
-    const [sessions, sets] = await Promise.all([repo.list('sessions'), repo.list('sets')]);
+    const [rawSessions, sets, daily] = await Promise.all([repo.list('sessions'), repo.list('sets'), dailyWeightsOf(repo)]);
+    const sessions = withBodyweights(rawSessions, daily);
     rows = sessionRows({ sessions, sets });
   };
 

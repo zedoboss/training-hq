@@ -1,5 +1,6 @@
 // EXERCISE page: muscles and equipment, demo slot, pinned note; charts, records and every session of this exercise
 // over the full history (Training HQ, Hevy and Strong) (3.9, P35-P37, P45, P47).
+import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { ready } from '../lib/data.js';
 import { mergeLibrary, duplicateExercise, exerciseUsed, routinesUsing } from '../lib/library.js';
 import { buildHistory } from '../lib/history.js';
@@ -111,7 +112,8 @@ export function render(view, params = []) {
     const ex = mergeLibrary(await repo.list('exercises'), getState().equipment).find((e) => e.id === id);
     if (!alive) return;
     if (!ex) { view.innerHTML = '<h1 class="view-title">Not found</h1><p class="view-sub">This exercise is not in the library.</p>'; return; }
-    const [bridge, sessions, sets, routines] = await Promise.all([repo.get('bridge', 'last-loads'), repo.list('sessions'), repo.list('sets'), repo.list('routines')]);
+    const [bridge, rawSessions, sets, routines, daily] = await Promise.all([repo.get('bridge', 'last-loads'), repo.list('sessions'), repo.list('sets'), repo.list('routines'), dailyWeightsOf(repo)]);
+    const sessions = withBodyweights(rawSessions, daily);
     if (!alive) return; // left this page while loading: don't draw over the next one
     const history = buildHistory({ sessions, sets, bridge }).all(ex.name);
     const type = ex.type || 'weight_reps';
