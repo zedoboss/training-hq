@@ -20,6 +20,7 @@ import { getState } from '../lib/store.js';
 import { saveSettings } from '../lib/data.js';
 import { withDefaults, equipmentWithDefaults, smallestPlate, restFor, restDefault, weightUnitFor, toUnit, fromUnit, toDistance, fromDistance, REST_CHOICES, restText } from '../lib/settings.js';
 import { play } from '../lib/sounds.js';
+import { isSquatExercise, depthText } from '../lib/squat-log.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DAY = { pull: 'PULL', push: 'PUSH', legs: 'LEGS', neck: 'NECK' };
@@ -213,7 +214,7 @@ export function render(view, params = []) {
       ${second ? `<input class="set-in" data-f="${second}" inputmode="numeric" value="${esc(s[second] ?? '')}" placeholder="${esc(placeholder)}" aria-label="${second === 'reps' ? 'reps' : 'seconds'}">` : '<span></span>'}
       <button class="set-tick" data-a="tick" type="button" aria-label="${s.done ? 'Mark not done' : 'Mark done'}">${s.done ? CHECK : ''}</button>
       ${fields.includes('durationS') && !s.done && !editing && prefs().show.inlineTimer ? timerLine(s, prev) : ''}
-      ${s.rpe || s.note ? `<div class="set-meta">${s.rpe ? `RPE ${s.rpe}` : ''}${s.rpe && s.note ? ' · ' : ''}${s.note ? esc(s.note) : ''}</div>` : ''}
+      ${s.rpe || s.note || s.depth ? `<div class="set-meta">${[s.depth ? `<span class="c-green">${esc(depthText(s.depth))}</span>` : '', s.rpe ? `RPE ${s.rpe}` : '', s.note ? esc(s.note) : ''].filter(Boolean).join(' · ')}</div>` : ''}
     </div>`;
   };
 
@@ -242,7 +243,8 @@ export function render(view, params = []) {
       <div class="set-row set-headrow"><span>SET</span><span>PREVIOUS</span><span>${fields.includes('kg') ? unit : fields.includes('distanceM') ? distUnit().toUpperCase() : ''}</span><span>${fields.includes('reps') ? 'REPS' : fields.includes('durationS') ? 'SEC' : ''}</span><span></span></div>
       ${all.map((s) => setRow(ex, s, all)).join('')}
       <div class="s-ex-foot"><span class="hud c-muted">${per != null ? `${fmtKg(ex.barKg)} BAR + ${fmtKg(per)} KG / SIDE` : ''}</span>
-        <span class="btn-row tight">${fields.includes('kg') && plateCalc && ex.barKg ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
+        <span class="btn-row tight">${!editing && isSquatExercise(ex) ? `<a class="btn-ghost small center" href="#/squat/set/${esc(session.id)}/${esc(ex.key)}" data-k="depth">Depth</a>` : ''}
+        ${fields.includes('kg') && plateCalc && ex.barKg ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
         <button class="btn-ghost small" data-a="add-set" type="button">+ Set</button></span></div>
     </section>`;
   };
@@ -340,6 +342,7 @@ export function render(view, params = []) {
       const others = session.exercises.filter((e) => e.key !== key);
       const lib = ctx.lib.get(ex.exerciseId) || {};
       actionSheet(ex.name, [
+        ...(!editing && isSquatExercise(ex) ? [{ label: 'Squat Depth camera (fills reps and depth)', run: () => { location.hash = `#/squat/set/${session.id}/${ex.key}`; } }] : []),
         { label: 'Demo clip', run: () => {
           let offDemo = () => {};
           const { el, close } = overlay(`<div class="hud c-muted sheet-title">${esc(ex.name)}</div><div data-demo></div><button class="sheet-btn sheet-cancel" type="button" data-cancel>Close</button>`, () => offDemo());

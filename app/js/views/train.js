@@ -13,6 +13,8 @@ import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { actionSheet, promptText, confirmSheet, promptTime } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+import { SQUAT_ICON } from './squat.js';
+import { savedTargetDeg } from '../lib/squat-log.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)' };
@@ -23,9 +25,10 @@ export function render(view) {
   let repo;
 
   const draw = async () => {
-    const [folders, routines, meta, sessions, bridge, dayList] = await Promise.all([
-      repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days'),
+    const [folders, routines, meta, sessions, bridge, dayList, squats] = await Promise.all([
+      repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days'), repo.list('squats'),
     ]);
+    const lastSquat = squats.filter((r) => r.reps?.length).sort((a, b) => b.startedAt - a.startedAt)[0];
     const active = sessions.find((s) => s.status === 'active' && s.kind !== 'holds');
     const today = isoDate(new Date());
     const days = daysByDate(dayList);
@@ -92,6 +95,8 @@ export function render(view) {
         <p class="hint c-text">Your Neck routine (${neckRoutine.exercises.length} exercises) has no place in the rotation yet. Where should it go?</p>
         <div class="chips wrap">${NECK_PLACES.map(([k, label]) => `<button class="chip" data-neck="${k}" type="button">${esc(label)}</button>`).join('')}<button class="chip" data-neck="not-yet" type="button">Not yet</button></div>
         <p class="hint">"Not yet" asks again in a week. When it restarts, your 30% cap applies from a light start.</p></section>` : ''}
+      <a class="card sq-card" href="#/squat" id="squat-card">${SQUAT_ICON}<span class="sq-card-main"><b>Squat Depth</b>
+        <span class="hud c-muted">${lastSquat ? `LAST ${lastSquat.good} REPS · LOW ${Math.round(lastSquat.lowDeg)}° · ` : ''}TARGET ${savedTargetDeg()}°</span></span><span class="pill is-on">Camera</span></a>
       <a class="card holds-link" href="#/holds"><span><span class="hud c-muted">TENDON HOLDS</span><br>Shoulder, knees, wrist</span><span class="pill">Open</span></a>
       ${groupByFolder(folders, routines).map(({ folder, routines: rs }) => `
         <div class="section-label folder-label">
@@ -195,7 +200,7 @@ export function render(view) {
   let off = () => {};
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression', 'schedule'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression', 'schedule', 'squats'].includes(c))) draw(); });
     draw();
   });
   return () => off();

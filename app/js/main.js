@@ -21,6 +21,8 @@ import * as calendar from './views/calendar.js';
 import * as historyView from './views/history.js';
 import * as progression from './views/progression.js';
 import * as readiness from './views/readiness.js';
+import * as squat from './views/squat.js';
+import { autoKeepOffline } from './lib/squat-offline.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -42,6 +44,7 @@ const VIEWS = {
   progression: { mod: progression, label: 'Progression', hidden: true, tab: 'train' },
   checkin: { mod: readiness, label: 'Check-in', hidden: true, tab: 'today' },
   readiness: { mod: { render: (view, params) => readiness.render(view, params, 'readiness') }, label: 'Readiness table', hidden: true, tab: 'train' },
+  squat: { mod: squat, label: 'Squat Depth', hidden: true, tab: 'train' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };
@@ -98,3 +101,5 @@ shell();
 window.addEventListener('hashchange', route);
 route();
 registerServiceWorker();
+// Squat Depth's pose files (about 19 MB) are fetched once in the background so it works at the gym with no signal.
+autoKeepOffline();

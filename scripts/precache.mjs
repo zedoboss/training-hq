@@ -2,6 +2,8 @@
 // file list inside it), app/precache.js (the same list, for the page) and app/version.json (the version, never
 // cached, so the page can see whether a newer one is out). The version is a hash of every app file.
 // Run by the Mac server at start, by the GitHub Pages deploy, and by hand before testing locally.
+// app/vendor/ (the Squat Depth pose library and models, about 40 MB) is left out of the list and the version: the
+// service worker keeps those files in their own store, so an app update never downloads them again.
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -11,10 +13,12 @@ const APP_DIR = fileURLToPath(new URL('../app/', import.meta.url));
 const TEMPLATE = fileURLToPath(new URL('./sw.template.js', import.meta.url));
 const SKIP = new Set(['precache.js', 'sw.js', 'version.json', '.DS_Store']);
 
-function walk(dir) {
+const VENDOR_DIR = 'vendor';
+
+function walk(dir, top = false) {
   const out = [];
   for (const name of readdirSync(dir).sort()) {
-    if (SKIP.has(name) || name.startsWith('.')) continue;
+    if (SKIP.has(name) || name.startsWith('.') || (top && name === VENDOR_DIR)) continue;
     const full = join(dir, name);
     if (statSync(full).isDirectory()) out.push(...walk(full));
     else out.push(full);
@@ -23,7 +27,7 @@ function walk(dir) {
 }
 
 export function buildPrecache(appDir = APP_DIR) {
-  const files = walk(appDir).filter((f) => !f.endsWith('.txt'));
+  const files = walk(appDir, true).filter((f) => !f.endsWith('.txt'));
   const hash = createHash('sha256');
   const rel = files.map((f) => relative(appDir, f).split(sep).join('/'));
   for (let i = 0; i < files.length; i++) {

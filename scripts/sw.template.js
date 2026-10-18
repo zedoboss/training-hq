@@ -7,6 +7,11 @@
 
 const { version, files } = self.TRAINING_HQ_PRECACHE;
 const CACHE = `thq-${version}`;
+// Squat Depth's pose library and models (vendor/, about 20 MB used): their own store, named after the MediaPipe
+// version, kept across app updates and "Reload app files". Filled as they are first fetched (lib/squat-offline.js
+// fetches them ahead of time); a new MediaPipe version gets a new name here.
+const VENDOR_CACHE = 'mediapipe-1.1.0';
+const isVendor = (url) => url.pathname.includes('/vendor/mediapipe/');
 const scopeUrl = (path) => new URL(path, self.registration.scope).href;
 
 self.addEventListener('install', (event) => {
@@ -21,6 +26,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     for (const key of await caches.keys()) {
       if (key.startsWith('thq-') && key !== CACHE) await caches.delete(key);
+      if (key.startsWith('mediapipe-') && key !== VENDOR_CACHE) await caches.delete(key);
     }
     await self.clients.claim();
   })());
@@ -37,6 +43,17 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   // Calls to the Mac server (and anything off-site) always go to the network; so does the "latest version" probe.
   if (url.origin !== self.location.origin || url.pathname.includes('/api/') || url.pathname.endsWith('/version.json')) return;
+
+  if (isVendor(url)) {
+    event.respondWith(caches.open(VENDOR_CACHE).then(async (cache) => {
+      const hit = await cache.match(req, { ignoreSearch: true });
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (res.ok && res.status === 200) await cache.put(new Request(url.origin + url.pathname), res.clone());
+      return res;
+    }));
+    return;
+  }
 
   if (req.mode === 'navigate') {
     event.respondWith(
