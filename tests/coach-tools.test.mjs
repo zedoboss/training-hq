@@ -124,8 +124,35 @@ test('programme gives exactly what Start would: the table capped at last load + 
   assert.match(wk4.text, /week 4 column \(asked for\)/);
 });
 
+test('the coach asks before it starts a session (his rule, Mon 10/19)', async () => {
+  const say = (turnId, role, at, tools = []) => store.writeLocal('coach-messages', `m-${turnId}-${role}`, { id: `m-${turnId}-${role}`, role, turnId, at, text: '', tools });
+  const inTurn = (turnId) => (name, args = {}) => TOOLS.find((t) => t.name === name).run(args, { ...ctx(), turnId });
+  // "About to start squats": the first call only offers.
+  say('t1', 'user', clock - 3000);
+  const first = await inTurn('t1')('start_session');
+  assert.match(first.text, /^Not started\. Ask him first, in a few words: "Start Legs[^"]* now\?"/);
+  assert.match(first.summary, /^asked first: /);
+  assert.ok(!list('sessions').some((x) => x.status === 'active'), 'nothing started');
+  // Calling again in the same turn still doesn't start it.
+  assert.match((await inTurn('t1')('start_session')).text, /^Not started/);
+  // The reply offered it; an unrelated turn in between, or a different session, doesn't count.
+  say('t1', 'assistant', clock - 2000, [{ name: 'start_session', summary: first.summary }]);
+  assert.match((await inTurn('t2')('start_session', { empty: true })).text, /^Not started/);
+  // He talked about something else first: the offer has lapsed.
+  say('t2', 'user', clock - 1500); say('t2', 'assistant', clock - 1000);
+  say('t3', 'user', clock);
+  assert.match((await inTurn('t3')('start_session')).text, /^Not started/);
+  for (const t of ['t1', 't2', 't3']) for (const r of ['user', 'assistant']) store.writeLocal('coach-messages', `m-${t}-${r}`, null, { deleted: true });
+});
+
 test('a session started, sets logged by voice-style numbers, the 30% guard and the rest timer', async () => {
-  const st = await call('start_session');
+  // He said yes to the coach's offer in his next message (see the test above).
+  store.writeLocal('coach-messages', 'm-o1-user', { id: 'm-o1-user', role: 'user', turnId: 'o1', at: clock - 2000, text: 'about to start squats' });
+  const offer = await TOOLS.find((t) => t.name === 'start_session').run({}, { ...ctx(), turnId: 'o1' });
+  store.writeLocal('coach-messages', 'm-o1-assistant', { id: 'm-o1-assistant', role: 'assistant', turnId: 'o1', at: clock - 1000, text: 'Start Legs now?', tools: [{ name: 'start_session', summary: offer.summary }] });
+  store.writeLocal('coach-messages', 'm-o2-user', { id: 'm-o2-user', role: 'user', turnId: 'o2', at: clock, text: 'yes' });
+  const st = await TOOLS.find((t) => t.name === 'start_session').run({}, { ...ctx(), turnId: 'o2' });
+  for (const id of ['m-o1-user', 'm-o1-assistant', 'm-o2-user']) store.writeLocal('coach-messages', id, null, { deleted: true });
   assert.equal(st.wrote, true);
   assert.match(st.text, /^Started Legs \(week 3 column\): 2 exercises/);
   assert.match(st.text, /Check-in not done today/);
