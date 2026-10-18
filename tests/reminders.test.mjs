@@ -238,3 +238,11 @@ test('sauna (6.9): planned day with the step and checklist, overdue backup at ro
   assert.deepEqual(items.map((i) => [i.id, i.due]), [['sauna-after:sa', true]]);
   assert.equal(items[0].at, t + 26 * 60000);
 });
+
+test('a discarded session does not count as trained: the day keeps its check-in and session reminders', async () => {
+  const { reminderState } = await import('../app/js/lib/reminders.js');
+  const st = reminderState({ sessions: [{ id: 'x', kind: 'workout', status: 'discarded', startedAt: at('2026-01-20', '05:00') }], days: [] }, TZ);
+  assert.equal(st.trainedDates.has('2026-01-20'), false);
+  const st2 = reminderState({ sessions: [{ id: 'y', kind: 'workout', status: 'active', startedAt: at('2026-01-20', '05:00') }], days: [] }, TZ);
+  assert.equal(st2.trainedDates.has('2026-01-20'), true);
+});

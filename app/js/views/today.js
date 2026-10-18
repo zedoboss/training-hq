@@ -11,6 +11,7 @@ import { weekColumn } from '../lib/programme.js';
 import { roundsByDate, holdSlots } from '../lib/holds.js';
 import { logMealFromFile, cameraInput } from './meal.js';
 import { dayTotals } from '../lib/meals.js';
+import { checklist, dayKindFor } from '../lib/supplements.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -73,13 +74,18 @@ async function trainToday(repo) {
   return { holds, readout: 'REST', progress: null, line: `${REST_TEXT[t.reason] || 'Rest day'}. ${nextText}` };
 }
 
-/** Today's kcal against the target, for the FUEL readout and the core's fuel ring. */
+/** Today's kcal against the target and supplements taken, for the FUEL readout and the core's fuel ring. */
 async function fuelToday(repo) {
-  const [meals, estimates, plan] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.get('fuel', 'plan')]);
-  const t = dayTotals(meals, estimates, isoDate(new Date()));
+  const [meals, estimates, plan, supps, slog, sessions, bridge, dayList] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.get('fuel', 'plan'),
+    repo.list('supplements'), repo.list('supp-log'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days')]);
+  const today = isoDate(new Date());
+  const t = dayTotals(meals, estimates, today);
   const kcal = Math.round(t.kcal).toLocaleString('en-US');
-  if (!plan?.kcal) return { readout: `${kcal} KCAL`, progress: null };
-  return { readout: `${kcal} / ${Number(plan.kcal).toLocaleString('en-US')} KCAL<br>${Math.round(t.protein)} G PROTEIN`, progress: Math.min(1, t.kcal / plan.kcal) };
+  const rot = rotationDay({ last: lastRotationSession(sessions, bridge), today, days: daysByDate(dayList) });
+  const due = checklist({ supps, log: slog, date: today, dayKind: dayKindFor(today, { today, rotKind: rot.today.kind }) }).flatMap((g) => g.items);
+  const supp = due.length ? `<br>SUPPS ${due.filter((i) => i.entry?.status === 'taken').length}/${due.length}` : '';
+  if (!plan?.kcal) return { readout: `${kcal} KCAL${supp}`, progress: null };
+  return { readout: `${kcal} / ${Number(plan.kcal).toLocaleString('en-US')} KCAL<br>${Math.round(t.protein)} G PROTEIN${supp}`, progress: Math.min(1, t.kcal / plan.kcal) };
 }
 
 export function render(view) {
@@ -202,7 +208,7 @@ export function render(view) {
   let gone = false;
   ready.then((repo) => {
     const refresh = async () => { train = await trainToday(repo); fuel = await fuelToday(repo); if (!gone) draw(getState()); };
-    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel'].includes(c))) refresh(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log'].includes(c))) refresh(); });
     refresh();
   });
   return () => { gone = true; clearInterval(timer); unsub(); off(); };

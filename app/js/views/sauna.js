@@ -78,7 +78,8 @@ function renderHome(view, repo, alive) {
       <div class="section-label">History · ${history.length}</div>
       <ul class="lib-list">${history.map((s) => `<li class="lib-row sauna-hist"><span class="lib-name">${esc(formatDate(new Date(s.startedAt)))}</span>
         <span class="lib-meta">${esc(stepShort(s.stepIndex))}${s.hotter ? ' · hotter sauna' : ''} · ${(s.rounds || []).filter((r) => r.outAt).map((r) => `${Math.round((r.outAt - r.inAt) / 60000)} min`).join(', ') || 'no rounds'}${s.tempC ? ` · ${s.tempC}°C` : ''}</span>
-        <span class="lib-meta ${hadSymptoms(s) ? 'c-red' : passed(s) ? 'c-green' : 'c-amber'}">${hadSymptoms(s) ? `Stopped: ${esc([...(s.symptoms || []).flatMap((x) => x.what), ...(s.after?.what || [])].join(', ') || 'symptoms')}` : passed(s) ? 'Clean' : s.after && !s.after.answeredAt ? 'After-question open' : 'Not completed as planned'}</span></li>`).join('') || '<li class="hint pad">No sessions yet.</li>'}</ul>`;
+        <span class="lib-meta ${hadSymptoms(s) ? 'c-red' : passed(s) ? 'c-green' : 'c-amber'}">${hadSymptoms(s) ? `Stopped: ${esc([...(s.symptoms || []).flatMap((x) => x.what), ...(s.after?.what || [])].join(', ') || 'symptoms')}` : passed(s) ? 'Clean' : s.after && !s.after.answeredAt ? 'After-question open' : 'Not completed as planned'}</span>
+        <button class="link-btn" type="button" data-del="${esc(s.id)}">Delete (a test, not a real session)</button></li>`).join('') || '<li class="hint pad">No sessions yet.</li>'}</ul>`;
     view.querySelectorAll('[data-doc]').forEach((b) => b.addEventListener('click', async () => {
       await savePlan(repo, { ...plan, doctor: [...(plan.doctor || []), { at: Date.now(), answer: b.dataset.doc, context: doc }] });
       toast('Answer recorded.');
@@ -98,6 +99,10 @@ function renderHome(view, repo, alive) {
         close();
       });
     };
+    view.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+      if (!(await confirmSheet('Delete this sauna session? Only for a test: a real session, symptoms included, belongs in the ladder.', { ok: 'Delete', danger: true }))) return;
+      await repo.remove('sauna', b.dataset.del);
+    }));
     view.querySelectorAll('[data-unplan]').forEach((b) => b.addEventListener('click', async () => {
       const p = planned[Number(b.dataset.unplan)];
       await savePlan(repo, { ...plan, planned: (plan.planned || []).filter((x) => x.date !== p.date) });

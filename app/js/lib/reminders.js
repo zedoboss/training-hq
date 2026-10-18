@@ -159,7 +159,7 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     settings,
     meta,
     table: tendons.find((d) => d?.kind === 'readiness') ?? null,
-    trainedDates: new Set(sessions.filter((s) => s.kind !== 'holds' && s.startedAt).map((s) => isoDate(new Date(s.startedAt), tz))),
+    trainedDates: new Set(sessions.filter((s) => s.kind !== 'holds' && s.startedAt && s.status !== 'discarded').map((s) => isoDate(new Date(s.startedAt), tz))),
     neck,
     meals,
     mealChecks,

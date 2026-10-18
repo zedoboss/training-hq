@@ -133,7 +133,7 @@ function dayPanel(day, marks, ctx, today) {
   const extra = m?.extra || [];
   return `<section class="day-panel" aria-live="polite">
     <div class="section-label">${esc(longDay(day))}</div>
-    ${detail.length || extra.length ? '' : `<p class="hint">${day > today ? 'Nothing planned here yet.' : day === today ? 'Nothing logged yet today.' : 'Rest day. Nothing logged.'}</p>`}
+    ${detail.length || extra.length ? (!m?.workouts.length && day < today ? '<p class="hint">Rest day.</p>' : '') : `<p class="hint">${day > today ? 'Nothing planned here yet.' : day === today ? 'Nothing logged yet today.' : 'Rest day. Nothing logged.'}</p>`}
     ${detail.map(({ session: s, source, exercises, sets }) => {
       const holds = s.kind === 'holds';
       const c = holds ? 'holds' : (s.dayType || 'other');
