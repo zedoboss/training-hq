@@ -47,6 +47,10 @@ export const DEFAULT_SETTINGS = {
   body: { stepGoal: null, scanModel: 'deep' },
   // Step 8: the coach's Claude ('fast' Sonnet 5.5 at low effort, the default; 'deep' Opus 5.5 at high effort).
   coach: { model: 'fast' },
+  // Step 9: the voice lock's strictness on the Mac ('strict' default, 'normal', 'relaxed'), whether the coach answers
+  // out loud, and the silent readout when speech was heard but not acted on. Listening itself is switched on per
+  // device (not synced), so the phone and the Mac's browser never both act on the same words.
+  voice: { strictness: 'strict', speak: true, readout: true },
 };
 
 export const DEFAULT_EQUIPMENT = {

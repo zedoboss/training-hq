@@ -18,6 +18,8 @@ export function paths(privateDir = process.env.TRAINING_HQ_PRIVATE || join(homed
     demosDir: join(privateDir, 'data', 'demos'),
     importsDir: join(privateDir, 'imports'),
     logsDir: join(privateDir, 'logs'),
+    // Step 9: the voice models (public files, downloaded by scripts/voice-setup.mjs; left out of the private git).
+    voiceModelsDir: join(privateDir, 'models', 'voice'),
   };
 }
 

@@ -64,11 +64,11 @@ export function readBackup(dir) {
 const gitBin = () => ['/opt/homebrew/bin/git', '/usr/local/bin/git', '/usr/bin/git'].find((g) => existsSync(g)) || 'git';
 
 /**
- * Commit the backup and the demo clips in the private folder's git (local only; nothing is pushed).
+ * Commit the backup, the demo clips and his voiceprint in the private folder's git (local only; nothing is pushed).
  * Only these paths are committed, so other uncommitted work in the folder is left alone.
  * @returns {'committed'|'unchanged'|'no-git'|string} a short outcome, or the git error
  */
-export function commitBackup(privateDir, message, paths = ['data/backup', 'data/demos']) {
+export function commitBackup(privateDir, message, paths = ['data/backup', 'data/demos', 'data/voice']) {
   if (!existsSync(join(privateDir, '.git'))) return 'no-git';
   const git = (...args) => spawnSync(gitBin(), ['-C', privateDir, ...args], { encoding: 'utf8' });
   const present = paths.filter((p) => existsSync(join(privateDir, p)));

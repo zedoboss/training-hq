@@ -14,6 +14,7 @@ const MIME = {
 };
 const MAX_BODY = 20 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 40 * 1024 * 1024;
+const MAX_CLIP_BYTES = 2 * 1024 * 1024;
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -24,6 +25,14 @@ function importCall(fn) {
   try { return fn(); } catch (e) {
     if (e?.name === 'ImportError' || e?.constructor?.name === 'ImportError') throw new HttpError(e.status || 400, e.message);
     if (/not a Hevy or Strong/.test(e?.message || '')) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+/** A voice call; its own refusals (no models yet, not calibrated, a bad clip) become plain answers. */
+function voiceCall(fn) {
+  try { return fn(); } catch (e) {
+    if (e?.status) throw new HttpError(e.status, e.message);
     throw e;
   }
 }
@@ -70,10 +79,11 @@ function readRaw(req, limit) {
  * @param {ReturnType<import('./imports.mjs').openImports>} [o.imports] Hevy and Strong imports (step 3)
  * @param {ReturnType<import('./health.mjs').openHealth>} [o.health] Apple Health files (step 7)
  * @param {ReturnType<import('./coach/index.mjs').openCoach>} [o.coach] the coach (step 8)
+ * @param {ReturnType<import('./voice/index.mjs').openVoice>} [o.voice] voice (step 9)
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -313,6 +323,34 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       auth(req);
       if (!coach) throw new HttpError(404, 'coach not available');
       return coach.status();
+    },
+
+    // Voice (step 9). Clips are small WAV files from the phone; the voice lock runs on the Mac (server/voice).
+    'GET /api/voice/status': async (req) => {
+      auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      return voice.status();
+    },
+
+    'POST /api/voice/enrol': async (req, url) => {
+      auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      const bytes = await readRaw(req, MAX_CLIP_BYTES);
+      return voiceCall(() => voice.enrol({ bytes, condition: url.searchParams.get('condition'), phrase: url.searchParams.get('phrase') || '' }));
+    },
+
+    'POST /api/voice/forget': async (req) => {
+      auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      const { condition } = await readJson(req);
+      return voice.forget(['home', 'gym'].includes(condition) ? condition : null);
+    },
+
+    'POST /api/voice/test': async (req, url) => {
+      auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      const bytes = await readRaw(req, MAX_CLIP_BYTES);
+      return voiceCall(() => voice.test({ bytes, kind: url.searchParams.get('kind') }));
     },
 
     'POST /api/sync': async (req) => {

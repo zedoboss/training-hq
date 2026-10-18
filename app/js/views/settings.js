@@ -131,7 +131,10 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('The coach thinks with', 'Claude on your Mac. Sonnet at low effort answers in a few seconds; Opus at high effort thinks deeper and takes longer. Also on the Talk screen.', '')}
       ${seg('coach.model', [['fast', 'Sonnet 5.5 · low'], ['deep', 'Opus 5.5 · high']], st.coach.model)}
-    </div>`;
+    </div>
+    <ul class="lib-list">
+      <li><a class="lib-row" href="#/voice"><span class="lib-name">Voice</span><span class="lib-meta">Only your voice: calibrate, test, listening</span></a></li>
+    </ul>`;
 }
 
 /** {a: {b: v}} from 'a.b' and a value. */

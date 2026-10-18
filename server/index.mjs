@@ -17,6 +17,8 @@ import { openHealth, defaultHealthDir } from './health.mjs';
 import { openCoach } from './coach/index.mjs';
 import { readProfile } from './coach/profile.mjs';
 import { TOOLS, contextLine } from './coach/tools.mjs';
+import { openEngine } from './voice/engine.mjs';
+import { openVoice } from './voice/index.mjs';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -71,7 +73,12 @@ log(`health: reading ${health.dir}`);
 // with its tools on a local MCP server. His profile is read from data/coach/profile.md in the private folder.
 const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.dataDir), context: contextLine, log });
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, onSync, log });
+// Voice (step 9): the voice lock runs here (speaker check, music check), his voiceprint stays in data/voice.
+const engine = openEngine({ modelsDir: config.voiceModelsDir || p.voiceModelsDir, log });
+const voice = openVoice({ store, dataDir: p.dataDir, engine, log });
+log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
+
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });

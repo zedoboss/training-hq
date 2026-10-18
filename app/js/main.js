@@ -27,6 +27,7 @@ import * as supps from './views/supps.js';
 import * as supp from './views/supp.js';
 import * as sauna from './views/sauna.js';
 import * as coach from './views/coach.js';
+import * as voiceView from './views/voice.js';
 import { getState, subscribe } from './lib/store.js';
 import { withDefaults } from './lib/settings.js';
 import { MODEL_LABEL } from './lib/coach.js';
@@ -58,6 +59,7 @@ const VIEWS = {
   supp: { mod: supp, label: 'Supplement', hidden: true, tab: 'fuel' },
   sauna: { mod: sauna, label: 'Sauna', hidden: true, tab: 'fuel' },
   coach: { mod: coach, label: 'Talk', hidden: true, tab: 'today' },
+  voice: { mod: voiceView, label: 'Voice', hidden: true, tab: 'settings' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };
