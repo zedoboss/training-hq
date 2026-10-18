@@ -95,7 +95,7 @@ test('zip: stored files open with the system unzip, names and bytes intact', () 
     writeFileSync(file, zipFiles(files, new Date(2026, 9, 18, 9, 30)));
     const list = execFileSync('unzip', ['-l', file]).toString();
     assert.match(list, /photos\/photo-1\.jpg/);
-    assert.match(list, /10-18-2026 09:30/);
+    assert.match(list, /(10-18-2026|2026-10-18) 09:30/, "macOS and Linux unzip print the date differently");
     execFileSync('unzip', ['-t', file]);
     assert.deepEqual([...execFileSync('unzip', ['-p', file, 'photos/photo-1.jpg'])], [...jpeg]);
     assert.match(execFileSync('unzip', ['-p', file, 'data/exercises.csv']).toString(), /Mÿ Curl/);

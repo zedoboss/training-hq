@@ -5,9 +5,10 @@ import { buildHistory, activeBridge } from '../app/js/lib/history.js';
 import { roundsByDate } from '../app/js/lib/holds.js';
 import { typicalDurationMs } from '../app/js/lib/session.js';
 import { previousSame } from '../app/js/lib/finish.js';
+import { isoDate } from '../app/js/lib/time.js';
 
 const TZ = 'Asia/Bangkok';
-const at = (iso, hm = '04:30') => Date.parse(`${iso}T${hm}:00+07:00`);
+const at = (iso, hm = '12:00') => Date.parse(`${iso}T${hm}:00+07:00`);
 const ex = (key, name, extra = {}) => ({ key, name, type: 'weight_reps', ...extra });
 const s = (id, iso, extra = {}) => ({ id, status: 'done', kind: 'workout', title: 'Legs', dayType: 'legs', startedAt: at(iso), endedAt: at(iso) + 60 * 60000, pausedMs: 0, exercises: [], ...extra });
 
@@ -66,7 +67,8 @@ test('the Hevy bridge steps aside once Hevy history is imported', () => {
   const withBridge = buildHistory({ sessions: own, sets, bridge });
   assert.equal(withBridge.all('Squat (Smith Machine)').length, 2);
   const imported = buildHistory({ sessions, sets, bridge });
-  assert.deepEqual(imported.all('Squat (Smith Machine)').map((e) => [e.date, e.source]), [['2026-10-17', 'training-hq'], ['2023-10-10', 'hevy']]);
+  // History dates are in the test machine's own time zone, so compare them through the same function.
+  assert.deepEqual(imported.all('Squat (Smith Machine)').map((e) => [e.date, e.source]), [[isoDate(new Date(at('2026-10-17'))), 'training-hq'], [isoDate(new Date(at('2023-10-10'))), 'hevy']]);
   // Hold rounds and typical length don't count the bridge on top of the imported sessions.
   const areas = [{ id: 'knees', holds: [{ exercise: 'Leg Extension (Machine)' }] }];
   const holdBridge = { exercises: { 'Leg Extension (Machine)': [{ date: '2023-10-10', sets: [{ hold: true }] }] } };
