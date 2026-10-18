@@ -79,3 +79,12 @@ export function routineFromSession(session, sets, routine = null) {
     updatedAt: Date.now(),
   };
 }
+
+/** The last finished workout before this one of the same kind: same day type, else same routine, else same title. */
+export function previousSame(session, sessions) {
+  const same = session.dayType ? (s) => s.dayType === session.dayType
+    : session.routineId ? (s) => s.routineId === session.routineId
+      : (s) => s.title === session.title;
+  return sessions.filter((s) => s.id !== session.id && s.status === 'done' && s.kind !== 'holds' && s.startedAt < session.startedAt && same(s))
+    .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
+}

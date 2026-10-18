@@ -1,8 +1,12 @@
-// Exercise history from two sources: sessions logged in Training HQ and the Hevy history bridge.
+// Exercise history from two sources: finished sessions (logged in Training HQ or imported from Hevy and Strong) and
+// the Hevy history bridge, a stand-in for the last few Hevy sessions that is ignored once Hevy history is imported.
 // Newest first. Each entry: {date, source, dayType, routineId, sets:[{type, kg, reps, durationS, hold}], heaviest:{kg, reps}|null}.
 import { isoDate } from './time.js';
 
 const isWorking = (s) => !s.hold && s.type !== 'warmup' && s.type !== 'hold';
+
+/** The bridge, or null once any Hevy session has been imported (the import holds the same sessions in full). */
+export const activeBridge = (bridge, sessions = []) => (bridge && !sessions.some((s) => s.source === 'hevy' && s.status === 'done') ? bridge : null);
 
 export function heaviestOf(sets) {
   return sets.filter(isWorking).reduce((best, x) => (x.kg != null && (!best || x.kg > best.kg || (x.kg === best.kg && (x.reps ?? 0) > (best.reps ?? 0))) ? { kg: x.kg, reps: x.reps } : best), null);
@@ -25,7 +29,8 @@ export function sameRoutine(entry, { routineId = null, dayType = null } = {}) {
  * @param {object|null} o.bridge  history bridge doc
  * @param {string|null} o.excludeSessionId  the session being logged (not history yet)
  */
-export function buildHistory({ sessions = [], sets = [], bridge = null, excludeSessionId = null }) {
+export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = null, excludeSessionId = null }) {
+  const bridge = activeBridge(rawBridge, sessions);
   const byName = new Map();
   const push = (name, entry) => { if (!byName.has(name)) byName.set(name, []); byName.get(name).push(entry); };
 
@@ -43,7 +48,7 @@ export function buildHistory({ sessions = [], sets = [], bridge = null, excludeS
       const mine = ss.filter((x) => x.exKey === ex.key).map((x) => ({ type: x.type, kg: x.kg ?? null, reps: x.reps ?? null, durationS: x.durationS ?? null, hold: x.type === 'hold' }));
       if (!mine.length) continue;
       const date = isoDate(new Date(s.startedAt));
-      push(ex.name, { date, at: s.startedAt, source: 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, sets: mine, heaviest: heaviestOf(mine) });
+      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, sets: mine, heaviest: heaviestOf(mine) });
       ownDates.set(`${ex.name}|${date}`, true);
     }
   }

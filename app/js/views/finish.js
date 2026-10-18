@@ -2,11 +2,13 @@
 // tendon hold prompt, "update routine?", save as routine, delete.
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
-import { buildHistory } from '../lib/history.js';
+import { buildHistory, activeBridge } from '../lib/history.js';
 import { summarize, elapsedMs, copySession } from '../lib/session.js';
 import { fileToJpeg, newPhotoId } from '../lib/photos.js';
-import { sessionBests, structureChanged, routineFromSession } from '../lib/finish.js';
-import { formatDay, formatTime } from '../lib/time.js';
+import { sessionBests, structureChanged, routineFromSession, previousSame } from '../lib/finish.js';
+import { dayMarks, workoutDates, weekStreak, SOURCE_LABEL, sourceOf } from '../lib/calendar.js';
+import { changePct } from '../lib/stats.js';
+import { isoDate, formatDate, formatDay, formatTime } from '../lib/time.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
 import { confirmSheet } from '../ui/sheet.js';
@@ -20,6 +22,8 @@ const localInput = (ms) => { const d = new Date(ms); const p = (n) => String(n).
 
 export function render(view, params = []) {
   const id = params[0];
+  // Opened from the calendar (#/finish/<id>/c/<day>) or the history list (#/finish/<id>/h): Back returns there.
+  const back = params[1] === 'c' && /^\d{4}-\d{2}-\d{2}$/.test(params[2] || '') ? `#/calendar/${params[2]}` : params[1] === 'h' ? '#/history' : null;
   let repo;
 
   const draw = async () => {
@@ -75,7 +79,15 @@ export function render(view, params = []) {
     const history = buildHistory({ sessions, sets, bridge });
     const done = all.filter((s) => s.done);
     const bests = sessionBests(session, done, history);
-    const number = sessions.filter((s) => s.status === 'done' && s.startedAt <= session.startedAt).length + (bridge?.sessionCount ?? 0);
+    const workouts = sessions.filter((s) => s.status === 'done' && s.kind !== 'holds');
+    const number = workouts.filter((s) => s.startedAt <= session.startedAt).length + (activeBridge(bridge, sessions)?.sessionCount ?? 0);
+    // P29: week streak as of this session, and volume against the last session of the same kind.
+    const day = isoDate(new Date(session.startedAt));
+    const streak = weekStreak(workoutDates(dayMarks({ sessions: workouts })), day, withDefaults(getState().settings).firstDayOfWeek).current;
+    const prev = previousSame(session, workouts);
+    const prevVol = prev ? summarize(prev, sets.filter((x) => x.sessionId === prev.id)).volume : null;
+    const pct = prev ? changePct(sum.volume, prevVol) : null;
+    const source = SOURCE_LABEL[sourceOf(session)] || sourceOf(session);
     const areas = (await repo.list('tendons')).filter((d) => d.kind === 'area' && d.phase !== 'none');
     const due = holdsAfter(areas, session.dayType);
     const hold = due.length ? { text: due.map((h) => `${h.exercise} hold, ${h.sets} × ${h.seconds} s`).join(' · ') } : null;
@@ -86,14 +98,15 @@ export function render(view, params = []) {
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
     void lib;
     view.innerHTML = `
-      <div class="lib-head"><a class="pill" href="#/train">Train</a>
+      <div class="lib-head"><a class="pill" href="${back || '#/train'}">${back ? 'Back' : 'Train'}</a>
         <span class="hud c-muted">${esc(formatDay(new Date(session.startedAt)).toUpperCase())} · ${esc(formatTime(new Date(session.startedAt)))} - ${esc(formatTime(new Date(session.endedAt)))}</span></div>
-      <div><div class="hud c-green">${esc(session.title.toUpperCase())} DONE</div><h1 class="view-title">Session ${number}</h1></div>
+      <div><div class="hud c-green">${esc(session.title.toUpperCase())} DONE <span class="c-muted">· ${esc(source.toUpperCase())}</span></div><h1 class="view-title">Session ${number}</h1></div>
       <section class="stat-row">
         <div class="card stat"><span class="hud c-muted">TIME</span><b>${Math.round(elapsedMs(session) / 60000)} min</b></div>
         <div class="card stat"><span class="hud c-muted">VOLUME</span><b>${sum.volume.toLocaleString('en-US')}</b></div>
         <div class="card stat"><span class="hud c-muted">SETS</span><b>${sum.done}</b></div>
       </section>
+      <p class="hint">Streak: ${streak} week${streak === 1 ? '' : 's'}${prev ? ` · Volume ${pct == null ? 'not comparable' : `${pct > 0 ? '▲' : pct < 0 ? '▼' : '='} ${Math.abs(pct)}%`} vs the last ${esc(prev.title)} (${esc(formatDate(new Date(prev.startedAt)))}, ${prevVol.toLocaleString('en-US')} kg)` : ''}</p>
       <section class="card pad-card">
         <div class="hud c-muted">COMEBACK BESTS · ${bests.length}</div>
         ${bests.map((b) => `<div class="best"><span>${esc(b.name)}</span><b>${fmtKg(b.kg)} × ${b.reps}</b></div>`).join('') || '<p class="hint">None this time.</p>'}
@@ -147,7 +160,7 @@ export function render(view, params = []) {
       for (const s of all) await repo.remove('sets', s.id);
       for (const x of (await repo.list('photos')).filter((p) => p.sessionId === id)) await repo.remove('photos', x.id);
       await repo.remove('sessions', id);
-      location.hash = '#/train';
+      location.hash = back || '#/train';
     };
   };
 

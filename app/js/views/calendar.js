@@ -135,7 +135,7 @@ function dayPanel(day, marks, ctx, today) {
         ${exercises.map((e) => `<div class="day-ex"><div class="day-ex-name">${esc(e.name)}${e.importedName ? ` <span class="c-faint">(${esc(e.importedName)} in ${esc(SOURCE_LABEL[source] || source)})</span>` : ''}</div>
           <div class="day-sets">${e.sets.map((t) => `<span>${esc(t)}</span>`).join('')}</div></div>`).join('')}
         ${s.note ? `<p class="hint">Note: ${esc(s.note)}</p>` : ''}
-        <div class="btn-row">${holds ? '' : `<a class="btn-ghost center" href="#/finish/${esc(s.id)}">Open</a>`}<a class="btn-ghost center" href="#/session/${esc(s.id)}/edit">Edit</a></div>
+        <div class="btn-row">${holds ? '' : `<a class="btn-ghost center" href="#/finish/${esc(s.id)}/c/${day}">Open</a>`}<a class="btn-ghost center" href="#/session/${esc(s.id)}/edit">Edit</a></div>
       </article>`;
     }).join('')}
     ${extra.map((e) => `<p class="hint">${esc(e.label)}</p>`).join('')}
@@ -173,7 +173,7 @@ export function render(view, params = []) {
     const body = mode === 'all' ? allYearsView(ctx.marks)
       : mode === 'year' ? yearView(route.year, ctx.marks, { firstDay, today })
         : monthView(route.month, ctx.marks, { firstDay, today, day: route.day });
-    view.innerHTML = `<div class="lib-head"><a class="pill" href="#/train">Back</a>
+    view.innerHTML = `<div class="lib-head"><a class="pill" href="#/train">Back</a><a class="pill" href="#/history">History</a>
         <label class="jump"><span class="hud c-muted">GO TO</span><input class="input" type="date" id="cal-jump" max="${today}" value="${route.day || ''}" aria-label="Go to a date"></label></div>
       <h1 class="view-title">Calendar</h1>
       ${summaryTiles(ctx.marks, today, firstDay)}

@@ -5,6 +5,7 @@ import { weekColumn } from './programme.js';
 import { effectiveKg } from './exercise-types.js';
 import { newId, newKey, defaultSets } from './routines.js';
 import { warmupSets } from './plates.js';
+import { activeBridge } from './history.js';
 
 export const newSetId = () => newId('set');
 
@@ -151,8 +152,9 @@ export function fillForTick(set, previous) {
  * Typical length of this kind of session: median of the last 3 of the same day type
  * (Training HQ sessions and the Hevy bridge), in ms. Null when there is nothing to go on.
  */
-export function typicalDurationMs(dayType, { sessions = [], bridge = null, now = Date.now() } = {}) {
+export function typicalDurationMs(dayType, { sessions = [], bridge: rawBridge = null, now = Date.now() } = {}) {
   if (!dayType) return null;
+  const bridge = activeBridge(rawBridge, sessions);
   const own = sessions.filter((s) => s.status === 'done' && s.dayType === dayType && s.endedAt)
     .map((s) => ({ at: s.startedAt, ms: s.endedAt - s.startedAt - (s.pausedMs || 0) }));
   const hevy = (bridge?.lastSessions || []).filter((s) => s.dayType === dayType && s.start && s.end)

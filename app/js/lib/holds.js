@@ -1,13 +1,15 @@
 // Tendon holds: what is due per area, from each area's phase (the owner's tendon note) and the rounds logged.
 // A round is 3 holds of ~30 s. Rounds come from hold sessions (kind "holds") and from hold sets inside workouts.
 import { isoDate } from './time.js';
+import { activeBridge } from './history.js';
 
 /**
  * Rounds per area logged on each date: {areaId: {'YYYY-MM-DD': count}}.
  * Hold sets on an area's hold exercises or on the exercises that load it count for that area.
- * bridge: Hevy history (hold sets marked hold:true), used until the full import in step 3.
+ * bridge: Hevy history (hold sets marked hold:true), used until Hevy history is imported.
  */
-export function roundsByDate(areas, sessions, sets, bridge = null) {
+export function roundsByDate(areas, sessions, sets, rawBridge = null) {
+  const bridge = activeBridge(rawBridge, sessions);
   const holdSessions = sessions.filter((s) => s.status === 'done');
   const byArea = Object.fromEntries(areas.map((a) => [a.id, {}]));
   const exToArea = new Map();
