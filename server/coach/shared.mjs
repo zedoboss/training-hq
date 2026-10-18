@@ -46,7 +46,7 @@ export function dayText(iso, today = null) {
 export const whenText = (ms, tz, today = null) => `${dayText(isoDate(new Date(ms), tz), today)}, ${formatTime(new Date(ms), tz)}`;
 export const timeText = (ms, tz) => formatTime(new Date(ms), tz);
 
-/** "56.3 kg total (11.3 kg bar + 22.5 kg a side)", or "29 kg". */
+/** "60 kg total (20 kg bar + 20 kg a side)", or "25 kg". */
 export function loadText(kgVal, barKg = null) {
   if (kgVal == null) return 'no load';
   const side = barKg ? platesPerSide(kgVal, barKg) : null;

@@ -72,7 +72,7 @@ test('helpers: names as he says them, loads with the bar, days with weekday', ()
   assert.equal(findByName(items, 'squat').item.name, 'Squat (Smith Machine)');
   assert.equal(findByName(items, 'cable row').item.name, 'Seated Cable Row - V Grip (Cable)');
   assert.equal(findByName(items, 'bench').item, null);
-  assert.equal(loadText(56.3, 11.3), '56.3 kg total (11.3 kg bar + 22.5 kg a side)');
+  assert.equal(loadText(62.5, 12.5), '62.5 kg total (12.5 kg bar + 25 kg a side)');
   assert.equal(loadText(29), '29 kg');
   assert.equal(dayText('2026-01-20', '2026-01-20'), 'Tuesday 1/20');
   assert.equal(dayText('2025-12-30', '2026-01-20'), 'Tuesday 12/30/2025');
