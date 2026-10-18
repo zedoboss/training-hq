@@ -81,3 +81,11 @@ test('a bar chosen for one exercise (EZ bar) wins; "none" means no bar; a bar wi
   assert.equal(barKgFor({ name: 'Squat (Smith Machine)', equipment: 'smith', barId: 'gone' }, eq), 11.3, 'a removed bar falls back to the equipment bar');
   assert.equal(equipmentWithDefaults({ bars: [{ id: 'ez', equipment: '', kg: 10 }] }).bars[0].equipment, null);
 });
+
+test('the coach starts on Sonnet 5.5 at low effort; Opus 5.5 at high effort is the other choice (8.4)', async () => {
+  const { withDefaults } = await import('../app/js/lib/settings.js');
+  const { MODELS } = await import('../server/claude.mjs');
+  assert.equal(withDefaults(null).coach.model, 'fast');
+  assert.equal(withDefaults({ coach: { model: 'deep' } }).coach.model, 'deep');
+  assert.deepEqual([MODELS.fast.model, MODELS.fast.effort, MODELS.deep.model, MODELS.deep.effort], ['claude-sonnet-5-5', 'low', 'claude-opus-5-5', 'high']);
+});

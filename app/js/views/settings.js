@@ -126,6 +126,11 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('Body scan photos are read by', 'Claude on your Mac. Opus looks harder at every number (about a minute); Sonnet is quicker.', '')}
       ${seg('body.scanModel', [['deep', 'Opus 5.5 · careful'], ['fast', 'Sonnet 5.5 · fast']], st.body.scanModel)}
+    </div>
+    <div class="section-label">Coach</div>
+    <div class="card opt-list">
+      ${opt('The coach thinks with', 'Claude on your Mac. Sonnet at low effort answers in a few seconds; Opus at high effort thinks deeper and takes longer. Also on the Talk screen.', '')}
+      ${seg('coach.model', [['fast', 'Sonnet 5.5 · low'], ['deep', 'Opus 5.5 · high']], st.coach.model)}
     </div>`;
 }
 

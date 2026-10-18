@@ -26,6 +26,10 @@ import * as meal from './views/meal.js';
 import * as supps from './views/supps.js';
 import * as supp from './views/supp.js';
 import * as sauna from './views/sauna.js';
+import * as coach from './views/coach.js';
+import { getState, subscribe } from './lib/store.js';
+import { withDefaults } from './lib/settings.js';
+import { MODEL_LABEL } from './lib/coach.js';
 import { autoKeepOffline } from './lib/squat-offline.js';
 
 const VIEWS = {
@@ -53,6 +57,7 @@ const VIEWS = {
   supps: { mod: supps, label: 'Supplements', hidden: true, tab: 'fuel' },
   supp: { mod: supp, label: 'Supplement', hidden: true, tab: 'fuel' },
   sauna: { mod: sauna, label: 'Sauna', hidden: true, tab: 'fuel' },
+  coach: { mod: coach, label: 'Talk', hidden: true, tab: 'today' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };
@@ -78,7 +83,7 @@ function shell() {
       <div class="top-right">
         <div class="model-readout">
           <div class="hud c-faint" style="letter-spacing:.4em">ACTIVE MODEL</div>
-          <div class="hud c-cyan" style="font-size:16px;letter-spacing:.24em;margin-top:6px">SONNET 5.5 · LOW</div>
+          <div class="hud c-cyan" id="active-model" style="font-size:16px;letter-spacing:.24em;margin-top:6px">SONNET 5.5 · LOW</div>
         </div>
         <a class="icon-btn" href="#/settings" data-tab="settings" aria-label="Settings">${GEAR}</a>
       </div>
@@ -106,6 +111,10 @@ function route() {
 }
 
 shell();
+// The coach's model (Settings or the Talk screen) in the header.
+const showModel = () => { const el = document.getElementById('active-model'); if (el) el.textContent = MODEL_LABEL[withDefaults(getState().settings).coach.model] || MODEL_LABEL.fast; };
+showModel();
+subscribe(showModel);
 window.addEventListener('hashchange', route);
 route();
 registerServiceWorker();

@@ -45,6 +45,8 @@ export const DEFAULT_SETTINGS = {
   // Step 7: a daily step goal of his own for the Body chart and the core's steps ring (none until he sets one).
   // Step 7: which Claude reads body scan result photos on the Mac (Opus 5.5 high by default: every number counts).
   body: { stepGoal: null, scanModel: 'deep' },
+  // Step 8: the coach's Claude ('fast' Sonnet 5.5 at low effort, the default; 'deep' Opus 5.5 at high effort).
+  coach: { model: 'fast' },
 };
 
 export const DEFAULT_EQUIPMENT = {
