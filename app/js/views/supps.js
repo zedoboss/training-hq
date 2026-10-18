@@ -4,7 +4,7 @@
 // The app only tracks what he decides to take. It never recommends a supplement or a dose, and never changes his list.
 import { ready } from '../lib/data.js';
 import { isoDate, formatHm, formatDay, formatTime } from '../lib/time.js';
-import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFor, scheduledOn, logId } from '../lib/supplements.js';
+import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFor, scheduledOn, logId, streak } from '../lib/supplements.js';
 import { rotationDay, lastRotationSession, daysByDate, addDays } from '../lib/rotation.js';
 import { actionSheet, promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -75,6 +75,13 @@ function renderDay(view, repo, alive, dateParam) {
     const due = groups.flatMap((g) => g.items);
     const taken = due.filter((i) => i.entry?.status === 'taken').length;
     const setup = all.filter((s) => scheduledOn(s, today) && (!s.time || !s.withFood || !s.stock));
+    // Streak and adherence over every supplement on the list (each one's own is on My list).
+    const st = streak({ supps: all, log, today });
+    const sumOf = (n) => all.map((x) => adherence(x, log, today, n)).reduce((a, x) => ({ taken: a.taken + x.taken, scheduled: a.scheduled + x.scheduled }), { taken: 0, scheduled: 0 });
+    const asPct = (x) => ({ pct: x.scheduled ? Math.round((x.taken / x.scheduled) * 100) : null });
+    const a7 = asPct(sumOf(7)); const a30 = asPct(sumOf(30));
+    const worstOne = all.filter((x) => statusOn(x, today) === 'active').map((x) => ({ x, a: adherence(x, log, today, 7) })).filter((y) => y.a.pct != null).sort((p, q) => p.a.pct - q.a.pct)[0];
+    const worst = worstOne ? `${worstOne.x.short || worstOne.x.name} ${worstOne.a.pct}% this week` : '';
     const row = (i) => {
       const s = i.supp; const e = i.entry;
       const restDose = dayKind === 'rest' && s.doseRest;
@@ -92,7 +99,10 @@ function renderDay(view, repo, alive, dateParam) {
         <span class="hud c-muted">${date === today ? 'TODAY · ' : ''}${esc(formatDay(new Date(`${date}T12:00:00`)).toUpperCase())} · ${dayKind === 'rest' ? 'REST DAY' : 'TRAINING DAY'}</span>
         ${date < today ? `<a class="pill" href="#/supps/${addDays(date, 1)}" aria-label="Next day">›</a>` : '<span class="pill is-off" aria-hidden="true">›</span>'}</div>
       <h1 class="view-title">Supplements</h1>
-      <section class="card pad-card supp-sum" id="s-sum"><div><span class="hud c-muted">TAKEN</span><b>${taken} of ${due.length}</b></div></section>
+      <section class="card pad-card supp-sum" id="s-sum"><div><span class="hud c-muted">TAKEN</span><b>${taken} of ${due.length}</b></div>
+        <div><span class="hud c-muted">STREAK</span><b>${st.days} day${st.days === 1 ? '' : 's'}</b></div>
+        <div><span class="hud c-muted">7 DAYS</span><b>${pct(a7)}</b></div><div><span class="hud c-muted">30 DAYS</span><b>${pct(a30)}</b></div>
+        <p class="hint">Streak: days in a row with everything taken. 7 and 30 days: taken out of scheduled, from the first day you ticked anything${a7.pct == null ? '' : `; lowest: ${esc(worst)}`}.</p></section>
       ${date === today && setup.length ? `<section class="card pad-card confirm-card"><div class="hud c-amber">SET THEM UP (YOU SAID YOU'D ENTER THESE HERE)</div>
         <p class="hint c-text">Time, with food or not, and servings left are still missing on: ${setup.map((s) => `<a href="#/supp/${esc(s.id)}">${esc(s.short || s.name)}</a>`).join(', ')}.</p></section>` : ''}
       ${groups.map((g) => `<div class="section-label">${esc(g.label)}${g.time ? ` · ${formatHm(g.time)}` : ''}</div>

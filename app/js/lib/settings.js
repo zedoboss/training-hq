@@ -34,7 +34,9 @@ export const DEFAULT_SETTINGS = {
   // Step 4: the readiness check-in comes this many minutes before the session time he sets.
   // Hold reminders (decision 18: he confirms the times the first time).
   // Notifications from the Mac: which kinds, the evening round-up time, the weekday of the neck reminder (0 = Sunday).
-  notify: { readinessMin: 30, holdsMorning: '07:30', holdsEvening: '19:30', holdTimesConfirmedOn: null, eveningCheck: '20:30', neckWeekday: 0, kinds: {} },
+  notify: { readinessMin: 30, holdsMorning: '07:30', holdsEvening: '19:30', holdTimesConfirmedOn: null, eveningCheck: '20:30', neckWeekday: 0, kinds: {},
+    // Step 6: supplements are asked again every 45 minutes, 3 times, until answered; the weekly planning question day.
+    suppFollowMin: 45, suppFollowMax: 3, suppPlanWeekday: 0 },
   // Step 6: which Claude reads meal photos on the Mac ('fast' Sonnet 5.5 low, 'deep' Opus 5.5 high); his usual meal
   // times [{name, time 'HH:MM'}] (none until he sets them: brief section 10).
   fuel: { visionModel: 'fast', mealTimes: [] },

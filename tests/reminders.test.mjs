@@ -162,3 +162,34 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   assert.equal(remindersFor({ ...base, date, last: null, meals: [breakfast], settings: { notify: { kinds: { meals: false } } } }).filter((i) => i.kind === 'meals').length, 0);
   assert.equal(dueNow(items, at(date, '13:20')).length, 0);
 });
+
+test('supplements (6.6): at his times, again every 45 minutes until answered, open ones in the evening', async () => {
+  const { logEntry } = await import('../app/js/lib/supplements.js');
+  const date = '2026-01-20';
+  const s = (id, extra) => ({ id, name: id, short: id, dose: '5 g', time: '07:00', days: { type: 'daily' }, history: [{ on: '2026-01-01', status: 'active' }], order: 0, ...extra });
+  const supplements = [s('creatine', { order: 0 }), s('vitamin C', { dose: '1,000 mg', order: 1 }), s('magnesium', { time: '21:00', dose: '375 mg', doseRest: '750 mg' }), s('collagen', { time: null })];
+  let items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19' }, supplements });
+  const sup = items.filter((i) => i.kind === 'supps');
+  assert.deepEqual(sup.map((i) => i.id), [`supps:${date}:0700`, `supps-again:${date}:0700:1`, `supps-again:${date}:0700:2`, `supps-again:${date}:0700:3`,
+    `supps:${date}:2100`, `supps-again:${date}:2100:1`, `supps-again:${date}:2100:2`, `supps-again:${date}:2100:3`]);
+  assert.equal(sup[0].at, at(date, '07:00'));
+  assert.equal(sup[0].title, 'Morning supplements');
+  assert.equal(sup[0].body, 'Creatine 5 g, Vitamin C 1,000 mg. Tap to tick them off.');
+  assert.equal(sup[0].fixed, true);
+  assert.equal(sup[1].at, at(date, '07:45'));
+  assert.equal(sup[1].body, "Morning stack's still open: creatine, vitamin C. Taken or skipped?");
+  // The day after Legs is the rotation's rest day: magnesium's rest-day dose.
+  assert.equal(sup[5].body, "Magnesium still unticked. It's a rest day, so 750 mg.");
+  const evening = items.find((i) => i.kind === 'evening');
+  assert.match(evening.body, /Supplements still open: creatine, vitamin C, magnesium, collagen\./);
+  assert.equal(evening.url, '#/holds');
+  // Answered: no more asking; skipped counts as answered.
+  const log = [logEntry({ supp: supplements[0], date, dayKind: 'rest', status: 'taken', at: 1 }), logEntry({ supp: supplements[1], date, dayKind: 'rest', status: 'skipped', reason: 'ran out', at: 1 })];
+  items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19' }, supplements, suppLog: log });
+  assert.equal(items.filter((i) => i.id.startsWith(`supps-again:${date}:0700`)).every((i) => !i.due), true);
+  assert.equal(items.find((i) => i.id === `supps-again:${date}:2100:1`).due, true);
+  // Switched off in Settings: none, and nothing in the evening round-up.
+  items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19' }, supplements, settings: { notify: { kinds: { supps: false } } } });
+  assert.equal(items.filter((i) => i.kind === 'supps').length, 0);
+  assert.doesNotMatch(items.find((i) => i.kind === 'evening')?.body || '', /Supplements/);
+});

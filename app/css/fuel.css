@@ -96,3 +96,12 @@
 .supp-done { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
 .supp-item.is-taken b { color: var(--green); }
 .supp-all { margin: 8px 0 10px; }
+.supp-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.supp-sum .hint { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+
+/* Calendar markers from step 6: meals (green bar, bottom left), supplements (amber ring; filled = all taken). */
+.cal-meals { position: absolute; bottom: 4px; left: 5px; width: 10px; height: 3px; border-radius: 2px; background: var(--green); }
+.cal-supps { position: absolute; bottom: 3px; right: 4px; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--amber); box-sizing: border-box; }
+.cal-supps.is-all { background: var(--amber); }
+.cal-key-meals { width: 10px; height: 3px; border-radius: 2px; background: var(--green); display: inline-block; }
+.cal-key-supps { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); display: inline-block; }

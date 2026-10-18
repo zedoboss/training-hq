@@ -11,6 +11,8 @@ import {
   dayMarks, workoutDates, weekStreak, restDaysSince, sessionsPerWeek, monthGrid, yearMonths, yearsList, dayColour, dayDetail, SOURCE_LABEL,
 } from '../lib/calendar.js';
 import { squatMarks } from '../lib/squat-log.js';
+import { mealMarks } from '../lib/meals.js';
+import { suppMarks } from '../lib/supplements.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -47,7 +49,8 @@ function summaryTiles(marks, today, firstDay) {
 
 function legend() {
   return `<div class="legend cal-legend">${['pull', 'push', 'legs', 'neck', 'other'].map((t) => `<span><i class="key cal-key t-${t}"></i>${TYPE_LABEL[t]}</span>`).join('')}
-    <span><i class="key cal-key-holds"></i>Holds</span><span><i class="key cal-key-squat"></i>Squat Depth</span><span class="c-faint">No colour: rest day</span></div>`;
+    <span><i class="key cal-key-holds"></i>Holds</span><span><i class="key cal-key-squat"></i>Squat Depth</span>
+    <span><i class="key cal-key-meals"></i>Meals logged</span><span><i class="key cal-key-supps"></i>Supplements all taken</span><span class="c-faint">No colour: rest day</span></div>`;
 }
 
 function dayTip(d, m) {
@@ -77,6 +80,8 @@ function monthView(month, marks, { firstDay, today, day }) {
           <span class="cal-num">${Number(d.slice(8))}</span>
           ${m?.holds.length ? '<i class="cal-holds" aria-hidden="true"></i>' : ''}
           ${m?.extra.some((e) => e.kind === 'squat') ? '<i class="cal-squat" aria-hidden="true"></i>' : ''}
+          ${m?.extra.some((e) => e.kind === 'meals') ? '<i class="cal-meals" aria-hidden="true"></i>' : ''}
+          ${m?.extra.some((e) => e.kind === 'supps') ? `<i class="cal-supps ${m.extra.find((e) => e.kind === 'supps').all ? 'is-all' : ''}" aria-hidden="true"></i>` : ''}
           ${many ? `<i class="cal-more" aria-hidden="true">${m.workouts.length}</i>` : ''}
         </button>`;
       }).join('')}
@@ -145,7 +150,9 @@ function dayPanel(day, marks, ctx, today) {
       return `<a class="card day-squat" href="#/squat"><span class="hud c-green">SQUAT DEPTH</span><span>${esc(e.label.replace(/^Squat Depth /, ''))}</span>
         ${r ? `<span class="hud sq-reps">${r.reps.map((x) => `<span class="${x.good ? 'c-green' : 'c-red'}">${Math.round(x.minDeg)}°</span>`).join(' ')}</span>` : ''}</a>`;
     }).join('')}
-    ${extra.filter((e) => e.kind !== 'squat').map((e) => `<p class="hint">${esc(e.label)}</p>`).join('')}
+    ${extra.filter((e) => e.kind === 'meals').map((e) => `<a class="card day-squat" href="#/fuel/${day}"><span class="hud c-green">MEALS</span><span>${esc(e.label.replace(/^Meals: /, ''))}</span></a>`).join('')}
+    ${extra.filter((e) => e.kind === 'supps').map((e) => `<a class="card day-squat" href="#/supps/${day}"><span class="hud c-amber">SUPPLEMENTS</span><span>${esc(e.label.replace(/^Supplements: /, ''))}</span></a>`).join('')}
+    ${extra.filter((e) => !['squat', 'meals', 'supps'].includes(e.kind)).map((e) => `<p class="hint">${esc(e.label)}</p>`).join('')}
     ${day <= today ? `<a class="btn-ghost center" href="#/session/start/empty/${day}">${day === today ? 'Start an empty session' : 'Log a session on this day'}</a>` : ''}
   </section>`;
 }
@@ -158,13 +165,14 @@ export function render(view, params = []) {
   let route = null;
 
   const load = async (repo) => {
-    const [sessions, sets, squats] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.list('squats')]);
+    const [sessions, sets, squats, meals, estimates, supps, suppLog] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.list('squats'),
+      repo.list('meals'), repo.list('meal-estimates'), repo.list('supplements'), repo.list('supp-log')]);
     const setsBySession = new Map();
     for (const x of sets) {
       if (!setsBySession.has(x.sessionId)) setsBySession.set(x.sessionId, []);
       setsBySession.get(x.sessionId).push(x);
     }
-    return { marks: dayMarks({ sessions, sets, extra: squatMarks(squats) }), byId: new Map(sessions.map((s) => [s.id, s])), setsBySession, squatsById: new Map(squats.map((r) => [r.id, r])) };
+    return { marks: dayMarks({ sessions, sets, extra: [...squatMarks(squats), ...mealMarks(meals, estimates), ...suppMarks(supps, suppLog)] }), byId: new Map(sessions.map((s) => [s.id, s])), setsBySession, squatsById: new Map(squats.map((r) => [r.id, r])) };
   };
 
   const draw = () => {
@@ -206,7 +214,7 @@ export function render(view, params = []) {
     ctx = await load(repo);
     draw();
     off = repo.onChange(async (cols) => {
-      if (!cols.includes('sessions') && !cols.includes('sets') && !cols.includes('squats')) return;
+      if (!cols.some((c) => ['sessions', 'sets', 'squats', 'meals', 'meal-estimates', 'supplements', 'supp-log'].includes(c))) return;
       ctx = await load(repo);
       const y = window.scrollY;
       draw();

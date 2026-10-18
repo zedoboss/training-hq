@@ -3,6 +3,7 @@
 // photo. Supplements and the sauna add theirs here too.
 import { zonedTime, formatHm, addMinutesHm } from './time.js';
 import { afterPhotoAt } from './meals.js';
+import { checklist, shortName } from './supplements.js';
 
 /** Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. */
 export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, cookingMin: 30 };
@@ -56,4 +57,38 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
     });
   }
   return out;
+}
+
+/** Supplement follow-ups: every 45 minutes after the time, up to 3 times, while something is still unanswered. */
+export const SUPP_FOLLOW = { everyMin: 45, max: 3 };
+const cap1 = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * Supplement reminders for one date (6.6): at each of his times, then follow-ups until each item is ticked or skipped
+ * (brief: it keeps asking and never assumes). Also returns what is still open, for the evening round-up.
+ * @returns {{items: Array, open: Array<string>}}
+ */
+export function suppReminders({ date, tz, supps = [], log = [], dayKind = 'train', follow = SUPP_FOLLOW }) {
+  const items = [];
+  const groups = checklist({ supps, log, date, dayKind });
+  for (const g of groups.filter((x) => x.time)) {
+    const id = g.time.replace(':', '');
+    const at = zonedTime(date, g.time, tz);
+    items.push({
+      id: `supps:${date}:${id}`, kind: 'supps', at, url: `#/supps/${date}`, tag: `supps-${date}-${id}`, fixed: true,
+      title: `${g.label} supplements`, body: `${g.items.map((i) => `${cap1(shortName(i.supp))} ${i.dose}`).join(', ')}. Tap to tick them off.`,
+      due: g.open.length > 0,
+    });
+    const open = g.open;
+    const text = open.length === 1
+      ? `${cap1(shortName(open[0].supp))} still unticked.${open[0].supp.doseRest ? ` It's a ${dayKind === 'rest' ? 'rest' : 'training'} day, so ${open[0].dose}.` : ''}`
+      : `${g.label} stack's still open: ${open.map((i) => shortName(i.supp)).join(', ')}. Taken or skipped?`;
+    for (let k = 1; k <= follow.max; k++) {
+      items.push({
+        id: `supps-again:${date}:${id}:${k}`, kind: 'supps', at: at + k * follow.everyMin * 60000, url: `#/supps/${date}`, tag: `supps-${date}-${id}`, fixed: false,
+        title: `${g.label} supplements still open`, body: text, due: open.length > 0,
+      });
+    }
+  }
+  return { items, open: groups.flatMap((g) => g.open.map((i) => shortName(i.supp))) };
 }

@@ -1,5 +1,5 @@
 // Backup reminders for when the Mac is off (step 4, brief section 7): the fixed reminders of the next days (session
-// and check-in times, tendon holds; supplement times join in step 6) go into the iPhone's own Reminders through a
+// and check-in times, tendon holds, supplement times) go into the iPhone's own Reminders through a
 // Shortcut, or into Calendar as a file. They then ring with no Mac and no connection.
 import { remindersFor } from './reminders.js';
 import { rotationDay, addDays } from './rotation.js';

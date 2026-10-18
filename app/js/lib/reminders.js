@@ -9,7 +9,7 @@ import { weekColumn } from './programme.js';
 import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
 import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
-import { mealReminders } from './fuel-reminders.js';
+import { mealReminders, suppReminders } from './fuel-reminders.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -18,6 +18,7 @@ export const KINDS = [
   ['evening', 'Evening: what is still open, and tomorrow'],
   ['neck', 'Neck is still unplanned (weekly)'],
   ['meals', 'Meal times with nothing logged; the after photo'],
+  ['supps', 'Supplements at their times, asked again until answered'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };
@@ -38,10 +39,12 @@ const holdText = (s) => `${s.label}: ${s.exercise}${s.also?.length ? ` then ${s.
  * @param {Set<string>} [o.trainedDates]  dates with a workout started or done
  * @param {object} [o.neck]      {planned, lastAskedOn} (4.9)
  * @param {Array} [o.meals]      meals (step 6), any date
- * @param {Array} [o.mealChecks] answers to "eaten, cooking, or skipping?" 
+ * @param {Array} [o.mealChecks] answers to "eaten, cooking, or skipping?"
+ * @param {Array} [o.supplements] his supplement list (step 6)
+ * @param {Array} [o.suppLog]    taken / skipped answers
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [] }) {
+export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [] }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -91,7 +94,11 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
     }
   }
 
-  // Evening: holds still open today, and tomorrow's session (or a nudge to set its time).
+  // Supplements (6.6): at his times, then again every 45 minutes until each is answered.
+  const supps = on('supps') ? suppReminders({ date, tz, supps: supplements, log: suppLog, dayKind: rot.today.kind === 'rest' ? 'rest' : 'train', follow: { everyMin: n.suppFollowMin, max: n.suppFollowMax } }) : { items: [], open: [] };
+  out.push(...supps.items);
+
+  // Evening: holds and supplements still open today, and tomorrow's session (or a nudge to set its time).
   if (on('evening')) {
     const open = slots.filter((s) => !s.done);
     const tomorrow = addDays(date, 1);
@@ -103,10 +110,11 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
         : `Tomorrow: ${LABEL[rot2.today.dayType]}. No time set yet.`;
     }
     const still = open.length ? `Still open: ${open.map((s) => `${s.label.toLowerCase()} (${s.exercise})`).join(', ')}.` : '';
-    if (still || next) {
+    const suppText = supps.open.length ? `Supplements still open: ${supps.open.join(', ')}.` : '';
+    if (still || suppText || next) {
       out.push({
-        id: `evening:${date}`, kind: 'evening', at: zonedTime(date, n.eveningCheck, tz), url: open.length ? '#/holds' : '#/train', tag: `evening-${date}`, fixed: false,
-        title: open.length ? 'Still open today' : 'Tomorrow', body: [still, next].filter(Boolean).join(' '), due: true,
+        id: `evening:${date}`, kind: 'evening', at: zonedTime(date, n.eveningCheck, tz), url: open.length ? '#/holds' : suppText ? '#/supps' : '#/train', tag: `evening-${date}`, fixed: false,
+        title: open.length || suppText ? 'Still open today' : 'Tomorrow', body: [still, suppText, next].filter(Boolean).join(' '), due: true,
       });
     }
   }
@@ -135,7 +143,7 @@ export function dueNow(items, now, sent = {}, graceMs = 30 * 60000) {
 }
 
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
-export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [] }, tz) {
+export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [] }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
   return {
     tz,
@@ -150,5 +158,7 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     neck,
     meals,
     mealChecks,
+    supplements,
+    suppLog,
   };
 }
