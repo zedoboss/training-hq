@@ -1,8 +1,9 @@
 // TENDON HOLDS: checklist (#/holds) and the hold timer (#/holds/<area>/<holdIndex>).
 // Rules come from the owner's tendon note; the app adds no rehab advice of its own.
-import { ready } from '../lib/data.js';
-import { roundsByDate, areaStatus, painOk, PHASE_TEXT } from '../lib/holds.js';
-import { isoDate, formatDay } from '../lib/time.js';
+import { ready, saveSettings } from '../lib/data.js';
+import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots } from '../lib/holds.js';
+import { rotationDay, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
+import { isoDate, formatDay, formatHm } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
@@ -27,10 +28,18 @@ async function loadAreas(repo) {
 function renderList(view, repo) {
   const draw = async () => {
     const today = isoDate(new Date());
-    const [areas, sessions, sets, bridge, todayDoc] = await Promise.all([loadAreas(repo), repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.get('days', today)]);
+    const [areas, sessions, sets, bridge, dayList] = await Promise.all([loadAreas(repo), repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('days')]);
+    const days = daysByDate(dayList);
+    const todayDoc = days[today];
+    const rot = rotationDay({ last: lastRotationSession(sessions, bridge), today, days });
+    const prefs = withDefaults(getState().settings).notify;
     // Today's check-in: W = yes or T = 3 means less weight or less effort for that area's holds (his note's rule).
     const ease = new Set(todayDoc?.readiness?.easeHolds || []);
     const rounds = roundsByDate(areas, sessions, sets, bridge);
+    const dayType = rot.today.kind === 'rest' ? null : rot.today.dayType;
+    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening } });
+    const slotWhen = (x) => (x.slot === 'after' ? `After ${LABEL[dayType]}` : x.slot === 'rest' ? `Rest day · ${formatHm(x.time)}` : `${x.slot === 'morning' ? 'Morning' : 'Evening'} · ${formatHm(x.time)}`);
+    const timesOpen = !prefs.holdTimesConfirmedOn;
     const unconfirmed = areas.filter((a) => a.holds?.length && a.phase !== 'unknown'
       && (a.timingConfirmed === false || a.timesConfirmed === false || a.holds.some((h) => h.timingConfirmed === false)));
     const confirmArea = (a, extra = {}) => ({ ...a, ...extra, timingConfirmed: true, timesConfirmed: true, timingConfirmedOn: today, holds: a.holds.map((h) => ({ ...h, timingConfirmed: true })) });
@@ -38,8 +47,16 @@ function renderList(view, repo) {
       <div class="lib-head"><a class="pill" href="#/train">Back</a></div>
       <h1 class="view-title">Tendon holds</h1>
       <p class="hint">Your rules: hold at least 30 seconds, 3 sets, using the movement that hurts. Pain up to 3-4 out of 10 is fine if it isn't worse the next day; if it is, use less weight or push less hard.</p>
-      ${unconfirmed.length ? `<section class="card pad-card confirm-card"><div class="hud c-amber">CONFIRM YOUR HOLD TIMES (FIRST TIME)</div>
+      <section class="card pad-card hold-today">
+        <div class="hud c-muted">TODAY · ${esc(formatDay(new Date()).toUpperCase())} · ${rot.today.kind === 'rest' ? 'REST DAY' : `${esc(LABEL[dayType]).toUpperCase()} DAY`}</div>
+        ${slots.length ? slots.map((x) => `<div class="hold-row slot-row${x.done ? ' is-done' : ''}" data-slot="${esc(x.area)}:${esc(x.slot)}"><div><span class="hud ${x.done ? 'c-green' : 'c-cyan'}">${esc(slotWhen(x).toUpperCase())}</span>
+          <div><b>${esc(x.label)}</b> · ${esc(x.exercise)}${x.where ? ` <span class="hint">(${esc(x.where)})</span>` : ''}${x.also?.length ? `<div class="hint">then ${esc(x.also.join(', '))}</div>` : ''}</div></div>
+          ${x.done ? '<span class="hud c-green">DONE</span>' : `<a class="pill is-on" href="#/holds/${esc(x.area)}/${x.holdIndex}">Start</a>`}</div>`).join('') : '<p class="hint">Nothing scheduled today.</p>'}
+      </section>
+      ${unconfirmed.length || timesOpen ? `<section class="card pad-card confirm-card"><div class="hud c-amber">CONFIRM YOUR HOLD TIMES (FIRST TIME)</div>
         ${unconfirmed.map((a) => `<p class="hint c-text"><b>${esc(a.label)}:</b> ${esc(timingOf(a))}</p>`).join('')}
+        <p class="hint c-text">Reminders for holds at home (and rest-day holds):</p>
+        <div class="time-pair"><label>Morning <input class="input" type="time" id="t-morning" value="${esc(prefs.holdsMorning)}"></label><label>Evening <input class="input" type="time" id="t-evening" value="${esc(prefs.holdsEvening)}"></label></div>
         <div class="btn-row"><button class="btn-primary" id="t-ok" type="button">Confirm</button><button class="btn-ghost" id="t-change" type="button">Change</button></div></section>` : ''}
       ${areas.filter((a) => a.holds?.length).map((a) => {
         const st = areaStatus(a, rounds[a.id] || {}, today);
@@ -54,7 +71,14 @@ function renderList(view, repo) {
       }).join('')}`;
     const ok = view.querySelector('#t-ok');
     if (ok) {
+      const saveTimes = async () => {
+        const m = view.querySelector('#t-morning').value; const e = view.querySelector('#t-evening').value;
+        if (!/^\d\d:\d\d$/.test(m) || !/^\d\d:\d\d$/.test(e) || m >= e) { toast('Morning must be before evening.'); return false; }
+        await saveSettings({ notify: { holdsMorning: m, holdsEvening: e, holdTimesConfirmedOn: today } });
+        return true;
+      };
       ok.onclick = async () => {
+        if (!(await saveTimes())) return;
         for (const a of unconfirmed) await repo.put('tendons', `area.${a.id}`, confirmArea(a));
         toast('Hold times confirmed.');
         draw();
@@ -62,6 +86,7 @@ function renderList(view, repo) {
       view.querySelector('#t-change').onclick = async () => {
         const text = await promptText('What should change?', '', { placeholder: 'e.g. shoulder holds only after Push' });
         if (!text) return;
+        if (!(await saveTimes())) return;
         for (const a of unconfirmed) await repo.put('tendons', `area.${a.id}`, confirmArea(a, { timingNote: { text, on: today } }));
         toast('Saved. The schedule follows your note from step 4.');
         draw();
@@ -69,6 +94,13 @@ function renderList(view, repo) {
     }
   };
   draw();
+  // Redraw when a round, a rest day, the tendon data or the reminder times change (also when they arrive by sync).
+  let pending = null;
+  return repo.onChange((cols) => {
+    if (!cols.some((c) => ['sessions', 'sets', 'days', 'tendons', 'settings'].includes(c))) return;
+    clearTimeout(pending);
+    pending = setTimeout(draw, 150);
+  });
 }
 
 function renderRun(view, repo, areaId, index) {
@@ -195,7 +227,7 @@ export function render(view, params = []) {
   ready.then((repo) => {
     if (params[0] && params[1] != null) cleanup = renderRun(view, repo, params[0], Number(params[1])) || cleanup;
     else if (params[0]) location.replace('#/holds');
-    else renderList(view, repo);
+    else cleanup = renderList(view, repo) || cleanup;
   });
   return () => cleanup();
 }

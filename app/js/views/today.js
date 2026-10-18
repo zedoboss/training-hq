@@ -8,6 +8,7 @@ import { withDefaults } from '../lib/settings.js';
 import { ready } from '../lib/data.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
 import { weekColumn } from '../lib/programme.js';
+import { roundsByDate, holdSlots } from '../lib/holds.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -54,13 +55,21 @@ async function trainToday(repo) {
   const wk = weekColumn(meta?.firstSessions?.[rot.next.dayType], rot.next.date);
   const next = LABEL[rot.next.dayType];
   const t = rot.today;
+  // Tendon holds planned today and how many are done (decisions 17, 18).
+  const [tendons, sets] = await Promise.all([repo.list('tendons'), repo.list('sets')]);
+  const areas = tendons.filter((d) => d.kind === 'area');
+  const rounds = roundsByDate(areas, sessions, sets, bridge);
+  const n = withDefaults(getState().settings).notify;
+  const slots = holdSlots({ areas, dayKind: t.kind, dayType: t.kind === 'rest' ? null : t.dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: n.holdsMorning, evening: n.holdsEvening } });
+  const open = slots.filter((x) => !x.done).length;
+  const holds = slots.length ? { readout: open ? `${open} OPEN` : 'DONE', progress: (slots.length - open) / slots.length } : { readout: 'NONE TODAY', progress: null };
   const hm = daysByDate(dayList)[rot.next.date]?.sessionTime;
   const at = hm ? ` at ${formatHm(hm)}` : '';
   const check = hm ? ` Check-in at ${formatHm(addMinutesHm(hm, -withDefaults(getState().settings).notify.readinessMin))}.` : ' No time set yet.';
-  if (t.kind === 'train') return { readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, line: `Today: ${next}${at}${wk ? `, week ${wk} column` : ''}.${check}` };
+  if (t.kind === 'train') return { holds, readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, line: `Today: ${next}${at}${wk ? `, week ${wk} column` : ''}.${check}` };
   const nextText = `Next: ${next}${at}, ${dayOf(rot.next.date)}${wk ? `, week ${wk} column` : ''}.${hm ? check : ''}`;
-  if (t.kind === 'done') return { readout: `${LABEL[t.dayType]} DONE`, progress: 1, line: `${LABEL[t.dayType]} done today. ${nextText}` };
-  return { readout: 'REST', progress: null, line: `${REST_TEXT[t.reason] || 'Rest day'}. ${nextText}` };
+  if (t.kind === 'done') return { holds, readout: `${LABEL[t.dayType]} DONE`, progress: 1, line: `${LABEL[t.dayType]} done today. ${nextText}` };
+  return { holds, readout: 'REST', progress: null, line: `${REST_TEXT[t.reason] || 'Rest day'}. ${nextText}` };
 }
 
 export function render(view) {
@@ -90,7 +99,7 @@ export function render(view) {
 
       <div class="core-wrap">
         <div data-k="core"></div>
-        ${readout('tl', 'TENDONS', '—', 'c-muted')}
+        ${readout('tl', 'TENDONS', '—', 'c-muted', 'r-tendons')}
         ${readout('tr', 'TRAIN', '—', 'c-amber', 'r-train')}
         ${readout('bl', 'STEPS', '—', 'c-cyan')}
         ${readout('br', 'FUEL', '—', 'c-green')}
@@ -156,12 +165,13 @@ export function render(view) {
   const draw = (s) => {
     set('weekcols', weekColumnsLine(s));
     set('r-train', train ? train.readout : '—');
+    set('r-tendons', train ? `<a class="readout-link" href="#/holds">${train.holds.readout}</a>` : '—');
     const m = macLine(s);
     set('mac', `<span class="${m.cls}">${m.text}</span>`);
     set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone.toUpperCase().replace('_', ' '));
     set('spoke', s.paired && s.programme && train ? train.line : spokeText(s));
     set('spoke-actions', s.paired ? '' : '<a class="btn-ghost spoke-btn" href="#/settings">PAIR WITH MAC</a>');
-    set('core', coreSvg({ train: train?.progress ?? null, fuel: null, steps: null, tendons: null },
+    set('core', coreSvg({ train: train?.progress ?? null, fuel: null, steps: null, tendons: train?.holds.progress ?? null },
       `AI core. ${train ? train.line : 'Nothing logged yet today.'}`));
   };
 
@@ -173,7 +183,7 @@ export function render(view) {
   let gone = false;
   ready.then((repo) => {
     const refresh = async () => { train = await trainToday(repo); if (!gone) draw(getState()); };
-    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'days', 'bridge', 'programme'].includes(c))) refresh(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings'].includes(c))) refresh(); });
     refresh();
   });
   return () => { gone = true; clearInterval(timer); unsub(); off(); };

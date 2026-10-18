@@ -628,3 +628,8 @@ a.card-note.c-amber { color: var(--amber); }
 .rd-q { display: flex; flex-direction: column; gap: 4px; }
 .rd-answer { font-size: 18px; font-weight: 600; line-height: 1.4; margin: 6px 0; }
 .btn-primary[disabled] { opacity: 0.45; pointer-events: none; }
+.hold-today .slot-row { align-items: center; }
+.slot-row.is-done { opacity: 0.6; }
+.time-pair { display: flex; gap: 12px; }
+.time-pair label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.readout-link { color: inherit; text-decoration: none; }

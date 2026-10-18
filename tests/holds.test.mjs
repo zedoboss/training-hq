@@ -66,3 +66,28 @@ test('holds due after a workout come from the tendon data ("after Push" in timin
   assert.deepEqual(holdsAfter(areas, 'pull'), []);
   assert.deepEqual(holdsAfter(areas, null), []);
 });
+
+test('hold plan for the day (decisions 17 and 18)', async () => {
+  const { holdSlots, slotHolds } = await import('../app/js/lib/holds.js');
+  const areas = [
+    { id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Gym Hold', when: 'after Legs', where: 'gym' }, { exercise: 'Home Hold', where: 'home', when: 'the second session on Legs days; both sessions on every other day' }] },
+    { id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Press Hold', timing: ['after Push'] }, { exercise: 'Raise Hold', timing: ['after Push', 'rest days'] }] },
+    { id: 'wrist', label: 'Wrist', phase: 'fix', holds: [{ exercise: 'Grip Hold', timing: ['after Pull', 'after Legs'] }] },
+    { id: 'arms', label: 'Arms', phase: 'none', holds: [] },
+  ];
+  const key = (s) => `${s.area}:${s.slot}:${s.exercise}${s.done ? ':done' : ''}`;
+  // Legs day: the gym hold counts as one of the two knee rounds; wrist after Legs.
+  assert.deepEqual(holdSlots({ areas, dayKind: 'train', dayType: 'legs' }).map(key), ['knees:after:Gym Hold', 'wrist:after:Grip Hold', 'knees:evening:Home Hold']);
+  // Push day: shoulder after Push; knees at home morning and evening.
+  const push = holdSlots({ areas, dayKind: 'done', dayType: 'push', roundsToday: { knees: 1 } });
+  assert.deepEqual(push.map(key), ['knees:morning:Home Hold:done', 'shoulder:after:Press Hold', 'knees:evening:Home Hold']);
+  assert.equal(push[0].time, '07:30');
+  assert.deepEqual(push[1].also, ['Raise Hold']);
+  assert.equal(push[2].time, '19:30');
+  // Rest day: shoulder's rest-day hold, knees twice, no wrist.
+  const rest = holdSlots({ areas, dayKind: 'rest', dayType: null, times: { morning: '08:00', evening: '20:00' } });
+  assert.deepEqual(rest.map(key), ['knees:morning:Home Hold', 'shoulder:rest:Raise Hold', 'knees:evening:Home Hold']);
+  assert.equal(rest[1].time, '08:00');
+  assert.deepEqual(slotHolds(areas[1], 'after', 'push').map((x) => x.h.exercise), ['Press Hold', 'Raise Hold']);
+  assert.deepEqual(slotHolds(areas[1], 'rest').map((x) => x.h.exercise), ['Raise Hold']);
+});
