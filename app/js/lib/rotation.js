@@ -3,7 +3,7 @@
 // A rest day he adds (going out, or the readiness check moving the session) doesn't change the last completed
 // session, so the same day type is next afterwards and nothing is made up twice. The rotation's own Rest is the day
 // after Legs. Day records live in the synced collection 'days', one per date: {date, rest, sessionTime, readiness}.
-import { daysBetween, isoDate } from './time.js';
+import { daysBetween, isoDate, hmOf } from './time.js';
 import { activeBridge } from './history.js';
 
 export const ROTATION = ['pull', 'push', 'legs'];
@@ -93,3 +93,28 @@ export const REST_TEXT = {
 
 /** Day records as a map by date, from the 'days' collection list. */
 export const daysByDate = (list) => Object.fromEntries((list || []).filter((d) => d?.date).map((d) => [d.date, d]));
+
+/** Day record with a session time ("HH:MM", 24-hour) set, or cleared with null. */
+export function withTime(doc, date, hm, at = Date.now()) {
+  const base = doc || { date };
+  if (!hm) {
+    const { sessionTime, timeSetAt, ...rest } = base;
+    return { ...rest, date };
+  }
+  return { ...base, date, sessionTime: hm, timeSetAt: at };
+}
+
+/**
+ * The usual start time: the middle one of the last 10 rotation sessions' start times (local clock), "HH:MM", or
+ * null. Used to prefill the time picker; he always sets the time himself (decision 15).
+ */
+export function usualStart(sessions, tz, n = 10) {
+  const hms = sessions.filter((s) => s.status === 'done' && s.kind !== 'holds' && inRotation(s.dayType) && s.startedAt)
+    .sort((a, b) => b.startedAt - a.startedAt).slice(0, n).map((s) => hmOf(new Date(s.startedAt), tz)).sort();
+  if (!hms.length) return null;
+  const mid = hms[Math.floor((hms.length - 1) / 2)];
+  // Round to 5 minutes.
+  const [h, m] = mid.split(':').map(Number);
+  const r = Math.round((h * 60 + m) / 5) * 5 % 1440;
+  return `${String(Math.floor(r / 60)).padStart(2, '0')}:${String(r % 60).padStart(2, '0')}`;
+}

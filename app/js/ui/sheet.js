@@ -56,6 +56,23 @@ export function promptLong(title, value = '', { placeholder = '', ok = 'Save' } 
   });
 }
 
+/** A clock time ("HH:MM", 24-hour, as the time input gives it). Resolves to the time, '' for "clear", or null. */
+export function promptTime(title, value = '', { ok = 'Save', clear = false, text = '' } = {}) {
+  return new Promise((resolve) => {
+    let result = null;
+    const { el, close } = overlay(`
+      <form class="sheet-form">
+        <label class="hud c-muted sheet-title" for="sheet-time">${esc(title)}</label>
+        ${text ? `<p class="hint">${esc(text)}</p>` : ''}
+        <input class="input" id="sheet-time" type="time" value="${esc(value)}" required>
+        <div class="btn-row">${clear ? '<button class="btn-ghost" type="button" data-clear>Clear</button>' : '<button class="btn-ghost" type="button" data-cancel>Cancel</button>'}<button class="btn-primary" type="submit">${esc(ok)}</button></div>
+      </form>`, () => resolve(result));
+    el.querySelector('[data-cancel]')?.addEventListener('click', () => close());
+    el.querySelector('[data-clear]')?.addEventListener('click', () => { result = ''; close(); });
+    el.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); const v = el.querySelector('input').value; result = /^\d{2}:\d{2}$/.test(v) ? v : null; close(); });
+  });
+}
+
 /** Yes/no confirmation in the app's style. */
 export function confirmSheet(text, { ok = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {

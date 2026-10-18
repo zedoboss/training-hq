@@ -3,7 +3,8 @@
 import { coreSvg } from '../ui/core.js';
 import { toast } from '../ui/toast.js';
 import { getState, subscribe } from '../lib/store.js';
-import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, formatDay } from '../lib/time.js';
+import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, formatDay, formatHm, addMinutesHm } from '../lib/time.js';
+import { withDefaults } from '../lib/settings.js';
 import { ready } from '../lib/data.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
 import { weekColumn } from '../lib/programme.js';
@@ -54,8 +55,11 @@ async function trainToday(repo) {
   const wk = weekColumn(meta?.firstSessions?.[rot.next.dayType], rot.next.date);
   const next = LABEL[rot.next.dayType];
   const t = rot.today;
-  if (t.kind === 'train') return { readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, line: `Today: ${next}${wk ? `, week ${wk} column` : ''}.` };
-  const nextText = `Next: ${next}, ${dayOf(rot.next.date)}${wk ? `, week ${wk} column` : ''}.`;
+  const hm = daysByDate(dayList)[rot.next.date]?.sessionTime;
+  const at = hm ? ` at ${formatHm(hm)}` : '';
+  const check = hm ? ` Check-in at ${formatHm(addMinutesHm(hm, -withDefaults(getState().settings).notify.readinessMin))}.` : ' No time set yet.';
+  if (t.kind === 'train') return { readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, line: `Today: ${next}${at}${wk ? `, week ${wk} column` : ''}.${check}` };
+  const nextText = `Next: ${next}${at}, ${dayOf(rot.next.date)}${wk ? `, week ${wk} column` : ''}.${hm ? check : ''}`;
   if (t.kind === 'done') return { readout: `${LABEL[t.dayType]} DONE`, progress: 1, line: `${LABEL[t.dayType]} done today. ${nextText}` };
   return { readout: 'REST', progress: null, line: `${REST_TEXT[t.reason] || 'Rest day'}. ${nextText}` };
 }

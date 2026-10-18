@@ -31,6 +31,8 @@ export const DEFAULT_SETTINGS = {
   gym: { name: '' },
   // Until Apple Health is connected (step 7): bodyweight for pull-ups and other bodyweight exercises.
   bodyweight: { kg: null, at: null },
+  // Step 4: the readiness check-in comes this many minutes before the session time he sets.
+  notify: { readinessMin: 30 },
 };
 
 export const DEFAULT_EQUIPMENT = {

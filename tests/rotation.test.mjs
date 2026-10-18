@@ -79,3 +79,13 @@ test('a session late in the evening counts on its own date in the given time zon
   assert.equal(lastRotationSession([s], null, 'UTC').date, '2026-10-19');
   assert.equal(nextDayType('neck'), 'pull');
 });
+
+test('session time on a day record, and the usual start time for the picker', async () => {
+  const { withTime, usualStart } = await import('../app/js/lib/rotation.js');
+  const d = withTime({ date: '2026-10-19', rest: null }, '2026-10-19', '04:30', 5);
+  assert.deepEqual(d, { date: '2026-10-19', rest: null, sessionTime: '04:30', timeSetAt: 5 });
+  assert.deepEqual(withTime(d, '2026-10-19', null), { date: '2026-10-19', rest: null });
+  const ss = ['03:58', '04:31', '05:20', '04:40', '06:10'].map((hm, i) => ({ id: `s${i}`, status: 'done', kind: 'workout', dayType: 'pull', startedAt: Date.parse(`2026-10-0${i + 1}T${hm}:00+07:00`) }));
+  assert.equal(usualStart(ss, TZ), '04:40');
+  assert.equal(usualStart([], TZ), null);
+});

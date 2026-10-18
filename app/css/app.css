@@ -607,3 +607,5 @@ a.card-note { color: var(--amber); }
 .prog-name { min-width: 0; }
 .prog-kg { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .prog-ready { list-style: none; margin: 0 0 8px; padding: 0; font-size: 13px; line-height: 1.7; }
+.time-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.time-line .hud { font-size: 11px; letter-spacing: 0.08em; line-height: 1.5; }

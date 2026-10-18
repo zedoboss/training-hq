@@ -67,3 +67,39 @@ export function isoWeek(date, tz) {
 export function gmtOffset(date, tz) {
   return parts(date, { timeZoneName: 'shortOffset' }, tz).timeZoneName;
 }
+
+/** "04:30" (24-hour, as stored) to "4:30 AM". */
+export function formatHm(hm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm || '');
+  if (!m) return '';
+  const h = Number(m[1]);
+  return `${h % 12 || 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** "04:30" moved by some minutes, within the day ("04:30", -30 = "04:00"). */
+export function addMinutesHm(hm, minutes) {
+  const [h, m] = hm.split(':').map(Number);
+  const t = (((h * 60 + m + minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/** The moment a local date and "HH:MM" happen in a time zone (ms). Works across DST changes. */
+export function zonedTime(iso, hm, tz = deviceTimeZone()) {
+  const [y, mo, d] = iso.split('-').map(Number);
+  const [h, mi] = hm.split(':').map(Number);
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  // Offset of the zone at that moment: what the zone's wall clock shows for the UTC guess.
+  const wall = (t) => {
+    const p = parts(new Date(t), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, tz);
+    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute));
+  };
+  let t = guess - (wall(guess) - guess);
+  t = guess - (wall(t) - t);
+  return t;
+}
+
+/** "04:30": the local clock time of a moment. */
+export function hmOf(date, tz) {
+  const p = parts(date, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, tz);
+  return `${p.hour}:${p.minute}`;
+}

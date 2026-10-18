@@ -2,12 +2,14 @@
 import { ready } from '../lib/data.js';
 import { groupByFolder, newRoutine, duplicateRoutine, moveFolder, newId } from '../lib/routines.js';
 import { weekColumn } from '../lib/programme.js';
-import { rotationDay, lastRotationSession, daysByDate, withRest, REST_TEXT, LABEL } from '../lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, usualStart, REST_TEXT, LABEL } from '../lib/rotation.js';
 import { isConfirmed, normalReady, modeOf } from '../lib/progression.js';
 import { buildHistory } from '../lib/history.js';
 import { comebackStartOf } from '../lib/finish.js';
-import { isoDate, formatDay } from '../lib/time.js';
-import { actionSheet, promptText, confirmSheet } from '../ui/sheet.js';
+import { isoDate, formatDay, formatHm, addMinutesHm } from '../lib/time.js';
+import { getState } from '../lib/store.js';
+import { withDefaults } from '../lib/settings.js';
+import { actionSheet, promptText, confirmSheet, promptTime } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -47,6 +49,13 @@ export function render(view) {
     const headline = t.kind === 'train' ? `Today · ${LABEL[next]}` : t.kind === 'done' ? `Today · ${LABEL[t.dayType]} done` : 'Today · Rest';
     const nextLine = t.kind === 'train' ? '' : `Next: ${LABEL[next]}, ${day(rot.next.date)}`;
     const undoable = t.kind === 'rest' && t.reason !== 'rotation';
+    // Session time for the next session's date (decision 15: he sets it; no fixed start time).
+    const nextDate = rot.next.date;
+    const hm = days[nextDate]?.sessionTime || null;
+    const checkMin = withDefaults(getState().settings).notify.readinessMin;
+    const whenLine = hm
+      ? `${nextDate === today ? 'Today' : esc(day(nextDate))}, ${formatHm(hm)} · check-in ${formatHm(addMinutesHm(hm, -checkMin))}`
+      : `No time set for ${nextDate === today ? 'today' : esc(day(nextDate))}`;
 
     view.innerHTML = `
       ${active ? `<a class="card resume" href="#/session/${esc(active.id)}"><span class="hud c-amber">SESSION IN PROGRESS</span><b>${esc(active.title)}</b><span class="pill is-on">Resume</span></a>` : ''}
@@ -55,6 +64,7 @@ export function render(view) {
         <div class="next-title"><span>${esc(headline)}</span>${wk && t.kind === 'train' ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
         ${t.kind === 'rest' ? `<p class="hint c-text rest-why">${esc(REST_TEXT[t.reason] || REST_TEXT.added)}. Tendon holds as planned.</p>` : ''}
         ${nextLine ? `<p class="hint next-line">${esc(nextLine)}${wk ? ` · week ${wk} column` : ''}</p>` : ''}
+        <div class="time-line"><span class="hud ${hm ? 'c-cyan' : 'c-amber'}" id="time-text">${whenLine.toUpperCase()}</span><button class="pill" id="set-time" type="button">${hm ? 'Change' : 'Set time'}</button></div>
         <p class="hint">${nextRoutine ? `${mode === 'normal' ? 'Normal programme · ' : ''}${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
         ${needsOk ? `<a class="card-note c-amber" id="wk-ok" href="#/progression/${esc(next)}/${wk}">Week ${wk} numbers need your OK. Until then: last confirmed numbers. Review ›</a>` : ''}
         ${suggestNormal ? `<div class="card-note" id="normal-hint"><span>${esc(LABEL[next])}'s main lifts hit their week 4 numbers in the last ${suggestNormal.n} sessions. Switch to the Normal programme?</span>
@@ -94,10 +104,22 @@ export function render(view) {
       await repo.put('progression', 'modes', { ...cur, [next]: { ...(cur[next] || { mode: 'comeback' }), notYet: suggestNormal.latest } });
       toast('Asks again after your next session.');
     };
+    view.querySelector('#set-time').onclick = async () => {
+      const usual = usualStart(sessions);
+      const v = await promptTime(`${LABEL[next]} · ${nextDate === today ? 'today' : day(nextDate)}`, hm || usual || '04:30', {
+        clear: !!hm, text: `Session start. The check-in comes ${checkMin} minutes before.${usual ? ` Your usual: ${formatHm(usual)}.` : ''}`,
+      });
+      if (v == null) return;
+      await repo.put('days', nextDate, withTime(days[nextDate], nextDate, v || null));
+      toast(v ? `${LABEL[next]} at ${formatHm(v)}.` : 'Time cleared.');
+    };
     const restBtn = view.querySelector('#rest-today');
     if (restBtn) restBtn.onclick = async () => {
       if (!(await confirmSheet(`Rest today? ${LABEL[next]} stays next and moves to tomorrow; nothing is made up twice.`, { ok: 'Rest today' }))) return;
       await repo.put('days', today, withRest(days[today], today, 'added'));
+      // Today's time carries over to the next session's date unless that one has its own.
+      const moved = rotationDay({ last, today, days: { ...days, [today]: withRest(days[today], today, 'added') } }).next.date;
+      if (hm && nextDate === today && !days[moved]?.sessionTime) await repo.put('days', moved, withTime(days[moved], moved, hm));
       toast(`Rest day. ${LABEL[next]} is next.`);
     };
     const undoBtn = view.querySelector('#undo-rest');

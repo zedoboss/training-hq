@@ -34,3 +34,18 @@ test('ISO week and GMT offset', async () => {
   assert.equal(isoWeek(new Date('2027-01-01T06:00:00Z'), TZ), 53);
   assert.equal(gmtOffset(early, TZ), 'GMT+7');
 });
+
+test('clock times as stored ("HH:MM") and the moment they happen in a zone', async () => {
+  const { formatHm, addMinutesHm, zonedTime, hmOf } = await import('../app/js/lib/time.js');
+  assert.equal(formatHm('04:30'), '4:30 AM');
+  assert.equal(formatHm('00:05'), '12:05 AM');
+  assert.equal(formatHm('12:00'), '12:00 PM');
+  assert.equal(formatHm('19:30'), '7:30 PM');
+  assert.equal(formatHm('bad'), '');
+  assert.equal(addMinutesHm('04:30', -30), '04:00');
+  assert.equal(addMinutesHm('00:10', -30), '23:40');
+  assert.equal(zonedTime('2026-10-19', '04:30', 'Asia/Ho_Chi_Minh'), Date.parse('2026-10-19T04:30:00+07:00'));
+  assert.equal(zonedTime('2026-03-29', '04:30', 'Europe/Berlin'), Date.parse('2026-03-29T04:30:00+02:00'));
+  assert.equal(zonedTime('2026-01-10', '23:15', 'America/New_York'), Date.parse('2026-01-10T23:15:00-05:00'));
+  assert.equal(hmOf(new Date('2026-10-19T04:05:00+07:00'), 'Asia/Ho_Chi_Minh'), '04:05');
+});
