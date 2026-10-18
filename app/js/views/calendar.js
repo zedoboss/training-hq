@@ -195,7 +195,7 @@ export function render(view, params = []) {
       : mode === 'year' ? yearView(route.year, ctx.marks, { firstDay, today })
         : monthView(route.month, ctx.marks, { firstDay, today, day: route.day });
     view.innerHTML = `<div class="lib-head"><a class="pill" href="#/train">Back</a><a class="pill" href="#/history">History</a>
-        <label class="jump"><span class="hud c-muted">GO TO</span><input class="input" type="date" id="cal-jump" max="${today}" value="${route.day || ''}" aria-label="Go to a date"></label></div>
+        <label class="jump"><span class="hud c-muted">GO TO</span><input class="input" type="date" id="cal-jump" max="${today}" value="${route.day || today}" aria-label="Go to a date"></label></div>
       <h1 class="view-title">Calendar</h1>
       ${summaryTiles(ctx.marks, today, firstDay)}
       ${seg}
