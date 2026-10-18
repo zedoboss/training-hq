@@ -14,6 +14,9 @@ import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
 import { findClaude } from './claude.mjs';
 import { openHealth, defaultHealthDir } from './health.mjs';
+import { openCoach } from './coach/index.mjs';
+import { readProfile } from './coach/profile.mjs';
+import { TOOLS, contextLine } from './coach/tools.mjs';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -64,7 +67,11 @@ const healthTimer = setInterval(scanHealth, 5 * 60000);
 healthTimer.unref();
 log(`health: reading ${health.dir}`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, onSync, log });
+// The coach (step 8): Claude Code as one long-lived process, started on the first message (or when the chat opens),
+// with its tools on a local MCP server. His profile is read from data/coach/profile.md in the private folder.
+const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.dataDir), context: contextLine, log });
+
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });
@@ -75,6 +82,7 @@ const shutdown = (sig) => {
   notifier.stop();
   clearInterval(visionTimer);
   clearInterval(healthTimer);
+  coach.close().catch(() => {});
   server.close(() => { store.close(); process.exit(0); });
   setTimeout(() => process.exit(0), 3000).unref();
 };

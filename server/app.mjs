@@ -69,10 +69,11 @@ function readRaw(req, limit) {
  * @param {ReturnType<import('./demos.mjs').openDemos>} [o.demos] exercise demo clips (2.17)
  * @param {ReturnType<import('./imports.mjs').openImports>} [o.imports] Hevy and Strong imports (step 3)
  * @param {ReturnType<import('./health.mjs').openHealth>} [o.health] Apple Health files (step 7)
+ * @param {ReturnType<import('./coach/index.mjs').openCoach>} [o.coach] the coach (step 8)
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -265,6 +266,53 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const r = await push.notify({ title: 'Training HQ', body: 'Test from your Mac. Tap to open Settings.', url: '#/settings', tag: 'test' }, { deviceId: device.id });
       if (!r.sent) throw new HttpError(502, r.dropped ? 'This phone\'s subscription has expired. Turn notifications off and on again.' : 'The push service did not accept the test.');
       return r;
+    },
+
+    // The coach (step 8). A message is answered as a stream of JSON lines (the reply as it is written, the tools it
+    // used, actions for the phone); the turn runs to the end and is saved even if the phone drops off half-way.
+    'POST /api/coach/send': async (req, url, res) => {
+      const device = auth(req);
+      if (!coach) throw new HttpError(404, 'coach not available');
+      const { text, model, tz } = await readJson(req);
+      if (!String(text ?? '').trim()) throw new HttpError(400, 'nothing to send');
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
+      let open = true;
+      res.on('close', () => { open = false; });
+      const emit = (e) => { if (open && !res.writableEnded) res.write(`${JSON.stringify(e)}\n`); };
+      const ping = setInterval(() => emit({ type: 'ping' }), 10000);
+      try {
+        await coach.send({ text, model, tz: typeof tz === 'string' && tz.length < 64 ? tz : null, deviceId: device.id, emit });
+      } catch (e) {
+        emit({ type: 'error', error: e.message });
+      } finally {
+        clearInterval(ping);
+        if (!res.writableEnded) res.end();
+      }
+    },
+
+    'POST /api/coach/warm': async (req) => {
+      auth(req);
+      if (!coach) throw new HttpError(404, 'coach not available');
+      const { model } = await readJson(req);
+      return { started: coach.warm(model), ...coach.status() };
+    },
+
+    'POST /api/coach/stop': async (req) => {
+      auth(req);
+      if (!coach) throw new HttpError(404, 'coach not available');
+      return { stopped: coach.stop() };
+    },
+
+    'POST /api/coach/new': async (req) => {
+      auth(req);
+      if (!coach) throw new HttpError(404, 'coach not available');
+      return { marker: coach.newConversation() };
+    },
+
+    'GET /api/coach/status': async (req) => {
+      auth(req);
+      if (!coach) throw new HttpError(404, 'coach not available');
+      return coach.status();
     },
 
     'POST /api/sync': async (req) => {
