@@ -105,7 +105,7 @@ test('session bests: only sessions before this one count; comeback and all-time'
     { sessionId: 'c3', exKey: 'k', kg: 50, reps: 8, type: 'normal', done: true, order: 1 },
   ];
   const h = buildHistory({ sessions, sets });
-  const of = (id, o) => sessionBests(sessions.find((s) => s.id === id), sets.filter((x) => x.sessionId === id), h, { comebackStart: '2026-09-24', tz: 'Asia/Bangkok', ...o });
+  const of = (id, o) => sessionBests(sessions.find((s) => s.id === id), sets.filter((x) => x.sessionId === id), h, { comebackStart: '2026-09-20', tz: 'Asia/Bangkok', ...o });
   assert.deepEqual(of('c2', { fullHistory: true }).map((b) => [b.kg, b.kind, b.previous]), [[45, 'comeback', 40]], 'the later 50 kg does not count');
   assert.deepEqual(of('c1', { fullHistory: true }), [], 'first comeback session: nothing since the comeback to beat, and below the 2024 numbers');
   assert.deepEqual(of('old2', { fullHistory: true }).map((b) => [b.kg, b.kind, b.previous]), [[105, 'all-time', 100]]);

@@ -110,7 +110,7 @@ export function yearsList(marks) {
 /** The day type that colours a day: the first workout's, 'other' for a workout without one, null for none. */
 export const dayColour = (mark) => (mark?.workouts.length ? (mark.workouts[0].dayType || 'other') : null);
 
-/** One set in words: "W 20 kg × 10", "41.3 kg × 12", "H 31.3 kg · 30 s", "BW × 8", "+5 kg × 6". */
+/** One set in words: "W 20 kg × 10", "42.5 kg × 12", "H 30 kg · 30 s", "BW × 8", "+5 kg × 6". */
 export function setText(set, exType = 'weight_reps') {
   const tag = SET_TYPES[set.type]?.short;
   const parts = [];

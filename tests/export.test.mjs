@@ -26,15 +26,15 @@ const sessions = [
 const sets = [
   { id: 's2.2', sessionId: 's2', exKey: 'b', order: 2, done: true, type: 'hold', kg: 4.5, reps: null, durationS: 30, importedAs: 'x 10' },
   { id: 's2.0', sessionId: 's2', exKey: 'a', order: 0, done: true, type: 'warmup', kg: 21.3, reps: 10, rpe: null },
-  { id: 's2.1', sessionId: 's2', exKey: 'a', order: 1, done: true, type: 'normal', kg: 41.3, reps: 12, rpe: 8, note: 'line\nbreak' },
-  { id: 's2.9', sessionId: 's2', exKey: 'a', order: 9, done: false, type: 'normal', kg: 41.3, reps: null },
+  { id: 's2.1', sessionId: 's2', exKey: 'a', order: 1, done: true, type: 'normal', kg: 42.5, reps: 12, rpe: 8, note: 'line\nbreak' },
+  { id: 's2.9', sessionId: 's2', exKey: 'a', order: 9, done: false, type: 'normal', kg: 42.5, reps: null },
   { id: 's1.0', sessionId: 's1', exKey: 'k0', order: 0, done: true, type: 'normal', distanceM: 1500, durationS: 600 },
   { id: 's3.0', sessionId: 's3', exKey: 'a', order: 0, done: true, type: 'normal', kg: 10, reps: 5 },
 ];
 
 test('cells: quotes, commas, line breaks and objects', () => {
   assert.equal(csvCell(null), '');
-  assert.equal(csvCell(41.3), '41.3');
+  assert.equal(csvCell(42.5), '42.5');
   assert.equal(csvCell('a,b'), '"a,b"');
   assert.equal(csvCell('say "hi"'), '"say ""hi"""');
   assert.equal(csvCell({ a: 1 }), '"{""a"":1}"');
@@ -47,7 +47,7 @@ test('workout rows: finished sessions oldest first, ticked sets only, set number
   assert.deepEqual(rows.map((r) => [r.session_id, r.exercise, r.set_number, r.set_type, r.weight_kg]), [
     ['s1', 'Treadmill', 1, 'normal', undefined],
     ['s2', 'Bench Press (Smith Machine)', 1, 'warmup', 21.3],
-    ['s2', 'Bench Press (Smith Machine)', 2, 'normal', 41.3],
+    ['s2', 'Bench Press (Smith Machine)', 2, 'normal', 42.5],
     ['s2', 'Lateral Raise (Cable)', 1, 'hold', 4.5],
   ]);
   const [run, , top, hold] = rows;
