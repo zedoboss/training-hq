@@ -6,6 +6,7 @@ import { createApp } from './app.mjs';
 import { writePrecache } from '../scripts/precache.mjs';
 import { seedDocs, applySeed } from './seed.mjs';
 import { openDemos } from './demos.mjs';
+import { openImports } from './imports.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { join } from 'node:path';
 
@@ -25,7 +26,9 @@ log(`demos: ${scan.clips} clips (${scan.added} new, ${scan.removed} gone) in ${p
 // Nightly backup at 1:00 AM into data/backup, committed to the private folder's git (2.21).
 const stopBackup = scheduleNightly({ store, privateDir: p.privateDir, backupDir: join(p.dataDir, 'backup'), hour: 1, log });
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, log });
+const imports = openImports({ store, importsDir: p.importsDir });
+
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });

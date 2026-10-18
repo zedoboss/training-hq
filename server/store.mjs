@@ -109,6 +109,14 @@ export function openStore(file, { now = () => Date.now() } = {}) {
     return rec;
   }
 
+  /** Many changes made on the Mac in one transaction (an import). items: [{col, id, data, deleted}] */
+  function writeLocalMany(items) {
+    const recs = items.map(({ col, id, data, deleted = false }) => ({ col, id, data: deleted ? null : data, deleted, hlc: clock.tick(), device: MAC_DEVICE }));
+    const r = applyChanges(recs, MAC_DEVICE);
+    if (r.rejected.length) throw new Error(`write rejected: ${JSON.stringify(r.rejected[0])}`);
+    return recs;
+  }
+
   function changesSince(since, limit = 2000) {
     const rows = q.since.all(since, limit + 1);
     const more = rows.length > limit;
@@ -158,7 +166,7 @@ export function openStore(file, { now = () => Date.now() } = {}) {
   const revokeDevice = (id) => db.prepare('UPDATE devices SET revoked = 1 WHERE id = ?').run(id).changes > 0;
 
   return {
-    db, applyChanges, writeLocal, changesSince,
+    db, applyChanges, writeLocal, writeLocalMany, changesSince,
     getRecord: (col, id) => toRecord(q.getRecord.get(col, id)),
     listRecords: (col) => db.prepare('SELECT col, id, data, deleted, hlc, device, seq FROM records WHERE col = ? AND deleted = 0 ORDER BY id').all(col).map(toRecord),
     historyFor: (col, id) => db.prepare('SELECT seq, data, deleted, hlc, device, from_device FROM history WHERE col = ? AND id = ? ORDER BY seq').all(col, id),

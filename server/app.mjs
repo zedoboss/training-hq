@@ -13,9 +13,19 @@ const MIME = {
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.wav': 'audio/wav', '.mp3': 'audio/mpeg',
 };
 const MAX_BODY = 20 * 1024 * 1024;
+const MAX_IMPORT_BYTES = 40 * 1024 * 1024;
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
+}
+
+/** Run an import step; its own errors (wrong file, unknown time zone) become plain 4xx answers. */
+function importCall(fn) {
+  try { return fn(); } catch (e) {
+    if (e?.name === 'ImportError' || e?.constructor?.name === 'ImportError') throw new HttpError(e.status || 400, e.message);
+    if (/not a Hevy or Strong/.test(e?.message || '')) throw new HttpError(400, e.message);
+    throw e;
+  }
 }
 
 function readJson(req) {
@@ -57,10 +67,11 @@ function readRaw(req, limit) {
  * @param {string} o.appDir folder with the app's files
  * @param {string[]} o.allowedOrigins extra origins allowed to call the API (e.g. the GitHub Pages site)
  * @param {ReturnType<import('./demos.mjs').openDemos>} [o.demos] exercise demo clips (2.17)
+ * @param {ReturnType<import('./imports.mjs').openImports>} [o.imports] Hevy and Strong imports (step 3)
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -170,6 +181,39 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, no
       if (!demos) throw new HttpError(404, 'no demo folder');
       const { id } = await readJson(req);
       try { return { removed: demos.remove(id) }; } catch (e) { throw new HttpError(e.status || 500, e.message); }
+    },
+
+    // Imports (step 3). The file is sent as text; the Mac keeps it, previews, and on commit writes the records.
+    'POST /api/import/preview': async (req, url) => {
+      auth(req);
+      if (!imports) throw new HttpError(404, 'imports not available');
+      const text = (await readRaw(req, MAX_IMPORT_BYTES)).toString('utf8');
+      return importCall(() => imports.preview({ text, fileName: url.searchParams.get('name') || '', tz: url.searchParams.get('tz') || 'UTC' }));
+    },
+
+    'POST /api/import/plan': async (req) => {
+      auth(req);
+      if (!imports) throw new HttpError(404, 'imports not available');
+      const { fileId, tz, matches } = await readJson(req);
+      return importCall(() => imports.plan({ fileId, tz, matches }));
+    },
+
+    'POST /api/import/commit': async (req) => {
+      auth(req);
+      if (!imports) throw new HttpError(404, 'imports not available');
+      const { fileId, tz, matches, remember } = await readJson(req);
+      const out = importCall(() => imports.commit({ fileId, tz, matches, remember: remember !== false }));
+      log(`import ${out.id}: ${out.summary.sessions} sessions, ${out.summary.sets} sets from ${out.file}`);
+      return out;
+    },
+
+    'POST /api/import/undo': async (req) => {
+      auth(req);
+      if (!imports) throw new HttpError(404, 'imports not available');
+      const { importId } = await readJson(req);
+      const out = importCall(() => imports.undo({ importId }));
+      log(`import ${importId} undone: ${JSON.stringify(out)}`);
+      return out;
     },
 
     'POST /api/sync': async (req) => {

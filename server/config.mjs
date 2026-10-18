@@ -16,6 +16,7 @@ export function paths(privateDir = process.env.TRAINING_HQ_PRIVATE || join(homed
     dbFile: join(privateDir, 'data', 'training-hq.sqlite'),
     seedDir: join(privateDir, 'data', 'seed'),
     demosDir: join(privateDir, 'data', 'demos'),
+    importsDir: join(privateDir, 'imports'),
     logsDir: join(privateDir, 'logs'),
   };
 }
