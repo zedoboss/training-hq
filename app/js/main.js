@@ -25,6 +25,7 @@ import * as squat from './views/squat.js';
 import * as meal from './views/meal.js';
 import * as supps from './views/supps.js';
 import * as supp from './views/supp.js';
+import * as sauna from './views/sauna.js';
 import { autoKeepOffline } from './lib/squat-offline.js';
 
 const VIEWS = {
@@ -51,6 +52,7 @@ const VIEWS = {
   meal: { mod: meal, label: 'Meal', hidden: true, tab: 'fuel' },
   supps: { mod: supps, label: 'Supplements', hidden: true, tab: 'fuel' },
   supp: { mod: supp, label: 'Supplement', hidden: true, tab: 'fuel' },
+  sauna: { mod: sauna, label: 'Sauna', hidden: true, tab: 'fuel' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };

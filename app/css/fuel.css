@@ -106,3 +106,38 @@
 .cal-key-meals { width: 10px; height: 3px; border-radius: 2px; background: var(--green); display: inline-block; }
 .cal-key-supps { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); display: inline-block; }
 .supp-low { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 14px; }
+
+/* Sauna: safety first. Big type, big buttons; the I FEEL OFF button is always on screen during a session. */
+.sauna-step { display: flex; flex-direction: column; gap: 8px; }
+.sauna-big { font: 700 22px/1.25 var(--sans); }
+.sauna-step .hint { margin: 0; }
+.sauna-ladder { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px; }
+.sauna-ladder li { border: 1px solid var(--border); border-radius: 7px; padding: 6px 4px; text-align: center; font: 500 11px/1.2 var(--mono); color: var(--faint); }
+.sauna-ladder li.is-done { color: var(--green); border-color: #1d4d36; }
+.sauna-ladder li.is-now { color: var(--on-pale); background: var(--pale); border-color: var(--pale); }
+.sauna-resume { display: flex; justify-content: space-between; align-items: center; padding: 14px; color: var(--text); text-decoration: none; }
+.sauna-hist { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.sauna-check { padding: 0 14px; display: flex; flex-direction: column; }
+.sauna-tick { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 0; border: 0; border-top: 1px solid var(--divider);
+  background: transparent; color: var(--text); font: 500 15px/1.35 var(--sans); text-align: left; cursor: pointer; }
+.sauna-tick:first-child { border-top: 0; }
+.sauna-tick small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+.sauna-tick:disabled { cursor: default; opacity: .9; }
+.sauna-box { flex: 0 0 32px; height: 32px; border-radius: 8px; border: 1.5px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-style: normal; font-weight: 700; color: var(--on-pale); }
+.sauna-tick.is-on .sauna-box { background: var(--green); border-color: var(--green); }
+.sauna-opts { display: flex; flex-direction: column; gap: 10px; }
+.sauna-opts .sauna-tick { border-top: 0; }
+.sauna-skip .c-text { margin: 4px 0; }
+.sauna-run { display: flex; flex-direction: column; gap: 12px; padding-bottom: 96px; }
+.sauna-big-time { font: 700 64px/1 var(--mono); letter-spacing: .02em; }
+.sauna-in { display: flex; flex-direction: column; gap: 12px; border-radius: 16px; padding: 4px 0; }
+.sauna-in.is-overdue { background: #5a1410; color: #fff; padding: 16px; animation: sauna-flash 1s steps(2) infinite; }
+@keyframes sauna-flash { 50% { background: #2a0806; } }
+.sauna-out { height: 72px; font-size: 18px; }
+.sauna-off { position: fixed; left: 12px; right: 12px; bottom: calc(12px + var(--safe-bottom)); height: 68px; border: 0; border-radius: 16px; background: var(--red); color: #1a0402;
+  font: 800 20px/1 var(--mono); letter-spacing: .18em; z-index: 40; cursor: pointer; box-shadow: 0 6px 24px rgba(0, 0, 0, .6); }
+.sauna-stop { background: #5a1410; border-radius: 16px; padding: 22px 18px; color: #fff; display: flex; flex-direction: column; gap: 10px; }
+.sauna-stop-title { font: 800 30px/1.1 var(--mono); letter-spacing: .1em; }
+.sauna-stop p { margin: 0; font-size: 18px; line-height: 1.4; }
+.btn-primary.big, .btn-ghost.big { height: 60px; font-size: 14px; }
+.sauna-felt { flex-wrap: wrap; overflow: visible; }
