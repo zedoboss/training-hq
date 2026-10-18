@@ -43,7 +43,7 @@ export function render(view, params = []) {
         </section>
         <form class="card pair-form" id="f-form">
           <div class="field"><label for="f-title">Title</label><input class="input" id="f-title" value="${esc(session.title)}" maxlength="60"></div>
-          <div class="field"><label for="f-start">Started</label><input class="input" id="f-start" type="datetime-local" value="${localInput(session.startedAt)}"></div>
+          <div class="field"><label for="f-start">Started</label><input class="input" id="f-start" type="datetime-local" value="${session.logFor ? `${session.logFor}${localInput(session.startedAt).slice(10)}` : localInput(session.startedAt)}"></div>
           <div class="field"><label for="f-dur">Duration (minutes)</label><input class="input" id="f-dur" inputmode="numeric" value="${durMin}"></div>
           <div class="field"><label for="f-gym">Gym</label><input class="input" id="f-gym" list="f-gyms" value="${esc(session.gym || '')}" maxlength="60" autocomplete="off">
             <datalist id="f-gyms">${gyms.map((g) => `<option value="${esc(g)}"></option>`).join('')}</datalist></div>

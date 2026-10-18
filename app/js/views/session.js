@@ -67,7 +67,7 @@ async function context(repo, excludeSessionId) {
   return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge };
 }
 
-async function startSession(view, routineId) {
+async function startSession(view, routineId, logFor = null) {
   const repo = await ready;
   const active = (await repo.list('sessions')).find((s) => s.status === 'active' && s.kind !== 'holds');
   if (active) {
@@ -82,6 +82,8 @@ async function startSession(view, routineId) {
     smallestPlate: minPlate(), gym: prefs().gym.name, warmupSteps: prefs().warmup.steps, sameRoutine: prefs().previousFrom === 'same-routine',
     bodyweightKg: prefs().bodyweight.kg,
   });
+  // Logged after the fact from the calendar (P12): the finish screen starts on that date.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(logFor || '') && logFor < isoDate(new Date())) session.logFor = logFor;
   // Sets first: if the app is closed half-way, no session exists without its sets.
   for (const s of sets) await repo.put('sets', s.id, s);
   await repo.put('sessions', session.id, session);
@@ -89,7 +91,7 @@ async function startSession(view, routineId) {
 }
 
 export function render(view, params = []) {
-  if (params[0] === 'start') { view.innerHTML = '<p class="view-sub">Starting…</p>'; startSession(view, params[1]); return () => {}; }
+  if (params[0] === 'start') { view.innerHTML = '<p class="view-sub">Starting…</p>'; startSession(view, params[1], params[2]); return () => {}; }
   const id = params[0];
   const editing = params[1] === 'edit';
   let repo; let session; let sets = []; let ctx; let timer; let wakeLock = null; let offRest = () => {}; let offRepo = () => {};
@@ -147,7 +149,9 @@ export function render(view, params = []) {
     el.querySelector('[data-k="vol"]').textContent = sum.volume.toLocaleString('en-US');
     el.querySelector('[data-k="sets"]').textContent = `${sum.done} / ${sum.total}`;
     el.querySelector('[data-k="paused"]').hidden = !session.pausedAt;
-    el.querySelector('[data-k="started"]').textContent = `STARTED ${formatTime(new Date(session.startedAt))} · ${elapsedMin} MIN AGO`;
+    el.querySelector('[data-k="started"]').textContent = session.logFor
+      ? `LOGGING FOR ${formatDay(new Date(`${session.logFor}T12:00:00`)).toUpperCase()}`
+      : `STARTED ${formatTime(new Date(session.startedAt))} · ${elapsedMin} MIN AGO`;
     el.querySelector('[data-k="eta"]').textContent = eta
       ? `FINISH ~${formatTime(new Date(eta.at))} · ${Math.max(0, Math.round(eta.leftMs / 60000))} MIN LEFT`
       : 'FINISH ~ · LOG A FEW SETS';

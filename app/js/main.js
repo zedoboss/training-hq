@@ -17,6 +17,7 @@ import * as demos from './views/demos.js';
 import * as stats from './views/stats.js';
 import * as importView from './views/import.js';
 import * as exportView from './views/export.js';
+import * as calendar from './views/calendar.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -33,6 +34,7 @@ const VIEWS = {
   holds: { mod: holds, label: 'Holds', hidden: true, tab: 'train' },
   demos: { mod: demos, label: 'Demos', hidden: true, tab: 'train' },
   stats: { mod: stats, label: 'Statistics', hidden: true, tab: 'train' },
+  calendar: { mod: calendar, label: 'Calendar', hidden: true, tab: 'train' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };
