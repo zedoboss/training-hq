@@ -16,6 +16,7 @@ import * as holds from './views/holds.js';
 import * as demos from './views/demos.js';
 import * as stats from './views/stats.js';
 import * as importView from './views/import.js';
+import * as exportView from './views/export.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -33,6 +34,7 @@ const VIEWS = {
   demos: { mod: demos, label: 'Demos', hidden: true, tab: 'train' },
   stats: { mod: stats, label: 'Statistics', hidden: true, tab: 'train' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
+  export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };
 
 const BRAND_MARK = `<svg class="brand-mark" aria-hidden="true" width="44" height="30" viewBox="0 0 44 30" fill="none"><path d="M2 15C8 5 16 2 22 2s14 3 20 13c-6 10-14 13-20 13S8 25 2 15z" stroke="#2b5268" stroke-width="1.4"/><circle cx="22" cy="15" r="9" fill="#0b2a3a" stroke="#4fd8ff" stroke-width="1.6"/><circle cx="22" cy="15" r="3.6" fill="#4fd8ff"/></svg>`;

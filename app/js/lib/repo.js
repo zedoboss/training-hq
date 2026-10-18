@@ -33,6 +33,7 @@ export async function openRepo(adapter) {
     async list(col) {
       return (await adapter.listRecords(col)).filter((r) => !r.deleted).map((r) => r.data);
     },
+    cols: () => adapter.listCols(),
     outbox: () => adapter.listOutbox(),
     pendingCount: async () => (await adapter.listOutbox()).length,
     ack: (keys) => adapter.removeOutbox(keys),
@@ -64,6 +65,7 @@ export function memoryAdapter() {
     async setMeta(key, v) { meta.set(key, clone(v)); },
     async getRecord(col, id) { return clone(records.get(k(col, id))); },
     async listRecords(col) { return [...records.values()].filter((r) => r.col === col).map(clone); },
+    async listCols() { return [...new Set([...records.values()].map((r) => r.col))].sort(); },
     async writeLocal(rec, clockState) {
       records.set(k(rec.col, rec.id), clone(rec));
       outbox.set(nextKey++, clone(rec));

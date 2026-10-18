@@ -50,6 +50,15 @@ export async function idbAdapter() {
     async listRecords(col) {
       return result(db.transaction('records').objectStore('records').index('col').getAll(col));
     },
+    /** Names of every collection held on this device. */
+    listCols() {
+      return new Promise((resolve, reject) => {
+        const out = [];
+        const req = db.transaction('records').objectStore('records').index('col').openKeyCursor(null, 'nextunique');
+        req.onsuccess = () => { const c = req.result; if (!c) { resolve(out); return; } out.push(c.key); c.continue(); };
+        req.onerror = () => reject(req.error);
+      });
+    },
     // Record, outbox entry and clock state are written in one transaction: all or nothing.
     async writeLocal(rec, clockState) {
       const tx = db.transaction(['records', 'outbox', 'meta'], 'readwrite');

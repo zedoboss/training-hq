@@ -215,6 +215,7 @@ export function render(view) {
     <div class="section-label">Import and export</div>
     <ul class="lib-list">
       <li><a class="lib-row" href="#/import"><span class="lib-name">Import history</span><span class="lib-meta">From Hevy or Strong · undo past imports</span></a></li>
+      <li><a class="lib-row" href="#/export"><span class="lib-name">Export your data</span><span class="lib-meta">Everything as CSV in one ZIP · works offline</span></a></li>
     </ul>
     <div class="section-label">App</div>
     <dl class="card kv">
