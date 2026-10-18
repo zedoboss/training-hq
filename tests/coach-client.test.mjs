@@ -40,5 +40,7 @@ test('today counts, tool labels, safe text', () => {
   assert.deepEqual(todayCounts(msgs, '2026-01-20', day), { turns: 2, tools: 2, errors: 2 });
   assert.equal(toolLabel({ name: 'log_set', title: 'Log a set' }), 'LOG A SET');
   assert.equal(textHtml('a <b>\nc'), 'a &lt;b&gt;<br>c');
+  assert.equal(textHtml('- **Legs not done today:** Monday'), '- <b>Legs not done today:</b> Monday');
+  assert.equal(textHtml('2 * 3 = 6 **'), '2 * 3 = 6 **');
   assert.equal(MODEL_LABEL.fast, 'SONNET 5.5 · LOW');
 });

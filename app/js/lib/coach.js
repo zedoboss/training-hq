@@ -58,5 +58,7 @@ export function runAction(a, deps) {
   }
 }
 
-/** Plain text to safe HTML with line breaks (the coach answers in plain text). */
-export const textHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/\n/g, '<br>');
+/** A coach message as HTML: escaped, line breaks kept, and **bold** shown bold (the coach writes it; raw asterisks
+ *  looked broken on the phone, Sun 10/18). */
+export const textHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
