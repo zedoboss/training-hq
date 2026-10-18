@@ -79,7 +79,9 @@ export function render(view, params = []) {
     const areas = (await repo.list('tendons')).filter((d) => d.kind === 'area' && d.phase !== 'none');
     const due = holdsAfter(areas, session.dayType);
     const hold = due.length ? { text: due.map((h) => `${h.exercise} hold, ${h.sets} × ${h.seconds} s`).join(' · ') } : null;
-    const holdDone = done.some((s) => s.type === 'hold');
+    // The prompt goes away once that day's tendon holds are logged; a hold on some other exercise doesn't count.
+    const dueNames = new Set(due.map((h) => h.exercise));
+    const holdDone = done.some((s) => s.type === 'hold' && dueNames.has(session.exercises.find((e) => e.key === s.exKey)?.name));
     const changed = structureChanged(session, done, routine);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
     void lib;

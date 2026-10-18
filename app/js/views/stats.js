@@ -194,7 +194,7 @@ export function render(view, params = []) {
         <div class="section-label">Sessions · ${r.sessions.length}</div>
         ${r.sessions.length ? `<ul class="ex-list">${r.sessions.map((s) => `<li><a class="lib-row" href="#/finish/${esc(s.id)}"><span class="lib-name">${esc(s.title)}</span><span class="lib-meta">${esc(dayName(s.date))}</span></a></li>`).join('')}</ul>` : '<p class="hint">None this month.</p>'}
         <div class="section-label">Top exercises</div>
-        ${r.topExercises.length ? `<ul class="best-list">${r.topExercises.map((e) => `<li class="best"><span>${esc(e.name)}</span><b>${e.sets} sets</b></li>`).join('')}</ul>` : '<p class="hint">None this month.</p>'}
+        ${r.topExercises.length ? `<ul class="best-list">${r.topExercises.map((e) => `<li class="best"><span>${esc(e.name)}</span><b>${e.sets} set${e.sets === 1 ? '' : 's'}</b></li>`).join('')}</ul>` : '<p class="hint">None this month.</p>'}
         <div class="section-label">Muscles vs ${esc(prevName)}</div>
         ${distBars(r.muscles, { now: monthName(month).split(' ')[0], before: prevName })}
         ${(() => {

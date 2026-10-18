@@ -234,7 +234,7 @@ export function render(view, params = []) {
       <div class="set-row set-headrow"><span>SET</span><span>PREVIOUS</span><span>${fields.includes('kg') ? unit : fields.includes('distanceM') ? distUnit().toUpperCase() : ''}</span><span>${fields.includes('reps') ? 'REPS' : fields.includes('durationS') ? 'SEC' : ''}</span><span></span></div>
       ${all.map((s) => setRow(ex, s, all)).join('')}
       <div class="s-ex-foot"><span class="hud c-muted">${per != null ? `${fmtKg(ex.barKg)} BAR + ${fmtKg(per)} KG / SIDE` : ''}</span>
-        <span class="btn-row tight">${fields.includes('kg') && plateCalc ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
+        <span class="btn-row tight">${fields.includes('kg') && plateCalc && ex.barKg ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
         <button class="btn-ghost small" data-a="add-set" type="button">+ Set</button></span></div>
     </section>`;
   };

@@ -310,6 +310,9 @@ select.input { appearance: none; -webkit-appearance: none; }
 .btn-primary.big { height: 54px; font-size: 13px; }
 .ex-name.plain { color: var(--text); text-decoration: none; }
 .row-fields { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.opt > .row-fields { flex-wrap: nowrap; flex-shrink: 0; }
+/* iPhone draws date and time inputs wider than their box unless told not to. */
+input.input[type="datetime-local"], input.input[type="date"], input.input[type="time"] { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; box-sizing: border-box; text-align: left; line-height: var(--tap); }
 .input.mini { height: 36px; width: auto; min-width: 0; padding: 0 8px; font-size: 14px; }
 .input.mini.grow { flex: 1 1 140px; }
 .set-edit { display: grid; grid-template-columns: minmax(0, 1.6fr) 52px auto 52px 64px 32px; gap: 6px; align-items: center; }
