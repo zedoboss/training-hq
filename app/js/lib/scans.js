@@ -94,16 +94,25 @@ export function expectedOn({ last, days, today, date }) {
  * - 4 weeks after the last scan, so it falls on the same weekday; the first scan: tomorrow;
  * - never before tomorrow, so the evening-before reminder and the preparation can happen;
  * - on a training day (the scan is first thing at the gym, before the workout): a rest day in the rotation moves it to
- *   the next training day.
- * @returns {{date, dayType, base, shifted: boolean, lastDate: string|null}}
+ *   the next training day. While today's session is open, a day that is a rest day either way today goes counts as
+ *   a rest day (projectRotationEitherWay), so the scan never lands on a day he may not be at the gym.
+ * @returns {{date, dayType, either: object|null, base, shifted: boolean, baseMaybe: boolean, open: string|null,
+ *   lastDate: string|null}}  either: {ifMoved, ifDone} day types when the picked day's type depends on today;
+ *   open: today's day type while it is not done and the days ahead depend on it.
  */
 export function proposeNext({ scans = [], today, last, days = {}, every = EVERY_DAYS }) {
   const prev = lastDone(scans);
   let base = prev ? addDays(prev.date, every) : addDays(today, 1);
   if (base <= today) base = addDays(today, 1);
-  const ahead = projectRotation({ last, days, from: today, n: daysBetween(today, base) + 8 });
-  const pick = ahead.find((p) => p.date >= base && p.kind === 'train');
-  return { date: pick?.date || base, dayType: pick?.dayType || null, base, shifted: !!pick && pick.date !== base, lastDate: prev?.date || null };
+  const ahead = projectRotationEitherWay({ last, days, from: today, n: daysBetween(today, base) + 8 });
+  const trains = (p) => p.kind === 'train' && (!p.maybe || (p.ifDone.kind === 'train' && p.ifMoved.kind === 'train'));
+  const pick = ahead.find((p) => p.date >= base && trains(p));
+  return {
+    date: pick?.date || base, dayType: pick?.maybe ? null : pick?.dayType || null,
+    either: pick?.maybe ? { ifMoved: pick.ifMoved.dayType, ifDone: pick.ifDone.dayType } : null,
+    base, shifted: !!pick && pick.date !== base, baseMaybe: !!ahead.find((p) => p.date === base)?.maybe,
+    open: ahead.some((p) => p.maybe) ? ahead[0].dayType : null, lastDate: prev?.date || null,
+  };
 }
 
 /**

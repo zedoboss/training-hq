@@ -23,8 +23,13 @@ test('the rotation ahead assumes each planned session happens', () => {
 });
 
 test('first scan: the next training day from tomorrow (tomorrow is the rotation rest day here)', () => {
+  // Today's Legs is not done yet: Wednesday is rest if he trains today, Legs if it moves; Thursday is Pull or rest.
+  // The scan goes on the first day he is at the gym either way: Friday (Pull if Legs moves, Push if done today).
   const p = proposeNext({ scans: [], today, last, days: {} });
-  assert.deepEqual(p, { date: '2026-01-22', dayType: 'pull', base: '2026-01-21', shifted: true, lastDate: null });
+  assert.deepEqual(p, { date: '2026-01-23', dayType: null, either: { ifMoved: 'pull', ifDone: 'push' }, base: '2026-01-21', shifted: true, baseMaybe: true, open: 'legs', lastDate: null });
+  // Legs done today: Wednesday is the rest day for sure, Thursday Pull.
+  const d = proposeNext({ scans: [], today, last: { dayType: 'legs', date: today }, days: {} });
+  assert.deepEqual(d, { date: '2026-01-22', dayType: 'pull', either: null, base: '2026-01-21', shifted: true, baseMaybe: false, open: null, lastDate: null });
   // Tomorrow a training day: tomorrow.
   const p2 = proposeNext({ scans: [], today: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20' }, days: {} });
   assert.equal(p2.date, '2026-01-22');
@@ -35,18 +40,23 @@ test('next scan: 4 weeks after the last, the same weekday; a rest day moves it t
   const scans = [done('2026-01-22'), { id: 'scan.2026-01-10', date: '2026-01-10', status: 'prep' }];
   assert.equal(lastDone(scans).date, '2026-01-22');
   const l = { dayType: 'pull', date: '2026-01-22' };
-  const p = proposeNext({ scans, today: '2026-01-23', last: l, days: {} });
+  // Friday 1/23, Push done: Thursday 2/19 is Pull.
+  const pushed = { dayType: 'push', date: '2026-01-23' };
+  const p = proposeNext({ scans, today: '2026-01-23', last: pushed, days: {} });
   assert.equal(EVERY_DAYS, 28);
-  assert.deepEqual(p, { date: '2026-02-19', dayType: 'pull', base: '2026-02-19', shifted: false, lastDate: '2026-01-22' });
+  assert.deepEqual(p, { date: '2026-02-19', dayType: 'pull', either: null, base: '2026-02-19', shifted: false, baseMaybe: false, open: null, lastDate: '2026-01-22' });
+  // Push not done yet: 2/19 is Pull, or the rest day if Push moves, so Friday 2/20 (Pull if Push moves, Push if done today).
+  const open = proposeNext({ scans, today: '2026-01-23', last: l, days: {} });
+  assert.deepEqual([open.date, open.either, open.baseMaybe, open.open], ['2026-02-20', { ifMoved: 'pull', ifDone: 'push' }, true, 'push']);
   // He adds a rest day on Thursday 2/19: Friday 2/20 (Pull moves with it).
   const days = { '2026-02-19': { date: '2026-02-19', rest: { reason: 'added' } } };
-  const p2 = proposeNext({ scans, today: '2026-01-23', last: l, days });
+  const p2 = proposeNext({ scans, today: '2026-01-23', last: pushed, days });
   assert.equal(p2.date, '2026-02-20');
   assert.equal(p2.dayType, 'pull');
   assert.equal(p2.shifted, true);
   // Overdue (no scan for 6 weeks): never before tomorrow.
-  const p3 = proposeNext({ scans, today: '2026-03-05', last: { dayType: 'push', date: '2026-03-04' }, days: {} });
-  assert.equal(p3.date, '2026-03-07'); // Thursday 3/5 Legs, Friday the rotation's rest day
+  const p3 = proposeNext({ scans, today: '2026-03-05', last: { dayType: 'legs', date: '2026-03-05' }, days: {} });
+  assert.equal(p3.date, '2026-03-07'); // Legs done Thursday 3/5, Friday the rotation's rest day
 });
 
 test('status: confirmed, missed, a rest day on the confirmed date, the prep record', () => {
@@ -64,7 +74,7 @@ test('status: confirmed, missed, a rest day on the confirmed date, the prep reco
   st = scanStatus({ plan, scans: [], today, last, days });
   assert.deepEqual(st.onRest, { to: '2026-01-23', dayType: 'pull' });
   // The date passed with no results: missed, and a new proposal.
-  st = scanStatus({ plan, scans: [prep], today: '2026-01-24', last: { dayType: 'push', date: '2026-01-23' }, days: {} });
+  st = scanStatus({ plan, scans: [prep], today: '2026-01-24', last: { dayType: 'legs', date: '2026-01-24' }, days: {} });
   assert.equal(st.next, null);
   assert.equal(st.missed, '2026-01-22');
   assert.equal(st.proposal.date, '2026-01-26'); // Sunday 1/25 is the rest day after Legs

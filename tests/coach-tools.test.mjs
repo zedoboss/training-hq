@@ -262,6 +262,8 @@ test('schedule: a session time, a rest day and its undo follow the rotation rule
 });
 
 test('body scan: confirm the proposed date (never today), record the safety notice and results', async () => {
+  // Today's Legs is open: the proposal is a day he trains either way, and says which workout each way.
+  assert.match((await call('body_scans')).text, /No date confirmed\. Proposed: Friday 1\/23 \(a training day either way: Pull if today's Legs moves to tomorrow, Push if he does it today\)/);
   assert.match((await call('body_scan', { action: 'confirm_date', date: '2026-01-20' })).text, /Pick a day after today/);
   const c = await call('body_scan', { action: 'confirm_date' });
   assert.match(c.text, /^Body scan confirmed for [A-Z][a-z]+day \d+\/\d+/);

@@ -15,7 +15,7 @@ import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, h
 import { addDays, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import {
   EVERY_DAYS, PROTOCOL, WHEN, SAFETY_TEXT, SAFETY_ASK, STAFF_QUESTIONS, protocolOf, scanStatus, confirmDate, cancelDate,
-  withTick, unticked, withProtocol, scanReminders, expectedOn, scanId,
+  withTick, unticked, withProtocol, scanReminders, expectedEitherWay, scanId,
   METRICS, keyFor, cleanMetrics, mergeReads, conditionsFrom, withResults, metricValue, isDone, conditionNotes,
   metricsAvailable, scanSeries, latestChange,
 } from '../lib/scans.js';
@@ -56,9 +56,12 @@ async function loadAll(repo) {
   return { plan: planDoc || {}, scans: scans.filter((s) => s?.date), last: lastRotationSession(sessions, bridge), days, photoScans };
 }
 
-/** "Thursday 10/22 (Legs)" with the day type the rotation expects then, when it is a training day. */
+/** "Thursday 10/22 (Legs)" with the day type the rotation expects then; "(Pull or Push)" while it depends on whether
+ * today's open session moves to tomorrow (first) or happens today (second). */
 function withType(iso, ctx, today) {
-  const exp = expectedOn({ last: ctx.last, days: ctx.days, today, date: iso });
+  const exp = expectedEitherWay({ last: ctx.last, days: ctx.days, today, date: iso });
+  const type = (e) => (e.kind === 'train' ? LABEL[e.dayType] : 'rest day');
+  if (exp?.maybe) return `${dayName(iso)} (${type(exp.ifMoved)} or ${type(exp.ifDone)})`;
   return `${dayName(iso)}${exp?.kind === 'train' ? ` (${LABEL[exp.dayType]})` : exp?.kind === 'rest' ? ' (rest day)' : ''}`;
 }
 
@@ -94,9 +97,11 @@ function home(view) {
     const rem = next ? [-3, -2, -1, 0].flatMap((k) => scanReminders({ date: addDays(next.date, k), tz: deviceTimeZone(), plan, scans, days: ctx.days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin })) : [];
     const remOn = n.kinds?.scan !== false;
     const p = st.proposal;
-    const why = p.lastDate
-      ? (p.shifted ? `4 weeks after your last scan (${dayName(p.lastDate)}) is ${dayName(p.base)}, a rest day in the rotation, so the next training day.` : `4 weeks after your last scan (${dayName(p.lastDate)}), the same weekday.`)
-      : `Your first scan: the next training day${p.shifted ? ' (tomorrow is a rest day in the rotation)' : ''}.`;
+    const restWhy = p.baseMaybe ? `may be a rest day (today's ${LABEL[p.open]} isn't logged yet)` : 'is a rest day in the rotation';
+    const why = (p.lastDate
+      ? (p.shifted ? `4 weeks after your last scan (${dayName(p.lastDate)}) is ${dayName(p.base)}, which ${restWhy}, so the next training day.` : `4 weeks after your last scan (${dayName(p.lastDate)}), the same weekday.`)
+      : `Your first scan: the next training day${p.shifted ? ` (tomorrow ${restWhy})` : ''}.`)
+      + (p.either ? ` Its workout: ${LABEL[p.either.ifMoved]} if today's ${LABEL[p.open]} moves to tomorrow, ${LABEL[p.either.ifDone]} if you do it today.` : '');
 
     const tick = (i) => {
       const on = !!rec?.prep?.ticks?.[i.id];
@@ -273,8 +278,10 @@ function pickDate(repo, ctx, plan, value, proposed, today) {
     const date = input.value;
     if (!date || date < today) { toast('Pick today or later.'); return; }
     close();
-    const exp = expectedOn({ last: ctx.last, days: ctx.days, today, date });
-    if (exp?.kind === 'rest' && !(await confirmSheet(`${dayName(date)} is a rest day in the rotation. The scan goes first thing at the gym, before a workout. Plan it anyway?`, { ok: 'Plan it' }))) return;
+    const exp = expectedEitherWay({ last: ctx.last, days: ctx.days, today, date });
+    const restAsk = exp?.kind === 'rest' ? `${dayName(date)} is a rest day in the rotation.`
+      : exp?.maybe && [exp.ifDone, exp.ifMoved].some((v) => v.kind === 'rest') ? `${withType(date, ctx, today)} may be a rest day: it depends on whether today's session moves to tomorrow.` : '';
+    if (restAsk && !(await confirmSheet(`${restAsk} The scan goes first thing at the gym, before a workout. Plan it anyway?`, { ok: 'Plan it' }))) return;
     await savePlan(repo, confirmDate(plan, date, { proposedDate: proposed }));
     toast(`Scan planned: ${dayName(date)}.`);
   });
