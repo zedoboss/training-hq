@@ -523,6 +523,10 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .cal-legend { flex-wrap: wrap; gap: 6px 12px; font-size: 11px; }
 .cal-key { background: var(--t); }
 .cal-key-holds { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); display: inline-block; }
+/* Squat Depth run that day (5.4): a white knee mark, readable on every day colour. */
+.cal-squat { position: absolute; top: 4px; left: 4px; width: 8px; height: 8px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 1.5px var(--bg); }
+.cal-key-squat { width: 8px; height: 8px; border-radius: 2px; background: var(--text); display: inline-block; }
+.day-squat { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; text-decoration: none; color: var(--text); font-size: 14px; }
 .day-panel { display: flex; flex-direction: column; gap: 8px; scroll-margin-bottom: 20px; }
 .day-sess { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .day-sess-head { display: flex; align-items: center; gap: 8px; }

@@ -10,6 +10,7 @@ import { elapsedMs } from '../lib/session.js';
 import {
   dayMarks, workoutDates, weekStreak, restDaysSince, sessionsPerWeek, monthGrid, yearMonths, yearsList, dayColour, dayDetail, SOURCE_LABEL,
 } from '../lib/calendar.js';
+import { squatMarks } from '../lib/squat-log.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -46,7 +47,7 @@ function summaryTiles(marks, today, firstDay) {
 
 function legend() {
   return `<div class="legend cal-legend">${['pull', 'push', 'legs', 'neck', 'other'].map((t) => `<span><i class="key cal-key t-${t}"></i>${TYPE_LABEL[t]}</span>`).join('')}
-    <span><i class="key cal-key-holds"></i>Holds</span><span class="c-faint">No colour: rest day</span></div>`;
+    <span><i class="key cal-key-holds"></i>Holds</span><span><i class="key cal-key-squat"></i>Squat Depth</span><span class="c-faint">No colour: rest day</span></div>`;
 }
 
 function dayTip(d, m) {
@@ -75,6 +76,7 @@ function monthView(month, marks, { firstDay, today, day }) {
         return `<button type="button" class="cal-day ${c ? `has t-${c}` : ''} ${d === today ? 'is-today' : ''} ${d === day ? 'is-sel' : ''} ${d > today ? 'is-future' : ''}" data-day="${d}" aria-label="${esc(tip)}" aria-pressed="${d === day}">
           <span class="cal-num">${Number(d.slice(8))}</span>
           ${m?.holds.length ? '<i class="cal-holds" aria-hidden="true"></i>' : ''}
+          ${m?.extra.some((e) => e.kind === 'squat') ? '<i class="cal-squat" aria-hidden="true"></i>' : ''}
           ${many ? `<i class="cal-more" aria-hidden="true">${m.workouts.length}</i>` : ''}
         </button>`;
       }).join('')}
@@ -138,7 +140,12 @@ function dayPanel(day, marks, ctx, today) {
         <div class="btn-row">${holds ? '' : `<a class="btn-ghost center" href="#/finish/${esc(s.id)}/c/${day}">Open</a>`}<a class="btn-ghost center" href="#/session/${esc(s.id)}/edit">Edit</a></div>
       </article>`;
     }).join('')}
-    ${extra.map((e) => `<p class="hint">${esc(e.label)}</p>`).join('')}
+    ${extra.filter((e) => e.kind === 'squat').map((e) => {
+      const r = ctx.squatsById?.get(e.id);
+      return `<a class="card day-squat" href="#/squat"><span class="hud c-green">SQUAT DEPTH</span><span>${esc(e.label.replace(/^Squat Depth /, ''))}</span>
+        ${r ? `<span class="hud sq-reps">${r.reps.map((x) => `<span class="${x.good ? 'c-green' : 'c-red'}">${Math.round(x.minDeg)}°</span>`).join(' ')}</span>` : ''}</a>`;
+    }).join('')}
+    ${extra.filter((e) => e.kind !== 'squat').map((e) => `<p class="hint">${esc(e.label)}</p>`).join('')}
     ${day <= today ? `<a class="btn-ghost center" href="#/session/start/empty/${day}">${day === today ? 'Start an empty session' : 'Log a session on this day'}</a>` : ''}
   </section>`;
 }
@@ -151,13 +158,13 @@ export function render(view, params = []) {
   let route = null;
 
   const load = async (repo) => {
-    const [sessions, sets] = await Promise.all([repo.list('sessions'), repo.list('sets')]);
+    const [sessions, sets, squats] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.list('squats')]);
     const setsBySession = new Map();
     for (const x of sets) {
       if (!setsBySession.has(x.sessionId)) setsBySession.set(x.sessionId, []);
       setsBySession.get(x.sessionId).push(x);
     }
-    return { marks: dayMarks({ sessions, sets }), byId: new Map(sessions.map((s) => [s.id, s])), setsBySession };
+    return { marks: dayMarks({ sessions, sets, extra: squatMarks(squats) }), byId: new Map(sessions.map((s) => [s.id, s])), setsBySession, squatsById: new Map(squats.map((r) => [r.id, r])) };
   };
 
   const draw = () => {
@@ -199,7 +206,7 @@ export function render(view, params = []) {
     ctx = await load(repo);
     draw();
     off = repo.onChange(async (cols) => {
-      if (!cols.includes('sessions') && !cols.includes('sets')) return;
+      if (!cols.includes('sessions') && !cols.includes('sets') && !cols.includes('squats')) return;
       ctx = await load(repo);
       const y = window.scrollY;
       draw();

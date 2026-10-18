@@ -14,7 +14,8 @@ export const sourceOf = (s) => s.source || 'training-hq';
  * Markers per local date: Map('YYYY-MM-DD' -> {workouts, holds, extra}).
  * workouts: finished sessions that aren't hold rounds, oldest first: {id, title, dayType, source, startedAt}.
  * holds: hold rounds, plus workouts with ticked hold sets in them: {id, title, area?}.
- * extra: [{date, kind, label}] from later steps (squat depth, meals, supplements, body scan, sauna).
+ * extra: [{date, kind, label}] from later steps: squat-depth runs (kind 'squat', lib/squat-log.js squatMarks), then
+ * meals, supplements, body scan, sauna.
  */
 export function dayMarks({ sessions = [], sets = [], extra = [], tz } = {}) {
   const withHolds = new Set();
@@ -124,6 +125,7 @@ export function setText(set, exType = 'weight_reps') {
   if (set.durationS != null) text = text ? `${text} · ${set.durationS} s` : `${set.durationS} s`;
   if (set.type === 'hold' && set.durationS == null && set.importedAs) text = `${text ? `${text} ` : ''}(logged as "${set.importedAs}")`;
   if (set.rpe != null) text += ` @${set.rpe}`;
+  if (set.depth?.lowDeg != null) text += ` · depth ${Math.round(set.depth.lowDeg)}°`; // Squat Depth filled it (5.3)
   return `${tag ? `${tag} ` : ''}${text || '-'}`;
 }
 

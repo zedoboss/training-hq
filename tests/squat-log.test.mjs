@@ -112,3 +112,13 @@ test('calendar markers: one per run with a rep, on the local date, with the time
   assert.equal(marks[0].label, 'Squat Depth 5:10 AM · 1 good · 1 shallow · lowest 70° · Squat (Smith Machine)');
   assert.equal(runText({ good: 3, shallow: 0, lowDeg: 69.6 }), '3 good · lowest 70°');
 });
+
+test('the calendar day carries the runs; a filled set reads with its depth', async () => {
+  const { dayMarks, setText } = await import('../app/js/lib/calendar.js');
+  const { r } = runThrough([70]);
+  const marks = dayMarks({ sessions: [], sets: [], extra: squatMarks([finishRun(r)], TZ), tz: TZ });
+  assert.equal(marks.get('2026-10-19').extra[0].kind, 'squat');
+  assert.equal(marks.get('2026-10-19').workouts.length, 0, 'a run alone is not a workout');
+  assert.equal(setText({ type: 'normal', kg: 56.3, reps: 8, depth: { lowDeg: 68.4 } }), '56.3 kg × 8 · depth 68°');
+  assert.equal(setText({ type: 'normal', kg: 56.3, reps: 8 }), '56.3 kg × 8');
+});
