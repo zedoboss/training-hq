@@ -600,7 +600,8 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 
 /* Step 4: week 5+ numbers and the Normal switch (#/progression), notes on the Train card */
 .card-note { display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.45; color: var(--text); text-decoration: none; border-top: 1px solid var(--border); padding-top: 8px; }
-a.card-note { color: var(--amber); }
+a.card-note { color: var(--pale); }
+a.card-note.c-amber { color: var(--amber); }
 .prog-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .prog-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .prog-row:last-child { border-bottom: 0; }
@@ -609,3 +610,21 @@ a.card-note { color: var(--amber); }
 .prog-ready { list-style: none; margin: 0 0 8px; padding: 0; font-size: 13px; line-height: 1.7; }
 .time-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .time-line .hud { font-size: 11px; letter-spacing: 0.08em; line-height: 1.5; }
+/* Readiness table and check-in (#/readiness, #/checkin) */
+.rd-rating { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.rd-rating:last-of-type { border-bottom: 0; }
+.rd-level { display: flex; align-items: center; gap: 8px; }
+.rd-level .input { flex: 1; min-width: 0; }
+.rd-wa { display: flex; align-items: center; gap: 14px; padding: 6px 0; }
+.rd-wa > span { width: 48px; font-weight: 600; }
+.rd-check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.rd-check.block { display: flex; padding: 5px 0; }
+.rd-rules { margin: 6px 0; padding-left: 20px; font-size: 14px; line-height: 1.5; display: flex; flex-direction: column; gap: 6px; }
+.rd-notes { margin: 0; padding-left: 18px; }
+.rd-area summary { cursor: pointer; padding: 8px 0; }
+.seg { display: flex; gap: 8px; margin: 6px 0; }
+.seg-btn { flex: 1; min-width: 0; padding: 10px 0; text-align: center; }
+.rd-meaning { min-height: 1.4em; }
+.rd-q { display: flex; flex-direction: column; gap: 4px; }
+.rd-answer { font-size: 18px; font-weight: 600; line-height: 1.4; margin: 6px 0; }
+.btn-primary[disabled] { opacity: 0.45; pointer-events: none; }

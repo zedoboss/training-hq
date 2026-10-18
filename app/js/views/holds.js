@@ -26,8 +26,10 @@ async function loadAreas(repo) {
 
 function renderList(view, repo) {
   const draw = async () => {
-    const [areas, sessions, sets, bridge] = await Promise.all([loadAreas(repo), repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads')]);
     const today = isoDate(new Date());
+    const [areas, sessions, sets, bridge, todayDoc] = await Promise.all([loadAreas(repo), repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.get('days', today)]);
+    // Today's check-in: W = yes or T = 3 means less weight or less effort for that area's holds (his note's rule).
+    const ease = new Set(todayDoc?.readiness?.easeHolds || []);
     const rounds = roundsByDate(areas, sessions, sets, bridge);
     const unconfirmed = areas.filter((a) => a.holds?.length && a.phase !== 'unknown'
       && (a.timingConfirmed === false || a.timesConfirmed === false || a.holds.some((h) => h.timingConfirmed === false)));
@@ -44,6 +46,7 @@ function renderList(view, repo) {
         return `<section class="card pad-card">
           <div class="ex-head"><b class="area-name">${esc(a.label)}</b><span class="hud ${st.due ? 'c-amber' : 'c-green'}">${esc(st.text.toUpperCase())}</span></div>
           <div class="hint">${esc(PHASE_TEXT[a.phase] || '')}</div>
+          ${ease.has(a.id) ? '<div class="hint c-amber ease-note">Check-in: worse than yesterday or above your limit. Use less weight or push less hard today (your rule).</div>' : ''}
           ${a.openQuestion ? `<div class="hint c-amber">To decide: ${esc(a.openQuestion.text)}</div>` : ''}
           ${a.holds.map((h, i) => `<div class="hold-row"><div><b>${esc(h.exercise)}</b><div class="hint">${esc(loadText(h))} · ${h.sets || 3} × ${h.seconds || 30} s${h.where ? ` · ${esc(h.where)}` : ''}</div></div>
             <a class="pill is-on" href="#/holds/${esc(a.id)}/${i}">Start</a></div>`).join('')}

@@ -20,6 +20,7 @@ import * as exportView from './views/export.js';
 import * as calendar from './views/calendar.js';
 import * as historyView from './views/history.js';
 import * as progression from './views/progression.js';
+import * as readiness from './views/readiness.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -39,6 +40,8 @@ const VIEWS = {
   calendar: { mod: calendar, label: 'Calendar', hidden: true, tab: 'train' },
   history: { mod: historyView, label: 'History', hidden: true, tab: 'train' },
   progression: { mod: progression, label: 'Progression', hidden: true, tab: 'train' },
+  checkin: { mod: readiness, label: 'Check-in', hidden: true, tab: 'today' },
+  readiness: { mod: { render: (view, params) => readiness.render(view, params, 'readiness') }, label: 'Readiness table', hidden: true, tab: 'train' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };

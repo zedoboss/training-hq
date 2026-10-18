@@ -5,6 +5,7 @@ import { weekColumn } from '../lib/programme.js';
 import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, usualStart, REST_TEXT, LABEL } from '../lib/rotation.js';
 import { isConfirmed, normalReady, modeOf } from '../lib/progression.js';
 import { buildHistory } from '../lib/history.js';
+import { ACTION_TEXT } from '../lib/readiness.js';
 import { comebackStartOf } from '../lib/finish.js';
 import { isoDate, formatDay, formatHm, addMinutesHm } from '../lib/time.js';
 import { getState } from '../lib/store.js';
@@ -49,6 +50,7 @@ export function render(view) {
     const headline = t.kind === 'train' ? `Today · ${LABEL[next]}` : t.kind === 'done' ? `Today · ${LABEL[t.dayType]} done` : 'Today · Rest';
     const nextLine = t.kind === 'train' ? '' : `Next: ${LABEL[next]}, ${day(rot.next.date)}`;
     const undoable = t.kind === 'rest' && t.reason !== 'rotation';
+    const rd = days[today]?.readiness || null;
     // Session time for the next session's date (decision 15: he sets it; no fixed start time).
     const nextDate = rot.next.date;
     const hm = days[nextDate]?.sessionTime || null;
@@ -64,6 +66,9 @@ export function render(view) {
         <div class="next-title"><span>${esc(headline)}</span>${wk && t.kind === 'train' ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
         ${t.kind === 'rest' ? `<p class="hint c-text rest-why">${esc(REST_TEXT[t.reason] || REST_TEXT.added)}. Tendon holds as planned.</p>` : ''}
         ${nextLine ? `<p class="hint next-line">${esc(nextLine)}${wk ? ` · week ${wk} column` : ''}</p>` : ''}
+        ${t.kind === 'train' ? (rd && rd.dayType === next
+          ? `<a class="card-note ${rd.action === 'train' ? '' : 'c-amber'}" id="rd-line" href="#/checkin">Check-in (rule ${rd.rule}): ${esc(ACTION_TEXT[rd.action])}${rd.action === 'lighter-area' && rd.lighterExercises?.length ? ` ${esc(rd.lighterExercises.join(', '))}.` : ''}</a>`
+          : '<a class="card-note" id="rd-line" href="#/checkin">Sore, or good to go? Check in before you start ›</a>') : ''}
         <div class="time-line"><span class="hud ${hm ? 'c-cyan' : 'c-amber'}" id="time-text">${whenLine.toUpperCase()}</span><button class="pill" id="set-time" type="button">${hm ? 'Change' : 'Set time'}</button></div>
         <p class="hint">${nextRoutine ? `${mode === 'normal' ? 'Normal programme · ' : ''}${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
         ${needsOk ? `<a class="card-note c-amber" id="wk-ok" href="#/progression/${esc(next)}/${wk}">Week ${wk} numbers need your OK. Until then: last confirmed numbers. Review ›</a>` : ''}

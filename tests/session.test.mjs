@@ -248,3 +248,19 @@ test('bodyweight (P20): volume and the 30% guard load for bodyweight exercises',
   const hist = [{ date: '2026-10-16', kg: guardLoad('weighted_bodyweight', 5, 78) }];
   assert.equal(guardCheck({ kg: guardLoad('weighted_bodyweight', 7.5, 78), capClass: 'main', history: hist, today: '2026-10-18' }), null, '+5 to +7.5 kg is 3%, not 50%');
 });
+
+test('check-in said lighter: previous week column, same sets, reps short; holds untouched', () => {
+  const h = buildHistory({ bridge });
+  const normal = buildSession({ routine, meta, programmeRoutines, lib, history: h, today: '2026-10-18', now: 1000 });
+  assert.equal(normal.session.exercises[0].target.kg, 66.3);
+  const { session, sets } = buildSession({ routine, meta, programmeRoutines, lib, history: h, today: '2026-10-18', now: 1000,
+    lighter: { all: false, names: ['Bench Press (Smith Machine)'], params: { weeksBack: 1, week1Pct: 20, repsShort: 2 }, rule: 4 } });
+  const t = session.exercises[0].target;
+  assert.equal(t.kg, 56.3); // week 3 column 57.5, loadable on the 11.3 bar
+  assert.deepEqual(t.reps, [4, 6]);
+  assert.match(t.why, /lighter \(check-in\): week 3 column \(planned 66.3\)/);
+  assert.equal(sets.filter((x) => x.exKey === session.exercises[0].key).length, 2);
+  assert.deepEqual(session.lighter, { all: false, names: ['Bench Press (Smith Machine)'], rule: 4 });
+  const holds = sets.filter((x) => x.exKey === session.exercises[1].key);
+  assert.ok(holds.every((x) => x.type === 'hold' && x.kg === 6.8));
+});

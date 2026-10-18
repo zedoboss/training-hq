@@ -7,6 +7,7 @@ import { newId, newKey, defaultSets } from './routines.js';
 import { warmupSets } from './plates.js';
 import { activeBridge } from './history.js';
 import { confirmedKg } from './progression.js';
+import { lighterTarget, lighterKg, shortReps } from './readiness.js';
 
 export const newSetId = () => newId('set');
 
@@ -33,14 +34,16 @@ const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmu
  * @param {boolean} [o.sameRoutine] previous values only from the same routine (Settings: previous column)
  * @param {number|null} [o.bodyweightKg] bodyweight for bodyweight exercises (Settings now, Apple Health in step 7)
  * @param {Array} [o.progress]    confirmed week 5+ numbers (collection 'progression', decision 8)
+ * @param {{all:boolean, names:string[], params:object, rule:number}|null} [o.lighter]  today's check-in said "go lighter"
  */
-export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null, progress = [] }) {
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null, progress = [], lighter = null }) {
   const id = newId('session');
   const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
   const session = {
     id, kind: 'workout', title: routine?.title ?? 'Workout', routineId: routine?.id ?? null, dayType: routine?.dayType ?? null, week,
     startedAt: now, endedAt: null, pausedMs: 0, pausedAt: null, status: 'active', note: '', photos: [], gym: gym || null, bodyweightKg: bodyweightKg ?? null, source: 'training-hq',
     exercises: [],
+    ...(lighter ? { lighter: { all: !!lighter.all, names: lighter.names || [], rule: lighter.rule ?? null } } : {}),
   };
   const sets = [];
   let order = 0;
@@ -55,9 +58,14 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     };
     let planned = [];
     const pe = re.plan ? planExerciseFor(programmeRoutines, re.plan) : null;
+    const easy = !!lighter && (lighter.all || (lighter.names || []).includes(re.name));
     if (pe) {
-      const progressKg = week > 4 ? confirmedKg(progress, routine.dayType, week, pe.name)?.kg ?? null : null;
-      const t = targetFor({ plan: pe, week, last: lastHeaviest, barKg: ex.barKg ?? null, smallestPlate, progressKg });
+      const tAt = (w) => targetFor({ plan: pe, week: w, last: lastHeaviest, barKg: ex.barKg ?? null, smallestPlate, progressKg: w > 4 ? confirmedKg(progress, routine.dayType, w, pe.name)?.kg ?? null : null });
+      let t = tAt(week);
+      if (easy) {
+        const l = lighterTarget({ week, targetAt: tAt, params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
+        t = { ...t, kg: t.bodyweight ? t.kg : l.kg ?? t.kg, reps: l.reps, why: `${l.why}${t.kg != null && !t.bodyweight ? ` (planned ${t.kg})` : ''}`, lighter: true };
+      }
       entry.target = t;
       entry.capClass = pe.capClass ?? entry.capClass;
       planned = Array.from({ length: t.sets }, () => ({ type: 'normal', kg: t.bodyweight ? null : t.kg, reps: null, target: { kg: t.kg, reps: t.reps } }));
@@ -72,10 +80,16 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
         const fromLast = prev ? prev[kind]?.[seen[kind]]?.kg ?? null : null;
         seen[kind]++;
         const fallback = kind === 'working' ? lastHeaviest?.kg ?? null : null;
-        const kgGuess = follow ? fromLast ?? s.kg ?? fallback : s.kg ?? fallback;
-        return { type: s.type, kg: kgGuess, reps: null, durationS: s.type === 'hold' ? s.durationS ?? 30 : s.durationS ?? null, target: { kg: kgGuess, reps: Array.isArray(s.reps) ? s.reps : s.reps ? [s.reps, s.reps] : null } };
+        let kgGuess = follow ? fromLast ?? s.kg ?? fallback : s.kg ?? fallback;
+        let reps = Array.isArray(s.reps) ? s.reps : s.reps ? [s.reps, s.reps] : null;
+        if (easy && kind === 'working') {
+          kgGuess = lighterKg(kgGuess, { params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
+          reps = shortReps(reps, lighter.params?.repsShort ?? 2);
+        }
+        return { type: s.type, kg: kgGuess, reps: null, durationS: s.type === 'hold' ? s.durationS ?? 30 : s.durationS ?? null, target: { kg: kgGuess, reps } };
       });
       if (lastHeaviest && !re.sets?.length) entry.target = { kg: lastHeaviest.kg, reps: null, why: `last load (${lastHeaviest.kg})` };
+      if (easy) entry.target = { ...(entry.target || {}), kg: planned.find((p) => p.type === 'normal')?.kg ?? entry.target?.kg ?? null, why: `lighter (check-in): ${lighter.params?.week1Pct ?? 20}% under`, lighter: true };
     }
     // P5: calculated warm-up sets from today's first working weight (Settings steps), loadable on the bar and plates.
     // They take the place of any plain warm-up rows the routine has.

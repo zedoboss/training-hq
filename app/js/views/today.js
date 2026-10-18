@@ -16,7 +16,6 @@ const MIC = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" 
 const LATER = {
   meal: 'Meal logging arrives in step 6.',
   talk: 'Voice arrives in step 9, after you calibrate it to your voice.',
-  checkin: 'The readiness check-in arrives in step 4.',
 };
 
 function weekColumnsLine(s) {
@@ -141,7 +140,7 @@ export function render(view) {
   const set = (k, html) => { for (const el of $all(k)) el.innerHTML = html; };
 
   view.querySelectorAll('[data-later]').forEach((b) => {
-    b.addEventListener('click', () => toast(LATER[b.dataset.later]));
+    b.addEventListener('click', () => { if (b.dataset.later === 'checkin') location.hash = '#/checkin'; else toast(LATER[b.dataset.later]); });
   });
 
   const tick = () => {
