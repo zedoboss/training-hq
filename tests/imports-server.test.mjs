@@ -134,3 +134,25 @@ test('HTTP: preview, plan, commit and undo need pairing and answer plain errors'
     done();
   }
 });
+
+test('a Hevy measurements file: preview, import once per date, undo', () => {
+  const { dir, store, imports, done } = setup();
+  try {
+    const M = '"date","weight_kg","fat_percent","waist_cm","notes"\n"10 Oct 2026, 07:00",80.5,15.2,82,""\n"1 Sep 2026",81,,,""\n';
+    const p = imports.preview({ text: M, fileName: 'measurements.csv', tz: 'UTC' });
+    assert.equal(p.kind, 'measurements');
+    assert.match(p.fileId, /^hevy-measurements\/measurements-/);
+    assert.equal(readdirSync(join(dir, 'imports', 'hevy-measurements')).length, 1);
+    assert.deepEqual([p.summary.measurements, p.summary.from, p.summary.to, p.summary.ignored], [2, '2026-09-01', '2026-10-10', ['notes']]);
+    assert.equal(store.listRecords('measurements').length, 0, 'preview saves nothing');
+    const rec = imports.commit({ fileId: p.fileId, tz: 'UTC' });
+    assert.equal(rec.kind, 'measurements');
+    assert.deepEqual(store.listRecords('measurements').map((r) => [r.id, r.data.weightKg]).sort(), [['measure.hevy.2026-09-01', 81], ['measure.hevy.2026-10-10', 80.5]]);
+    const again = imports.plan({ fileId: p.fileId, tz: 'UTC' });
+    assert.deepEqual([again.summary.measurements, again.summary.skipped], [0, 2]);
+    assert.throws(() => imports.commit({ fileId: p.fileId, tz: 'UTC' }), /nothing new/);
+    assert.deepEqual(imports.undo({ importId: rec.id }), { measurements: 2 });
+    assert.equal(store.listRecords('measurements').filter((r) => !r.deleted).length, 0);
+    assert.equal(imports.plan({ fileId: p.fileId, tz: 'UTC' }).summary.measurements, 2, 'can be imported again after undo');
+  } finally { done(); }
+});

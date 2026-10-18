@@ -36,7 +36,89 @@ export function detectSource(header) {
   const h = new Set(header);
   if (h.has('exercise_title') && h.has('start_time') && h.has('set_index')) return 'hevy';
   if (h.has('Exercise Name') && h.has('Set Order') && h.has('Workout Name')) return 'strong';
+  if (header.some((c) => /^date$/i.test(String(c).trim())) && header.filter((c) => measureColumn(c)).length >= 2) return 'hevy-measurements';
   return null;
+}
+
+// ---------- Hevy body measurements (3.10) ----------
+// Hevy exports body measurements as their own CSV. No real one has been checked yet, so the column names come from
+// Hevy's public API (date, weight_kg, lean_mass_kg, fat_percent, neck_cm ... right_calf) and are matched loosely:
+// any case, spaces or dashes, with or without a unit (_cm, _in, _kg, _lb/_lbs, (cm), %). Inches and pounds become
+// cm and kg. The preview lists the columns that were read and the ones that were not.
+const MEASURE = {
+  weight: 'weightKg', body_weight: 'weightKg', bodyweight: 'weightKg', lean_mass: 'leanMassKg', fat_percent: 'fatPercent',
+  body_fat: 'fatPercent', fat: 'fatPercent', neck: 'neckCm', shoulder: 'shoulderCm', shoulders: 'shoulderCm', chest: 'chestCm',
+  left_bicep: 'leftBicepCm', right_bicep: 'rightBicepCm', left_forearm: 'leftForearmCm', right_forearm: 'rightForearmCm',
+  abdomen: 'abdomenCm', waist: 'waistCm', hips: 'hipsCm', left_thigh: 'leftThighCm', right_thigh: 'rightThighCm',
+  left_calf: 'leftCalfCm', right_calf: 'rightCalfCm',
+};
+/** {field, unit} for a measurement column, or null. unit: 'kg' | 'lb' | 'cm' | 'in' | '%'. */
+export function measureColumn(col) {
+  let k = String(col || '').trim().toLowerCase().replace(/[\s-]+/g, '_').replace(/[()]/g, '').replace(/_+$/, '');
+  let unit = null;
+  const u = k.match(/_(kg|lbs?|cm|in|percent|pct)$/);
+  if (u && !(k === 'fat_percent')) { unit = u[1].startsWith('lb') ? 'lb' : u[1] === 'percent' || u[1] === 'pct' ? '%' : u[1]; k = k.slice(0, -u[0].length); }
+  if (k.endsWith('%')) { unit = '%'; k = k.replace(/_?%$/, ''); }
+  const field = MEASURE[k];
+  if (!field) return null;
+  if (!unit) unit = field === 'fatPercent' ? '%' : field.endsWith('Kg') ? 'kg' : 'cm';
+  return { field, unit };
+}
+const fromUnit = (n, unit) => (n == null ? null : unit === 'lb' ? round2(n * LB) : unit === 'in' ? round2(n * 2.54) : n);
+
+/** A calendar date "YYYY-MM-DD" from "2026-10-10", "10 Oct 2026", "10 Oct 2026, 04:53" or "Oct 10, 2026". */
+export function measureDate(s) {
+  const t = String(s || '').trim();
+  let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = t.match(/^(\d{1,2}) ([A-Za-z]{3})[a-z]* (\d{4})/);
+  if (m && MONTHS[m[2].toLowerCase()]) return `${m[3]}-${pad(MONTHS[m[2].toLowerCase()])}-${pad(m[1])}`;
+  m = t.match(/^([A-Za-z]{3})[a-z]* (\d{1,2}),? (\d{4})/);
+  if (m && MONTHS[m[1].toLowerCase()]) return `${m[3]}-${pad(MONTHS[m[1].toLowerCase()])}-${pad(m[2])}`;
+  return null;
+}
+
+/** Rows of a measurements export: {rows: [{date, values}], read: [column], ignored: [column], badRows}. */
+export function readMeasurements({ header, rows, badRows = 0 }) {
+  const di = header.findIndex((c) => /^date$/i.test(String(c).trim()));
+  const cols = header.map((c, i) => (i === di ? null : measureColumn(c)));
+  const out = [];
+  let bad = badRows;
+  for (const r of rows) {
+    const date = measureDate(r[header[di]]);
+    if (!date) { bad++; continue; }
+    const values = {};
+    cols.forEach((c, i) => { if (c) { const v = fromUnit(num(r[header[i]]), c.unit); if (v != null && v > 0) values[c.field] = v; } });
+    out.push({ date, values });
+  }
+  return {
+    rows: out,
+    read: header.filter((c, i) => cols[i]),
+    ignored: header.filter((c, i) => i !== di && !cols[i]),
+    badRows: bad,
+  };
+}
+
+/**
+ * Measurement records to add, one per date: id measure.hevy.<date>. Skipped: rows with no numbers, dates already
+ * imported from Hevy, and dates that already have a measurement from somewhere else.
+ * existing: [{id, date, source, deleted}]
+ */
+export function planMeasurements({ rows, existing = [], importId }) {
+  const live = existing.filter((m) => !m.deleted);
+  const byDate = new Map(live.map((m) => [m.date, m]));
+  const records = []; const skipped = []; const seen = new Set();
+  for (const r of [...rows].sort((a, b) => a.date.localeCompare(b.date))) {
+    const id = `measure.hevy.${r.date}`;
+    const keys = Object.keys(r.values);
+    if (!keys.length) { skipped.push({ date: r.date, reason: 'no numbers in the row' }); continue; }
+    if (seen.has(r.date)) { skipped.push({ date: r.date, reason: 'the same date twice in the file' }); continue; }
+    const have = byDate.get(r.date);
+    if (have) { skipped.push({ date: r.date, reason: have.id === id ? 'already imported' : 'a measurement is already here for that date' }); continue; }
+    seen.add(r.date);
+    records.push({ id, date: r.date, source: 'hevy', importId, ...r.values });
+  }
+  return { records, skipped };
 }
 
 // ---------- dates and units ----------

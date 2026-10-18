@@ -1,4 +1,5 @@
-// IMPORT (#/import, from Settings): bring in workout history from Hevy or Strong (3.3, 3.4, P57).
+// IMPORT (#/import, from Settings): bring in workout history from Hevy or Strong (3.3, 3.4, P57), and Hevy's body
+// measurements export (3.10).
 // The Mac does the work: it keeps the file in the private folder, previews, imports, and undoes; the sessions reach
 // this device by sync. Nothing is saved until Import is tapped.
 import { ready, previewImport, planImport, commitImport, undoImport } from '../lib/data.js';
@@ -11,14 +12,16 @@ import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const n = (x, one, many = `${one}s`) => `${(x ?? 0).toLocaleString('en-US')} ${x === 1 ? one : many}`;
-const APP = { hevy: 'Hevy', strong: 'Strong' };
+const APP = { hevy: 'Hevy', strong: 'Strong', 'hevy-measurements': 'Hevy measurements' };
+const isM = (p) => p?.kind === 'measurements';
+const dayOf = (iso) => (iso ? formatDate(new Date(`${iso}T12:00:00`)) : '—');
 const HOW = { 'same name': 'SAME NAME', remembered: 'REMEMBERED', chosen: 'CHOSEN', new: 'NEW' };
 
 const HOWTO = `
   <details class="notes"><summary>How to export from Hevy</summary>
     <ul><li>In Hevy: Profile, then Settings (gear), then Export &amp; Import Data, then Export Workouts.</li>
       <li>Save the CSV file to Files (or AirDrop it to the Mac), then choose it here.</li>
-      <li>Body measurements are a separate export in Hevy; they come in with the Body screen later.</li></ul></details>
+      <li>Body measurements are a separate export in Hevy (Export Measurements). Choose that file here too: it adds one measurement per date.</li></ul></details>
   <details class="notes"><summary>How to export from Strong</summary>
     <ul><li>In Strong: Profile, then Settings (gear), then Export Strong Data.</li>
       <li>Save the CSV file to Files (or AirDrop it to the Mac), then choose it here.</li>
@@ -48,7 +51,35 @@ export function render(view) {
   let off = () => {};
   const st = { busy: null, p: null, matches: {}, result: null, error: null, imports: [] };
 
+  // A measurements file: dates, columns read and not read, skipped dates.
+  const measurementsHtml = (p) => {
+    const s = p.summary;
+    const reasons = Object.entries(s.reasons || {});
+    return `
+      <div class="section-label">Hevy measurements${p.fileName ? ` · ${esc(p.fileName)}` : ''}</div>
+      <div class="stat-row">
+        <div class="card stat"><span class="hud c-muted">DATES</span><b>${s.measurements.toLocaleString('en-US')}</b></div>
+        <div class="card stat"><span class="hud c-muted">COLUMNS</span><b>${s.read.length}</b></div>
+        <div class="card stat"><span class="hud c-muted">SKIPPED</span><b>${s.skipped}</b></div>
+      </div>
+      <dl class="card kv">
+        <dt>From</dt><dd>${dayOf(s.from)}</dd>
+        <dt>To</dt><dd>${dayOf(s.to)}</dd>
+        <dt>In the file</dt><dd>${n(s.fileRows, 'row')}</dd>
+        <dt>Read</dt><dd>${esc(s.read.join(', ') || 'nothing')}</dd>
+        <dt>Not read</dt><dd>${s.ignored.length ? `<span class="c-amber">${esc(s.ignored.join(', '))}</span>` : 'none'}</dd>
+        ${s.badRows ? `<dt>Unreadable rows</dt><dd class="c-amber">${s.badRows}</dd>` : ''}
+        <dt>Kept on the Mac</dt><dd><code>imports/${esc(p.fileId)}</code></dd>
+      </dl>
+      <p class="hint">Weights are stored in kg and lengths in cm. Columns under "Not read" are left out; tell Claude if one of them matters.</p>
+      ${reasons.length ? `<details class="notes" ${s.measurements ? '' : 'open'}><summary>Skipped and why · ${s.skipped}</summary>
+        ${reasons.map(([r, c]) => `<div class="hud c-muted imp-reason">${esc(r.toUpperCase())} · ${c}</div>
+          <ul>${p.skipped.filter((x) => x.reason === r).map((x) => `<li>${esc(dayOf(x.date))}</li>`).join('')}</ul>`).join('')}
+      </details>` : ''}`;
+  };
+
   const summaryHtml = (p) => {
+    if (isM(p)) return measurementsHtml(p);
     const s = p.summary;
     const reasons = Object.entries(s.reasons || {});
     const notDone = s.notDone || [];
@@ -96,6 +127,7 @@ export function render(view) {
   };
 
   const matchesHtml = (p) => {
+    if (isM(p)) return '';
     const list = reviewOrder(p.exercises);
     const look = list.filter((e) => e.how === 'new' || e.how === 'chosen');
     const fine = list.filter((e) => !look.includes(e));
@@ -110,8 +142,8 @@ export function render(view) {
     if (!st.imports.length) return '';
     return `<div class="section-label">Past imports</div>
       <ul class="lib-list">${st.imports.map((d) => `<li class="imp-past">
-        <div><div class="lib-name">${esc(APP[d.source] || d.source)} · ${n(d.summary?.sessions, 'session')}, ${n(d.summary?.sets, 'set')}</div>
-          <div class="lib-meta">${esc(formatDay(new Date(d.at)))}, ${esc(formatTime(new Date(d.at)))}${d.summary?.from ? ` · ${esc(formatDate(new Date(d.summary.from)))} to ${esc(formatDate(new Date(d.summary.to)))}` : ''}</div>
+        <div><div class="lib-name">${esc(APP[d.source] || d.source)} · ${d.kind === 'measurements' ? n(d.summary?.measurements, 'date') : `${n(d.summary?.sessions, 'session')}, ${n(d.summary?.sets, 'set')}`}</div>
+          <div class="lib-meta">${esc(formatDay(new Date(d.at)))}, ${esc(formatTime(new Date(d.at)))}${d.summary?.from ? ` · ${d.kind === 'measurements' ? `${esc(dayOf(d.summary.from))} to ${esc(dayOf(d.summary.to))}` : `${esc(formatDate(new Date(d.summary.from)))} to ${esc(formatDate(new Date(d.summary.to)))}`}` : ''}</div>
           ${d.undoneAt ? `<div class="hint">Undone ${esc(formatDay(new Date(d.undoneAt)))}, ${esc(formatTime(new Date(d.undoneAt)))}</div>` : ''}</div>
         ${d.undoneAt ? '<span class="tag">UNDONE</span>' : `<button class="btn-ghost small btn-danger" type="button" data-undo="${esc(d.id)}">Undo</button>`}
       </li>`).join('')}</ul>`;
@@ -126,18 +158,21 @@ export function render(view) {
       <h1 class="view-title">Import history</h1>
       ${paired ? '' : '<p class="cap-warn">Imports run on your Mac. Pair this device with it first (Settings).</p>'}
       <section class="stack">
-        <p class="hint">Choose a workout export from Hevy or Strong (a CSV file). You see what it holds before anything is saved. Importing the same file again, or two apps covering the same days, never doubles a session.</p>
+        <p class="hint">Choose a workout export from Hevy or Strong, or Hevy's body measurements export (a CSV file). You see what it holds before anything is saved. Importing the same file again, or two apps covering the same days, never doubles a session.</p>
         <label class="btn-primary center file-btn ${paired && !busy ? '' : 'is-off'}">${p ? 'Choose another file' : 'Choose file'}<input type="file" accept=".csv,text/csv,text/comma-separated-values" hidden id="imp-file" ${paired && !busy ? '' : 'disabled'}></label>
         ${HOWTO}
       </section>
       ${busy ? `<p class="hud c-cyan">${esc(busy)}</p>` : ''}
       ${st.error ? `<p class="cap-warn">${esc(st.error)}</p>` : ''}
-      ${result ? `<div class="card pad-card"><span class="hud c-green">IMPORTED</span>
+      ${result && result.kind === 'measurements' ? `<div class="card pad-card"><span class="hud c-green">IMPORTED</span>
+        <div>${n(result.summary.measurements, 'measurement date')}${result.skipped?.length ? `. ${n(result.skipped.length, 'date')} skipped.` : '.'}</div>
+        <p class="hint">They are stored with your data and show on the Body screen once it is built (step 7). Undo removes exactly these again.</p></div>` : ''}
+      ${result && result.kind !== 'measurements' ? `<div class="card pad-card"><span class="hud c-green">IMPORTED</span>
         <div>${n(result.summary.sessions, 'session')}, ${n(result.summary.sets, 'set')}${result.summary.newExercises ? `, ${n(result.summary.newExercises, 'new exercise')}` : ''}${result.skipped?.length ? `. ${n(result.skipped.length, 'session')} skipped.` : '.'}</div>
         <p class="hint">They are in your history now, on this device too. Undo removes exactly these again.</p>
         <a class="btn-ghost center" href="#/stats">Open statistics</a></div>` : ''}
       ${p ? summaryHtml(p) + matchesHtml(p) : ''}
-      ${p ? `<div class="stack"><button class="btn-primary" id="imp-go" type="button" ${p.summary.sessions && !busy ? '' : 'disabled'}>${p.summary.sessions ? `Import ${n(p.summary.sessions, 'session')}` : 'Nothing new to import'}</button>
+      ${p ? `<div class="stack"><button class="btn-primary" id="imp-go" type="button" ${(isM(p) ? p.summary.measurements : p.summary.sessions) && !busy ? '' : 'disabled'}>${isM(p) ? (p.summary.measurements ? `Import ${n(p.summary.measurements, 'date')}` : 'Nothing new to import') : p.summary.sessions ? `Import ${n(p.summary.sessions, 'session')}` : 'Nothing new to import'}</button>
         <button class="btn-ghost" id="imp-cancel" type="button">Cancel</button></div>` : ''}
       ${pastHtml()}`;
   };
@@ -193,9 +228,10 @@ export function render(view) {
     } else if (b.id === 'imp-go') {
       const p = st.p;
       const s = p.summary;
-      const ok = await confirmSheet(`Import ${n(s.sessions, 'session')} and ${n(s.sets, 'set')} from ${APP[p.source]}${s.newExercises ? `, adding ${n(s.newExercises, 'new exercise')}` : ''}? You can undo it later.`, { ok: 'Import' });
+      const ok = await confirmSheet(isM(p) ? `Import body measurements for ${n(s.measurements, 'date')} from Hevy? You can undo it later.`
+        : `Import ${n(s.sessions, 'session')} and ${n(s.sets, 'set')} from ${APP[p.source]}${s.newExercises ? `, adding ${n(s.newExercises, 'new exercise')}` : ''}? You can undo it later.`, { ok: 'Import' });
       if (!ok) return;
-      await run(`Importing ${n(s.sessions, 'session')}… then syncing them to this device.`, async () => {
+      await run(isM(p) ? 'Importing measurements… then syncing them to this device.' : `Importing ${n(s.sessions, 'session')}… then syncing them to this device.`, async () => {
         st.result = await commitImport(p.fileId, p.tz, st.matches);
         st.p = null; st.matches = {};
         await loadPast();
@@ -203,11 +239,12 @@ export function render(view) {
       });
     } else if (b.dataset.undo) {
       const d = st.imports.find((x) => x.id === b.dataset.undo);
-      const ok = await confirmSheet(`Undo this ${APP[d.source]} import? Its ${n(d.summary?.sessions, 'session')} and their sets are removed, and exercises it added that nothing else uses. Sessions you logged in Training HQ are not touched.`, { ok: 'Undo import', danger: true });
+      const ok = await confirmSheet(d.kind === 'measurements' ? `Undo this Hevy measurements import? Its ${n(d.summary?.measurements, 'date')} are removed. Measurements you entered yourself are not touched.`
+        : `Undo this ${APP[d.source]} import? Its ${n(d.summary?.sessions, 'session')} and their sets are removed, and exercises it added that nothing else uses. Sessions you logged in Training HQ are not touched.`, { ok: 'Undo import', danger: true });
       if (!ok) return;
       await run('Undoing…', async () => {
         const r = await undoImport(d.id);
-        toast(`Removed ${n(r.sessions, 'session')}, ${n(r.sets, 'set')}${r.exercises ? `, ${n(r.exercises, 'exercise')}` : ''}.`);
+        toast(d.kind === 'measurements' ? `Removed ${n(r.measurements, 'measurement date')}.` : `Removed ${n(r.sessions, 'session')}, ${n(r.sets, 'set')}${r.exercises ? `, ${n(r.exercises, 'exercise')}` : ''}.`);
         st.result = null;
         await loadPast();
       });

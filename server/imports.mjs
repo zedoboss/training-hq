@@ -1,15 +1,17 @@
-// Imports from Hevy and Strong on the Mac (step 3): preview, import, undo.
+// Imports from Hevy and Strong on the Mac (step 3): preview, import, undo. Workouts from both apps, and Hevy's
+// separate body measurements export (3.10, into the 'measurements' collection, one record per date).
 // The original file is kept in the private folder (imports/<app>/); the new records reach the phone by sync.
 // Rules for the owner's own notes come from the settings doc 'import-rules'; remembered exercise matches live in
 // 'import-matches' ({hevy: {file name: exercise id}, strong: {...}}).
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectSource, matchExercises, newExerciseFromImport, parseCsv, planImport, readExport, summarizePlan } from '../app/js/lib/import.js';
+import { detectSource, matchExercises, newExerciseFromImport, parseCsv, planImport, readExport, summarizePlan, readMeasurements, planMeasurements } from '../app/js/lib/import.js';
 import { mergeLibrary } from '../app/js/lib/library.js';
 import { equipmentWithDefaults } from '../app/js/lib/settings.js';
 
-const FILE_ID = /^(hevy|strong)\/[A-Za-z0-9._-]{1,120}\.csv$/;
+const FILE_ID = /^(hevy|strong|hevy-measurements)\/[A-Za-z0-9._-]{1,120}\.csv$/;
+const NOT_AN_EXPORT = 'This file is not a Hevy or Strong workout export, or a Hevy measurements export (its columns don\'t match).';
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 
 export class ImportError extends Error {
@@ -28,7 +30,7 @@ export function openImports({ store, importsDir, now = () => Date.now() }) {
   /** Keep the file in imports/<app>/ (once: the same content is found under any name) and return its id. */
   function keepFile(text, fileName = '') {
     const source = detectSource(parseCsv(text.slice(0, 2000)).header);
-    if (!source) throw new ImportError('This file is not a Hevy or Strong workout export (its columns don\'t match).');
+    if (!source) throw new ImportError(NOT_AN_EXPORT);
     const dir = join(importsDir, source);
     mkdirSync(dir, { recursive: true });
     const h = sha(text);
@@ -52,11 +54,31 @@ export function openImports({ store, importsDir, now = () => Date.now() }) {
   const importDocs = () => store.listRecords('imports').map((r) => r.data);
   const restorable = () => new Set(importDocs().filter((d) => d.undoneAt).flatMap((d) => d.sessionIds || []));
 
+  function readKept(fileId) {
+    if (!FILE_ID.test(fileId || '')) throw new ImportError('unknown file');
+    try { return readFileSync(join(importsDir, fileId), 'utf8'); } catch { throw new ImportError('file not found; choose it again'); }
+  }
+  const isMeasurements = (fileId) => String(fileId || '').startsWith('hevy-measurements/');
+
+  /** A measurements file: one record per date, nothing that is already here. */
+  function buildMeasurements({ fileId, importId = 'preview' }) {
+    const csv = parseCsv(readKept(fileId));
+    const m = readMeasurements(csv);
+    const existing = rows('measurements').map((r) => (r.deleted ? { id: r.id, deleted: true } : { id: r.id, ...JSON.parse(r.data) }));
+    const plan = planMeasurements({ rows: m.rows, existing, importId });
+    const reasons = {};
+    for (const x of plan.skipped) reasons[x.reason] = (reasons[x.reason] || 0) + 1;
+    const summary = {
+      measurements: plan.records.length, from: plan.records[0]?.date ?? null, to: plan.records.at(-1)?.date ?? null,
+      fileRows: m.rows.length, read: m.read, ignored: m.ignored, skipped: plan.skipped.length, reasons, badRows: m.badRows,
+    };
+    return { plan, summary };
+  }
+  const measurementReport = (fileId, tz, b) => ({ fileId, source: 'hevy-measurements', kind: 'measurements', tz, summary: b.summary, skipped: b.plan.skipped, exercises: [] });
+
   /** Read the kept file and plan the import with the chosen matches ({file name: exercise id | 'new'}). */
   function build({ fileId, tz, matches = {}, importId = 'preview' }) {
-    if (!FILE_ID.test(fileId || '')) throw new ImportError('unknown file');
-    let text;
-    try { text = readFileSync(join(importsDir, fileId), 'utf8'); } catch { throw new ImportError('file not found; choose it again'); }
+    const text = readKept(fileId);
     checkTz(tz);
     const r = readExport(text, { rules: doc('settings', 'import-rules') || {} });
     const lib = library();
@@ -110,11 +132,13 @@ export function openImports({ store, importsDir, now = () => Date.now() }) {
     preview({ text, fileName, tz }) {
       if (!text || !text.trim()) throw new ImportError('the file is empty');
       const { fileId, kept } = keepFile(text, fileName);
-      return { ...report(fileId, tz, build({ fileId, tz })), fileName: fileName || null, keptNew: kept };
+      const out = isMeasurements(fileId) ? measurementReport(fileId, tz, buildMeasurements({ fileId })) : report(fileId, tz, build({ fileId, tz }));
+      return { ...out, fileName: fileName || null, keptNew: kept };
     },
 
     /** Same as preview for a file already kept, with the time zone and matches chosen so far. */
     plan({ fileId, tz, matches }) {
+      if (isMeasurements(fileId)) return measurementReport(fileId, tz, buildMeasurements({ fileId }));
       return report(fileId, tz, build({ fileId, tz, matches }));
     },
 
@@ -123,6 +147,13 @@ export function openImports({ store, importsDir, now = () => Date.now() }) {
       const at = now();
       const source = String(fileId || '').split('/')[0];
       const importId = `imp.${source}.${at}`;
+      if (isMeasurements(fileId)) {
+        const m = buildMeasurements({ fileId, importId });
+        if (!m.plan.records.length) throw new ImportError('nothing new to import: every date in this file is already here or was skipped');
+        const record = { id: importId, source, kind: 'measurements', file: fileId, at, summary: m.summary, measurementIds: m.plan.records.map((x) => x.id), skipped: m.plan.skipped, undoneAt: null };
+        store.writeLocalMany([...m.plan.records.map((x) => ({ col: 'measurements', id: x.id, data: x })), { col: 'imports', id: importId, data: record }]);
+        return record;
+      }
       const b = build({ fileId, tz, matches, importId });
       if (!b.plan.sessions.length) throw new ImportError('nothing new to import: every session in this file is already here or was skipped');
       const items = [
@@ -155,6 +186,15 @@ export function openImports({ store, importsDir, now = () => Date.now() }) {
       const d = doc('imports', importId);
       if (!d) throw new ImportError('no such import', 404);
       if (d.undoneAt) throw new ImportError('this import was already undone');
+      if (d.kind === 'measurements') {
+        const ids = new Set(d.measurementIds || []);
+        const mine = rows('measurements').filter((r) => !r.deleted && ids.has(r.id) && JSON.parse(r.data).importId === importId);
+        store.writeLocalMany([
+          ...mine.map((r) => ({ col: 'measurements', id: r.id, deleted: true })),
+          { col: 'imports', id: importId, data: { ...d, undoneAt: now(), undone: { measurements: mine.length } } },
+        ]);
+        return { measurements: mine.length };
+      }
       const ids = new Set(d.sessionIds);
       const live = rows('sessions').filter((r) => !r.deleted).map((r) => JSON.parse(r.data));
       const mine = live.filter((s) => ids.has(s.id) && s.importId === importId);
