@@ -53,8 +53,8 @@ export function foodItem(db, food, grams, { name = null, unsure = false } = {}) 
 
 /** "Rice, white, long-grain, regular, unenriched, cooked without salt" -> "Rice, white, long-grain, cooked" style. */
 export function shortName(desc) {
-  const parts = String(desc).split(',').map((x) => x.trim()).filter(Boolean);
-  if (parts.length <= 3) return parts.join(', ');
+  const parts = String(desc).replace(/\s*\((includes|nfs)[^)]*\)/gi, '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (parts.length <= 4) return parts.join(', ');
   const keep = parts.slice(0, 2);
   const cook = parts.slice(2).find((p) => /raw|cooked|boiled|roasted|fried|dried|grilled|baked/i.test(p));
   return [...keep, ...(cook ? [cook] : [])].join(', ');
@@ -77,7 +77,7 @@ export function score(food, q, { prefer = null } = {}) {
   if (qCooked && COOKED.test(food.tokens.join(' '))) s += 0.03;
   if (food.tokens.includes('whole') && !q.some((t) => ['yolk', 'white'].includes(t))) s += 0.01;
   if (LATER.has(food.category)) s -= 0.06;
-  if (prefer?.has(food.id)) s += 0.5;
+  if (prefer?.has(food.id) && hits === q.length) s += 0.5; // his own food first, when every word fits it
   // USDA's own words (the Mac names foods that way): that entry, not a neighbour.
   if (q.length === food.tokens.length && hits === q.length && q.every((t, i) => t === food.tokens[i])) s += 0.3;
   return s;
@@ -110,21 +110,32 @@ export function matchFood(db, text, { prefer = [] } = {}) {
  * His own foods (prefer, with names) give their name and id first.
  */
 export function withUsda(db, items, { prefer = [], keepTyped = true } = {}) {
+  const hisNames = new Set(prefer.map((p) => p.name));
   const mine = new Map(prefer.filter((p) => p?.fdcId).map((p) => [p.fdcId, p]));
   const labels = prefer.filter((p) => p?.label && !p.fdcId);
   return (items || []).map((x) => {
     if (keepTyped && x.source === 'typed') return x;
     // His own foods that USDA doesn't have (collagen): the pack's label values.
     const lab = !x.fdcId && labels.find((p) => sameFood(p.name, x.name));
-    if (lab) return labelItem(lab, x.grams, { unsure: !!x.unsure });
+    const keep = x.portion ? { portion: x.portion } : {};
+    if (lab) return { ...labelItem(lab, x.grams, { unsure: !!x.unsure }), ...keep };
     let food = x.fdcId ? db.byId.get(Number(x.fdcId)) : null;
+    // An id that doesn't fit the USDA words given with it (his white rice's id on "Rice, brown, ..."): the words win.
+    if (food && x.usda && !fits(food, tokens(x.usda))) food = matchFood(db, x.usda, { prefer: [...mine.keys()] }) || food;
     if (!food && x.usda) food = matchFood(db, x.usda, { prefer: [...mine.keys()] });
     if (!food && x.name) food = matchFood(db, x.name, { prefer: [...mine.keys()] });
     if (!food) { const { usda, ...rest } = x; return { ...rest, source: rest.source || 'estimate' }; }
-    const name = mine.get(food.id)?.name || x.name;
-    return foodItem(db, food, x.grams, { name, unsure: !!x.unsure });
+    // His name for his food, unless the name given says more ("Brown rice" is not his "Rice").
+    const his = mine.get(food.id)?.name;
+    let name = his && (!x.name || tokens(x.name).every((t) => tokens(his).includes(t))) ? his : x.name || his;
+    // Not his food, but named like one of his (his rice's name on brown rice): USDA's words instead.
+    if (!his && hisNames.has(x.name)) name = shortName(food.name);
+    return { ...foodItem(db, food, x.grams, { name, unsure: !!x.unsure }), ...keep };
   });
 }
+
+/** Every word is in the food's description (USDA words given with an id must all fit it). */
+const fits = (food, q) => q.every((t) => food.tokens.includes(t) || (t.length >= 3 && food.tokens.some((d) => d.startsWith(t))));
 
 /** Two names for the same food: every word of the shorter one is in the longer one. */
 export function sameFood(a, b) {
@@ -138,8 +149,58 @@ export function labelItem(food, grams, { unsure = false } = {}) {
   return { name: food.name, grams: Math.round(Number(grams) || 0), kcal: Math.round((food.label.kcal || 0) * k), protein: r1((food.label.protein || 0) * k), unsure, source: 'label' };
 }
 
-/** His own foods from the fuel plan, for matching first: [{fdcId?, name, label?}]. */
-export const myFoods = (plan) => (plan?.foods || []).filter((f) => f?.fdcId || f?.label).map((f) => ({ ...(f.fdcId ? { fdcId: Number(f.fdcId) } : {}), name: f.name, ...(f.label ? { label: f.label } : {}) }));
+/** His own foods from the fuel plan, for matching first: [{fdcId?, name, label?, pack?, unit?, usual?}]. */
+export const myFoods = (plan) => (plan?.foods || []).filter((f) => f?.fdcId || f?.label).map((f) => ({
+  ...(f.fdcId ? { fdcId: Number(f.fdcId) } : {}), name: f.name, ...(f.label ? { label: f.label } : {}),
+  ...(f.pack ? { pack: f.pack } : {}), ...(f.unit ? { unit: f.unit } : {}), ...(f.usual ? { usual: f.usual } : {}),
+}));
+
+// ---- Amounts without a scale (A7) ---------------------------------------------------------------------------------
+// He has no kitchen scale: he knows his packs (beef 250 g raw, almonds 200 g), counts (eggs, scoops) and usual
+// portions. A food of his carries pack {grams, label}, unit {grams, label, plural} and usual {packs|count|grams, text}.
+
+const FRACTIONS = [[0.25, '¼'], [1 / 3, '⅓'], [0.5, '½'], [2 / 3, '⅔'], [0.75, '¾']];
+const fracText = (n) => {
+  const whole = Math.floor(n + 1e-9); const rest = n - whole;
+  const f = FRACTIONS.find(([v]) => Math.abs(v - rest) < 0.02);
+  if (rest < 0.02) return String(whole);
+  return f ? `${whole || ''}${f[1]}` : String(Math.round(n * 100) / 100);
+};
+
+/** Grams for an amount of one of his foods: {packs} of its pack, {count} of its unit, {usual: true}, or {grams}. */
+export function gramsFor(food, amount = {}) {
+  if (amount.grams != null) return Number(amount.grams) || 0;
+  if (amount.packs != null && food?.pack?.grams) return Math.round(Number(amount.packs) * food.pack.grams);
+  if (amount.count != null && food?.unit?.grams) return Math.round(Number(amount.count) * food.unit.grams);
+  if (amount.usual && food?.usual) return gramsFor(food, { ...food.usual, usual: false, text: undefined });
+  return null;
+}
+
+/** "½ pack", "2 packs", "3 eggs", "1 scoop": the words for an amount of one of his foods. */
+export function amountText(food, amount) {
+  if (amount.packs != null && food?.pack) return `${fracText(amount.packs)} pack${amount.packs > 1 ? 's' : ''}`;
+  if (amount.count != null && food?.unit) return `${fracText(amount.count)} ${amount.count === 1 ? food.unit.label : food.unit.plural || `${food.unit.label}s`}`;
+  return amount.grams != null ? `${Math.round(amount.grams)} g` : '';
+}
+
+/** Quick amounts to tap for one of his foods: fractions of a pack or counts, then his usual day's amount. */
+export function amountChoices(food) {
+  if (!food) return [];
+  const out = [];
+  const add = (amount, portion) => { const grams = gramsFor(food, amount); if (grams && !out.some((c) => c.grams === grams)) out.push({ portion, grams, label: portion.endsWith(`${grams} g`) ? portion : `${portion} · ${grams} g` }); };
+  if (food.pack) for (const p of [0.25, 0.5, 1, 2]) add({ packs: p }, amountText(food, { packs: p }));
+  if (food.unit) for (const c of [1, 2, 3, 4, 5, 6]) add({ count: c }, amountText(food, { count: c }));
+  if (food.usual) add({ ...food.usual }, `usual day: ${food.usual.short || amountText(food, food.usual) || `${gramsFor(food, food.usual)} g`}`);
+  return out;
+}
+
+/** His usual amounts in words, for the Mac reading a photo and for the coach. */
+export function amountsLine(plan) {
+  return (plan?.foods || []).filter((f) => f.pack || f.unit || f.usual).map((f) => [
+    f.name, f.pack ? `pack ${f.pack.grams} g${/raw/i.test(f.pack.label || '') ? ' raw' : ''}` : '', f.unit ? `1 ${f.unit.label} = ${f.unit.grams} g` : '',
+    f.usual ? `usually ${f.usual.text || amountText(f, f.usual)}` : '',
+  ].filter(Boolean).join(', ')).join('; ');
+}
 
 /** His planned day (fuel plan foods) as meal items, with USDA or label values, and the totals. */
 export function planItems(db, plan) {

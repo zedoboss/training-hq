@@ -14,6 +14,7 @@ import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
 import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks } from '../../app/js/lib/meals.js';
+import { amountsLine } from '../../app/js/lib/foods.js';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered } from '../../app/js/lib/fuel-reminders.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation } from '../../app/js/lib/scans.js';
@@ -359,6 +360,8 @@ export function mealsText(s, { date = null }) {
   }
   if (!meals.length) lines.push('No meals logged.');
   if (plan.foods?.length) lines.push(`His planned day (his diet analysis): ${plan.foods.map((f) => `${f.name} ${f.perDay || `${f.gramsPerDay} g`}`).join('; ')}.`);
+  const amounts = amountsLine(plan);
+  if (amounts) lines.push(`No kitchen scale: he goes by packs and counts: ${amounts}.`);
   return lines.join('\n');
 }
 

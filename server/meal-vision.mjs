@@ -1,38 +1,41 @@
 // Meal photos read on the Mac (6.2, brief sections 6 FUEL and 7): for every meal photo that has no estimate yet, ask
-// Claude (vision) for the scale reading, the items, grams, kcal and protein, or, for the after photo, what was left.
+// Claude (vision) for the items and grams (from his packs and usual amounts: no scale, A7; kcal and protein from USDA,
+// A5), or, for the after photo, what was left.
 // The answer is written to 'meal-estimates' (<meal id>.before / .after) and reaches the phone by sync. The Mac never
 // writes the meal itself, so his own edits on the phone can't be overwritten. Photos that arrive while the Mac was
 // unreachable are simply read on the next sync. One photo at a time; a failed read is tried again up to 3 times.
 import { runOnce, imageBlock, parseJsonAnswer, MODELS } from './claude.mjs';
 import { cleanItems } from '../app/js/lib/meals.js';
-import { withUsda } from '../app/js/lib/foods.js';
+import { withUsda, amountsLine } from '../app/js/lib/foods.js';
 import { foodsDb, myFoods } from './foods.mjs';
 
 export const MAX_TRIES = 3;
 const RETRY_MS = 5 * 60000;
 
 export const SYSTEM_BEFORE = `You read meal photos for a personal food log. Look at the photo and estimate what is on the plate.
-- If a kitchen scale is visible, read its display in grams (scaleGrams). Assume the scale was zeroed with the plate on it, so the reading is the food only, and make the items' grams add up to it. No scale visible: scaleGrams null.
-- One item per food, with grams for the amount in the photo (cooked weight for cooked food, raw weight for raw food).
+- He has no kitchen scale. Estimate grams from the photo together with his packs, counts and usual amounts (sent with the photo). When an amount looks like one of them (a 250 g pack of beef, half a pack of almonds, 3 eggs), use its grams and say it in portion ("1 pack", "½ pack", "3 eggs"); otherwise portion "".
+- One item per food, with grams for the amount in the photo (cooked weight for cooked food, raw weight for raw food). For his own beef, give the RAW weight it was cooked from (his packs are weighed raw; cooked meat weighs less than raw) with his raw entry.
 - name: his name for it when it is one of his usual foods, else a plain name. fdcId: the number in [fdcId ...] after his usual food when it is one of them, else null.
 - usda: the USDA FoodData Central description of the closest entry, in USDA's own words (for example "Rice, white, long-grain, regular, unenriched, cooked without salt" or "Egg, whole, cooked, fried"). The app computes kcal and protein from USDA's per-100 g values for that entry.
 - kcal and protein (grams of protein): your own estimate, used only when no USDA entry matches.
 - unsure: true when you are guessing what the food is or how much there is.
-- notes: one short sentence only if something matters (for example "Scale shows 412 g including a bowl?"), else "".
+- notes: one short sentence only if something matters, else "".
 Reply with JSON only, no other text:
-{"scaleGrams": number|null, "items": [{"name": string, "fdcId": number|null, "usda": string, "grams": number, "kcal": number, "protein": number, "unsure": boolean}], "notes": string}`;
+{"items": [{"name": string, "fdcId": number|null, "usda": string, "grams": number, "portion": string, "kcal": number, "protein": number, "unsure": boolean}], "notes": string}`;
 
 export const SYSTEM_AFTER = `You read the AFTER photo of a meal for a personal food log: what is left on the plate after eating.
 You get the list of items that were on the plate before, numbered from 0. For each item with something left, give its index and the grams left (never more than it had). Items fully eaten are left out. An empty plate: "leftovers": [].
-- If a kitchen scale is visible, read its display in grams (scaleGrams), assumed zeroed with the plate on it; then the leftovers add up to it. Else null.
+- He has no kitchen scale: estimate from the photo and the amounts before.
 - notes: one short sentence only if something matters, else "".
 Reply with JSON only, no other text:
-{"scaleGrams": number|null, "leftovers": [{"index": number, "name": string, "grams": number}], "notes": string}`;
+{"leftovers": [{"index": number, "name": string, "grams": number}], "notes": string}`;
 
 /** The text sent with a photo: his usual foods (from the private data) and any note he added. */
 export function promptText({ kind, meal, plan, before = [] }) {
   const lines = [];
   if (plan?.foods?.length) lines.push(`Foods he often eats (use these names when they match): ${plan.foods.map((f) => (f.fdcId ? `${f.name} [fdcId ${f.fdcId}]` : f.name)).join('; ')}.`);
+  const amounts = amountsLine(plan);
+  if (amounts) lines.push(`His packs, counts and usual amounts (no kitchen scale): ${amounts}.`);
   if (kind === 'after') lines.push(`On the plate before:\n${before.map((x, i) => `${i}. ${x.name}: ${x.grams} g`).join('\n')}`);
   lines.push(kind === 'after' ? 'This is the after photo.' : 'This is the before photo.');
   if (meal.hint) lines.push(`His note about this meal. It overrides the photo and the list of usual foods: name the items and amounts the way he says.\n${meal.hint}`);

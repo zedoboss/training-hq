@@ -156,3 +156,6 @@
 .review-item { border-top: 1px solid var(--divider); padding-top: 10px; margin-top: 10px; }
 .review-item p { margin: 4px 0; }
 .plan-day .meal-row { font-size: 14px; }
+/* A7: his packs and counts under one of his foods. */
+.meal-edit .me-amts { gap: 6px; padding: 2px 0 4px; }
+.meal-edit .me-amts .chip { min-height: 34px; padding: 4px 9px; font-size: 10.5px; letter-spacing: 0.04em; }

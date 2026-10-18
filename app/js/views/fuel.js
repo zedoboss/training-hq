@@ -158,7 +158,7 @@ export function render(view, params) {
       ${date === today ? `<div class="fuel-log">
         <label class="btn-primary fuel-cam file-btn" for="f-cam">${CAMERA}<span>LOG MEAL</span></label>
         <button class="btn-ghost" id="f-manual" type="button">No photo</button></div>
-        <p class="hint">Take the before photo with the kitchen scale in it if you weighed the food. The Mac reads it and estimates items, grams, kcal and protein; you confirm or fix.</p>` : ''}
+        <p class="hint">Take the before photo. The Mac names the foods and estimates grams from your packs and usual amounts; kcal and protein come from USDA values. You confirm or fix (Fix has one-tap packs and counts).</p>` : ''}
       ${queued ? '<p class="hint c-amber">Mac unreachable: photos are kept on this phone and read when it is back.</p>' : ''}
       ${date === today ? `<section class="card pad-card fuel-times"><div class="ex-head"><span class="hud c-muted">MEAL TIMES</span><button class="link-btn" id="f-times" type="button">${times.length ? 'Change' : 'Set them'}</button></div>
         ${times.length ? `<p class="hint c-text">${times.map((x) => `${esc(x.name)} ${formatHm(x.time)}`).join(' · ')}</p>` : '<p class="hint">Not set yet, so no meal-time reminders. Set your usual times and the app asks when one passes with nothing logged.</p>'}

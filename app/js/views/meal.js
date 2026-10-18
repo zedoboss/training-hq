@@ -12,7 +12,7 @@ import {
   netItems, mealState, STATE_TEXT, afterPhotoAt,
 } from '../lib/meals.js';
 import { actionSheet, confirmSheet, promptText, promptLong, overlay } from '../ui/sheet.js';
-import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE, myFoods, labelItem, sameFood } from '../lib/foods.js';
+import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE, myFoods, labelItem, sameFood, amountChoices } from '../lib/foods.js';
 
 const SOURCE_LABEL = 'SR Legacy and Foundation Foods';
 import { toast } from '../ui/toast.js';
@@ -91,6 +91,23 @@ export function editItems(title, items) {
       if (f) return `USDA · ${f.name} · ${Math.round(per100(db, f, 'kcal') ?? 0)} kcal, ${per100(db, f, 'protein') ?? 0} g protein per 100 g`;
       return x.source ? SOURCE_TEXT[x.source] || '' : '';
     };
+    // A7: no scale: his packs, counts and usual amounts as one-tap choices under one of his foods.
+    const mineOf = (x) => mine.find((m) => (m.fdcId && m.fdcId === x.fdcId) || (!m.fdcId && m.label && m.name === x.name));
+    const amounts = (x) => {
+      const m = mineOf(x);
+      const ch = m ? amountChoices(m) : [];
+      return ch.length ? `<div class="chips wrap me-amts">${ch.map((c) => `<button class="chip ${x.portion === c.portion ? 'is-on' : ''}" type="button" data-g="${c.grams}" data-portion="${esc(c.portion)}">${esc(c.label)}</button>`).join('')}</div>` : '';
+    };
+    const setGrams = (cur, i, g, portion = null) => {
+      const f = usdaFor(rows[i]);
+      const lab = rows[i]?.source === 'label' && mine.find((m) => m.label && m.name === rows[i].name);
+      if (f) cur[i] = foodItem(db, f, g, { name: cur[i].name });
+      else if (lab) cur[i] = labelItem(lab, g);
+      else if (rows[i]?.grams) cur[i] = regram({ ...cur[i], grams: rows[i].grams, kcal: cur[i].kcal, protein: cur[i].protein }, g);
+      else cur[i] = { ...cur[i], grams: g };
+      if (portion) cur[i].portion = portion; else delete cur[i].portion;
+      return cur;
+    };
     const draw = () => {
       box.innerHTML = rows.map((x, i) => `<div class="me-item" data-i="${i}"><div class="me-row">
         <input class="input" data-f="name" value="${esc(x.name)}" placeholder="Food" aria-label="Food" maxlength="80" autocomplete="off">
@@ -98,7 +115,7 @@ export function editItems(title, items) {
         <input class="input" data-f="kcal" inputmode="decimal" value="${x.kcal || ''}" aria-label="Kcal">
         <input class="input" data-f="protein" inputmode="decimal" value="${x.protein || ''}" aria-label="Protein grams">
         <button class="icon-mini" type="button" data-del aria-label="Remove">✕</button></div>
-        <div class="me-src hint">${esc(line(x))}</div><div class="me-sugg" hidden></div></div>`).join('');
+        <div class="me-src hint">${esc(line(x))}</div>${amounts(x)}<div class="me-sugg" hidden></div></div>`).join('');
       box.querySelectorAll('.me-item').forEach((item) => {
         const i = Number(item.dataset.i);
         const name = item.querySelector('[data-f=name]');
@@ -137,14 +154,13 @@ export function editItems(title, items) {
         });
         name.addEventListener('blur', () => setTimeout(() => { sugg.hidden = true; }, 150));
         item.querySelector('[data-f=grams]').addEventListener('change', (e) => {
-          const cur = read();
-          const f = usdaFor(rows[i]);
-          const lab = rows[i]?.source === 'label' && mine.find((m) => m.label && m.name === rows[i].name);
-          if (f) cur[i] = foodItem(db, f, Number(e.target.value) || 0, { name: cur[i].name });
-          else if (lab) cur[i] = labelItem(lab, Number(e.target.value) || 0);
-          else if (rows[i]?.grams) cur[i] = regram({ ...cur[i], grams: rows[i].grams, kcal: cur[i].kcal, protein: cur[i].protein }, Number(e.target.value) || 0);
-          rows = cur; draw();
+          rows = setGrams(read(), i, Number(e.target.value) || 0);
+          draw();
         });
+        item.querySelectorAll('[data-portion]').forEach((c) => c.addEventListener('click', () => {
+          rows = setGrams(read(), i, Number(c.dataset.g), c.dataset.portion);
+          draw();
+        }));
         for (const f of ['kcal', 'protein']) {
           item.querySelector(`[data-f=${f}]`).addEventListener('change', () => { const cur = read(); cur[i] = { ...cur[i], source: 'typed' }; rows = cur; draw(); });
         }
@@ -152,6 +168,7 @@ export function editItems(title, items) {
       });
     };
     draw();
+    dbReady.then(() => { rows = read(); draw(); });
     el.querySelector('[data-add]').onclick = () => { rows = [...read(), { name: '', grams: 0, kcal: 0, protein: 0 }]; draw(); box.querySelector('.me-item:last-child [data-f=name]').focus(); };
     el.querySelector('[data-cancel]').onclick = () => close();
     el.querySelector('form').addEventListener('submit', async (e) => {
@@ -259,11 +276,11 @@ export function render(view, [id]) {
       </div>
       ${!meal.after && meal.before?.photoId ? '<button class="btn-ghost" id="m-none" type="button">Ate it all: no after photo</button>' : ''}`}
       ${statusLine ? `<p class="hint ${offline || state.startsWith('failed') ? 'c-amber' : ''}" id="m-status">${esc(statusLine)}</p>` : ''}
-      ${meal.before?.photoId ? `<label class="card meal-scale"><span><span class="hud c-muted">SCALE READING</span><span class="hint">${scaleG != null ? 'Read from the photo. Tap to correct.' : estB ? 'No scale seen in the photo. Type it if you weighed it.' : 'Read from the photo when the Mac has it.'}</span></span>
+      ${meal.before?.photoId && scaleG != null ? `<label class="card meal-scale"><span><span class="hud c-muted">SCALE READING</span><span class="hint">${scaleG != null ? 'Read from the photo. Tap to correct.' : estB ? 'No scale seen in the photo. Type it if you weighed it.' : 'Read from the photo when the Mac has it.'}</span></span>
         <span class="meal-scale-in"><input class="input" id="m-scale" inputmode="decimal" value="${scaleG ?? ''}" aria-label="Grams on the scale"><span class="c-muted">g</span></span></label>` : ''}
       <section class="card meal-est">
         <div class="meal-est-head hud c-muted"><span>${headTag}</span><span>G · KCAL · PROTEIN</span></div>
-        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'estimate' ? '<span class="src-tag">EST.</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
+        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.portion ? ` <span class="c-faint">${esc(x.portion)}</span>` : ''}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'estimate' ? '<span class="src-tag">EST.</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
           : `<p class="hint">${waiting ? 'Waiting for the estimate.' : meal.source === 'manual' ? 'Nothing yet. Tap Fix to type what you ate.' : 'No items.'}</p>`}
         ${l.items.length ? `<div class="meal-left hud c-amber">LEFT ON THE PLATE${l.estimated ? ' · ESTIMATE' : ''}</div>${l.items.map((x) => `<div class="meal-row c-muted"><span>− ${esc(leftName(x.index) || x.name)}</span><span class="mono">${n0(x.grams)} g</span></div>`).join('')}` : ''}
         ${l.pending && meal.after?.photoId ? '<p class="hint">Leftovers: waiting for the Mac to read the after photo.</p>' : ''}

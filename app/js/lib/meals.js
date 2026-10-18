@@ -6,6 +6,7 @@
 //                 items: [{name, grams, kcal, protein, unsure, fdcId?, source?}]; leftovers: [{name, grams, index}]
 //                 fdcId: the USDA FoodData Central food; source 'usda' (kcal and protein computed from it, A5),
 //                 'estimate' (the Mac's guess, no USDA match), 'typed' (his own numbers), 'label' (a pack's label).
+//                 portion: his words for the amount when he has no scale ("½ pack", "3 eggs"; A7).
 //                 after.none = he ate everything (no after photo needed). source 'photo' or 'manual'.
 // meal-photos    {id, mealId, kind: 'before'|'after', dataUrl, at}: kept on the phone until the Mac has them.
 // meal-estimates written by the Mac only, so his edits and its answers never overwrite each other:
@@ -64,6 +65,7 @@ export function cleanItems(items) {
     ...(Number.isInteger(num(x?.fdcId)) && num(x.fdcId) > 0 ? { fdcId: num(x.fdcId) } : {}),
     ...(ITEM_SOURCES.includes(x?.source) ? { source: x.source } : {}),
     ...(x?.usda ? { usda: String(x.usda).slice(0, 200) } : {}),
+    ...(x?.portion ? { portion: String(x.portion).slice(0, 40) } : {}),
   }));
 }
 

@@ -108,3 +108,43 @@ test('Diet.html lines to confirm (A6): open until answered; use changes the supp
   assert.match(a.changes[0].text, /Diet\.html \(he confirmed\): 2 tablets/);
   assert.deepEqual(reviewOpen(answerReview(review, 'supp.a', 'keep', '2026-10-18'), supps), []);
 });
+
+test('no scale (A7): packs, counts and usual amounts to grams and words; the photo prompt carries them', async () => {
+  const { gramsFor, amountText, amountChoices, amountsLine, myFoods, withUsda: wu } = await import('../app/js/lib/foods.js');
+  const { promptText, SYSTEM_BEFORE } = await import('../server/meal-vision.mjs');
+  const plan = { foods: [
+    { name: 'Nuts', fdcId: 170567, pack: { grams: 200, label: '200 g pack' }, usual: { packs: 0.5, text: 'half a pack a day' } },
+    { name: 'Eggs', fdcId: 171287, unit: { grams: 50, label: 'egg', plural: 'eggs' }, usual: { count: 10 } },
+    { name: 'Rice', fdcId: 169757, usual: { grams: 450, short: '450 g cooked' } },
+  ] };
+  const [nuts, eggs, rice] = myFoods(plan);
+  assert.equal(gramsFor(nuts, { packs: 0.5 }), 100);
+  assert.equal(gramsFor(eggs, { count: 3 }), 150);
+  assert.equal(gramsFor(rice, { usual: true }), 450);
+  assert.equal(gramsFor(rice, { packs: 1 }), null);
+  assert.equal(amountText(nuts, { packs: 0.5 }), '½ pack');
+  assert.equal(amountText(nuts, { packs: 2 }), '2 packs');
+  assert.equal(amountText(eggs, { count: 1 }), '1 egg');
+  assert.deepEqual(amountChoices(nuts).map((c) => c.label), ['¼ pack · 50 g', '½ pack · 100 g', '1 pack · 200 g', '2 packs · 400 g']);
+  assert.equal(amountChoices(eggs).at(-1).label, 'usual day: 10 eggs · 500 g');
+  assert.deepEqual(amountChoices(rice).map((c) => c.label), ['usual day: 450 g cooked · 450 g']);
+  assert.match(amountsLine(plan), /^Nuts, pack 200 g, usually half a pack a day; Eggs, 1 egg = 50 g, usually 10 eggs; Rice, usually 450 g$/);
+  const [x] = wu(db, [{ name: 'Nuts', fdcId: 170567, grams: 100, portion: '½ pack' }]);
+  assert.equal(x.portion, '½ pack'); assert.equal(x.kcal, 579);
+  assert.match(promptText({ kind: 'before', meal: { hint: '' }, plan }), /His packs, counts and usual amounts \(no kitchen scale\): Nuts, pack 200 g/);
+  assert.doesNotMatch(SYSTEM_BEFORE, /scaleGrams|kitchen scale is visible/);
+});
+
+test('an id that does not fit the USDA words given with it: the words win, and his name only when it fits', () => {
+  const prefer = [{ fdcId: 169757, name: 'Rice (cooked weight)' }];
+  const [brown, white, plain] = withUsda(db, [
+    { name: 'Brown rice (cooked weight)', fdcId: 169757, usda: 'Rice, brown, long-grain, cooked', grams: 150 },
+    { name: 'Rice', fdcId: 169757, usda: 'Rice, white, long-grain, regular, unenriched, cooked without salt', grams: 200 },
+    { name: 'rice', grams: 100 },
+  ], { prefer });
+  assert.equal(brown.fdcId, 169704); assert.equal(brown.name, 'Brown rice (cooked weight)');
+  assert.equal(white.fdcId, 169757); assert.equal(white.name, 'Rice (cooked weight)');
+  assert.equal(plain.fdcId, 169757, 'plain "rice": his rice');
+  const [named] = withUsda(db, [{ name: 'Rice (cooked weight)', fdcId: 169757, usda: 'Rice, brown, long-grain, cooked', grams: 150 }], { prefer });
+  assert.equal(named.fdcId, 169704); assert.equal(named.name, 'Rice, brown, long-grain, cooked');
+});

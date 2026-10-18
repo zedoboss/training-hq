@@ -325,3 +325,16 @@ test('supplement_review (A6): the open Diet.html line is shown, his answer recor
   assert.doesNotMatch((await call('supplements')).text, /Not confirmed yet/);
   assert.match((await call('supplement_review', { supplement: 'caps', answer: 'use' })).text, /Nothing to confirm/);
 });
+
+test('log_meal by packs and counts (A7): his foods sized from his packs; unknown ones refused', async () => {
+  store.writeLocal('fuel', 'plan', { kind: 'plan', kcal: 2000, proteinG: 150, foods: [
+    { name: 'Raw almonds', fdcId: 170567, pack: { grams: 200, label: '200 g pack' } },
+    { name: 'Eggs', fdcId: 171287, unit: { grams: 50, label: 'egg', plural: 'eggs' } },
+  ] });
+  const r = await call('log_meal', { items: [{ name: 'almonds', packs: 0.5 }, { name: 'eggs', count: 3 }], time: '02:00' });
+  assert.match(r.text, /Raw almonds ½ pack \(100 g\), Eggs 3 eggs \(150 g\); 794 kcal, 40 g protein \(USDA values\)/);
+  const items = list('meals')[0].before.items;
+  assert.deepEqual(items.map((x) => [x.name, x.grams, x.portion, x.fdcId, x.source]), [['Raw almonds', 100, '½ pack', 170567, 'usda'], ['Eggs', 150, '3 eggs', 171287, 'usda']]);
+  assert.match(await call('meals').then((m) => m.text), /No kitchen scale: he goes by packs and counts: Raw almonds, pack 200 g; Eggs, 1 egg = 50 g/);
+  assert.match((await call('log_meal', { items: [{ name: 'cashews', packs: 1 }] })).text, /No grams for "cashews"/);
+});
