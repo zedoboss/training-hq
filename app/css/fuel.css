@@ -73,3 +73,13 @@
 .fuel-times .ex-head { display: flex; justify-content: space-between; align-items: center; }
 .fuel-times .hint { margin: 6px 0 0; }
 .meal-edit .mt-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 32px; gap: 6px; align-items: center; }
+
+/* Supplements */
+.supp-card { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 4px 10px; align-items: center; padding: 12px 14px; color: var(--text); text-decoration: none; }
+.supp-card .pill { grid-row: 1 / 3; grid-column: 2; }
+.supp-card-line { font-size: 14px; color: var(--muted); }
+.supp-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.supp-form { display: flex; flex-direction: column; gap: 14px; }
+.supp-form .row-fields { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.supp-form .seg { flex-wrap: wrap; }
+.supp-form #sf-days { margin-top: 8px; }

@@ -142,6 +142,7 @@ export function render(view, params) {
       ${date === today ? `<section class="card pad-card fuel-times"><div class="ex-head"><span class="hud c-muted">MEAL TIMES</span><button class="link-btn" id="f-times" type="button">${times.length ? 'Change' : 'Set them'}</button></div>
         ${times.length ? `<p class="hint c-text">${times.map((x) => `${esc(x.name)} ${formatHm(x.time)}`).join(' · ')}</p>` : '<p class="hint">Not set yet, so no meal-time reminders. Set your usual times and the app asks when one passes with nothing logged.</p>'}
         ${dayChecks.length ? `<p class="hint">${dayChecks.map((c) => `${esc(c.name)}: ${ANSWER[c.answer].toLowerCase()}`).join(' · ')}</p>` : ''}</section>` : ''}
+      ${date === today ? `<a class="card supp-card" href="#/supps" id="f-supps"><span class="hud c-amber">SUPPLEMENTS</span><span class="supp-card-line" id="f-supps-line">Your checklist</span><span class="pill is-on">Open</span></a>` : ''}
       <div class="section-label">${list.length ? `Meals · ${list.length}` : 'No meals logged'}</div>
       <ul class="meal-list">${list.map((m) => {
         const mt = mealTotals(m, estimates);
