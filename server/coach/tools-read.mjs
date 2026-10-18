@@ -14,7 +14,7 @@ import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
 import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks } from '../../app/js/lib/meals.js';
-import { checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
+import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered } from '../../app/js/lib/fuel-reminders.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN } from '../../app/js/lib/sauna.js';
@@ -358,7 +358,7 @@ export function mealsText(s, { date = null }) {
     lines.push(`- ${m.name} ${timeText(m.at, s.tz)} [id ${m.id}] (${STATE_SHORT[mealState(m, est, s.now)] || mealState(m, est, s.now)}${b.estimated && b.items ? ', estimate' : ''}): ${eaten ? eaten.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') || 'nothing' : 'being read'}${mt.known ? `; ${mt.kcal} kcal, ${mt.protein} g protein` : ''}${m.note ? `; note: ${m.note}` : ''}`);
   }
   if (!meals.length) lines.push('No meals logged.');
-  if (plan.foods?.length) lines.push(`His usual foods: ${plan.foods.map((f) => f.name).join('; ')}.`);
+  if (plan.foods?.length) lines.push(`His planned day (his diet analysis): ${plan.foods.map((f) => `${f.name} ${f.perDay || `${f.gramsPerDay} g`}`).join('; ')}.`);
   return lines.join('\n');
 }
 
@@ -386,6 +386,9 @@ function supplementsText(s, { date = null }) {
   lines.push(cons.length ? `Considering: ${cons.map((c) => `${c.name}${c.note ? ` (${c.note})` : ''}`).join('; ')}.` : 'Considering: nothing.');
   const weekly = answers.filter((a) => a.kind === 'weekly').sort((a, b) => b.at - a.at)[0];
   if (weekly) lines.push(`Last weekly planning answer: ${dayText(weekly.date, s.today)}, ${weekly.answer}${weekly.text ? ` (${weekly.text})` : ''}.`);
+  // A6: lines of his Diet.html that differ from his list, still to confirm (he may be asked; never decide for him).
+  const open = reviewOpen(s.one('fuel', 'supp-review'), supps);
+  if (open.length) lines.push(`Not confirmed yet, his Diet.html words these differently (ask him which is right when it fits; record it with supplement_review): ${open.map((x) => `${supps.find((y) => y.id === x.suppId)?.name}: list "${x.brief}" vs Diet.html "${x.diet}"`).join('; ')}.`);
   return lines.join('\n');
 }
 

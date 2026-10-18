@@ -313,3 +313,15 @@ test('read tools answer on an empty database without failing', async () => {
   }
   empty.close();
 });
+
+test('supplement_review (A6): the open Diet.html line is shown, his answer recorded; keep leaves the list', async () => {
+  store.writeLocal('fuel', 'supp-review', { items: [{ suppId: 'supp.powder', kind: 'differs', brief: '5 g', diet: '5 tablets', set: { dose: '5 tablets' } }, { suppId: 'supp.caps', kind: 'detail', brief: '2 caps', diet: '2 caps (300 mg each)', set: { dose: '2 caps (300 mg each)' } }], answers: {} });
+  assert.match((await call('supplements')).text, /Not confirmed yet, his Diet\.html words these differently.*Test powder: list "5 g" vs Diet\.html "5 tablets"/);
+  const r = await call('supplement_review', { supplement: 'powder', answer: 'use' });
+  assert.equal(r.wrote, true);
+  assert.equal(store.getRecord('supplements', 'supp.powder').data.dose, '5 tablets');
+  await call('supplement_review', { supplement: 'caps', answer: 'keep' });
+  assert.equal(store.getRecord('supplements', 'supp.caps').data.dose, '2 caps');
+  assert.doesNotMatch((await call('supplements')).text, /Not confirmed yet/);
+  assert.match((await call('supplement_review', { supplement: 'caps', answer: 'use' })).text, /Nothing to confirm/);
+});

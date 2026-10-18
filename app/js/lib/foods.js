@@ -111,8 +111,12 @@ export function matchFood(db, text, { prefer = [] } = {}) {
  */
 export function withUsda(db, items, { prefer = [], keepTyped = true } = {}) {
   const mine = new Map(prefer.filter((p) => p?.fdcId).map((p) => [p.fdcId, p]));
+  const labels = prefer.filter((p) => p?.label && !p.fdcId);
   return (items || []).map((x) => {
     if (keepTyped && x.source === 'typed') return x;
+    // His own foods that USDA doesn't have (collagen): the pack's label values.
+    const lab = !x.fdcId && labels.find((p) => sameFood(p.name, x.name));
+    if (lab) return labelItem(lab, x.grams, { unsure: !!x.unsure });
     let food = x.fdcId ? db.byId.get(Number(x.fdcId)) : null;
     if (!food && x.usda) food = matchFood(db, x.usda, { prefer: [...mine.keys()] });
     if (!food && x.name) food = matchFood(db, x.name, { prefer: [...mine.keys()] });
@@ -120,6 +124,35 @@ export function withUsda(db, items, { prefer = [], keepTyped = true } = {}) {
     const name = mine.get(food.id)?.name || x.name;
     return foodItem(db, food, x.grams, { name, unsure: !!x.unsure });
   });
+}
+
+/** Two names for the same food: every word of the shorter one is in the longer one. */
+export function sameFood(a, b) {
+  const [x, y] = [tokens(a), tokens(b)].sort((p, q) => p.length - q.length);
+  return x.length > 0 && x.every((t) => y.some((u) => u === t || (t.length >= 4 && u.startsWith(t))));
+}
+
+/** A meal item from a pack's label ({perGrams, kcal, protein}). */
+export function labelItem(food, grams, { unsure = false } = {}) {
+  const k = (Number(grams) || 0) / (food.label.perGrams || 100);
+  return { name: food.name, grams: Math.round(Number(grams) || 0), kcal: Math.round((food.label.kcal || 0) * k), protein: r1((food.label.protein || 0) * k), unsure, source: 'label' };
+}
+
+/** His own foods from the fuel plan, for matching first: [{fdcId?, name, label?}]. */
+export const myFoods = (plan) => (plan?.foods || []).filter((f) => f?.fdcId || f?.label).map((f) => ({ ...(f.fdcId ? { fdcId: Number(f.fdcId) } : {}), name: f.name, ...(f.label ? { label: f.label } : {}) }));
+
+/** His planned day (fuel plan foods) as meal items, with USDA or label values, and the totals. */
+export function planItems(db, plan) {
+  const items = (plan?.foods || []).map((f) => {
+    const g = Number(f.gramsPerDay) || 0;
+    const food = f.fdcId && db?.byId.get(Number(f.fdcId));
+    if (food) return foodItem(db, food, g, { name: f.name });
+    if (f.label) return labelItem(f, g);
+    return { name: f.name, grams: g, kcal: 0, protein: 0, unsure: false, source: 'estimate' };
+  });
+  const kcal = Math.round(items.reduce((a, x) => a + x.kcal, 0));
+  const protein = r1(items.reduce((a, x) => a + x.protein, 0));
+  return { items, kcal, protein };
 }
 
 /** One line for the source of a meal's numbers. */

@@ -13,5 +13,4 @@ export function foodsDb(log = () => {}) {
   return db;
 }
 
-/** His own foods with a USDA id (fuel plan), for matching first and naming items his way. */
-export const myFoods = (plan) => (plan?.foods || []).filter((f) => f?.fdcId).map((f) => ({ fdcId: Number(f.fdcId), name: f.name }));
+export { myFoods } from '../app/js/lib/foods.js';

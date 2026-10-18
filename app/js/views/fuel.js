@@ -15,6 +15,7 @@ import { logMealFromFile, logMealManual, cameraInput } from './meal.js';
 import { dayKindOn } from './supps.js';
 import { checklist } from '../lib/supplements.js';
 import { toast } from '../ui/toast.js';
+import { loadFoods, planItems, SOURCE_NOTE } from '../lib/foods.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const CAMERA = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
@@ -51,6 +52,23 @@ export function editMealTimes() {
       close();
     });
   });
+}
+
+/** His planned day (A6): the foods of his diet plan with USDA (or label) values, against his targets. */
+async function showPlan(repo) {
+  const [plan, db] = await Promise.all([repo.get('fuel', 'plan'), loadFoods().catch(() => null)]);
+  if (!plan?.foods?.length) { toast('No planned foods yet.'); return; }
+  const p = planItems(db, plan);
+  const n1 = (x) => String(Math.round((x || 0) * 10) / 10);
+  const { el, close } = overlay(`<div class="sheet-form plan-day"><div class="hud c-muted sheet-title">YOUR PLANNED DAY</div>
+    <div class="meal-est-head hud c-muted"><span>FOOD</span><span>G · KCAL · PROTEIN</span></div>
+    ${p.items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'label' ? '<span class="src-tag">LABEL</span>' : ''}${plan.foods[i].perDay ? ` <span class="c-faint">${esc(plan.foods[i].perDay)}</span>` : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')}
+    <div class="meal-total"><span>Planned day</span><span class="mono c-cyan">${n0(p.kcal)} kcal · ${n1(p.protein)} g</span></div>
+    ${plan.kcal ? `<p class="hint">Your targets: ${n0(plan.kcal)} kcal, ${plan.proteinG} g protein a day.${plan.bottomUpNote ? ` ${esc(plan.bottomUpNote)}` : ''}</p>` : ''}
+    <p class="hint">${esc(SOURCE_NOTE)}; raw weights unless it says cooked. ${esc(plan.foodsSource || '')}</p>
+    <div class="btn-row"><button class="btn-primary" type="button" data-close>Close</button></div></div>`, () => {});
+  el.querySelector('.sheet').classList.add('sheet-tall');
+  el.querySelector('[data-close]').onclick = () => close();
 }
 
 /** Targets editor: kcal and protein per day, saved in the fuel plan with a dated change note. */
@@ -133,7 +151,8 @@ export function render(view, params) {
         <div class="fuel-total"><span class="hud c-muted">PROTEIN</span><b>${Math.round(t.protein * 10) / 10} g</b>${tg ? `<small>${tg.proteinG > t.protein ? `${n1(tg.proteinG - t.protein)} g to go` : 'target reached'}</small>` : ''}</div>
         <div class="fuel-total"><span class="hud c-muted">MEALS</span><b>${t.meals}</b></div>
         ${tg ? `${bar('KCAL', t.kcal, tg.kcal, '', '')}${bar('PROTEIN', t.protein, tg.proteinG, ' g', 'is-protein', n1)}
-          <button class="link-btn" id="f-targets" type="button">Targets: ${n0(tg.kcal)} kcal · ${tg.proteinG} g protein a day</button>` : '<p class="hint">Targets arrive with the first sync from your Mac.</p>'}
+          <button class="link-btn" id="f-targets" type="button">Targets: ${n0(tg.kcal)} kcal · ${tg.proteinG} g protein a day</button>
+          ${plan?.foods?.length ? '<button class="link-btn" id="f-plan" type="button">Your planned day ›</button>' : ''}` : '<p class="hint">Targets arrive with the first sync from your Mac.</p>'}
         ${t.estimated || t.unread ? `<p class="hint">${[t.estimated ? `${t.estimated} meal${t.estimated === 1 ? '' : 's'} still an estimate (not confirmed)` : '', t.unread ? `${t.unread} still being read by the Mac` : ''].filter(Boolean).join(' · ')}.</p>` : ''}
       </section>
       ${date === today ? `<div class="fuel-log">
@@ -167,6 +186,7 @@ export function render(view, params) {
       if (alive) line.textContent = due.length ? `${due.filter((i) => i.entry?.status === 'taken').length} of ${due.length} taken${next ? ` · next: ${next.label}${next.time ? ` ${formatHm(next.time)}` : ''}` : ' · all answered'}` : 'Nothing scheduled today';
     }
     body.querySelector('#f-targets')?.addEventListener('click', () => editTargets(repo));
+    body.querySelector('#f-plan')?.addEventListener('click', () => showPlan(repo));
     body.querySelector('#f-times')?.addEventListener('click', () => editMealTimes());
     const man = body.querySelector('#f-manual');
     if (man) man.onclick = async () => {

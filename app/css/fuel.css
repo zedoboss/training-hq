@@ -152,3 +152,7 @@
 .meal-edit .me-pick { display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left; padding: 10px 12px; min-height: 44px; border: 0; border-bottom: 1px solid var(--divider); background: transparent; color: var(--text); font: 400 14px var(--sans, inherit); cursor: pointer; }
 .meal-edit .me-pick:last-child { border-bottom: 0; }
 .meal-row .src-tag { font: 500 10px var(--mono); letter-spacing: 0.08em; color: var(--faint); margin-left: 6px; }
+/* A6: Diet.html lines to confirm on My supplements; the planned day sheet. */
+.review-item { border-top: 1px solid var(--divider); padding-top: 10px; margin-top: 10px; }
+.review-item p { margin: 4px 0; }
+.plan-day .meal-row { font-size: 14px; }

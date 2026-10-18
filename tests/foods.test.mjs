@@ -81,3 +81,30 @@ test('a meal photo: Claude names the USDA entry, the Mac computes kcal and prote
     ]);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('planned day (A6): his foods with USDA ids or a pack label, summed; label foods match by name', async () => {
+  const { planItems, myFoods, withUsda: wu } = await import('../app/js/lib/foods.js');
+  const plan = { foods: [
+    { name: 'Rice (cooked weight)', gramsPerDay: 450, fdcId: 169757 },
+    { name: 'Collagen peptides', gramsPerDay: 10, label: { perGrams: 10, kcal: 40, protein: 9 } },
+    { name: 'Something', gramsPerDay: 20 },
+  ] };
+  const p = planItems(db, plan);
+  assert.deepEqual(p.items.map((x) => [x.kcal, x.protein, x.source]), [[585, 12.1, 'usda'], [40, 9, 'label'], [0, 0, 'estimate']]);
+  assert.equal(p.kcal, 625); assert.equal(p.protein, 21.1);
+  const mine = myFoods(plan);
+  assert.deepEqual(mine.map((m) => m.name), ['Rice (cooked weight)', 'Collagen peptides']);
+  const [c] = wu(db, [{ name: 'collagen', grams: 20, kcal: 0, protein: 0 }], { prefer: mine });
+  assert.deepEqual(c, { name: 'Collagen peptides', grams: 20, kcal: 80, protein: 18, unsure: false, source: 'label' });
+});
+
+test('Diet.html lines to confirm (A6): open until answered; use changes the supplement with a dated note', async () => {
+  const { reviewOpen, applyReview, answerReview } = await import('../app/js/lib/supplements.js');
+  const supps = [{ id: 'supp.a', name: 'A', dose: '1 g', perTake: { train: 1, rest: 1 }, changes: [] }, { id: 'supp.b', name: 'B', status: 'removed' }];
+  const review = { items: [{ suppId: 'supp.a', brief: '1 g', diet: '2 tablets', set: { dose: '2 tablets', perTake: { train: 2, rest: 2 } } }, { suppId: 'supp.b', brief: 'x', diet: 'y', set: {} }], answers: {} };
+  assert.deepEqual(reviewOpen(review, supps).map((x) => x.suppId), ['supp.a']);
+  const a = applyReview(supps[0], review.items[0], '2026-10-18');
+  assert.equal(a.dose, '2 tablets'); assert.deepEqual(a.perTake, { train: 2, rest: 2 });
+  assert.match(a.changes[0].text, /Diet\.html \(he confirmed\): 2 tablets/);
+  assert.deepEqual(reviewOpen(answerReview(review, 'supp.a', 'keep', '2026-10-18'), supps), []);
+});

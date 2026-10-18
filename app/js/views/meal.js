@@ -12,7 +12,7 @@ import {
   netItems, mealState, STATE_TEXT, afterPhotoAt,
 } from '../lib/meals.js';
 import { actionSheet, confirmSheet, promptText, promptLong, overlay } from '../ui/sheet.js';
-import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE } from '../lib/foods.js';
+import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE, myFoods, labelItem, sameFood } from '../lib/foods.js';
 
 const SOURCE_LABEL = 'SR Legacy and Foundation Foods';
 import { toast } from '../ui/toast.js';
@@ -51,10 +51,9 @@ export async function logMealManual({ at = Date.now() } = {}) {
  */
 export const cameraInput = (id) => `<input type="file" accept="image/*" capture="environment" hidden id="${id}">`;
 
-/** His own foods (fuel plan) with a USDA id: suggested first, named his way. */
+/** His own foods (fuel plan): suggested first, named his way (USDA ones and label ones such as collagen). */
 async function myFoodsList() {
-  const plan = await (await ready).get('fuel', 'plan');
-  return (plan?.foods || []).filter((f) => f?.fdcId).map((f) => ({ fdcId: Number(f.fdcId), name: f.name }));
+  return myFoods(await (await ready).get('fuel', 'plan'));
 }
 
 const SOURCE_TEXT = { usda: 'USDA', typed: 'your numbers', estimate: 'estimate', label: 'pack label' };
@@ -111,17 +110,26 @@ export function editItems(title, items) {
             await dbReady;
             const q = name.value.trim();
             if (!db || q.length < 2) { sugg.hidden = true; return; }
-            const found = searchFoods(db, q, { limit: 6, prefer: mine.map((m) => m.fdcId) });
-            const minesFirst = mine.filter((m) => m.name.toLowerCase().includes(q.toLowerCase()) && !found.some((r) => r.food.id === m.fdcId)).map((m) => ({ food: db.byId.get(m.fdcId) })).filter((r) => r.food);
+            const found = searchFoods(db, q, { limit: 6, prefer: mine.filter((m) => m.fdcId).map((m) => m.fdcId) });
+            const ql = q.toLowerCase();
+            const minesFirst = mine.filter((m) => (m.name.toLowerCase().includes(ql) || sameFood(m.name, q)) && !found.some((r) => r.food.id === m.fdcId))
+              .map((m) => (m.fdcId ? { food: db.byId.get(m.fdcId) } : { label: m })).filter((r) => r.food || r.label);
             const list = [...minesFirst, ...found].slice(0, 6);
-            sugg.innerHTML = list.map((r) => { const m = mine.find((y) => y.fdcId === r.food.id); return `<button class="me-pick" type="button" data-id="${r.food.id}"><span>${esc(m ? m.name : r.food.name)}</span><span class="hud ${m ? 'c-cyan' : 'c-faint'}">${m ? 'YOUR FOOD' : 'USDA'}</span></button>`; }).join('');
+            sugg.innerHTML = list.map((r, k) => {
+              if (r.label) return `<button class="me-pick" type="button" data-k="${k}"><span>${esc(r.label.name)}</span><span class="hud c-cyan">YOUR FOOD · LABEL</span></button>`;
+              const m = mine.find((y) => y.fdcId === r.food.id);
+              return `<button class="me-pick" type="button" data-k="${k}"><span>${esc(m ? m.name : r.food.name)}</span><span class="hud ${m ? 'c-cyan' : 'c-faint'}">${m ? 'YOUR FOOD' : 'USDA'}</span></button>`;
+            }).join('');
             sugg.hidden = !list.length;
             sugg.querySelectorAll('.me-pick').forEach((b) => b.addEventListener('mousedown', (e) => e.preventDefault()));
             sugg.querySelectorAll('.me-pick').forEach((b) => b.addEventListener('click', () => {
-              const food = db.byId.get(Number(b.dataset.id));
+              const r = list[Number(b.dataset.k)];
               const cur = read();
-              const m = mine.find((y) => y.fdcId === food.id);
-              cur[i] = foodItem(db, food, cur[i].grams || 0, { name: m ? m.name : shortName(food.name) });
+              if (r.label) cur[i] = labelItem(r.label, cur[i].grams || r.label.label.perGrams || 0);
+              else {
+                const m = mine.find((y) => y.fdcId === r.food.id);
+                cur[i] = foodItem(db, r.food, cur[i].grams || 0, { name: m ? m.name : shortName(r.food.name) });
+              }
               rows = cur; draw();
               box.querySelector(`.me-item[data-i="${i}"] [data-f=grams]`)?.focus();
             }));
@@ -131,7 +139,9 @@ export function editItems(title, items) {
         item.querySelector('[data-f=grams]').addEventListener('change', (e) => {
           const cur = read();
           const f = usdaFor(rows[i]);
+          const lab = rows[i]?.source === 'label' && mine.find((m) => m.label && m.name === rows[i].name);
           if (f) cur[i] = foodItem(db, f, Number(e.target.value) || 0, { name: cur[i].name });
+          else if (lab) cur[i] = labelItem(lab, Number(e.target.value) || 0);
           else if (rows[i]?.grams) cur[i] = regram({ ...cur[i], grams: rows[i].grams, kcal: cur[i].kcal, protein: cur[i].protein }, Number(e.target.value) || 0);
           rows = cur; draw();
         });

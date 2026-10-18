@@ -7,7 +7,7 @@ import { ready } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { isoDate, formatHm, formatDay, formatTime, timeAt } from '../lib/time.js';
-import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFrom, scheduledOn, logId, streak } from '../lib/supplements.js';
+import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFrom, scheduledOn, logId, streak, reviewOpen, applyReview, answerReview } from '../lib/supplements.js';
 import { addDays } from '../lib/rotation.js';
 import { actionSheet, promptText, promptLong, confirmSheet } from '../ui/sheet.js';
 import { lowAnswered, weeklyAnsweredSince } from '../lib/fuel-reminders.js';
@@ -28,9 +28,11 @@ export function suppFacts(s) {
 function renderList(view, repo, alive) {
   const draw = async () => {
     const today = isoDate(new Date());
-    const [all, log] = await Promise.all([repo.list('supplements'), repo.list('supp-log')]);
+    const [all, log, review] = await Promise.all([repo.list('supplements'), repo.list('supp-log'), repo.get('fuel', 'supp-review')]);
     if (!alive()) return;
     const by = (st) => all.filter((s) => statusOn(s, today) === st).sort(byOrder);
+    const open = reviewOpen(review, all);
+    const nameOf = (id) => all.find((s) => s.id === id)?.name || id;
     const row = (s) => {
       const stock = stockStatus(s, log);
       const a7 = adherence(s, log, today, 7); const a30 = adherence(s, log, today, 30);
@@ -43,13 +45,26 @@ function renderList(view, repo, alive) {
       <div class="lib-head"><a class="pill" href="#/supps">Today</a><a class="pill is-on" href="#/supp/new">+ Add</a></div>
       <h1 class="view-title">My supplements</h1>
       <p class="hint">Your list, as you set it. Training HQ only tracks what you decide to take: it doesn't suggest supplements or doses.</p>
+      ${open.length ? `<section class="card pad-card confirm-card" id="supp-review"><div class="hud c-amber">FROM YOUR DIET.HTML · ${open.length} TO CONFIRM</div>
+        <p class="hint">Your diet analysis words these differently from your list. Pick which one is right; nothing changes until you do.</p>
+        ${open.map((x) => `<div class="review-item" data-supp="${esc(x.suppId)}"><b>${esc(nameOf(x.suppId))}</b>${x.kind === 'detail' ? ' <span class="hint">(adds detail)</span>' : ''}
+          <p class="hint c-text">Your list: ${esc(x.brief)}</p><p class="hint c-text">Diet.html: ${esc(x.diet)}</p>${x.countNote ? `<p class="hint">${esc(x.countNote)}</p>` : ''}
+          <div class="btn-row"><button class="btn-ghost small" data-review="use" type="button">Use Diet.html</button><button class="btn-ghost small" data-review="keep" type="button">Keep my list</button></div></div>`).join('')}</section>` : ''}
       <div class="section-label">Taking · ${active.length}</div>
       <ul class="lib-list">${active.map(row).join('') || '<li class="hint pad">Nothing on the list.</li>'}</ul>
       ${paused.length ? `<div class="section-label">Paused · ${paused.length}</div><ul class="lib-list">${paused.map(row).join('')}</ul>` : ''}
       ${removed.length ? `<details class="notes"><summary>Removed · ${removed.length}</summary><ul class="lib-list">${removed.map(row).join('')}</ul></details>` : ''}`;
+    view.querySelectorAll('[data-review]').forEach((b) => b.addEventListener('click', async () => {
+      const id = b.closest('[data-supp]').dataset.supp;
+      const item = open.find((x) => x.suppId === id);
+      const supp = await repo.get('supplements', id);
+      if (b.dataset.review === 'use') await repo.put('supplements', id, applyReview(supp, item, today));
+      await repo.put('fuel', 'supp-review', answerReview(await repo.get('fuel', 'supp-review'), id, b.dataset.review, today));
+      toast(b.dataset.review === 'use' ? `${supp.name}: now as in Diet.html.` : `${supp.name}: kept as on your list.`);
+    }));
   };
   draw();
-  return repo.onChange((cols) => { if (cols.some((c) => ['supplements', 'supp-log'].includes(c))) draw(); });
+  return repo.onChange((cols) => { if (cols.some((c) => ['supplements', 'supp-log', 'fuel'].includes(c))) draw(); });
 }
 
 const SKIP_REASONS = ['Day off', 'Ran out', 'Forgot it', 'Not today'];

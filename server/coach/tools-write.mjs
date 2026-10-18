@@ -15,7 +15,7 @@ import { modeOf } from '../../app/js/lib/progression.js';
 import { currentBodyweight } from '../../app/js/lib/health.js';
 import { newId } from '../../app/js/lib/routines.js';
 import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
-import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist } from '../../app/js/lib/supplements.js';
+import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
@@ -613,6 +613,22 @@ async function schedule(a, ctx) {
   return refuse('action is set_time, clear_time, rest_today or undo_rest.');
 }
 
+// ---- Diet.html supplement lines (A6) ----------------------------------------------------------------------------------
+
+/** His answer about a Diet.html line that differs from his list: use it (the supplement changes) or keep his list. */
+function supplementReview(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const review = s.one('fuel', 'supp-review');
+  const open = reviewOpen(review, s.list('supplements'));
+  if (!open.length) return refuse('Nothing to confirm: every Diet.html line is answered.');
+  const { item: supp } = findSupp(s, a.supplement || '');
+  const item = supp && open.find((x) => x.suppId === supp.id);
+  if (!item) return refuse(`Open lines: ${open.map((x) => s.list('supplements').find((y) => y.id === x.suppId)?.name).join(', ')}. Which one?`);
+  if (a.answer === 'use') put(s, 'supplements', supp.id, applyReview(supp, item, s.today));
+  put(s, 'fuel', 'supp-review', answerReview(review, supp.id, a.answer, s.today));
+  return wrote(a.answer === 'use' ? `${supp.name} now reads as in his Diet.html: ${item.diet}.${item.countNote ? ` ${item.countNote}` : ''}` : `${supp.name} stays as on his list: ${item.brief}.`, `${supp.short || supp.name}: ${a.answer}`);
+}
+
 // ---- rest-day holds (A2) ----------------------------------------------------------------------------------------
 
 /** His answer to the rest-day hold question: the gym for that hold, a hold he names, or skip today. */
@@ -649,6 +665,7 @@ export const WRITE_TOOLS = [
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
   write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
+  write('supplement_review', 'Diet.html line', "His answer about a line of his Diet.html that differs from his supplement list (the supplements tool lists the open ones): use = change the supplement to the Diet.html line, keep = leave his list. Only his answer; never decide for him.", obj({ supplement: { type: 'string' }, answer: { type: 'string', enum: ['use', 'keep'] } }, ['supplement', 'answer']), supplementReview),
   write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
 ];

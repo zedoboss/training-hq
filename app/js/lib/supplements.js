@@ -195,3 +195,18 @@ export function suppMarks(supps = [], log = []) {
     };
   });
 }
+
+// ---- Diet.html lines to confirm (A6) -------------------------------------------------------------------------------
+// The fuel doc 'supp-review' lists lines of his diet analysis that differ from his list or add detail. He answers each:
+// 'use' applies the line to the supplement (dated in its changes), 'keep' leaves it. Nothing changes without him.
+
+/** Review items still unanswered, for supplements still on his list. */
+export const reviewOpen = (review, supps = []) => (review?.items || []).filter((x) => !review.answers?.[x.suppId] && supps.some((s) => s.id === x.suppId && s.status !== 'removed'));
+
+/** The supplement with the Diet.html line applied. */
+export function applyReview(supp, item, today) {
+  return { ...supp, ...item.set, changes: [...(supp.changes || []), { on: today, text: `Changed to the line in his Diet.html (he confirmed): ${item.diet}.` }] };
+}
+
+/** The review doc with his answer recorded. */
+export const answerReview = (review, suppId, answer, today) => ({ ...review, answers: { ...(review.answers || {}), [suppId]: { answer, on: today } } });
