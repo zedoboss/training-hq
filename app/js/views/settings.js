@@ -212,6 +212,10 @@ export function render(view) {
     <dl class="card kv" id="mac-kv"></dl>
     <div id="mac-actions" class="stack"></div>
     <div id="prefs" class="stack"></div>
+    <div class="section-label">Import and export</div>
+    <ul class="lib-list">
+      <li><a class="lib-row" href="#/import"><span class="lib-name">Import history</span><span class="lib-meta">From Hevy or Strong · undo past imports</span></a></li>
+    </ul>
     <div class="section-label">App</div>
     <dl class="card kv">
       <dt>Version</dt><dd id="set-version">…</dd>

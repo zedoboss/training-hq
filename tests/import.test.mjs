@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   parseCsv, detectSource, wallTime, zonedToMs, durationSeconds, readHevy, readStrong, applyRules, DEFAULT_RULES,
   dayTypeOf, matchExercises, newExerciseFromImport, readExport, planImport, summarizePlan, sessionIdFor, hashId,
+  reviewOrder,
 } from '../app/js/lib/import.js';
 import { mergeLibrary } from '../app/js/lib/library.js';
 
@@ -145,6 +146,8 @@ test('matching: remembered, same name, or new with suggestions; new exercises ge
   assert.equal(newExerciseFromImport('Leg Raise Thing', [{ kg: null, reps: 10 }]).type, 'reps_only');
   assert.equal(newExerciseFromImport('Dip (Weighted)', [{ kg: null, reps: 8 }]).type, 'weighted_bodyweight');
   assert.equal(newExerciseFromImport('Farmer Hold', [{ kg: 30, durationS: 40 }]).type, 'weight_duration');
+  const bench = lib.find((e) => e.primary === 'chest');
+  assert.equal(newExerciseFromImport('Shrugs Na Incline Bench Machine', [{ kg: 20, reps: 12 }], { suggestion: { id: bench.id, score: 0.6 }, library: lib }).primary, 'traps');
   const close = newExerciseFromImport('Smith Machine Squat', [{ kg: 60, reps: 8 }], { suggestion: m[1].suggestions[0], library: lib });
   assert.deepEqual([close.primary, close.equipment], ['quadriceps', 'smith']);
 });
@@ -229,4 +232,13 @@ test('plan: a workout whose only block was not done is skipped with the reason',
   assert.equal(r.dropped, 1);
   const plan = planImport({ source: 'hevy', workouts: r.workouts, tz: 'UTC', resolve: new Map(), importId: 'i' });
   assert.deepEqual(plan.skipped.map((x) => x.reason), ['no sets done']);
+});
+
+test('review order: new names first, then chosen, remembered, same name; most sets first', () => {
+  const list = [
+    { name: 'A', how: 'same name', sets: 50 }, { name: 'B', how: 'new', sets: 3 }, { name: 'C', how: 'remembered', sets: 9 },
+    { name: 'D', how: 'new', sets: 30 }, { name: 'E', how: 'chosen', sets: 1 },
+  ];
+  assert.deepEqual(reviewOrder(list).map((e) => e.name), ['D', 'B', 'E', 'C', 'A']);
+  assert.equal(list[0].name, 'A');
 });

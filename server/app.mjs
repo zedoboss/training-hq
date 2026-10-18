@@ -46,14 +46,14 @@ function readJson(req) {
   });
 }
 
-/** Raw request body (a video upload), refused past `limit` bytes. */
+/** Raw request body (a video or an import file), refused past `limit` bytes. */
 function readRaw(req, limit) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > limit) { reject(new HttpError(413, `video too large (max ${Math.round(limit / 1048576)} MB)`)); req.destroy(); return; }
+      if (size > limit) { reject(new HttpError(413, `file too large (max ${Math.round(limit / 1048576)} MB)`)); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks)));

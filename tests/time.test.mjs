@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTime, formatTimeSec, formatDay, weekdayShort, isoDate, daysBetween } from '../app/js/lib/time.js';
+import { formatTime, formatTimeSec, formatDay, formatDate, weekdayShort, isoDate, daysBetween } from '../app/js/lib/time.js';
 
 // UTC+7 fixture zone. 2026-10-16T21:05:12Z is Saturday 10/17, 4:05:12 AM there.
 const TZ = 'Asia/Bangkok';
@@ -15,6 +15,7 @@ test('times are H:MM AM/PM in the given zone', () => {
 
 test('days are weekday plus month/day, local date not UTC date', () => {
   assert.equal(formatDay(early, TZ), 'Saturday 10/17');
+  assert.equal(formatDate(early, TZ), 'Saturday 10/17/2026');
   assert.equal(weekdayShort(early, TZ), 'SAT');
   assert.equal(isoDate(early, TZ), '2026-10-17');
 });

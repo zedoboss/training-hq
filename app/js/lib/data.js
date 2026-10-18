@@ -162,6 +162,31 @@ export async function rescanDemos() {
   return res.json();
 }
 
+// Imports (step 3) run on the Mac: it keeps the file, plans, and writes the records; they come back by sync.
+const postJson = async (path, body, timeoutMs = 120000) =>
+  (await macFetch(path, { method: 'POST', body: JSON.stringify(body), type: 'application/json', timeoutMs })).json();
+
+/** Send a Hevy or Strong CSV to the Mac; it keeps the file and answers with what an import would do. */
+export async function previewImport(text, { name = '', tz }) {
+  const res = await macFetch(`/api/import/preview?name=${encodeURIComponent(name)}&tz=${encodeURIComponent(tz)}`, { method: 'POST', body: text, type: 'text/csv', timeoutMs: 180000 });
+  return res.json();
+}
+
+/** The same preview with another time zone or other exercise matches ({file name: exercise id | 'new'}). */
+export const planImport = (fileId, tz, matches) => postJson('/api/import/plan', { fileId, tz, matches });
+
+export async function commitImport(fileId, tz, matches) {
+  const out = await postJson('/api/import/commit', { fileId, tz, matches, remember: true }, 300000);
+  await syncNow();
+  return out;
+}
+
+export async function undoImport(importId) {
+  const out = await postJson('/api/import/undo', { importId });
+  await syncNow();
+  return out;
+}
+
 /** Ask the Mac for a pairing code for another device. */
 export async function newPairingCode() {
   await ready;

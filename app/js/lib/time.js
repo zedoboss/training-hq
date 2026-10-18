@@ -29,6 +29,12 @@ export function formatDay(date, tz) {
   return `${p.weekday} ${p.month}/${p.day}`;
 }
 
+/** "Tuesday 10/10/2023": a day with its year, for history that spans years */
+export function formatDate(date, tz) {
+  const p = parts(date, { weekday: 'long', year: 'numeric', month: 'numeric', day: 'numeric' }, tz);
+  return `${p.weekday} ${p.month}/${p.day}/${p.year}`;
+}
+
 /** "SAT" */
 export function weekdayShort(date, tz) {
   return parts(date, { weekday: 'short' }, tz).weekday.toUpperCase();

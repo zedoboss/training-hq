@@ -288,6 +288,10 @@ export function matchExercises(names, library, remembered = {}) {
   });
 }
 
+const REVIEW = { new: 0, chosen: 1, remembered: 2, 'same name': 3 };
+/** Exercise matches in the order to look at them: new names first, then chosen, remembered, same name; most sets first. */
+export const reviewOrder = (list) => [...list].sort((a, b) => (REVIEW[a.how] ?? 9) - (REVIEW[b.how] ?? 9) || b.sets - a.sets || a.name.localeCompare(b.name));
+
 const MUSCLE_WORDS = [
   [/neck/, 'neck'], [/wrist|cupping|forearm|grip/, 'forearms'], [/calf|calves/, 'calves'], [/leg curl|hamstring|rdl|romanian/, 'hamstrings'],
   [/hip thrust|glute/, 'glutes'], [/abduct/, 'abductors'], [/adduct/, 'adductors'], [/squat|leg press|leg extension|lunge/, 'quadriceps'],
@@ -298,7 +302,7 @@ const MUSCLE_WORDS = [
 ];
 const EQUIP_WORDS = [[/smith/, 'smith'], [/barbell|ez bar|\bez\b/, 'barbell'], [/dumbbell/, 'dumbbell'], [/cable|pushdown/, 'cable'], [/machine|plates/, 'machine'], [/band/, 'band'], [/kettlebell/, 'kettlebell']];
 
-/** A new exercise for a name that matched nothing: type from the logged sets; muscles from a close library match or the name. */
+/** A new exercise for a name that matched nothing: type from the logged sets; muscle from words in the name, else a close library match. */
 export function newExerciseFromImport(name, sets, { suggestion = null, library = [], source = null } = {}) {
   const n = norm(name);
   const any = (f) => sets.some(f);
@@ -309,7 +313,8 @@ export function newExerciseFromImport(name, sets, { suggestion = null, library =
   else if (/\bweighted\b/.test(n) && !/\bneck\b/.test(n)) type = 'weighted_bodyweight';
   else if (!any((s) => s.kg)) type = 'reps_only';
   const base = suggestion && suggestion.score >= 0.5 ? library.find((e) => e.id === suggestion.id) : null;
-  const primary = base?.primary ?? (MUSCLE_WORDS.find(([r]) => r.test(n))?.[1] || 'other');
+  // The name wins: "Shrugs Na Incline Bench Machine" is a shrug, though its closest library name is a bench press.
+  const primary = MUSCLE_WORDS.find(([r]) => r.test(n))?.[1] ?? base?.primary ?? 'other';
   const equipment = EQUIP_WORDS.find(([r]) => r.test(n))?.[1] ?? base?.equipment ?? (type === 'reps_only' || type === 'weighted_bodyweight' ? 'bodyweight' : 'other');
   return { id: slug(name), name, type, primary, secondary: base?.secondary ? [...base.secondary] : [], equipment, source: 'import', importedFrom: source };
 }
