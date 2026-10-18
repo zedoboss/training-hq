@@ -20,11 +20,16 @@ export function loadable(kg, { barKg = null, smallestPlate = 1.25, step = 0.5 } 
 /** The highest load allowed by the cap, before rounding to a loadable weight. */
 export const capOf = (lastKg) => Math.round(lastKg * (1 + CAP) * 100) / 100;
 
-/** Week cell from the programme: weeks 1-4; past week 4 use week 4 (week 5+ proposals come in step 4). */
-export function weekCell(planExercise, week) {
+/**
+ * Week cell from the programme: weeks 1-4. Past week 4: week 4's reps and sets with the number he confirmed for
+ * that week (progressKg, decision 8), or week 4's own number until he has confirmed one.
+ */
+export function weekCell(planExercise, week, progressKg = null) {
   if (!planExercise?.weeks) return null;
   const w = Math.min(Math.max(week || 1, 1), 4);
-  return planExercise.weeks[w - 1];
+  const cell = planExercise.weeks[w - 1];
+  if (week > 4 && progressKg != null && cell?.load && cell.load.kg != null) return { ...cell, load: { ...cell.load, kg: progressKg } };
+  return cell;
 }
 
 /** Number of working sets for a cell: "1st session: 1 set, after: 2 sets" depends on whether it was done before. */
@@ -42,13 +47,14 @@ export function setCount(sets, doneBefore) {
  * @param {{kg:number, reps:number, date:string}|null} o.last  heaviest working set of the last session
  * @param {number|null} o.barKg
  * @param {number} [o.smallestPlate]  smallest plate he has (Settings), for rounding bar loads
+ * @param {number|null} [o.progressKg]  week 5+: the number he confirmed for this week (decision 8)
  * @returns {{kg:number|null, approx:boolean, added:boolean, bodyweight:boolean, reps:[number,number]|null,
  *   sets:number, why:string, table:number|null, capKg:number|null, gated:string|null, week:number}}
  */
-export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25 }) {
+export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25, progressKg = null }) {
   const doneBefore = !!last;
   const gatedNotStarted = plan.weeks && plan.weeks.some((w) => w.gate) && !doneBefore;
-  const cell = weekCell(plan, gatedNotStarted ? 1 : week);
+  const cell = weekCell(plan, gatedNotStarted ? 1 : week, progressKg);
   const rule = plan.override?.source || '';
   const out = {
     kg: null, approx: false, added: false, bodyweight: false, reps: cell?.reps ?? null, sets: setCount(cell?.sets, doneBefore),
@@ -62,30 +68,31 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     return out;
   }
   if (cell.load.type === 'bodyweight') { out.bodyweight = true; out.why = 'bodyweight'; return out; }
-  if (cell.load.type === 'added') { out.added = true; out.kg = cell.load.kg; out.why = `table: +${cell.load.kg} kg added`; return out; }
+  if (cell.load.type === 'added') { out.added = true; out.kg = cell.load.kg; out.why = `${week > 4 && progressKg != null ? `week ${week} (confirmed)` : 'table'}: +${cell.load.kg} kg added`; return out; }
 
   const table = cell.load.kg;
+  const src = week > 4 && progressKg != null ? `week ${week} (confirmed)` : 'table';
   out.table = table;
   out.approx = !!cell.load.approx;
   if (!last) {
     out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
-    out.why = gatedNotStarted ? 'week 1: not started yet, form focus' : 'table (no previous load)';
+    out.why = gatedNotStarted ? 'week 1: not started yet, form focus' : `${src} (no previous load)`;
     return out;
   }
   if (last.kg >= table) {
     out.kg = last.kg;
-    out.why = `ahead of the table (${table}): hold at your last ${last.kg}`;
+    out.why = `ahead of the ${src} (${table}): hold at your last ${last.kg}`;
     return out;
   }
   if (plan.capClass === 'main') {
     out.capKg = capOf(last.kg);
     const capped = Math.min(table, out.capKg);
     out.kg = loadable(capped, { barKg, smallestPlate });
-    out.why = out.capKg < table ? `table ${table}, capped: last ${last.kg} + 30%` : `table ${table} (within 30% of last ${last.kg})`;
+    out.why = out.capKg < table ? `${src} ${table}, capped: last ${last.kg} + 30%` : `${src} ${table} (within 30% of last ${last.kg})`;
     return out;
   }
   out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
-  out.why = `table ${table} (light work, no cap)`;
+  out.why = `${src} ${table} (light work, no cap)`;
   return out;
 }
 

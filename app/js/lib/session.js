@@ -6,6 +6,7 @@ import { effectiveKg } from './exercise-types.js';
 import { newId, newKey, defaultSets } from './routines.js';
 import { warmupSets } from './plates.js';
 import { activeBridge } from './history.js';
+import { confirmedKg } from './progression.js';
 
 export const newSetId = () => newId('set');
 
@@ -31,8 +32,9 @@ const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmu
  * @param {Array} [o.warmupSteps] warm-up steps (Settings) for exercises marked "warm-up sets" in the routine
  * @param {boolean} [o.sameRoutine] previous values only from the same routine (Settings: previous column)
  * @param {number|null} [o.bodyweightKg] bodyweight for bodyweight exercises (Settings now, Apple Health in step 7)
+ * @param {Array} [o.progress]    confirmed week 5+ numbers (collection 'progression', decision 8)
  */
-export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null }) {
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null, progress = [] }) {
   const id = newId('session');
   const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
   const session = {
@@ -54,7 +56,8 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     let planned = [];
     const pe = re.plan ? planExerciseFor(programmeRoutines, re.plan) : null;
     if (pe) {
-      const t = targetFor({ plan: pe, week, last: lastHeaviest, barKg: ex.barKg ?? null, smallestPlate });
+      const progressKg = week > 4 ? confirmedKg(progress, routine.dayType, week, pe.name)?.kg ?? null : null;
+      const t = targetFor({ plan: pe, week, last: lastHeaviest, barKg: ex.barKg ?? null, smallestPlate, progressKg });
       entry.target = t;
       entry.capClass = pe.capClass ?? entry.capClass;
       planned = Array.from({ length: t.sets }, () => ({ type: 'normal', kg: t.bodyweight ? null : t.kg, reps: null, target: { kg: t.kg, reps: t.reps } }));

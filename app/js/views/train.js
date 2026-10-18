@@ -3,6 +3,9 @@ import { ready } from '../lib/data.js';
 import { groupByFolder, newRoutine, duplicateRoutine, moveFolder, newId } from '../lib/routines.js';
 import { weekColumn } from '../lib/programme.js';
 import { rotationDay, lastRotationSession, daysByDate, withRest, REST_TEXT, LABEL } from '../lib/rotation.js';
+import { isConfirmed, normalReady, modeOf } from '../lib/progression.js';
+import { buildHistory } from '../lib/history.js';
+import { comebackStartOf } from '../lib/finish.js';
 import { isoDate, formatDay } from '../lib/time.js';
 import { actionSheet, promptText, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -26,8 +29,18 @@ export function render(view) {
     const rot = rotationDay({ last, today, days });
     const next = rot.next.dayType;
     const wk = meta ? weekColumn(meta.firstSessions?.[next], rot.next.date) : null;
-    const nextRoutine = routines.filter((r) => r.dayType === next && r.folderId === 'comeback').sort((a, b) => a.order - b.order)[0]
+    const [progress, modes, planRoutine] = await Promise.all([repo.list('progression'), repo.get('progression', 'modes'), repo.get('programme', `routine.${next}-gbi`)]);
+    const mode = modeOf(modes, next);
+    const nextRoutine = routines.filter((r) => r.dayType === next && r.folderId === (mode === 'normal' ? 'normal' : 'comeback')).sort((a, b) => a.order - b.order)[0]
       || routines.find((r) => r.dayType === next);
+    // Week 5+: the week's numbers wait for his OK (decision 8). Week 4+: suggest the Normal programme (decision 9).
+    const needsOk = mode === 'comeback' && wk >= 5 && !isConfirmed(progress, next, wk);
+    let suggestNormal = null;
+    if (mode === 'comeback' && wk >= 4 && planRoutine) {
+      const nr = normalReady({ planRoutine, history: buildHistory({ sessions, sets: await repo.list('sets'), bridge }), since: comebackStartOf(meta) });
+      const latest = nr.lifts.flatMap((l) => l.recent.map((r) => r.date)).sort().pop();
+      if (nr.ready && modes?.[next]?.notYet !== latest) suggestNormal = { latest, n: nr.need };
+    }
     const lastByRoutine = new Map();
     for (const s of bridge?.lastSessions || []) if (s.dayType && !lastByRoutine.has(s.dayType)) lastByRoutine.set(s.dayType, s.date);
     const t = rot.today;
@@ -42,7 +55,10 @@ export function render(view) {
         <div class="next-title"><span>${esc(headline)}</span>${wk && t.kind === 'train' ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
         ${t.kind === 'rest' ? `<p class="hint c-text rest-why">${esc(REST_TEXT[t.reason] || REST_TEXT.added)}. Tendon holds as planned.</p>` : ''}
         ${nextLine ? `<p class="hint next-line">${esc(nextLine)}${wk ? ` · week ${wk} column` : ''}</p>` : ''}
-        <p class="hint">${nextRoutine ? `${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
+        <p class="hint">${nextRoutine ? `${mode === 'normal' ? 'Normal programme · ' : ''}${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
+        ${needsOk ? `<a class="card-note c-amber" id="wk-ok" href="#/progression/${esc(next)}/${wk}">Week ${wk} numbers need your OK. Until then: last confirmed numbers. Review ›</a>` : ''}
+        ${suggestNormal ? `<div class="card-note" id="normal-hint"><span>${esc(LABEL[next])}'s main lifts hit their week 4 numbers in the last ${suggestNormal.n} sessions. Switch to the Normal programme?</span>
+          <span class="btn-row"><a class="pill is-on" href="#/progression/${esc(next)}">Review</a><button class="pill" id="normal-later" type="button">Not yet</button></span></div>` : ''}
         <div class="btn-row next-btns">
           ${nextRoutine ? `<a class="${t.kind === 'train' ? 'btn-primary' : 'btn-ghost'} center" href="#/session/start/${esc(nextRoutine.id)}">${t.kind === 'train' ? `Start ${esc(LABEL[next])}` : `${esc(LABEL[next])} now`}</a>` : ''}
           <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
@@ -72,6 +88,12 @@ export function render(view) {
       </div>
       <div class="btn-row three"><a class="btn-ghost center" href="#/calendar">Calendar</a><a class="btn-ghost center" href="#/history">History</a><a class="btn-ghost center" href="#/stats">Statistics</a></div>`;
 
+    const later = view.querySelector('#normal-later');
+    if (later) later.onclick = async () => {
+      const cur = (await repo.get('progression', 'modes')) || {};
+      await repo.put('progression', 'modes', { ...cur, [next]: { ...(cur[next] || { mode: 'comeback' }), notYet: suggestNormal.latest } });
+      toast('Asks again after your next session.');
+    };
     const restBtn = view.querySelector('#rest-today');
     if (restBtn) restBtn.onclick = async () => {
       if (!(await confirmSheet(`Rest today? ${LABEL[next]} stays next and moves to tomorrow; nothing is made up twice.`, { ok: 'Rest today' }))) return;
@@ -125,7 +147,7 @@ export function render(view) {
   let off = () => {};
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression'].includes(c))) draw(); });
     draw();
   });
   return () => off();

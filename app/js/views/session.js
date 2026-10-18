@@ -76,11 +76,11 @@ async function startSession(view, routineId, logFor = null) {
     return;
   }
   const routine = routineId === 'empty' ? null : await repo.get('routines', routineId);
-  const [meta, progDocs, ctx] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null)]);
+  const [meta, progDocs, ctx, progress] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null), repo.list('progression')]);
   const { session, sets } = buildSession({
     routine, meta, programmeRoutines: progDocs.filter((d) => d.kind === 'routine'), lib: ctx.lib, history: ctx.history, today: isoDate(new Date()),
     smallestPlate: minPlate(), gym: prefs().gym.name, warmupSteps: prefs().warmup.steps, sameRoutine: prefs().previousFrom === 'same-routine',
-    bodyweightKg: prefs().bodyweight.kg,
+    bodyweightKg: prefs().bodyweight.kg, progress,
   });
   // Logged after the fact from the calendar (P12): the finish screen starts on that date.
   if (/^\d{4}-\d{2}-\d{2}$/.test(logFor || '') && logFor < isoDate(new Date())) session.logFor = logFor;

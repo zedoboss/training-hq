@@ -19,6 +19,7 @@ import * as importView from './views/import.js';
 import * as exportView from './views/export.js';
 import * as calendar from './views/calendar.js';
 import * as historyView from './views/history.js';
+import * as progression from './views/progression.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -37,6 +38,7 @@ const VIEWS = {
   stats: { mod: stats, label: 'Statistics', hidden: true, tab: 'train' },
   calendar: { mod: calendar, label: 'Calendar', hidden: true, tab: 'train' },
   history: { mod: historyView, label: 'History', hidden: true, tab: 'train' },
+  progression: { mod: progression, label: 'Progression', hidden: true, tab: 'train' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },
   export: { mod: exportView, label: 'Export', hidden: true, tab: 'settings' },
 };
