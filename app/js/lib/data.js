@@ -191,6 +191,21 @@ export async function undoImport(importId) {
   return out;
 }
 
+// Apple Health (step 7): the Mac reads the iPhone Shortcut's file from iCloud Drive; these ask it to look now, or
+// send it a file picked on the phone. The days come back by sync.
+export async function scanHealth() {
+  const out = await postJson('/api/apple-health/scan', {}, 60000);
+  await syncNow();
+  return out;
+}
+
+export async function uploadHealth(text, name) {
+  const res = await macFetch(`/api/apple-health/upload?name=${encodeURIComponent(name || 'health.json')}`, { method: 'POST', body: text, type: 'text/plain', timeoutMs: 120000 });
+  const out = await res.json();
+  await syncNow();
+  return out;
+}
+
 /** Ask the Mac for a pairing code for another device. */
 export async function newPairingCode() {
   await ready;

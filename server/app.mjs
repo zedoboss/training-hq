@@ -68,10 +68,11 @@ function readRaw(req, limit) {
  * @param {string[]} o.allowedOrigins extra origins allowed to call the API (e.g. the GitHub Pages site)
  * @param {ReturnType<import('./demos.mjs').openDemos>} [o.demos] exercise demo clips (2.17)
  * @param {ReturnType<import('./imports.mjs').openImports>} [o.imports] Hevy and Strong imports (step 3)
+ * @param {ReturnType<import('./health.mjs').openHealth>} [o.health] Apple Health files (step 7)
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -213,6 +214,22 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const { importId } = await readJson(req);
       const out = importCall(() => imports.undo({ importId }));
       log(`import ${importId} undone: ${JSON.stringify(out)}`);
+      return out;
+    },
+
+    // Apple Health (step 7): look in the iCloud Drive folder now, or read a file picked on the phone.
+    'POST /api/apple-health/scan': async (req) => {
+      auth(req);
+      if (!health) throw new HttpError(404, 'Apple Health not available');
+      return health.scan();
+    },
+
+    'POST /api/apple-health/upload': async (req, url) => {
+      auth(req);
+      if (!health) throw new HttpError(404, 'Apple Health not available');
+      const text = (await readRaw(req, MAX_IMPORT_BYTES)).toString('utf8');
+      const out = health.upload(text, (url.searchParams.get('name') || 'health.json').slice(0, 80));
+      if (!out.samples) throw new HttpError(400, out.bad ? `Nothing in that file could be read (${out.bad} lines). Is it the file from the Training HQ Health Shortcut?` : 'That file is empty.');
       return out;
     },
 

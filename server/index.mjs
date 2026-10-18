@@ -12,6 +12,7 @@ import { openPush, DEFAULT_SUBJECT } from './push.mjs';
 import { startNotifier } from './notify.mjs';
 import { openMealVision } from './meal-vision.mjs';
 import { findClaude } from './claude.mjs';
+import { openHealth, defaultHealthDir } from './health.mjs';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -47,7 +48,16 @@ const visionTimer = setInterval(kickVision, 2 * 60000);
 visionTimer.unref();
 const onSync = (cols) => { if (cols.has('meals') || cols.has('meal-photos')) kickVision(); };
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, onSync, log });
+// Apple Health (step 7): the iPhone Shortcut's file in iCloud Drive, read at start and every 5 minutes.
+const health = openHealth({ store, dir: config.healthDir || defaultHealthDir(), log });
+let healthError = null;
+const scanHealth = () => { try { const s = health.scan(); if (s.error !== healthError && s.error) log(`health: ${s.error}`); healthError = s.error ?? null; } catch (e) { log(`health: ${e.stack || e}`); } };
+setTimeout(scanHealth, 2000).unref();
+const healthTimer = setInterval(scanHealth, 5 * 60000);
+healthTimer.unref();
+log(`health: reading ${health.dir}`);
+
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });
@@ -57,6 +67,7 @@ const shutdown = (sig) => {
   stopBackup();
   notifier.stop();
   clearInterval(visionTimer);
+  clearInterval(healthTimer);
   server.close(() => { store.close(); process.exit(0); });
   setTimeout(() => process.exit(0), 3000).unref();
 };

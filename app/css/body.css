@@ -1,0 +1,11 @@
+/* BODY (step 7): Apple Health, measurements, progress photos, body scans. Same theme as the rest. */
+
+.hk-actions { display: flex; gap: 8px; }
+.hk-actions > * { flex: 1 1 0; height: 48px; }
+.hk-kv { padding: 4px 0 0; }
+.hk-guide { gap: 4px; }
+.hk-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 12px; font-size: 14px; line-height: 1.5; color: var(--text); }
+.hk-steps code { font: 500 12px var(--mono); color: var(--pale); }
+.hk-code { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-2); }
+.hk-code code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 11px; line-height: 1.45; }
+.hk-code .btn-ghost { flex-shrink: 0; }
