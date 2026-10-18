@@ -1,6 +1,7 @@
-// Squat Depth's unit tests (angle math, filter, rep state machine, the gym regression), copied unchanged from the
-// Squat Depth app (tests/run-tests.mjs). Only the loading changed: the logic now lives in app/js/lib/squat-core.js
-// instead of a <script id="core"> block in index.html, and the gym clips are tests/squat-gym-clips.json.
+// Squat Depth's unit tests (angle math, filter, rep state machine, depth estimate, the gym regression), copied
+// unchanged from the Squat Depth app (tests/run-tests.mjs). Only the loading changed: the logic now lives in
+// app/js/lib/squat-core.js instead of a <script id="core"> block in index.html, and the gym set is
+// tests/squat-gym-set.json.
 
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -8,7 +9,7 @@ import assert from 'node:assert/strict';
 import SquatCore from '../app/js/lib/squat-core.js';
 
 const C = SquatCore;
-const { RepMachine, AngleTracker, KneeGuard, SidePicker, State, kneeAngle, legProblem } = C;
+const { RepMachine, AngleTracker, KneeGuard, DepthEstimator, SidePicker, State, kneeAngle, legProblem } = C;
 
 const FPS = 30;
 const DT = 1000 / FPS;
@@ -637,6 +638,7 @@ test('default target is 75 degrees', () => {
 });
 
 // ---------- Bottom not seen: no shallow call on a rep whose bottom the camera missed ----------
+// (These machines have no depth estimator, so a hidden bottom ends as 'unseen'. With one, see the next section.)
 
 /** Like feed(), but `null` frames have no trusted reading: time passes and the machine hears nothing. */
 function feedWithGaps(machine, angles, fps = FPS) {
@@ -655,7 +657,7 @@ function feedWithGaps(machine, angles, fps = FPS) {
 }
 const blind = (ms, fps = FPS) => Array(Math.round(ms * fps / 1000)).fill(null);
 
-test('blind spot at the bottom: not called shallow, reported as not seen and not counted', () => {
+test('blind spot at the bottom, nothing to estimate from: not called shallow, reported as not seen, not counted', () => {
   const m = noAnticipation();
   const events = feedWithGaps(m, [...hold(172, STAND), ...ramp(172, 100), ...hold(100, 2), ...blind(200),
     ...hold(108, 2), ...ramp(108, 172), ...hold(172, 5)]);
@@ -693,7 +695,7 @@ test('a flicker at the bottom shorter than BOTTOM_GAP_MS does not hide it', () =
   assert.deepEqual(types(events), ['shallow']);
 });
 
-test('tracking lost at the bottom: no shallow call; reported as not seen when he is back standing', () => {
+test('tracking lost at the bottom: no shallow call; the verdict comes when he is back standing', () => {
   const m = noAnticipation();
   m._keepArmed = true;
   feed(m, [...hold(172, STAND), ...ramp(172, 100), ...hold(100, 3)]);
@@ -701,8 +703,8 @@ test('tracking lost at the bottom: no shallow call; reported as not seen when he
   m._t += 600;
   const events = feed(m, [...ramp(110, 172), ...hold(172, STAND)]);
   assert.deepEqual(types(events), ['armed'], 'the ready blip, as after any interruption');
-  assert.equal(events[0].unseen, true);
-  assert.equal(Math.round(events[0].minAngle), 100);
+  assert.equal(events[0].rep.type, 'unseen');
+  assert.equal(Math.round(events[0].rep.minAngle), 100);
   assert.equal(m.unseen, 1);
   assert.equal(m.shallow + m.good + m.dings, 0);
   // Lost on the way down, before the shallow line: nothing to report.
@@ -711,7 +713,7 @@ test('tracking lost at the bottom: no shallow call; reported as not seen when he
   m._t += 600;
   const again = feed(m, hold(172, STAND));
   assert.deepEqual(types(again), ['armed']);
-  assert.equal(again[0].unseen, undefined);
+  assert.equal(again[0].rep, undefined);
   assert.equal(m.unseen, 1);
 });
 
@@ -750,45 +752,158 @@ test('knee guard: an opening knee is only believed if the hip rises with it', ()
   assert.equal(guard.check(60, 700, 120, m), true, 'between reps nothing is checked');
 });
 
-// ---------- Regression: a loaded set filmed at the gym ----------
-// Frames read off the leg the app drew on a screen recording of the set (tests/squat-gym-clips.json).
+// ---------- Depth estimate from the hip and head, when the knee is lost at the bottom ----------
 
-const gym = JSON.parse(readFileSync(new URL('./squat-gym-clips.json', import.meta.url), 'utf8'));
-
-/** One clip through the app's pipeline: knee guard, tracker, rep machine (default target, anticipation on). */
-function runClip(clip, { guard = true } = {}) {
-  const dt = 1000 / gym.fps, tracker = new AngleTracker(), kneeGuard = new KneeGuard(), m = new RepMachine();
-  const events = [];
-  clip.frames.forEach((f, i) => {
-    if (!f) return;
-    const [angle, hipY, thigh] = f;
-    if (guard && !kneeGuard.check(angle, hipY, thigh, m)) return;
-    const s = tracker.update(angle, i * dt);
-    if (!s) return;
-    const ev = m.update(s.angle, s.vel, i * dt, s.dtMs, s.restarted);
-    if (ev && (ev.type !== 'armed' || ev.unseen)) events.push(ev.unseen ? 'unseen' : ev.type);
-  });
-  return { events, m };
+/** A body whose hip and head drop in step with the knee: standing hip 700, head 450, leg 240 px. */
+const bodyAt = (angle) => ({ hipY: 700 + 240 * (175 - angle) / 200, headY: 450 + 240 * (175 - angle) / 180, scale: 240 });
+/**
+ * Frames through estimator and machine the way the screen does it: {a: true knee angle, seen: knee believed}.
+ * A frame whose knee isn't seen still feeds the estimator (the hip and head are in view) and asks hidden().
+ */
+function feedBody(m, est, frames, fps = FPS) {
+  const dt = 1000 / fps, events = [];
+  let prev = null;
+  m._t = m._t ?? 0;
+  for (const { a, seen = true } of frames) {
+    m._t += dt;
+    est.frame({ knee: seen ? a : null, ...bodyAt(a) }, m);
+    let ev;
+    if (seen) { ev = m.update(a, prev === null ? 0 : (a - prev) / dt * 1000, m._t, dt); prev = a; } else ev = m.hidden(m._t);
+    if (ev && (ev.type !== 'armed' || ev.rep)) events.push(ev);
+    if (ev && ev.rep) events.push(ev.rep);
+  }
+  return events;
 }
+const seen = (angles) => angles.map((a) => ({ a }));
+const unseen = (angles) => angles.map((a) => ({ a, seen: false }));
+/** Standing, then three clean reps to 70: the calibration. */
+function calibrated() {
+  const est = new DepthEstimator(), m = new RepMachine({ anticipate: false, targetDeg: 75 }, est);
+  const events = feedBody(m, est, seen([...hold(172, STAND), ...[1, 2, 3].flatMap(() => [...ramp(172, 70), ...hold(70, 3), ...ramp(70, 172), ...hold(172, 5)])]));
+  assert.deepEqual(types(events), ['depth', 'rep', 'depth', 'rep', 'depth', 'rep']);
+  return { est, m };
+}
+/** A rep seen down to 100, the knee lost from there through its bottom and back to 105, then seen up to standing. */
+const hiddenRep = (bottom) => [...seen(ramp(172, 100)), ...unseen([...ramp(100, bottom), ...hold(bottom, 3), ...ramp(bottom, 105)]),
+  ...seen([...ramp(105, 172), ...hold(172, 5)])];
 
-test('regression (gym): the rep whose bottom the camera lost is reported as not seen, not shallow', () => {
-  const clip = gym.clips[1];
-  // What the app did: for the deepest half second the knee point sat on the shin (105-126 degrees while he was
-  // still sinking), and the rep was called shallow on the reading from before the bottom.
-  const before = runClip(clip, { guard: false });
-  assert.deepEqual(before.events, ['shallow']);
-  assert.ok(before.m.lastMin > 80 && before.m.lastMin < 85, `shallow at ${before.m.lastMin}`);
-  const after = runClip(clip);
-  assert.deepEqual(after.events, ['unseen']);
-  assert.equal(after.m.shallow + after.m.good, 0);
-  assert.equal(after.m.unseen, 1);
+test('estimate: calibrated on clean reps of the set, the hip and head give the knee angle', () => {
+  const { est } = calibrated();
+  const b = bodyAt(72), drop = (y, k) => (y - est.ref[k]) / est.ref.scale; // below the standing heights it learned
+  const e = est.estimate({ hip: drop(b.hipY, 'hip'), head: drop(b.headY, 'head') });
+  assert.ok(Math.abs(e.angle - 72) < 1, `estimated ${e.angle}`);
+  assert.equal(e.band, C.EST_BAND_MIN_DEG, 'a perfect fit still keeps the minimum band');
+  assert.equal(new DepthEstimator().estimate({ hip: 0.5, head: 0.5 }), null, 'nothing to say before any clean rep');
 });
 
-test('regression (gym): the good reps of the same set still ding and count', () => {
-  for (const clip of [gym.clips[0], gym.clips[2], gym.clips[3]]) {
-    const { events, m } = runClip(clip);
-    assert.deepEqual(events, ['depth', 'rep'], clip.name);
-    assert.equal(m.good, 1, clip.name);
-    assert.deepEqual(runClip(clip, { guard: false }).events, ['depth', 'rep'], `${clip.name}, as before`);
+test('estimate: hidden bottom, clearly deep enough: dings while the knee is lost, and counts', () => {
+  const { est, m } = calibrated();
+  const events = feedBody(m, est, hiddenRep(60));
+  assert.deepEqual(types(events), ['depth', 'rep']);
+  assert.equal(events[0].estimated, true, 'the ding came from the estimate');
+  assert.ok(events[0].angle <= 75 - C.EST_BAND_MIN_DEG);
+  assert.equal(events[1].estimated, true);
+  assert.equal(m.good, 4);
+  assert.equal(m.lastEstimated, true);
+});
+
+test('estimate: hidden bottom, clearly short: shallow, with the estimate', () => {
+  const { est, m } = calibrated();
+  const events = feedBody(m, est, hiddenRep(90));
+  assert.deepEqual(types(events), ['shallow']);
+  assert.equal(events[0].estimated, true);
+  assert.ok(Math.abs(events[0].minAngle - 90) < 2, `estimated ${events[0].minAngle}`);
+  assert.equal(m.shallow, 1);
+  assert.equal(m.estimated, 1);
+});
+
+test('estimate: hidden bottom, too close to call: NOT SURE, not counted until he says so', () => {
+  const { est, m } = calibrated();
+  const events = feedBody(m, est, hiddenRep(77));
+  assert.deepEqual(types(events), ['unsure']);
+  assert.ok(Math.abs(events[0].minAngle - 77) < 2);
+  assert.ok(events[0].minAngle - events[0].band <= 75 && events[0].minAngle + events[0].band > 75);
+  assert.deepEqual([m.good, m.shallow, m.unsure], [3, 0, 1]);
+  const p = m.countUnsure();
+  assert.equal(p.angle, events[0].minAngle);
+  assert.deepEqual([m.good, m.unsure, m.pending.length], [4, 0, 0]);
+  assert.equal(m.countUnsure(), null, 'nothing left to count');
+});
+
+test('estimate: lost at the bottom with a tracking restart, the verdict comes on re-arming', () => {
+  const { est, m } = calibrated();
+  m._keepArmed = true;
+  feedBody(m, est, [...seen(ramp(172, 100)), ...unseen([...ramp(100, 90), ...hold(90, 3)])]);
+  m.update(110, 0, m._t + DT, DT, true); // tracking comes back on the way up
+  m._t += DT;
+  const events = feedBody(m, est, seen([...ramp(110, 172), ...hold(172, STAND)]));
+  assert.deepEqual(types(events), ['armed', 'shallow']);
+  assert.equal(events[0].rep, events[1]);
+  assert.equal(events[1].estimated, true);
+});
+
+test('estimate: one stray hip reading cannot make a rep deep, and a rep stops calibrating once its knee is lost', () => {
+  const { est, m } = calibrated();
+  feedBody(m, est, seen(ramp(172, 100)));
+  const deepest = (bodyAt(100).hipY - est.ref.hip) / est.ref.scale;
+  est.frame({ knee: 100, hipY: 700 + 240 * 0.9, headY: bodyAt(100).headY, scale: 240 }, m); // one wild hip point
+  est.frame({ knee: 100, ...bodyAt(100) }, m);
+  const pairs = est.pairs.hip.length;
+  assert.ok(Math.abs(est.rep.hip - deepest) < 1e-9, 'the deepest point needs two frames of three');
+  est.frame({ knee: null, ...bodyAt(98) }, m);
+  est.frame({ knee: 96, ...bodyAt(96) }, m);
+  assert.equal(est.pairs.hip.length, pairs, 'nothing from after the knee was lost');
+});
+
+// ---------- Regression: the loaded set filmed at the gym ----------
+// tests/squat-gym-set.json: every frame of the set, read off a screen recording of the app (see "about" in the file).
+
+const gym = JSON.parse(readFileSync(new URL('./squat-gym-set.json', import.meta.url), 'utf8'));
+
+/** The whole set through the app's pipeline. old: as the app was (no knee guard, no estimate). */
+function replaySet({ old = false } = {}) {
+  const dt = 1000 / gym.fps, tracker = new AngleTracker(), guard = new KneeGuard();
+  const est = old ? null : new DepthEstimator(), m = new RepMachine({}, est);
+  const events = [];
+  gym.frames.forEach(([angle, hipY, thigh, scale, headY], i) => {
+    const t = i * dt;
+    const trusted = angle !== null && (old || guard.check(angle, hipY, thigh, m));
+    est?.frame({ knee: trusted ? angle : null, hipY: angle !== null ? hipY : null, headY, scale: scale ?? 0 }, m);
+    let ev = null;
+    if (trusted) { const s = tracker.update(angle, t); if (s) ev = m.update(s.angle, s.vel, t, s.dtMs, s.restarted); } else if (est) ev = m.hidden(t);
+    const e = ev && (ev.rep || ev);
+    if (e && e.type !== 'armed') events.push({ ...e, rep: gym.reps.findLastIndex((r) => r.from <= i) + 1 });
+  });
+  return { events, m, est, ofRep: (n) => events.filter((e) => e.rep === n).map((e) => e.type) };
+}
+
+test('regression (gym): as the app was, the third rep was called shallow on a reading from before its bottom', () => {
+  const { events, ofRep } = replaySet({ old: true });
+  assert.deepEqual(ofRep(3), ['shallow']);
+  const e = events.find((x) => x.rep === 3);
+  assert.ok(e.minAngle > 80 && e.minAngle < 85, `shallow at ${e.minAngle}`);
+});
+
+test('regression (gym): now the third rep gets an estimate from the hip and head, too close to call: his decision', () => {
+  const { events, ofRep, est, m } = replaySet();
+  assert.deepEqual(ofRep(3), ['unsure']);
+  const e = events.find((x) => x.rep === 3);
+  assert.ok(e.minAngle > 74 && e.minAngle < 86, `estimated ${e.minAngle}`);
+  assert.ok(e.minAngle - e.band <= 75 && e.minAngle + e.band > 75, `75 within ${e.minAngle} ± ${e.band}`);
+  // The verdict at the end of the set, with every rep's calibration, still can't call it.
+  const end = est.estimate(e.drops);
+  assert.equal(DepthEstimator.verdict(end, 75), 'unsure');
+  assert.ok(Math.abs(end.angle - e.minAngle) < 6, `end of set ${end.angle}`);
+  assert.equal(m.unseen, 0, 'never the bare "not seen"');
+});
+
+test('regression (gym): the clean reps of the set still ding and count as before', () => {
+  const now = replaySet(), before = replaySet({ old: true });
+  for (const n of [1, 5, 8]) {
+    assert.deepEqual(now.ofRep(n), ['depth', 'rep'], `rep ${n}`);
+    assert.deepEqual(before.ofRep(n), ['depth', 'rep'], `rep ${n}, as before`);
+    const a = now.events.filter((e) => e.rep === n), b = before.events.filter((e) => e.rep === n);
+    assert.ok(Math.abs(a[0].angle - b[0].angle) < 1 && Math.abs(a[1].minAngle - b[1].minAngle) < 1, `rep ${n} reads the same`);
+    assert.ok(!a.some((e) => e.estimated), `rep ${n} needs no estimate`);
   }
 });

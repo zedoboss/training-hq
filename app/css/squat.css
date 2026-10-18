@@ -56,14 +56,17 @@ html.sq-running, html.sq-running body { overflow: hidden; }
 .sq-huge { font-size: calc(34 * var(--u)); font-weight: 800; letter-spacing: -0.04em; color: var(--green); }
 .sq-sub { font-size: calc(5.6 * var(--u)); font-weight: 600; margin-top: calc(1.2 * var(--u)); color: var(--text); }
 .sq-sub.some { color: var(--red); }
-#sq-hudUnseen { color: var(--amber); }
+#sq-hudUnsure, #sq-hudUnseen { color: var(--amber); }
 .sq-state { font-size: calc(5.2 * var(--u)); font-weight: 700; margin-top: calc(1 * var(--u)); color: var(--amber); letter-spacing: 0.04em; }
 .sq-state.depth { color: var(--green); }
 
 #sq-banner { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--red); color: #2a0a06;
   font: 800 calc(11 * var(--u)) / 1.1 var(--mono); letter-spacing: -0.02em; padding: calc(2 * var(--u)) calc(5 * var(--u));
   border-radius: calc(2 * var(--u)); white-space: nowrap; pointer-events: none; }
-#sq-banner.warn { background: var(--amber); color: #241a02; font-size: calc(9 * var(--u)); white-space: normal; text-align: center; max-width: 86vw; }
+#sq-banner.warn { background: var(--amber); color: #241a02; font-size: calc(9 * var(--u)); white-space: normal; text-align: center; width: max-content; max-width: 86vw; }
+#sq-banner small { display: block; font-size: 0.5em; margin-top: 0.2em; text-align: center; }
+#sq-btnCount { position: absolute; right: calc(10px + var(--sar)); bottom: calc(72px + var(--sab)); min-height: 52px; padding: 0 18px;
+  border-radius: 99px; border: 1px solid var(--amber); background: rgba(5, 11, 18, 0.86); color: var(--amber); font: 700 16px/1 var(--mono); letter-spacing: 0.04em; }
 #sq-banner.info { background: rgba(5, 11, 18, 0.86); color: var(--text); border: 1px solid var(--border-strong); font: 500 calc(5 * var(--u)) / 1.35 var(--sans);
   white-space: normal; text-align: center; max-width: 86vw; }
 

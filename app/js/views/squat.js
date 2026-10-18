@@ -6,7 +6,7 @@
 // for use with no connection (5.2, lib/squat-offline.js).
 import SquatCore from '../lib/squat-core.js';
 import { MP_LOCAL as mpLocal, MODEL_LOCAL, offlineStatus, keepOffline, isDownloading, approxBytes, mb } from '../lib/squat-offline.js';
-import { SETTINGS_KEY, startRun, addRepEvent, resetReps, summarizeRun, finishRun, fillChoices, fillSet, runText, isSquatExercise } from '../lib/squat-log.js';
+import { SETTINGS_KEY, startRun, addRepEvent, countRep, reviewEstimates, resetReps, summarizeRun, finishRun, fillChoices, fillSet, runText, repDeg, isSquatExercise } from '../lib/squat-log.js';
 import { ready } from '../lib/data.js';
 import { formatDay, formatTime } from '../lib/time.js';
 import { kg as fmtKg } from '../lib/loads.js';
@@ -72,7 +72,8 @@ const settings = loadSettings();
 // The screen's elements exist while #/squat is open (mount() sets them); everything else lives as long as the app,
 // so the pose model stays warm between visits.
 let video = null, overlayCanvas = null, runEl = null, g = null;
-const machine = new C.RepMachine(settings);
+const estimator = new C.DepthEstimator();
+const machine = new C.RepMachine(settings, estimator);
 const tracker = new C.AngleTracker();
 const kneeGuard = new C.KneeGuard();
 const sidePicker = new C.SidePicker();
@@ -411,13 +412,14 @@ function processFrame(meta) {
     const problemL = C.legProblem(points, 'L', w, h), problemR = C.legProblem(points, 'R', w, h);
     side = sidePicker.update(points, !problemL, !problemR);
     const problem = side === 'L' ? problemL : problemR;
+    let knee = null; // this frame's knee angle, when it can be believed
     if (!problem) {
       const [hi, ki, ai] = C.LEG[side];
-      const hip = points[hi], knee = points[ki];
-      const raw = C.kneeAngle(hip, knee, points[ai], w, h);
-      const thigh = Math.hypot((hip.x - knee.x) * w, (hip.y - knee.y) * h);
+      const hip = points[hi], kneePoint = points[ki];
+      const raw = C.kneeAngle(hip, kneePoint, points[ai], w, h);
+      const thigh = Math.hypot((hip.x - kneePoint.x) * w, (hip.y - kneePoint.y) * h);
       if (kneeGuard.check(raw, hip.y * h, thigh, machine)) {
-        sample = tracker.update(raw, tSample);
+        knee = raw;
         lockText = `LOCK · ${side === 'L' ? 'LEFT' : 'RIGHT'} LEG`; lockCls = 'good';
       } else {
         lockText = LEG_PROBLEM_LABEL.knee; lockCls = 'warn'; // the knee opened without the hip rising: not believed
@@ -425,17 +427,21 @@ function processFrame(meta) {
     } else {
       lockText = LEG_PROBLEM_LABEL[problem]; lockCls = 'warn';
     }
+    // The depth estimate follows the hip and head on every frame, before the machine judges this one.
+    estimator.frame({ knee, ...C.bodyHeights(points, side, w, h) }, machine);
+    if (knee !== null) sample = tracker.update(knee, tSample);
   }
 
+  let ev = null;
   if (sample) {
     run.lostSince = 0;
-    const ev = machine.update(sample.angle, sample.vel, tSample, sample.dtMs, sample.restarted);
-    if (ev) onRepEvent(ev, sample, tFrame, tCb, tDet, clock);
-  } else if (!run.lostSince) {
-    run.lostSince = tDet;
-  } else if (tDet - run.lostSince > LOST_RESET_MS && machine.state !== C.State.UNKNOWN) {
-    machine.resetState(); tracker.reset();
+    ev = machine.update(sample.angle, sample.vel, tSample, sample.dtMs, sample.restarted);
+  } else {
+    if (points) ev = machine.hidden(tSample); // knee lost, rest of him in view: a clear estimate can still ding
+    if (!run.lostSince) run.lostSince = tDet;
+    else if (tDet - run.lostSince > LOST_RESET_MS && machine.state !== C.State.UNKNOWN) { machine.resetState(); tracker.reset(); }
   }
+  if (ev) onRepEvent(ev, sample, tFrame, tCb, tDet, clock);
 
   // ----- Everything below is display only; the ding has already been fired. -----
   const tDone = performance.now();
@@ -488,8 +494,8 @@ function onRepEvent(ev, sample, tFrame, tCb, tDet, clock) {
     const tDing = performance.now();
     flash('hit');
     const entry = {
-      ding: machine.dings, anticipated: ev.anticipated, late: ev.late,
-      angle: +sample.angle.toFixed(1), velDegPerSec: +sample.vel.toFixed(0),
+      ding: machine.dings, anticipated: ev.anticipated, late: ev.late, estimated: ev.estimated,
+      angle: +(sample ? sample.angle : ev.angle).toFixed(1), velDegPerSec: sample ? +sample.vel.toFixed(0) : 0,
       frameClock: clock,                       // what tFrame means: capture | present | callback
       tFrame: +tFrame.toFixed(1), tCallback: +tCb.toFixed(1), tDetectDone: +tDet.toFixed(1), tDingScheduled: +tDing.toFixed(1),
       frameToDingMs: +(tDing - tFrame).toFixed(1), inferMs: +(tDet - tCb).toFixed(1),
@@ -501,28 +507,40 @@ function onRepEvent(ev, sample, tFrame, tCb, tDet, clock) {
     console.log('[squat] ding', JSON.stringify(entry));
   } else if (ev.type === 'armed') {
     if (settings.sound) audio.ready();
-    if (ev.unseen) onUnseen(ev); // tracking was lost at the bottom of the rep he just did
+    if (ev.rep) { onRepEvent(ev.rep, sample, tFrame, tCb, tDet, clock); return; } // verdict on a rep lost at its bottom (logs it)
   } else if (ev.type === 'rep') {
+    if (ev.judged) { if (settings.sound) audio.ding(); flash('hit'); } // counted from the estimate at the end of the rep
     renderCounts();
     if (ev.anticipated && !ev.confirmed) console.log(`[squat] early ding was not confirmed: min ${ev.minAngle.toFixed(1)}° vs target ${machine.targetDeg}°`);
   } else if (ev.type === 'shallow') {
     if (settings.sound && settings.buzz) audio.buzz();
     flash('shallow');
-    showBanner('TOO SHALLOW', SHALLOW_BANNER_MS);
+    showBanner('TOO SHALLOW', SHALLOW_BANNER_MS, '', ev.estimated ? `ESTIMATED ~${Math.round(ev.minAngle)}°` : '');
     renderCounts();
-    console.log(`[squat] shallow rep: min ${ev.minAngle.toFixed(1)}°`);
+    console.log(`[squat] shallow rep: min ${ev.minAngle.toFixed(1)}°${ev.estimated ? ` (estimated ±${ev.band.toFixed(1)})` : ''}`);
+  } else if (ev.type === 'unsure') {
+    // Too close to call from the hip and head: he decides with COUNT IT, never the app. No buzz.
+    flash('unseen');
+    showBanner('NOT SURE', UNSEEN_BANNER_MS, 'warn', `ESTIMATED ~${Math.round(ev.minAngle)}° · TARGET ${machine.targetDeg}°`);
+    console.log(`[squat] not sure: estimated ${ev.minAngle.toFixed(1)}° ±${ev.band.toFixed(1)}`);
   } else if (ev.type === 'unseen') {
-    onUnseen(ev);
+    // Nothing to estimate from (no clean reps to calibrate on yet): not counted either way.
+    flash('unseen');
+    showBanner("DIDN'T SEE THE BOTTOM", UNSEEN_BANNER_MS, 'warn');
+    renderCounts();
+    console.log(`[squat] bottom not seen: deepest reading before it was lost ${ev.minAngle.toFixed(1)}°`);
   }
   addRepEvent(current, ev); // Training HQ: keep the rep for the log (after the ding, never before it)
+  if (ev.type === 'unsure') renderCounts(); // after it is in the log, so COUNT IT finds it
 }
 
-/** A rep whose bottom the camera didn't see: no buzz (it may well have been deep enough), not counted either way. */
-function onUnseen(ev) {
-  flash('unseen');
-  showBanner("DIDN'T SEE THE BOTTOM", UNSEEN_BANNER_MS, 'warn');
+/** COUNT IT: his call on the latest NOT SURE rep, it was deep enough. */
+function countLatest() {
+  const p = machine.countUnsure();
+  if (!p) return;
+  countRep(current);
   renderCounts();
-  console.log(`[squat] bottom not seen: deepest reading before it was lost ${ev.minAngle.toFixed(1)}°`);
+  showBanner('COUNTED', SHALLOW_BANNER_MS, 'info', `~${Math.round(p.angle)}°, YOUR CALL`);
 }
 
 // ===== Display =====
@@ -563,9 +581,14 @@ function renderCounts() {
   const sh = $('hudShallow');
   sh.textContent = `shallow ${machine.shallow}`;
   sh.className = 'sq-sub' + (machine.shallow ? ' some' : '');
+  const us = $('hudUnsure');
+  us.hidden = !machine.unsure; us.textContent = `not sure ${machine.unsure}`;
   const un = $('hudUnseen');
   un.hidden = !machine.unseen; un.textContent = `not seen ${machine.unseen}`;
-  $('hudLast').textContent = machine.lastMin === null ? 'last –' : `last ${Math.round(machine.lastMin)}°`;
+  $('hudLast').textContent = machine.lastMin === null ? 'last –' : `last ${machine.lastEstimated ? '~' : ''}${Math.round(machine.lastMin)}°`;
+  const waiting = machine.pending[machine.pending.length - 1];
+  $('btnCount').hidden = !waiting;
+  if (waiting) $('btnCount').textContent = `COUNT IT · ~${Math.round(waiting.angle)}°${machine.pending.length > 1 ? ` (${machine.pending.length})` : ''}`;
 }
 
 function renderDebug() {
@@ -590,9 +613,10 @@ function flash(cls) {
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => runEl?.classList.remove(cls), FLASH_MS);
 }
-function showBanner(text, ms = 0, kind = '') { // kind: '' (red), 'warn' (amber), 'info' (dark, small)
+function showBanner(text, ms = 0, kind = '', sub = '') { // kind: '' (red), 'warn' (amber), 'info' (dark, small)
   const el = $('banner');
   el.textContent = text; el.className = kind; el.hidden = false;
+  if (sub) { const s = document.createElement('small'); s.textContent = sub; el.append(s); }
   clearTimeout(bannerTimer);
   if (ms) bannerTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
@@ -606,7 +630,7 @@ function applyDisplaySettings() {
 
 // ===== Start / stop =====
 function resetSession() {
-  machine.resetCounts(); tracker.reset(); kneeGuard.reset(); sidePicker.reset();
+  machine.resetCounts(); tracker.reset(); kneeGuard.reset(); estimator.reset(); sidePicker.reset();
   Object.assign(stats, { fps: 0, inferMs: 0, frameToDoneMs: 0, dropped: 0, stale: 0, frames: 0 });
   Object.assign(run, { lastCb: 0, lastPresented: 0, lastMediaTime: -1, staleStreak: 0, detectErrors: 0, lostSince: 0, shownAngle: null, shownState: null });
   $('hudAngle').textContent = '–'; $('hudState').textContent = ' ';
@@ -670,7 +694,12 @@ function replay() {
 let repo = null;
 const viewAlive = () => !!$('start');
 
+/** One rep in a rep list: green good, red shallow, amber NOT SURE; "~" marks an estimate. */
+const repSpan = (x) => `<span class="${x.good ? 'c-green' : x.unsure ? 'c-amber' : 'c-red'}">${repDeg(x)}</span>`;
+
 async function afterRun(r, { quiet }) {
+  // The verdict at the end of the set: shallow and NOT SURE estimates are judged again with every rep's calibration.
+  reviewEstimates(r, (drops) => estimator.estimate(drops));
   const summary = summarizeRun(r);
   repo ||= await ready;
   // Camera runs are squat-depth sessions (calendar, coach); a replayed video is a test, not a session.
@@ -690,12 +719,15 @@ function resultSheet({ run: r, doc, summary, session, sets }) {
   let pick = defaultId;
   const names = [...new Set(choices.map((c) => c.name))];
   const chip = (c) => `<button class="chip ${c.setId === pick ? 'is-on' : ''}" data-set="${esc(c.setId)}" type="button">${names.length > 1 ? `${esc(c.name.replace(/\s*\(.*\)$/, ''))} ` : ''}${c.label === 'W' ? 'Warm-up' : `Set ${esc(c.label)}`}${c.kg != null ? ` · ${fmtKg(c.kg)} kg` : ''}${c.done ? ' ✓' : ''}</button>`;
-  const repsLine = r.reps.map((x) => `<span class="${x.good ? 'c-green' : 'c-red'}">${Math.round(x.minDeg)}°</span>`).join(' ');
+  const repsLine = r.reps.map(repSpan).join(' ');
+  const unsure = r.reps.map((x, i) => ({ x, i })).filter(({ x }) => x.unsure);
   const { el, close } = overlay(`
     <div class="hud c-muted sheet-title">SQUAT DEPTH · ${doc ? 'SAVED' : 'VIDEO TEST, NOT SAVED'}</div>
-    <div class="sq-result"><span><b class="c-green">${summary.good}</b><span class="hud">GOOD</span></span>${summary.shallow ? `<span><b class="c-red">${summary.shallow}</b><span class="hud">SHALLOW</span></span>` : ''}
+    <div class="sq-result"><span><b class="c-green">${summary.good}</b><span class="hud">GOOD</span></span>${summary.shallow ? `<span><b class="c-red">${summary.shallow}</b><span class="hud">SHALLOW</span></span>` : ''}${summary.unsure ? `<span><b class="c-amber">${summary.unsure}</b><span class="hud">NOT SURE</span></span>` : ''}
       <span><b class="c-cyan">${summary.lowDeg != null ? `${Math.round(summary.lowDeg)}°` : '–'}</b><span class="hud">LOWEST</span></span></div>
-    <p class="hint">Each rep's lowest knee angle (target ${esc(summary.targetDeg)}°): ${repsLine}</p>
+    <p class="hint">Each rep's lowest knee angle (target ${esc(summary.targetDeg)}°; ~ is estimated from your hip and head, where the camera lost your knee): ${repsLine}</p>
+    ${unsure.length ? `<p class="hint">NOT SURE: the estimate is too close to ${esc(summary.targetDeg)}° to call. Count a rep if it was deep enough.</p>
+      <div class="chips wrap">${unsure.map(({ x, i }) => `<button class="chip" data-count="${i}" type="button">Count rep ${i + 1} · ${repDeg(x)}</button>`).join('')}</div>` : ''}
     ${choices.length ? `<div class="hud c-muted">FILL INTO ${esc(session.title.toUpperCase())}</div>
       <div class="chips wrap" data-k="chips">${choices.map(chip).join('')}</div>
       <button class="btn-primary" data-fill="good" type="button">Fill ${summary.good} rep${summary.good === 1 ? '' : 's'}</button>
@@ -708,6 +740,14 @@ function resultSheet({ run: r, doc, summary, session, sets }) {
     pick = b.dataset.set;
     el.querySelectorAll('[data-set]').forEach((x) => x.classList.toggle('is-on', x === b));
   });
+  el.querySelectorAll('[data-count]').forEach((b) => b.addEventListener('click', async () => {
+    // His call on a NOT SURE rep: it counts. Keep it in the saved run, then show the sheet again with the new numbers.
+    countRep(r, +b.dataset.count);
+    const again = doc ? finishRun(r, doc.endedAt) : null;
+    if (again) await repo.put('squats', again.id, again);
+    close();
+    resultSheet({ run: r, doc: again, summary: summarizeRun(r), session, sets });
+  }));
   el.querySelectorAll('[data-fill]').forEach((b) => b.addEventListener('click', async () => {
     const set = sets.find((s) => s.id === pick);
     if (!set) return;
@@ -761,7 +801,7 @@ async function drawRuns() {
   box.innerHTML = runs.slice(0, 8).map((r) => `<li class="sq-run-row">
       <div><b>${esc(formatDay(new Date(r.startedAt)))}, ${esc(formatTime(new Date(r.startedAt)))}</b>
         <div class="hint">${esc(runText(r))}${r.exerciseName ? ` · ${esc(r.exerciseName)}` : ''}</div>
-        <div class="hud sq-reps">${r.reps.map((x) => `<span class="${x.good ? 'c-green' : 'c-red'}">${Math.round(x.minDeg)}°</span>`).join(' ')}</div></div>
+        <div class="hud sq-reps">${r.reps.map(repSpan).join(' ')}</div></div>
       <button class="icon-mini" data-run="${esc(r.id)}" type="button" aria-label="Options for this run">···</button></li>`).join('')
     || '<li class="hint pad">No runs yet. Each camera run with at least one rep is kept here and on the calendar.</li>';
   box.querySelectorAll('[data-run]').forEach((b) => b.addEventListener('click', () => {
@@ -847,6 +887,7 @@ async function copyLog() {
     delegate: pose.delegate, model: pose.model, warmupMs: Math.round(stats.warmupMs),
     fps: +stats.fps.toFixed(1), inferMs: +stats.inferMs.toFixed(1), droppedFrames: stats.dropped, staleFrames: stats.stale,
     dings: machine.dings, lateDings: machine.late, earlyDings: machine.early, earlyMissed: machine.earlyMissed, unseenReps: machine.unseen,
+    unsureReps: machine.unsure, estimatedReps: machine.estimated,
     earlyAvgLeadMs: machine.earlyConfirmed ? +(machine.earlyLeadSumMs / machine.earlyConfirmed).toFixed(1) : null,
     log: latencyLog,
   }, null, 1);
@@ -929,6 +970,7 @@ export function render(view, params = []) {
         <span class="sq-lbl">GOOD REPS</span>
         <span id="sq-hudReps" class="sq-huge">0</span>
         <span id="sq-hudShallow" class="sq-sub">shallow 0</span>
+        <span id="sq-hudUnsure" class="sq-sub" hidden>not sure 0</span>
         <span id="sq-hudUnseen" class="sq-sub" hidden>not seen 0</span>
         <span id="sq-hudLast" class="sq-sub">last &ndash;</span>
       </div>
@@ -939,6 +981,7 @@ export function render(view, params = []) {
         <span id="sq-forPill" class="sq-pill" hidden></span>
         <div id="sq-debug" hidden></div>
       </div>
+      <button id="sq-btnCount" type="button" hidden>COUNT IT</button>
       <div class="sq-btns">
         <button id="sq-btnReplay" type="button" aria-label="Replay video" hidden>&#x27F2;</button>
         <button id="sq-btnSettingsRun" type="button" aria-label="Settings">&#x2699;&#xFE0E;</button>
@@ -962,9 +1005,10 @@ export function render(view, params = []) {
     if (file) start('file', URL.createObjectURL(file));
   });
   $('btnStop').addEventListener('click', () => stop());
+  $('btnCount').addEventListener('click', countLatest);
   $('btnReplay').addEventListener('click', replay);
   video.addEventListener('ended', () => {
-    if (run.active && run.mode === 'file') showBanner(`Video ended: ${machine.good} good, ${machine.shallow} shallow${machine.unseen ? `, ${machine.unseen} not seen` : ''}. Tap ⟲ to replay, ✕ to finish.`, 0, 'info');
+    if (run.active && run.mode === 'file') showBanner(`Video ended: ${machine.good} good, ${machine.shallow} shallow${machine.unsure ? `, ${machine.unsure} not sure` : ''}${machine.unseen ? `, ${machine.unseen} not seen` : ''}. Tap ⟲ to replay, ✕ to finish.`, 0, 'info');
   });
   $('btnSettings').addEventListener('click', openSettings);
   $('btnSettingsRun').addEventListener('click', openSettings);
@@ -1007,7 +1051,7 @@ export function render(view, params = []) {
 
   // For poking at from the console (as in the original), plus feed(): angles straight into the rep logic, as if the
   // camera saw them, for testing without a person in front of it.
-  window.squat = { settings, machine, tracker, kneeGuard, stats, latencyLog, pose, run, audio, get current() { return current; },
+  window.squat = { settings, machine, tracker, kneeGuard, estimator, stats, latencyLog, pose, run, audio, get current() { return current; },
     feed(angles, fps = 30) {
       const dt = 1000 / fps;
       let t = performance.now();

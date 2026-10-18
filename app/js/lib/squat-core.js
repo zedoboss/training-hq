@@ -43,6 +43,18 @@ const SquatCore = (() => {
   const KNEE_OPEN_DEG = 8;          // a reading this far above the rep's deepest one...
   const KNEE_HIP_PER_RAD = 0.25;    // ...needs the hip at least this x thigh length x (that opening, in radians) above its lowest point
 
+  // ===== Depth estimate when the knee is lost =====
+  // The hip and head go down with the knee. How far each has dropped below standing is calibrated against the knee
+  // angle on the set's own clean frames, so a rep whose bottom the knee point missed still gets a number.
+  const EST_MAX_KNEE_DEG = 110;     // calibration pairs come from trusted knee readings below this (the deep half)
+  const EST_MIN_PAIRS = 12;         // a signal needs at least this many pairs...
+  const EST_MIN_SPAN = 0.04;        // ...spread over at least this much drop (in leg lengths) to be fitted
+  const EST_BAND_SD = 1.5;          // NOT SURE band, either side of the estimate: this many standard deviations of the fit...
+  const EST_BAND_MIN_DEG = 4;       // ...and never narrower than this
+  const EST_EXTRAP_SHARE = 0.5;     // past the deepest calibrated drop, half the extrapolated change is added to the band
+  const EST_MAX_PAIRS = 900;        // pairs kept per signal (a set is far fewer)
+  const STAND_TOP_SLACK_DEG = 1;    // standing heights come from the most upright frame between reps (the latest within this)
+
   // ===== Is this really a leg we can measure? =====
   const FRAME_MARGIN = 0.02;        // hip/knee/ankle closer than this to the frame edge count as cut off
   const LIMB_RATIO_MIN = 0.5;       // thigh : shin length seen from the side is close to 1;
@@ -208,15 +220,123 @@ const SquatCore = (() => {
     }
   }
 
+  const HEAD = [0, 7, 8]; // MediaPipe indices: nose, ears
+
+  /**
+   * What the depth estimate follows: hip and head heights in px (null when not seen) and thigh + shin in px.
+   * The shoulders are left out on purpose: the bar sits on them and the model places them badly under it.
+   */
+  function bodyHeights(lm, side, width, height) {
+    const seen = (p) => !!p && (p.visibility ?? 0) >= MIN_VISIBILITY && p.y >= 0 && p.y <= 1;
+    const [h, k, a] = LEG[side];
+    const head = HEAD.map((i) => lm[i]).filter(seen);
+    const len = (p, q) => Math.hypot((p.x - q.x) * width, (p.y - q.y) * height);
+    return {
+      hipY: seen(lm[h]) ? lm[h].y * height : null,
+      headY: head.length ? head.reduce((sum, p) => sum + p.y, 0) / head.length * height : null,
+      scale: len(lm[h], lm[k]) + len(lm[k], lm[a]),
+    };
+  }
+
+  /**
+   * Estimates the knee angle at the bottom of a rep from how far the hip and head dropped, for when the knee itself
+   * was lost there. Each drop (below its standing height, in standing leg lengths) is fitted against the trusted
+   * knee readings of the same set, deep half only, and the two estimates are averaged, weighted by how well each fits.
+   * Once a rep has lost its knee, the rest of that rep doesn't calibrate: readings just after the knee point comes
+   * back can still be off. Feed it every frame with a pose, before that frame's machine update.
+   */
+  class DepthEstimator {
+    constructor() { this.reset(); }
+    /** A new set: forget the calibration. */
+    reset() {
+      this.pairs = { hip: [], head: [] }; this.ref = null; this.rep = null;
+      this._top = null; this._recent = { hip: [], head: [] }; this._tainted = false;
+    }
+    /**
+     * @param f {knee, hipY, headY, scale}: knee = this frame's knee angle when it is trusted, else null
+     * @param machine the RepMachine the frame goes to
+     */
+    frame({ knee = null, hipY = null, headY = null, scale = 0 }, machine) {
+      if (!machine.inRep) {
+        this.rep = null; this._recent = { hip: [], head: [] }; this._tainted = false;
+        // Between reps: remember the most upright frame. Right after a rep counts he is often still a little bent.
+        if (knee !== null && knee >= machine.standDeg && scale > 0 && (!this._top || knee >= this._top.knee - STAND_TOP_SLACK_DEG)) {
+          this._top = { knee, hip: hipY, head: headY, scale };
+        }
+        return;
+      }
+      if (!this.rep) {
+        // A rep starts: measure it from where he stood just before.
+        const top = this._top, old = this.ref;
+        if (top) this.ref = { hip: top.hip ?? old?.hip ?? null, head: top.head ?? old?.head ?? null, scale: top.scale };
+        this._top = null;
+        if (!this.ref) return;
+        this.rep = { hip: -Infinity, head: -Infinity };
+      }
+      if (knee === null) this._tainted = true;
+      for (const [k, y] of [['hip', hipY], ['head', headY]]) {
+        if (y === null || this.ref[k] === null) continue;
+        const drop = (y - this.ref[k]) / this.ref.scale;
+        const recent = this._recent[k];
+        recent.push(drop);
+        if (recent.length > 3) recent.shift();
+        // The deepest point needs two frames of three: one stray landmark can't make a rep deep.
+        if (recent.length === 3) this.rep[k] = Math.max(this.rep[k], [...recent].sort((a, b) => a - b)[1]);
+        if (knee !== null && knee <= EST_MAX_KNEE_DEG && !this._tainted) {
+          this.pairs[k].push([drop, knee]);
+          if (this.pairs[k].length > EST_MAX_PAIRS) this.pairs[k].shift();
+        }
+      }
+    }
+    /** The bottom of the current rep, or of an earlier one given its drops: {angle, band}, or null if it can't say. */
+    estimate(drops = this.rep) {
+      if (!drops) return null;
+      let wSum = 0, angleSum = 0, bandSum = 0;
+      for (const k of ['hip', 'head']) {
+        const q = drops[k], fit = Number.isFinite(q) ? this._fit(k) : null;
+        if (!fit) continue;
+        const band = Math.max(EST_BAND_MIN_DEG, EST_BAND_SD * fit.sd) + EST_EXTRAP_SHARE * -fit.b * Math.max(0, q - fit.maxDrop);
+        const w = 1 / (fit.sd * fit.sd + 1); // +1: a suspiciously perfect fit doesn't take all the weight
+        wSum += w; angleSum += w * (fit.a + fit.b * q); bandSum += w * band;
+      }
+      return wSum ? { angle: angleSum / wSum, band: bandSum / wSum } : null;
+    }
+    /** Least squares knee = a + b * drop over the pairs so far, or null when there aren't enough of them. */
+    _fit(k) {
+      const p = this.pairs[k], n = p.length;
+      if (n < EST_MIN_PAIRS) return null;
+      let sx = 0, sy = 0, sxx = 0, sxy = 0, lo = Infinity, hi = -Infinity;
+      for (const [x, y] of p) { sx += x; sy += y; sxx += x * x; sxy += x * y; lo = Math.min(lo, x); hi = Math.max(hi, x); }
+      const vx = sxx - sx * sx / n;
+      if (hi - lo < EST_MIN_SPAN || !(vx > 0)) return null;
+      const b = (sxy - sx * sy / n) / vx, a = (sy - b * sx) / n;
+      if (b >= 0) return null; // deeper has to mean a smaller angle; anything else is noise
+      let ss = 0;
+      for (const [x, y] of p) ss += (y - a - b * x) ** 2;
+      return { a, b, sd: Math.sqrt(ss / (n - 2)), maxDrop: hi };
+    }
+    /** 'good' (clearly at or past the target), 'shallow' (clearly above it) or 'unsure'. */
+    static verdict(est, targetDeg) {
+      return est.angle + est.band <= targetDeg ? 'good' : est.angle - est.band > targetDeg ? 'shallow' : 'unsure';
+    }
+  }
+
   /**
    * The rep state machine. Feed it one filtered angle per frame.
    * update() returns at most one event:
-   *   { type: 'depth', anticipated, late, angle } -> play the ding NOW
-   *   { type: 'rep', minAngle }              -> good rep finished (back to standing)
-   *   { type: 'shallow', minAngle }          -> dipped past the shallow line, never hit target
-   *   { type: 'unseen', minAngle }           -> back to standing, but the bottom happened out of sight: not counted
-   *   { type: 'armed', unseen }              -> seen standing after not being armed: ready for a rep. unseen (with
-   *                                             minAngle): tracking was lost at the bottom of the rep he just did
+   *   { type: 'depth', anticipated, late, angle, estimated } -> play the ding NOW (estimated: from the hip and head,
+   *                                             the knee was lost at the bottom)
+   *   { type: 'rep', minAngle, estimated, judged } -> good rep finished (back to standing). judged: counted from the
+   *                                             estimate only now, with no ding during the rep: ding as it counts
+   *   { type: 'shallow', minAngle, estimated } -> dipped past the shallow line, never hit target (estimated: the bottom
+   *                                             was hidden and the estimate is clearly above the target)
+   *   { type: 'unsure', minAngle, band }     -> the bottom was hidden and the estimate is within `band` of the target:
+   *                                             not counted unless he says so (countUnsure)
+   *   { type: 'unseen', minAngle }           -> the bottom was hidden and there is nothing to estimate from: not counted
+   *   { type: 'armed', rep }                 -> seen standing after not being armed: ready for a rep. rep: the verdict
+   *                                             (one of the events above) on a rep whose tracking was lost at its bottom
+   * Estimated events also carry band (the estimate's uncertainty, either side), drops (to estimate it again later) and
+   * seenAngle (the deepest trusted reading: he was at least that deep).
    *
    * Double dings are impossible by construction: after 'depth' the machine sits in DEPTH and
    * only re-arms once the angle is back above standDeg. The gap between descendDeg and
@@ -227,10 +347,13 @@ const SquatCore = (() => {
    * disarms and waits to see a standing leg again rather than trust a reading from nowhere.
    *
    * A shallow call needs a watched bottom too. A blind spot of BOTTOM_GAP_MS or more (or an interruption) after
-   * the deepest reading and before he is seen coming back up means the bottom wasn't seen: 'unseen', not 'shallow'.
+   * the deepest reading and before he is seen coming back up means the bottom wasn't seen. Then the estimator
+   * (hip and head) judges it: clearly deep enough counts, clearly short is shallow, too close to call is 'unsure'.
    */
   class RepMachine {
-    constructor(cfg = {}) {
+    /** @param estimator optional DepthEstimator, fed by the caller, for reps whose bottom the knee point missed */
+    constructor(cfg = {}, estimator = null) {
+      this.estimator = estimator;
       this.configure(cfg);
       this.resetCounts();
     }
@@ -252,11 +375,16 @@ const SquatCore = (() => {
       this._turnSeen = false;       // seen coming back up from the deepest reading of this rep
       this._bottomUnseen = false;   // ...or a blind spot hid the bottom
       this._lostMin = null;         // tracking was lost at the bottom of a rep: its deepest reading, reported on re-arming
+      this._est = null;             // the ding came from the estimate: {band, drops}
     }
     resetCounts() {
       this.resetState();
       this.good = 0; this.shallow = 0; this.lastMin = null;
-      this.unseen = 0;              // reps whose bottom the camera didn't see: neither good nor shallow
+      this.unseen = 0;              // reps whose bottom the camera didn't see and couldn't estimate: neither good nor shallow
+      this.unsure = 0;              // reps whose estimate was too close to call, waiting for him (pending)
+      this.pending = [];            // ...their {angle, band, drops}, oldest first
+      this.estimated = 0;           // good or shallow reps judged from the estimate
+      this.lastEstimated = false;   // lastMin is an estimate
       this.dings = 0;               // total dings
       this.late = 0;                // dings given late, after a hold at depth, because the descent wasn't seen
       this.early = 0;               // dings fired by anticipation, before angle <= target
@@ -266,6 +394,8 @@ const SquatCore = (() => {
     }
     /** True when no rep is in progress (safe moment to switch legs, etc). */
     get idle() { return this.state === State.UNKNOWN || this.state === State.STANDING; }
+    /** A rep is under way, or was lost at its bottom and waits for its verdict. */
+    get inRep() { return !this.idle || this._lostMin !== null; }
 
     update(angle, velDegPerSec = 0, tMs = 0, frameDtMs = 0, restarted = false) {
       // Tracking was interrupted. Once the ding has sounded that doesn't matter (we only wait for
@@ -287,9 +417,7 @@ const SquatCore = (() => {
           this.state = State.STANDING;
           const lostMin = this._lostMin;
           this._lostMin = null;
-          if (lostMin === null) return { type: 'armed' };
-          this.unseen++; this.lastMin = null;
-          return { type: 'armed', unseen: true, minAngle: lostMin };
+          return lostMin === null ? { type: 'armed' } : { type: 'armed', rep: this._hiddenVerdict(lostMin) };
         }
         this._armSince = null;
         // The descent wasn't watched (tracking dropped out on the way down), but he is now sitting
@@ -321,8 +449,8 @@ const SquatCore = (() => {
           const min = this.minAngle;
           this.state = State.STANDING; this.minAngle = Infinity;
           if (min >= this.shallowDeg) return null;   // just a wiggle at the top
-          if (this._bottomUnseen) { this.unseen++; this.lastMin = null; return { type: 'unseen', minAngle: min }; }
-          this.shallow++; this.lastMin = min;
+          if (this._bottomUnseen) return this._hiddenVerdict(min);
+          this.shallow++; this.lastMin = min; this.lastEstimated = false;
           return { type: 'shallow', minAngle: min };
         }
         if (angle <= this.targetDeg) return this._depth(false, angle, tMs);
@@ -344,20 +472,58 @@ const SquatCore = (() => {
       if (angle >= this.standDeg) {
         const ev = { type: 'rep', minAngle: this.minAngle, anticipated: this._anticipated, confirmed: !this._anticipated || this._confirmed };
         if (this._anticipated && !this._confirmed) this.earlyMissed++;
-        this.good++; this.lastMin = this.minAngle;
+        if (this._est) { Object.assign(ev, { estimated: true }, this._est); this.estimated++; }
+        this.good++; this.lastMin = this.minAngle; this.lastEstimated = !!this._est;
         this.state = State.STANDING; this.minAngle = Infinity;
         return ev;
       }
       return null;
     }
-    _depth(anticipated, angle, tMs, late = false) {
+    _depth(anticipated, angle, tMs, late = false, est = null) {
       this.state = State.DEPTH;
       this._lostMin = null; // a late ding after losing him judges that rep after all
       this.dings++;
       if (anticipated) this.early++;
       if (late) this.late++;
-      this._anticipated = anticipated; this._confirmed = false; this._depthT = tMs;
-      return { type: 'depth', anticipated, late, angle };
+      this._anticipated = anticipated; this._confirmed = false; this._depthT = tMs; this._est = est;
+      return { type: 'depth', anticipated, late, angle, estimated: !!est };
+    }
+    /**
+     * A frame where the knee isn't believed but the rest of him is in view. If the hip and head already put him
+     * clearly at or past the target, ding now, from the estimate, instead of waiting for a knee that may not come back.
+     */
+    hidden(tMs) {
+      const lost = this.state === State.UNKNOWN && this._lostMin !== null;
+      if (!this.estimator || (this.state !== State.DESCENDING && !lost)) return null;
+      const est = this.estimator.estimate();
+      if (!est || DepthEstimator.verdict(est, this.targetDeg) !== 'good') return null;
+      this.minAngle = Math.min(lost ? this._lostMin : this.minAngle, est.angle);
+      return this._depth(false, est.angle, tMs, false, { band: est.band, drops: { ...this.estimator.rep } });
+    }
+    /** The verdict on a rep whose bottom the knee point missed, from the hip-and-head estimate if there is one. */
+    _hiddenVerdict(minAngle) {
+      const est = this.estimator ? this.estimator.estimate() : null;
+      if (!est) { this.unseen++; this.lastMin = null; return { type: 'unseen', minAngle }; }
+      // A trusted reading deeper than the estimate wins: he was at least that deep.
+      const angle = Math.min(est.angle, minAngle), band = est.band, drops = { ...this.estimator.rep }, seenAngle = minAngle;
+      const verdict = DepthEstimator.verdict({ angle, band }, this.targetDeg);
+      this.lastMin = angle; this.lastEstimated = true;
+      // Clearly deep enough but only known now (no ding during the rep): judged: the screen dings as it counts it.
+      if (verdict === 'good') {
+        this.good++; this.estimated++; this.dings++;
+        return { type: 'rep', minAngle: angle, estimated: true, judged: true, band, drops, seenAngle };
+      }
+      if (verdict === 'shallow') { this.shallow++; this.estimated++; return { type: 'shallow', minAngle: angle, estimated: true, band, drops, seenAngle }; }
+      this.unsure++;
+      this.pending.push({ angle, band, drops });
+      return { type: 'unsure', minAngle: angle, band, drops, seenAngle };
+    }
+    /** He says the NOT SURE rep was deep enough: count the latest one as good. Returns it, or null if none is waiting. */
+    countUnsure() {
+      const p = this.pending.pop();
+      if (!p) return null;
+      this.unsure--; this.good++;
+      return p;
     }
   }
 
@@ -391,12 +557,12 @@ const SquatCore = (() => {
   }
 
   return {
-    State, LEG, kneeAngle, legProblem, OneEuroFilter, AngleTracker, KneeGuard, RepMachine, SidePicker,
+    State, LEG, kneeAngle, legProblem, bodyHeights, OneEuroFilter, AngleTracker, KneeGuard, DepthEstimator, RepMachine, SidePicker,
     TARGET_DEG_DEFAULT, TARGET_DEG_MIN, TARGET_DEG_MAX,
     STAND_DEG_DEFAULT, STAND_DEG_MIN, STAND_DEG_MAX,
     DESCEND_MARGIN_DEG, SHALLOW_DEG, MIN_VISIBILITY, MAX_DEG_PER_SEC,
     ANTICIPATE_MIN_VEL, ANTICIPATE_MAX_DEG, SIDE_SWITCH_MARGIN, SIDE_SWITCH_FRAMES, GAP_RESET_MS, ARM_HOLD_MS, DEPTH_HOLD_MS, FRAME_MARGIN,
-    BOTTOM_GAP_MS, TURN_SEEN_DEG, UNSEEN_MARGIN_DEG, KNEE_OPEN_DEG,
+    BOTTOM_GAP_MS, TURN_SEEN_DEG, UNSEEN_MARGIN_DEG, KNEE_OPEN_DEG, EST_MAX_KNEE_DEG, EST_BAND_MIN_DEG,
   };
 })();
 
