@@ -13,12 +13,12 @@ const esc = (x) => String(x ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 async function loadState() {
   const repo = await ready;
-  const [sessions, sets, tendons, bridge, settings, meta, days, neck, meals, mealChecks, supplements, suppLog, suppAnswers] = await Promise.all([
+  const [sessions, sets, tendons, bridge, settings, meta, days, neck, meals, mealChecks, supplements, suppLog, suppAnswers, sauna, saunaPlan] = await Promise.all([
     repo.list('sessions'), repo.list('sets'), repo.list('tendons'), repo.get('bridge', 'last-loads'), repo.get('settings', 'main'),
     repo.get('programme', 'meta'), repo.list('days'), repo.get('schedule', 'neck'), repo.list('meals'), repo.list('meal-checks'),
-    repo.list('supplements'), repo.list('supp-log'), repo.list('supp-answers'),
+    repo.list('supplements'), repo.list('supp-log'), repo.list('supp-answers'), repo.list('sauna'), repo.get('sauna-plan', 'main'),
   ]);
-  return reminderState({ sessions, sets, tendons, bridge, settings, meta, days, neck, meals, mealChecks, supplements, suppLog, suppAnswers });
+  return reminderState({ sessions, sets, tendons, bridge, settings, meta, days, neck, meals, mealChecks, supplements, suppLog, suppAnswers, sauna, saunaPlan });
 }
 
 /** Today's reminders worked out on this device, the same way the Mac does. */

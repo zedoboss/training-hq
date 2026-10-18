@@ -5,6 +5,7 @@ import { zonedTime, formatHm, addMinutesHm } from './time.js';
 import { afterPhotoAt } from './meals.js';
 import { checklist, shortName, statusOn, stockStatus, lastsText } from './supplements.js';
 import { addDays } from './rotation.js';
+import { ladderState, stepText, plannedHm, OVERDUE_MIN } from './sauna.js';
 
 /** Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. */
 export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, cookingMin: 30 };
@@ -121,6 +122,40 @@ export function planReminders({ date, tz, supps = [], log = [], answers = [], ev
       title: 'Supplements: planning to get anything?', body: 'Restock anything, or add something new? Tap to answer.',
       due: !weeklyAnsweredSince(answers, addDays(date, -6)),
     });
+  }
+  return out;
+}
+
+/**
+ * Sauna (6.9, brief section 11): a reminder on a planned sauna day with the day's step and the checklist; a backup for
+ * the overdue alarm (the phone's own alarm needs the app on screen; this push comes from the Mac at the same moment);
+ * and the symptom question 15 minutes after the last round.
+ */
+export function saunaReminders({ date, tz, sessions = [], plan = {} }) {
+  const out = [];
+  const p = (plan.planned || []).find((x) => x.date === date);
+  if (p) {
+    const st = ladderState(sessions, date, plan);
+    out.push({
+      id: `sauna-day:${date}`, kind: 'sauna', at: zonedTime(date, plannedHm(p), tz), url: '#/sauna', tag: `sauna-${date}`, fixed: true,
+      title: 'Sauna today', body: `${stepText(st.step)}. Checklist first: eaten and drunk, no alcohol, not ill, slept, energy 2 or 3, water and a cold towel, someone knows you're in there. Never before lifting.`,
+      due: !sessions.some((s) => s.date === date),
+    });
+  }
+  for (const s of sessions.filter((x) => x.date === date)) {
+    for (const r of (s.rounds || []).filter((x) => x.inAt)) {
+      if (s.status !== 'active' && r.outAt) continue;
+      out.push({
+        id: `sauna-overdue:${s.id}:${r.n}`, kind: 'sauna', at: r.inAt + (r.planned + OVERDUE_MIN) * 60000, url: `#/sauna/run/${s.id}`, tag: `sauna-overdue-${s.id}`, fixed: false,
+        title: 'Sauna: overdue', body: `Round ${r.n} was ${r.planned} minutes. Get out now and tap OUT.`, due: s.status === 'active' && !r.outAt,
+      });
+    }
+    if (s.after?.dueAt) {
+      out.push({
+        id: `sauna-after:${s.id}`, kind: 'sauna', at: s.after.dueAt, url: `#/sauna/run/${s.id}`, tag: `sauna-after-${s.id}`, fixed: false,
+        title: 'Sauna: 15 minutes after', body: 'Any symptoms? Tap to answer.', due: !s.after.answeredAt,
+      });
+    }
   }
   return out;
 }

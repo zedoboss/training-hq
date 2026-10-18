@@ -215,3 +215,26 @@ test('supplements (6.7): running low asks every evening until answered for that 
   // Not on other weekdays; a new count after restocking starts over.
   assert.equal(remindersFor({ ...base, date: '2026-01-19', last: null, supplements: [cr] }).some((i) => i.id.startsWith('supps-plan')), false);
 });
+
+test('sauna (6.9): planned day with the step and checklist, overdue backup at round + 5 min, the question 15 minutes after', () => {
+  const date = '2026-01-20';
+  const t = at(date, '17:00');
+  const plan = { planned: [{ date, time: '17:00' }] };
+  let items = remindersFor({ ...base, date, last: null, sauna: [], saunaPlan: plan }).filter((i) => i.kind === 'sauna');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].at, t);
+  assert.equal(items[0].title, 'Sauna today');
+  assert.match(items[0].body, /^1 round of 10 minutes\. Checklist first: .*Never before lifting\.$/);
+  assert.equal(items[0].fixed, true);
+  const active = { id: 'sa', date, status: 'active', plannedRounds: 1, rounds: [{ n: 1, planned: 10, inAt: t + 60000, outAt: null }], after: null };
+  items = remindersFor({ ...base, date, last: null, sauna: [active], saunaPlan: plan }).filter((i) => i.kind === 'sauna');
+  const over = items.find((i) => i.id === 'sauna-overdue:sa:1');
+  assert.equal(over.at, t + 16 * 60000);
+  assert.equal(over.body, 'Round 1 was 10 minutes. Get out now and tap OUT.');
+  assert.equal(over.due, true);
+  assert.equal(items.find((i) => i.id === `sauna-day:${date}`).due, false);
+  const done = { ...active, status: 'done', rounds: [{ ...active.rounds[0], outAt: t + 11 * 60000 }], endedAt: t + 11 * 60000, after: { dueAt: t + 26 * 60000, answeredAt: null } };
+  items = remindersFor({ ...base, date, last: null, sauna: [done] }).filter((i) => i.kind === 'sauna');
+  assert.deepEqual(items.map((i) => [i.id, i.due]), [['sauna-after:sa', true]]);
+  assert.equal(items[0].at, t + 26 * 60000);
+});

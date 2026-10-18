@@ -141,3 +141,6 @@
 .sauna-stop p { margin: 0; font-size: 18px; line-height: 1.4; }
 .btn-primary.big, .btn-ghost.big { height: 60px; font-size: 14px; }
 .sauna-felt { flex-wrap: wrap; overflow: visible; }
+.cal-sauna { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid var(--cyan); }
+.cal-sauna.is-symptoms { border-bottom-color: var(--red); }
+.cal-key-sauna { display: inline-block; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid var(--cyan); }
