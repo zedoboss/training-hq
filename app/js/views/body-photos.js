@@ -2,6 +2,7 @@
 // phone and the Mac only; collection 'body-photos', id 'bodyphoto.<date>.<pose>', 1280 px JPEG).
 // #/body/photos                 days newest first, take today's, add from Photos, compare
 // #/body/photos/take/<pose>     the camera with the last photo of that pose as a faint overlay, flip, self-timer
+// #/body/photos/take/<pose>/<a,b,c>  the same, going through only those poses (A13: the recovery photos)
 // #/body/photos/view/<id>       one photo; retake (today), delete
 // #/body/photos/compare/<a>/<b> two photos side by side with their dates and the days between
 // Stored photos are the true image (as the iPhone Camera saves them); the front camera's preview and the overlay on
@@ -10,7 +11,7 @@ import { ready } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { formatDay, isoDate, daysBetween } from '../lib/time.js';
-import { POSES, photoId, lastPhoto, photoDays, posePhotos, fitSize } from '../lib/body.js';
+import { POSES, BASE_POSES, posesShown, photoId, lastPhoto, photoDays, posePhotos, fitSize } from '../lib/body.js';
 import { fileToJpeg } from '../lib/photos.js';
 import { play, unlockAudio } from '../lib/sounds.js';
 import { confirmSheet } from '../ui/sheet.js';
@@ -25,7 +26,7 @@ const daysText = (n) => (n === 0 ? 'same day' : `${n} day${n === 1 ? '' : 's'} a
 
 export function render(view, params = []) {
   const [mode, a, b] = params;
-  if (mode === 'take') return take(view, isPose(a) ? a : 'front');
+  if (mode === 'take') { const only = b ? b.split(',').filter(isPose) : []; return take(view, isPose(a) ? a : 'front', only.length ? only : null); }
   if (mode === 'view') return one(view, a);
   if (mode === 'compare') return compare(view, a, b);
   return list(view);
@@ -46,7 +47,9 @@ function list(view) {
   let cmpPose = null;
   const draw = async (repo) => {
     const photos = (await repo.list('body-photos')).filter((p) => p?.date && p.dataUrl);
+    const recPlan = await repo.get('recovery', 'main');
     if (!alive) return;
+    const shown = posesShown(recPlan?.photos?.poses || [], photos);
     const today = isoDate(new Date());
     const days = photoDays(photos);
     const todays = days.find((d) => d.date === today)?.photos || {};
@@ -59,7 +62,7 @@ function list(view) {
       <h1 class="view-title">Progress photos</h1>
       <p class="view-sub">Private: kept on this phone and your Mac, never online. One photo per pose per day; same spot, light and distance each time.</p>
       <div class="section-label">Today</div>
-      <div class="bp-take">${POSES.map(([p, l]) => `<a class="btn-${todays[p] ? 'ghost' : 'primary'} center" href="#/body/photos/take/${p}">${todays[p] ? '✓ ' : ''}${l}</a>`).join('')}</div>
+      <div class="bp-take">${shown.map(([p, l]) => `<a class="btn-${todays[p] ? 'ghost' : 'primary'} center" href="#/body/photos/take/${p}">${todays[p] ? '✓ ' : ''}${l}</a>`).join('')}</div>
       <label class="link-btn file-btn" for="bp-file">Add one from Photos instead</label>
       <input id="bp-file" type="file" accept="image/*" hidden>
       <section class="card pad-card" id="bp-add" hidden></section>
@@ -72,7 +75,7 @@ function list(view) {
         </section>` : ''}
       <div class="section-label">${days.length ? 'Every day' : 'No photos yet'}</div>
       ${days.length ? days.map((d) => `<section class="bp-day"><div class="hud c-muted">${esc(dayName(d.date).toUpperCase())}</div>
-        <div class="bp-row">${POSES.map(([p, l]) => (d.photos[p] ? `<a class="bp-thumb" href="#/body/photos/view/${esc(d.photos[p].id)}"><img src="${d.photos[p].dataUrl}" alt="${esc(l)} photo, ${esc(dayName(d.date))}" loading="lazy" decoding="async"><span>${l}</span></a>`
+        <div class="bp-row">${shown.map(([p, l]) => (d.photos[p] ? `<a class="bp-thumb" href="#/body/photos/view/${esc(d.photos[p].id)}"><img src="${d.photos[p].dataUrl}" alt="${esc(l)} photo, ${esc(dayName(d.date))}" loading="lazy" decoding="async"><span>${l}</span></a>`
           : `<span class="bp-thumb is-empty"><span>${l}</span></span>`)).join('')}</div></section>`).join('')
         : '<p class="hint">Take front, side and back today, then again every few weeks. The last photo of each pose shows faintly over the camera so you can stand the same way.</p>'}`;
 
@@ -89,12 +92,12 @@ function list(view) {
       if (!f) return;
       let dataUrl;
       try { dataUrl = await fileToJpeg(f); } catch { toast('That file could not be read as a photo.'); return; }
-      let pose = POSES.find(([p]) => !todays[p])?.[0] || 'front';
+      let pose = shown.find(([p]) => !todays[p])?.[0] || 'front';
       const box = $('#bp-add');
       box.hidden = false;
       box.innerHTML = `<span class="hud c-cyan">ADD THIS PHOTO</span>
         <img class="bp-preview" src="${dataUrl}" alt="The chosen photo">
-        <div class="field"><label>Pose</label><div class="seg" role="group">${POSES.map(([p, l]) => `<button class="pill ${p === pose ? 'is-on' : ''}" type="button" data-pose="${p}">${l}</button>`).join('')}</div></div>
+        <div class="field"><label>Pose</label><div class="seg" role="group">${shown.map(([p, l]) => `<button class="pill ${p === pose ? 'is-on' : ''}" type="button" data-pose="${p}">${l}</button>`).join('')}</div></div>
         <div class="field"><label for="bp-date">Taken on</label><input class="input" type="date" id="bp-date" value="${today}" max="${today}"></div>
         <div class="btn-row"><button class="btn-ghost" type="button" id="bp-cancel">Cancel</button><button class="btn-primary" type="button" id="bp-save">Save</button></div>`;
       box.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -118,8 +121,13 @@ function list(view) {
   return () => { alive = false; off(); };
 }
 
-function take(view, startPose) {
+function take(view, startPose, only = null) {
   let pose = startPose;
+  // The poses to go through: the ones asked for (the recovery photos), else front, side and back plus any a recovery
+  // record adds (filled in once the data is ready).
+  let list = POSES.filter(([p]) => (only ? only.includes(p) : BASE_POSES.includes(p) || p === startPose));
+  const here = (p) => `#/body/photos/take/${p}${only ? `/${only.join(',')}` : ''}`;
+  const segHtml = () => list.map(([p, l]) => `<button class="pill ${p === pose ? 'is-on' : ''}" type="button" data-pose="${p}">${l}</button>`).join('');
   let facing = 'user';
   let timer = 0;
   let ghost = 0.35;
@@ -129,7 +137,7 @@ function take(view, startPose) {
   const vol = () => withDefaults(getState().settings).sounds.timerVolume;
   view.innerHTML = `
     <div class="lib-head"><a class="pill" href="#/body/photos">Photos</a><span class="hud c-muted">${esc(dayName(today).toUpperCase())}</span></div>
-    <div class="seg" role="group" aria-label="Pose" id="bt-poses">${POSES.map(([p, l]) => `<button class="pill" type="button" data-pose="${p}">${l}</button>`).join('')}</div>
+    <div class="seg" role="group" aria-label="Pose" id="bt-poses">${segHtml()}</div>
     <div class="bp-stage" id="bt-stage">
       <video id="bt-video" playsinline muted autoplay></video>
       <img id="bt-ghost" class="bp-ghost" alt="" hidden>
@@ -232,16 +240,17 @@ function take(view, startPose) {
     if (!(await savePhoto(repo, { date: today, pose, dataUrl: shot, source: 'camera', camera: stream ? facing : null }))) return;
     toast(`${POSE[pose]} photo saved.`);
     const done = new Set((await repo.list('body-photos')).filter((p) => p.date === today).map((p) => p.pose));
-    const nextPose = POSES.map(([p]) => p).find((p) => !done.has(p));
-    if (!nextPose) { location.hash = '#/body/photos'; return; }
+    const nextPose = list.map(([p]) => p).find((p) => !done.has(p));
+    if (!nextPose) { location.hash = only ? '#/body/recovery' : '#/body/photos'; return; }
     pose = nextPose;
-    history.replaceState(null, '', `#/body/photos/take/${pose}`);
+    history.replaceState(null, '', here(pose));
     $('#bt-retake').click();
   });
-  view.querySelectorAll('[data-pose]').forEach((x) => x.addEventListener('click', () => {
-    if (shot) return;
-    pose = x.dataset.pose; history.replaceState(null, '', `#/body/photos/take/${pose}`); drawPose();
-  }));
+  $('#bt-poses').addEventListener('click', (e) => {
+    const x = e.target.closest('[data-pose]');
+    if (!x || shot) return;
+    pose = x.dataset.pose; history.replaceState(null, '', here(pose)); drawPose();
+  });
   view.querySelectorAll('[data-timer]').forEach((x) => x.addEventListener('click', () => {
     timer = Number(x.dataset.timer); view.querySelectorAll('[data-timer]').forEach((y) => y.classList.toggle('is-on', y === x));
   }));
@@ -256,7 +265,17 @@ function take(view, startPose) {
   const onVis = () => { if (document.hidden) { cancelCount(); stop(); } else if (alive && !shot && !$('#bt-live').hidden) start(); };
   document.addEventListener('visibilitychange', onVis);
 
-  ready.then((r) => { repo = r; drawPose(); });
+  ready.then(async (r) => {
+    repo = r;
+    if (!only) {
+      const [plan, all] = await Promise.all([repo.get('recovery', 'main'), repo.list('body-photos')]);
+      if (!alive) return;
+      list = posesShown(plan?.photos?.poses || [], all);
+      if (!list.some(([p]) => p === pose)) list = [...list, POSES.find(([p]) => p === pose)];
+      $('#bt-poses').innerHTML = segHtml();
+    }
+    drawPose();
+  });
   start();
   return () => { alive = false; cancelCount(); stop(); document.removeEventListener('visibilitychange', onVis); };
 }

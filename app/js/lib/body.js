@@ -18,7 +18,11 @@ export const CIRCUMFERENCES = [
 export const MEASURE_FIELDS = [...WEIGHT_FIELDS, ...CIRCUMFERENCES];
 export const fieldOf = (key) => MEASURE_FIELDS.find((f) => f.key === key) || null;
 
-export const POSES = [['front', 'Front'], ['side', 'Side'], ['back', 'Back']];
+// A13: two more poses for a recovery record's photos (the other side, arms behind the head); shown when used.
+export const POSES = [['front', 'Front'], ['side', 'Side'], ['side2', 'Other side'], ['back', 'Back'], ['arms-up', 'Arms behind head']];
+export const BASE_POSES = ['front', 'side', 'back'];
+/** The poses to offer: front, side and back, plus any pose a recovery record asks for or a photo already has. */
+export const posesShown = (extra = [], photos = []) => POSES.filter(([p]) => BASE_POSES.includes(p) || extra.includes(p) || photos.some((x) => x?.pose === p));
 const LB = 0.45359237;
 const r2 = (n) => Math.round(n * 100) / 100;
 

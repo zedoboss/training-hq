@@ -17,7 +17,15 @@ export function stateFrom(store, tz) {
     settings: one('settings', 'main'), meta: one('programme', 'meta'), days: list('days'), neck: one('schedule', 'neck'),
     meals: list('meals'), mealChecks: list('meal-checks'), supplements: list('supplements'), suppLog: list('supp-log'), suppAnswers: list('supp-answers'), sauna: list('sauna'), saunaPlan: one('sauna-plan', 'main'),
     scans: list('body-scans'), scanPlan: one('scan-plan', 'main'), coachReminders: list('coach-reminders'),
+    ...recoveryFrom(one, list),
   }, tz);
+}
+
+/** A13: his recovery record and what it needs (photos only when there is a record: they are big). */
+function recoveryFrom(one, list) {
+  const recoveryPlan = one('recovery', 'main');
+  if (!recoveryPlan) return {};
+  return { recoveryPlan, recoveryState: one('recovery', 'state'), notes: list('coach-notes'), photos: list('body-photos').map((p) => ({ date: p.date, pose: p.pose, dataUrl: Boolean(p.dataUrl) })) };
 }
 
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */

@@ -4,19 +4,26 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+// A13: his recovery record (data/coach/recovery.md, also private) is read the same way and added after the profile.
 export const PROFILE_FILE = ['coach', 'profile.md'];
+export const RECOVERY_FILE = ['coach', 'recovery.md'];
 export const MAX_PROFILE = 24000;
 
-let cache = { file: null, mtime: 0, text: '' };
+const cache = new Map();
 
-/** The profile text, or '' when there is none yet. */
-export function readProfile(dataDir) {
-  const file = join(dataDir, ...PROFILE_FILE);
+function readText(file) {
   let st;
   try { st = statSync(file); } catch { return ''; }
-  if (cache.file === file && cache.mtime === st.mtimeMs) return cache.text;
+  const c = cache.get(file);
+  if (c && c.mtime === st.mtimeMs) return c.text;
   let text = '';
   try { text = readFileSync(file, 'utf8').slice(0, MAX_PROFILE); } catch { text = ''; }
-  cache = { file, mtime: st.mtimeMs, text };
+  cache.set(file, { mtime: st.mtimeMs, text });
   return text;
 }
+
+/** The profile text, or '' when there is none yet. */
+export const readProfile = (dataDir) => readText(join(dataDir, ...PROFILE_FILE));
+
+/** His recovery record, or '' when there is none. */
+export const readRecovery = (dataDir) => readText(join(dataDir, ...RECOVERY_FILE));

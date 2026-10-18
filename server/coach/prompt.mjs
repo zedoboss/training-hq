@@ -40,10 +40,15 @@ QUIET
 /** Added to the context of a message he said out loud (step 9). */
 export const VOICE_NOTE = 'He said this out loud; the app turned it into text. Speech recognition mishears numbers, above all "for" as 4: "84 8" or "84.8" may be "80 for 8", "56.348" may be "56.3 for 8". If exactly one reading matches the target of the exercise he is on (same kg, reps in range), log that reading and say the numbers back; otherwise ask in one short line. Your answer is spoken aloud by the app: one or two short sentences, no lists, no symbols. If he just logged a set exactly as he said it, it matches today\'s target and breaks no rule, answer with exactly "Logged." (the app plays a tick instead of speaking).';
 
-/** The whole system prompt: the rules, then his profile (private). */
-export function systemPrompt({ profile = '' } = {}) {
+/** The whole system prompt: the rules, then his profile and his recovery record (both private). */
+export function systemPrompt({ profile = '', recovery = '' } = {}) {
   const p = String(profile || '').trim();
-  return p ? `${RULES}\n\nHIS PROFILE (his own notes; where it conflicts with the rules above about tone, his profile wins)\n${p}` : RULES;
+  const r = String(recovery || '').trim();
+  return [
+    RULES,
+    p ? `HIS PROFILE (his own notes; where it conflicts with the rules above about tone, his profile wins)\n${p}` : '',
+    r ? `HIS RECOVERY RECORD (his own record; follow its rules for you exactly. The context block gives today's day count since it started: use only what the record marks CURRENT for today, never the EXPIRED items as instructions, and add no medical advice of your own)\n${r}` : '',
+  ].filter(Boolean).join('\n\n');
 }
 
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);

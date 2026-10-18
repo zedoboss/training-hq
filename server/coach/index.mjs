@@ -32,14 +32,15 @@ export function conversation(store) {
  * @param {ReturnType<import('../store.mjs').openStore>} o.store
  * @param {Array} o.tools          tool definitions (tools.mjs)
  * @param {() => string} [o.profile] his own profile text (private folder)
+ * @param {() => string} [o.recovery] his recovery record (private folder, A13)
  * @param {(o: {store, tz, now}) => string} [o.context] today's state for the context block of every message
  * @param {object} [o.process]     a process from openCoachProcess (tests pass a fake)
  */
-export function openCoach({ store, tools = [], profile = () => '', context = null, process = null, log = () => {}, now = () => Date.now(), tz = deviceTimeZone() }) {
+export function openCoach({ store, tools = [], profile = () => '', recovery = () => '', context = null, process = null, log = () => {}, now = () => Date.now(), tz = deviceTimeZone() }) {
   let active = null; // the turn whose tool calls are arriving now (one at a time)
 
   const mcp = openMcp({ tools, log, onCall: (tool, args) => callTool(tool, args) });
-  const proc = process || openCoachProcess({ system: () => systemPrompt({ profile: profile() }), mcpUrl: () => mcp.url(), log, now });
+  const proc = process || openCoachProcess({ system: () => systemPrompt({ profile: profile(), recovery: recovery() }), mcpUrl: () => mcp.url(), log, now });
 
   const save = (m) => { store.writeLocal(COL, m.id, m); return m; };
 

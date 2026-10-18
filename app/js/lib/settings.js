@@ -38,7 +38,9 @@ export const DEFAULT_SETTINGS = {
     // Step 6: supplements are asked again every 45 minutes, 3 times, until answered; the weekly planning question day.
     suppFollowMin: 45, suppFollowMax: 3, suppPlanWeekday: 0,
     // Step 7: body scan reminders two evenings before and the evening before, at this time.
-    scanEvening: '20:00' },
+    scanEvening: '20:00',
+    // A13: recovery reminders (weekly check-in, things to do, photos) at this time.
+    recoveryHm: '20:15' },
   // Step 6: which Claude reads meal photos on the Mac ('fast' Sonnet 5.5 low, 'deep' Opus 5.5 high); his usual meal
   // times [{name, time 'HH:MM'}] (none until he sets them: brief section 10).
   fuel: { visionModel: 'fast', mealTimes: [] },

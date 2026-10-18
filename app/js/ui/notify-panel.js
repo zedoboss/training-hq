@@ -19,7 +19,9 @@ async function loadState() {
     repo.list('supplements'), repo.list('supp-log'), repo.list('supp-answers'), repo.list('sauna'), repo.get('sauna-plan', 'main'), repo.list('body-scans'), repo.get('scan-plan', 'main'),
     repo.list('coach-reminders'),
   ]);
-  return reminderState({ sessions, sets, tendons, bridge, settings, meta, days, neck, meals, mealChecks, supplements, suppLog, suppAnswers, sauna, saunaPlan, scans, scanPlan, coachReminders });
+  const recoveryPlan = await repo.get('recovery', 'main');
+  const recovery = recoveryPlan ? { recoveryPlan, recoveryState: await repo.get('recovery', 'state'), notes: await repo.list('coach-notes'), photos: await repo.list('body-photos') } : {};
+  return reminderState({ sessions, sets, tendons, bridge, settings, meta, days, neck, meals, mealChecks, supplements, suppLog, suppAnswers, sauna, saunaPlan, scans, scanPlan, coachReminders, ...recovery });
 }
 
 /** Today's reminders worked out on this device, the same way the Mac does. */
@@ -156,7 +158,7 @@ export function notifyPanel(el) {
   let pending = null;
   ready.then((repo) => {
     draw.off = repo.onChange((cols) => {
-      if (!cols.some((c) => ['days', 'settings', 'sessions', 'sets', 'tendons', 'programme', 'schedule'].includes(c))) return;
+      if (!cols.some((c) => ['days', 'settings', 'sessions', 'sets', 'tendons', 'programme', 'schedule', 'recovery'].includes(c))) return;
       clearTimeout(pending);
       pending = setTimeout(() => { listToday(); drawBackup(); }, 300);
     });

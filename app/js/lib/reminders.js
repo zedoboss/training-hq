@@ -11,6 +11,7 @@ import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
 import { mealReminders, suppReminders, planReminders, saunaReminders } from './fuel-reminders.js';
 import { scanReminders } from './scans.js';
+import { recoveryReminders } from './recovery.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -23,6 +24,7 @@ export const KINDS = [
   ['sauna', 'Sauna: planned days, the overdue alarm backup, the question 15 minutes after'],
   ['scan', 'Body scan: two evenings before (no alcohol), the evening before with the preparation list, at your session time on the day'],
   ['coach', 'Reminders you asked the coach for'],
+  ['recovery', 'Recovery: the weekly check-in until the checkup, things to do, photos every few weeks'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };
@@ -56,9 +58,10 @@ const holdText = (s) => (s.ask ? `${s.label}: the gym for the ${s.restHold || s.
  * @param {Array} [o.sauna]      sauna sessions; [o.saunaPlan] the sauna plan
  * @param {Array} [o.scans]      body scans (step 7); [o.scanPlan] the scan plan
  * @param {Array} [o.coachReminders] reminders the coach set for him (step 8): {id, at, date, text, cancelledAt}
+ * @param {object} [o.recovery]  A13: {plan, state, notes, photos} (lib/recovery.js), when he has a recovery record
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [] }) {
+export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recovery = null }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -154,6 +157,8 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
       });
     }
   }
+  // A13: his recovery record: the weekly check-in, things to do, photos.
+  if (on('recovery') && recovery?.plan) out.push(...recoveryReminders({ date, tz, ...recovery, hm: n.recoveryHm }));
   // Meals (6.3): his meal times with nothing logged, and the after photo.
   if (on('meals')) out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
   return out.sort((a, b) => a.at - b.at);
@@ -167,7 +172,7 @@ export function dueNow(items, now, sent = {}, graceMs = 30 * 60000) {
 }
 
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
-export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [] }, tz) {
+export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [] }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
   return {
     tz,
@@ -190,5 +195,6 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     scans,
     scanPlan,
     coachReminders,
+    recovery: recoveryPlan ? { plan: recoveryPlan, state: recoveryState, notes, photos } : null,
   };
 }

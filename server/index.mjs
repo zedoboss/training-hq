@@ -17,7 +17,7 @@ import { openScanVision } from './scan-vision.mjs';
 import { findClaude } from './claude.mjs';
 import { openHealth, defaultHealthDir } from './health.mjs';
 import { openCoach } from './coach/index.mjs';
-import { readProfile } from './coach/profile.mjs';
+import { readProfile, readRecovery } from './coach/profile.mjs';
 import { TOOLS, contextLine } from './coach/tools.mjs';
 import { openEngine } from './voice/engine.mjs';
 import { openVoice } from './voice/index.mjs';
@@ -80,7 +80,7 @@ log(`health: reading ${health.dir}`);
 
 // The coach (step 8): Claude Code as one long-lived process, started on the first message (or when the chat opens),
 // with its tools on a local MCP server. His profile is read from data/coach/profile.md in the private folder.
-const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.dataDir), context: contextLine, log });
+const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.dataDir), recovery: () => readRecovery(p.dataDir), context: contextLine, log });
 
 // Voice (step 9): the voice lock runs here (speaker check, music check), his voiceprint stays in data/voice.
 const engine = openEngine({ modelsDir: config.voiceModelsDir || p.voiceModelsDir, log });

@@ -22,6 +22,7 @@ import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
 import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods.js';
 import { foodsDb, myFoods } from '../foods.mjs';
+import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -703,6 +704,49 @@ function restDayHold(a, ctx) {
   return wrote(`${area.label}, ${dayText(s.today, s.today)}: ${restChoiceText(c, area)}${c.choice === 'skip' ? ' today. Asked again next rest day.' : '. 3 × 30 s, his rule.'}`, `rest-day ${c.choice}`);
 }
 
+// ---- recovery (A13) -----------------------------------------------------------------------------------------------
+
+/** His recovery check-in answers, a task he did, or the checkup date he booked. Only his words; no advice. */
+function recoveryLog(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const plan = s.one('recovery', 'main');
+  if (!plan) return refuse('No recovery record in the app.');
+  const state = s.one('recovery', 'state');
+  if (a.action === 'check_in') {
+    const qs = plan.checkIn?.questions || [];
+    const answers = {};
+    for (const x of a.answers || []) {
+      const q = findByName(qs, x.question, (y) => y.label, (y) => [y.key]).item;
+      if (!q) return refuse(`Not a check-in question: ${x.question}. Questions: ${qs.map((y) => y.label).join(', ')}.`);
+      if (q.choices) {
+        const c = q.choices.find((y) => y.toLowerCase() === String(x.answer || '').trim().toLowerCase());
+        if (!c) return refuse(`${q.label}: answer with one of ${q.choices.join(', ')} (his word for it).`);
+        answers[q.key] = c;
+      } else answers[q.key] = String(x.answer || '').trim();
+    }
+    const missing = missingAnswers(plan, answers);
+    if (missing.length) return refuse(`Still to ask: ${missing.map((k2) => qs.find((q) => q.key === k2)?.ask || k2).join(' ')}`);
+    const note = checkInNote(plan, answers, { date: s.today, at: s.now, by: 'coach' });
+    put(s, 'coach-notes', noteId(s.today), note);
+    return wrote(`Saved, ${dayText(s.today, s.today)}: ${note.text}`, 'check-in saved');
+  }
+  if (a.action === 'task_done' || a.action === 'task_undo') {
+    const t = findByName(plan.tasks || [], a.task || '', (y) => y.text, (y) => [y.id]).item;
+    if (!t) return refuse(`Which one? ${(plan.tasks || []).map((y) => y.text).join('; ')}.`);
+    put(s, 'recovery', 'state', withTask(state, t.id, a.action === 'task_done', 'coach', s.now));
+    return wrote(`${t.text}: ${a.action === 'task_done' ? 'done' : 'open again'}.${a.action === 'task_done' && t.setsCheckup && !a.date && !state?.checkup?.date ? ' Ask him for the date if he has one.' : ''}`, a.action === 'task_done' ? 'done' : 'reopened');
+  }
+  if (a.action === 'set_checkup') {
+    if (a.date && a.date < s.today) return refuse('That date has passed.');
+    let next = withCheckup(state, a.date || null, 'coach', s.now);
+    const booking = (plan.tasks || []).find((t) => t.setsCheckup);
+    if (a.date && booking) next = withTask(next, booking.id, true, 'coach', s.now);
+    put(s, 'recovery', 'state', next);
+    return wrote(a.date ? `Checkup: ${dayText(a.date, s.today)}. The check-ins run until then; a reminder comes the evening before.` : 'Checkup date cleared.', a.date ? 'checkup set' : 'checkup cleared');
+  }
+  return refuse('Unknown action.');
+}
+
 const write = (name, title, description, inputSchema, run) => ({ name, title, description, inputSchema, run });
 
 export const WRITE_TOOLS = [
@@ -723,5 +767,6 @@ export const WRITE_TOOLS = [
   write('sauna_plan', 'Sauna days', "Plan sauna days WITH him: propose (from his rotation: rest days first, never before lifting, about two a week on separate days while building up, once a week at his level; at his usual sauna time), then plan the dates he agrees to, remove one, or set his usual sauna time. The ladder decides each session's step. About food and drink say only his checklist line (eaten and drunk in the last few hours); never tell him to fast.", obj({ action: { type: 'string', enum: ['propose', 'plan', 'remove', 'set_time'] }, dates: { type: 'array', items: obj({ date: ISO, time: HM }, ['date']) }, date: ISO, time: HM }, ['action']), saunaPlan),
   write('supplement_review', 'Diet.html line', "His answer about a line of his Diet.html that differs from his supplement list (the supplements tool lists the open ones): use = change the supplement to the Diet.html line, keep = leave his list. Only his answer; never decide for him.", obj({ supplement: { type: 'string' }, answer: { type: 'string', enum: ['use', 'keep'] } }, ['supplement', 'answer']), supplementReview),
   write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
+  write('recovery_log', 'Recovery', "His recovery record (A13): save his weekly check-in answers in his words (check_in: one answer per question; for choice questions one of the choices the recovery tool lists; 'anything new' in his words, empty if nothing), tick or untick a thing he had to do (task_done / task_undo), or set the checkup date he booked (set_checkup). Only what he says: no advice.", obj({ action: { type: 'string', enum: ['check_in', 'task_done', 'task_undo', 'set_checkup'] }, answers: { type: 'array', items: obj({ question: { type: 'string' }, answer: { type: 'string' } }, ['question', 'answer']) }, task: { type: 'string' }, date: ISO }, ['action']), recoveryLog),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
 ];

@@ -25,6 +25,7 @@ import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
 import { addMinutesHm } from '../../app/js/lib/time.js';
+import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -156,6 +157,7 @@ export function todayText(s) {
   }
   const sauna = s.list('sauna').find((x) => x.status === 'active');
   if (sauna) lines.push(`Sauna session in progress (${stepText(sauna.stepIndex ?? 0)}).`);
+  lines.push(...recoveryContext(s));
   return lines.join('\n');
 }
 
@@ -165,6 +167,37 @@ export function contextLine({ store, tz, now }) {
   const lines = [...rotationLines(s).slice(0, 3), comingUp(s, 6)];
   const active = s.active();
   if (active) lines.push(activeText(s, active));
+  lines.push(...recoveryContext(s));
+  return lines.join('\n');
+}
+
+// ---- recovery (A13) -----------------------------------------------------------------------------------------------
+
+/** Photos without their pixels (only the dates and poses matter here). */
+const photoMarks = (s) => s.list('body-photos').map((p) => ({ date: p.date, pose: p.pose, dataUrl: Boolean(p.dataUrl) }));
+
+/** His recovery record's state for today, from the app (the day count, what is due): for every message. */
+function recoveryContext(s) {
+  const plan = s.one('recovery', 'main');
+  if (!plan) return [];
+  return recoveryLines({ plan, state: s.one('recovery', 'state'), notes: s.list('coach-notes'), photos: photoMarks(s), date: s.today });
+}
+
+function recoveryText(s) {
+  const plan = s.one('recovery', 'main');
+  if (!plan) return 'No recovery record in the app.';
+  const state = s.one('recovery', 'state');
+  const lines = recoveryContext(s);
+  lines.push(`Check-in questions: ${(plan.checkIn?.questions || []).map((q) => `${q.label} (${q.choices ? q.choices.join(' / ') : 'his words'})`).join('; ')}.`);
+  const done = (plan.tasks || []).filter((t) => state?.tasks?.[t.id]?.doneAt);
+  if (done.length) lines.push(`Done: ${done.map((t) => `${t.text} (${dayText(s.date(state.tasks[t.id].doneAt), s.today)})`).join('; ')}.`);
+  if (state?.checkup?.date) lines.push(`Checkup booked: ${dayText(state.checkup.date, s.today)}.`);
+  else if (endsOn(plan, state)) lines.push(`Checkup not booked yet${plan.untilText ? `: ${plan.untilText}` : ''}.`);
+  if (plan.checkupQuestions?.length) lines.push(`His list for the checkup: ${plan.checkupQuestions.join('; ')}.`);
+  const ph = photoStatus(plan, photoMarks(s), s.today);
+  if (ph) lines.push(`Photo poses: ${ph.poses.join(', ')}, every ${plan.photos.minDays || 14}-${plan.photos.maxDays || 28} days. ${plan.photos.how || ''}`.trim());
+  const ci = checkIns(s.list('coach-notes')).slice(0, 8);
+  lines.push(ci.length ? `Check-ins, newest first: ${ci.map((n) => `${dayText(n.date, s.today)}: ${n.text}`).join(' | ')}` : 'No check-ins yet.');
   return lines.join('\n');
 }
 
@@ -519,6 +552,7 @@ export const READ_TOOLS = [
   read('body_scans', 'Body scans', 'The Evolt 360 scan plan: next date or proposal, safety notice, staff instructions, preparation checklist, past results with their conditions, the latest change.', obj(), (s) => scansText(s)),
   read('sauna', 'Sauna', "The sauna ladder (today's step, clean sessions needed), the doctor question, a session in progress, the last sessions with symptoms, and the fixed rules. The ladder and hard stops can't be changed.", obj(), (s) => saunaText(s)),
   read('squat_sessions', 'Squat Depth', 'Recent Squat Depth runs: good and shallow reps, the lowest angle, each rep.', obj({ limit: { type: 'integer', minimum: 1, maximum: 20 } }), (s, a) => squatText(s, a)),
+  read('recovery', 'Recovery', "His recovery record's state in the app: days since it started, the weekly check-in (due or not, his past answers), what he still has to do, the checkup date, the photos. His record itself (what is CURRENT, what EXPIRED) is in your instructions.", obj(), (s) => recoveryText(s)),
   read('notes', 'Notes', 'Notes the coach wrote for him, and reminders set.', obj({ limit: { type: 'integer', minimum: 1, maximum: 60 } }), (s, a) => notesText(s, a)),
 ];
 
