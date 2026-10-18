@@ -109,10 +109,12 @@ const onRestDays = (h) => /\brest days?\b/i.test(timingOf(h));
  * @param {string|null} o.dayType today's session (planned or done); null on a rest day
  * @param {object} [o.roundsToday] {areaId: rounds logged today}
  * @param {{morning:string, evening:string}} [o.times]
+ * @param {object} [o.restChoices] {areaId: {today, last}} from restChoices(): his rest-day answer (A2)
  * @returns {Array<{area:string, label:string, slot:'after'|'rest'|'morning'|'evening', time:string|null,
- *   holdIndex:number, exercise:string, where:string|null, done:boolean}>}
+ *   holdIndex:number|'other', exercise:string, where:string|null, done:boolean, ask?:boolean, choice?:string|null,
+ *   skipped?:boolean, last?:object|null}>}
  */
-export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES }) {
+export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES, restChoices = {} }) {
   const out = [];
   const trainType = dayKind === 'rest' ? null : dayType;
   for (const a of areas || []) {
@@ -134,9 +136,17 @@ export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, ti
       else if (rest >= 0) add('rest', rest);
       // The round's other holds on the same timing (bench hold, then the cable raise hold, after Push).
       if (slots[0]) slots[0].also = holds.filter((h, i) => i !== slots[0].holdIndex && (after >= 0 ? isAfter(h, trainType) : onRestDays(h))).map((h) => h.exercise);
+      // Rest day (his answer Sun 10/18): he is asked each rest day: the gym for this hold, another hold he names, or
+      // skip today. Until he answers, his last gym/other answer stands (a skip counts for its own day only).
+      if (after < 0 && rest >= 0 && slots[0]) {
+        const rc = restChoices[a.id] || {};
+        const pick = rc.today || (rc.last?.choice === 'skip' ? rc.lastPlan : rc.last) || null;
+        Object.assign(slots[0], { ask: !rc.today, choice: pick?.choice || null, skipped: rc.today?.choice === 'skip', last: rc.last || null, restHold: holds[rest].exercise });
+        if (pick?.choice === 'other' && pick.holdName) Object.assign(slots[0], { holdIndex: 'other', exercise: pick.holdName, where: null, also: [] });
+      }
     }
     const done = roundsToday[a.id] || 0;
-    slots.forEach((s, i) => out.push({ ...s, done: i < done }));
+    slots.forEach((s, i) => out.push({ ...s, done: i < done, ...(i < done && s.ask ? { ask: false } : {}) }));
   }
   const ORDER = { morning: 0, rest: 1, after: 2, evening: 3 };
   return out.sort((x, y) => ORDER[x.slot] - ORDER[y.slot]);
@@ -149,3 +159,48 @@ export function slotHolds(area, slot, dayType) {
   if (slot === 'rest') return holds.map((h, i) => ({ h, i })).filter(({ h }) => onRestDays(h));
   return [];
 }
+
+/** The answers on a rest day (A2): the gym for the rest-day hold, another hold he names, or skip today. */
+export const REST_CHOICES = [['gym', 'Gym, just for this hold'], ['other', 'Another hold'], ['skip', 'Skip today']];
+
+/** Areas he is asked about on a rest day: a hold timed "rest days" outside the heal phase (today: the shoulder). */
+export const restAskAreas = (areas) => (areas || []).filter((a) => a.phase !== 'heal' && a.phase !== 'none' && a.phase !== 'unknown' && (a.holds || []).some(onRestDays));
+
+/**
+ * His rest-day answers per area, from the day records (days[date].restHolds[areaId] = {choice, holdName, at, by}):
+ * today's answer, the last one before today, and the last gym/other one (what stands when the last was a skip).
+ * @returns {{[areaId:string]: {today:object|null, last:object|null, lastPlan:object|null}}}
+ */
+export function restChoices(days, date) {
+  const out = {};
+  const dates = Object.keys(days || {}).filter((d) => d <= date && days[d]?.restHolds).sort().reverse();
+  for (const d of dates) {
+    for (const [area, c] of Object.entries(days[d].restHolds)) {
+      if (!c?.choice) continue;
+      const o = (out[area] ||= { today: null, last: null, lastPlan: null });
+      if (d === date) { o.today = { ...c, date: d }; continue; }
+      if (!o.last) o.last = { ...c, date: d };
+      if (!o.lastPlan && c.choice !== 'skip') o.lastPlan = { ...c, date: d };
+    }
+  }
+  return out;
+}
+
+/** Day record with his rest-day answer for one area. */
+export function withRestChoice(doc, date, areaId, { choice, holdName = null }, by = 'app', at = Date.now()) {
+  const base = doc || { date };
+  const entry = { choice, at, by, ...(choice === 'other' ? { holdName: String(holdName || '').trim() } : {}) };
+  return { ...base, date, restHolds: { ...(base.restHolds || {}), [areaId]: entry } };
+}
+
+/** One line for his answer: "gym for Lateral Raise (Cable)", "his own hold: wall press", "skipped today". */
+export function restChoiceText(c, area) {
+  if (!c) return 'not answered';
+  if (c.choice === 'skip') return 'skipped';
+  if (c.choice === 'other') return `his own hold: ${c.holdName}`;
+  const h = (area?.holds || []).find(onRestDays);
+  return `the gym for the ${h ? h.exercise : 'rest-day'} hold`;
+}
+
+/** Slots still to do today (a skipped slot is not open). */
+export const openSlots = (slots) => slots.filter((x) => !x.done && !x.skipped);

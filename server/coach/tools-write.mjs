@@ -19,6 +19,7 @@ import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checkli
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm } from '../../app/js/lib/time.js';
+import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -585,6 +586,25 @@ async function schedule(a, ctx) {
   return refuse('action is set_time, clear_time, rest_today or undo_rest.');
 }
 
+// ---- rest-day holds (A2) ----------------------------------------------------------------------------------------
+
+/** His answer to the rest-day hold question: the gym for that hold, a hold he names, or skip today. */
+function restDayHold(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const areas = restAskAreas(s.list('tendons').filter((x) => x.kind === 'area'));
+  if (!areas.length) return refuse('No tendon area has a rest-day hold.');
+  const area = a.area ? findByName(areas, a.area, (x) => x.label, (x) => [x.id]).item : areas[0];
+  if (!area) return refuse(`Not an area with a rest-day hold: ${a.area}. Areas: ${areas.map((x) => x.label).join(', ')}.`);
+  if (s.rotation().today.kind !== 'rest') return refuse('Today is not a rest day; the rest-day hold question is for rest days.');
+  if (a.choice === 'other' && !String(a.hold || '').trim()) return refuse('"other" needs the hold he named, in his words. Ask him which hold; never suggest one.');
+  const days = s.days();
+  const doc = withRestChoice(days[s.today], s.today, area.id, { choice: a.choice, holdName: a.hold }, 'coach', s.now);
+  put(s, 'days', s.today, doc);
+  const c = doc.restHolds[area.id];
+  ctx.action({ kind: 'open', url: '#/holds', label: 'Open tendon holds' });
+  return wrote(`${area.label}, ${dayText(s.today, s.today)}: ${restChoiceText(c, area)}${c.choice === 'skip' ? ' today. Asked again next rest day.' : '. 3 × 30 s, his rule.'}`, `rest-day ${c.choice}`);
+}
+
 const write = (name, title, description, inputSchema, run) => ({ name, title, description, inputSchema, run });
 
 export const WRITE_TOOLS = [
@@ -602,5 +622,6 @@ export const WRITE_TOOLS = [
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
   write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
+  write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
 ];

@@ -636,6 +636,9 @@ a.card-note.c-amber { color: var(--amber); }
 .btn-primary[disabled] { opacity: 0.45; pointer-events: none; }
 .hold-today .slot-row { align-items: center; }
 .slot-row.is-done { opacity: 0.6; }
+.slot-row.is-skipped { opacity: 0.7; }
+.rest-ask .chips { margin-top: 8px; }
+.slot-row .link-btn { padding: 4px 0 0; }
 .time-pair { display: flex; gap: 12px; }
 .time-pair label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .readout-link { color: inherit; text-decoration: none; }

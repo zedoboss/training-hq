@@ -2,7 +2,7 @@
 // Rules come from the owner's tendon note; the app adds no rehab advice of its own.
 import { ready, saveSettings } from '../lib/data.js';
 import { setQuiet } from '../lib/quiet.js';
-import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots } from '../lib/holds.js';
+import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES } from '../lib/holds.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
@@ -38,7 +38,22 @@ function renderList(view, repo) {
     const ease = new Set(todayDoc?.readiness?.easeHolds || []);
     const rounds = roundsByDate(areas, sessions, sets, bridge);
     const dayType = rot.today.kind === 'rest' ? null : rot.today.dayType;
-    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening } });
+    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today) });
+    const areaOf = (id) => areas.find((a) => a.id === id);
+    // A2: the rest-day question (the gym for this hold, another hold he names, or skip today). No hold is suggested.
+    const lastText = (x) => (x.last ? `<div class="hint">Last rest day (${esc(formatDay(new Date(`${x.last.date}T12:00:00`)))}): ${esc(restChoiceText(x.last, areaOf(x.area)))}.</div>` : '');
+    const askRow = (x) => `<div class="hold-row slot-row rest-ask" data-slot="${esc(x.area)}:rest"><div><span class="hud c-amber">REST DAY · ${esc(formatHm(x.time))} · WHAT TODAY?</span>
+          <div><b>${esc(x.label)}</b> · the ${esc(x.restHold)} hold needs the gym.</div>${lastText(x)}
+          <div class="chips wrap">${REST_CHOICES.map(([k, label]) => `<button class="chip" data-rc="${k}" data-area="${esc(x.area)}" type="button">${esc(label)}</button>`).join('')}</div></div></div>`;
+    const slotRow = (x) => {
+      if (x.ask && !x.done) return askRow(x);
+      if (x.skipped && !x.done) return `<div class="hold-row slot-row is-skipped" data-slot="${esc(x.area)}:rest"><div><span class="hud c-muted">REST DAY · SKIPPED TODAY (YOUR CHOICE)</span>
+          <div><b>${esc(x.label)}</b> · no hold today</div></div><button class="pill" data-rc-change="${esc(x.area)}" type="button">Change</button></div>`;
+      return `<div class="hold-row slot-row${x.done ? ' is-done' : ''}" data-slot="${esc(x.area)}:${esc(x.slot)}"><div><span class="hud ${x.done ? 'c-green' : 'c-cyan'}">${esc(slotWhen(x).toUpperCase())}${x.slot === 'rest' && x.holdIndex === 'other' ? ' · YOUR HOLD' : ''}</span>
+          <div><b>${esc(x.label)}</b> · ${esc(x.exercise)}${x.where ? ` <span class="hint">(${esc(x.where)})</span>` : ''}${x.also?.length ? `<div class="hint">then ${esc(x.also.join(', '))}</div>` : ''}</div>
+          ${x.slot === 'rest' && !x.done ? `<button class="link-btn" data-rc-change="${esc(x.area)}" type="button">Change today's choice</button>` : ''}</div>
+          ${x.done ? '<span class="hud c-green">DONE</span>' : `<a class="pill is-on" href="#/holds/${esc(x.area)}/${x.holdIndex}">Start</a>`}</div>`;
+    };
     const slotWhen = (x) => (x.slot === 'after' ? `After ${LABEL[dayType]}` : x.slot === 'rest' ? `Rest day · ${formatHm(x.time)}` : `${x.slot === 'morning' ? 'Morning' : 'Evening'} · ${formatHm(x.time)}`);
     const timesOpen = !prefs.holdTimesConfirmedOn;
     const unconfirmed = areas.filter((a) => a.holds?.length && a.phase !== 'unknown'
@@ -50,9 +65,7 @@ function renderList(view, repo) {
       <p class="hint">Your rules: hold at least 30 seconds, 3 sets, using the movement that hurts. Pain up to 3-4 out of 10 is fine if it isn't worse the next day; if it is, use less weight or push less hard.</p>
       <section class="card pad-card hold-today">
         <div class="hud c-muted">TODAY · ${esc(formatDay(new Date()).toUpperCase())} · ${rot.today.kind === 'rest' ? 'REST DAY' : `${esc(LABEL[dayType]).toUpperCase()} DAY`}</div>
-        ${slots.length ? slots.map((x) => `<div class="hold-row slot-row${x.done ? ' is-done' : ''}" data-slot="${esc(x.area)}:${esc(x.slot)}"><div><span class="hud ${x.done ? 'c-green' : 'c-cyan'}">${esc(slotWhen(x).toUpperCase())}</span>
-          <div><b>${esc(x.label)}</b> · ${esc(x.exercise)}${x.where ? ` <span class="hint">(${esc(x.where)})</span>` : ''}${x.also?.length ? `<div class="hint">then ${esc(x.also.join(', '))}</div>` : ''}</div></div>
-          ${x.done ? '<span class="hud c-green">DONE</span>' : `<a class="pill is-on" href="#/holds/${esc(x.area)}/${x.holdIndex}">Start</a>`}</div>`).join('') : '<p class="hint">Nothing scheduled today.</p>'}
+        ${slots.length ? slots.map(slotRow).join('') : '<p class="hint">Nothing scheduled today.</p>'}
       </section>
       ${unconfirmed.length || timesOpen ? `<section class="card pad-card confirm-card"><div class="hud c-amber">CONFIRM YOUR HOLD TIMES (FIRST TIME)</div>
         ${unconfirmed.map((a) => `<p class="hint c-text"><b>${esc(a.label)}:</b> ${esc(timingOf(a))}</p>`).join('')}
@@ -70,6 +83,24 @@ function renderList(view, repo) {
             <a class="pill is-on" href="#/holds/${esc(a.id)}/${i}">Start</a></div>`).join('')}
         </section>`;
       }).join('')}`;
+    const answer = async (areaId, choice) => {
+      let holdName = null;
+      if (choice === 'other') {
+        const prev = restChoices(days, today)[areaId];
+        const named = [prev?.today, prev?.last, prev?.lastPlan].find((c) => c?.choice === 'other')?.holdName || '';
+        holdName = (await promptText('Which hold today?', named, { placeholder: 'The hold, in your words' }))?.trim();
+        if (!holdName) return;
+      }
+      await repo.put('days', today, withRestChoice(days[today], today, areaId, { choice, holdName }));
+      toast(choice === 'skip' ? 'Skipped today. Asks again next rest day.' : choice === 'other' ? `${holdName}: 3 × 30 s, your rule.` : 'Gym it is.');
+    };
+    view.querySelectorAll('[data-rc]').forEach((b) => b.addEventListener('click', () => answer(b.dataset.area, b.dataset.rc)));
+    view.querySelectorAll('[data-rc-change]').forEach((b) => b.addEventListener('click', async () => {
+      const id = b.dataset.rcChange;
+      const { restHolds, ...rest } = days[today] || {};
+      const left = { ...(restHolds || {}) }; delete left[id];
+      await repo.put('days', today, { ...rest, date: today, ...(Object.keys(left).length ? { restHolds: left } : {}) });
+    }));
     const ok = view.querySelector('#t-ok');
     if (ok) {
       const saveTimes = async () => {
@@ -206,7 +237,13 @@ function renderRun(view, repo, areaId, index) {
   (async () => {
     const areas = await loadAreas(repo);
     area = areas.find((a) => a.id === areaId);
-    hold = area?.holds?.[index];
+    if (index === 'other') {
+      // A2: the hold he named for today's rest day (his words; his note's 3 × 30 s).
+      const today = isoDate(new Date());
+      const rc = restChoices(daysByDate(await repo.list('days')), today)[areaId] || {};
+      const c = [rc.today, rc.lastPlan].find((x) => x?.choice === 'other');
+      hold = c ? { exercise: c.holdName, load: 'load your choice', sets: 3, seconds: 30 } : null;
+    } else hold = area?.holds?.[index];
     if (!hold) { view.innerHTML = '<h1 class="view-title">Hold not found</h1><p class="hint"><a href="#/holds">Back</a></p>'; return; }
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/holds">Back</a><span class="hud c-muted">${esc(area.label.toUpperCase())} · ${esc((PHASE_TEXT[area.phase] || '').split(':')[0].toUpperCase())}</span></div>
@@ -227,7 +264,7 @@ export function render(view, params = []) {
   view.innerHTML = '<p class="view-sub">Loading…</p>';
   let cleanup = () => {};
   ready.then((repo) => {
-    if (params[0] && params[1] != null) cleanup = renderRun(view, repo, params[0], Number(params[1])) || cleanup;
+    if (params[0] && params[1] != null) cleanup = renderRun(view, repo, params[0], params[1] === 'other' ? 'other' : Number(params[1])) || cleanup;
     else if (params[0]) location.replace('#/holds');
     else cleanup = renderList(view, repo) || cleanup;
   });

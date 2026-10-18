@@ -9,7 +9,7 @@ import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js'
 import { targetFor } from '../../app/js/lib/targets.js';
 import { confirmedKg, modeOf, isConfirmed } from '../../app/js/lib/progression.js';
 import { currentBodyweight, healthDays, hoursText, weightSeries } from '../../app/js/lib/health.js';
-import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT } from '../../app/js/lib/holds.js';
+import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText } from '../../app/js/lib/holds.js';
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
@@ -96,9 +96,15 @@ function holdLines(s) {
   const rot = s.rotation();
   const rounds = roundsByDate(areas, s.list('sessions'), s.list('sets'), s.one('bridge', 'last-loads'));
   const st = s.settings().notify;
-  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening } });
+  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today) });
   if (!slots.length) return ['Tendon holds today: none planned.'];
-  return [`Tendon holds today: ${slots.map((x) => `${x.label} ${x.slot === 'after' ? 'after the session' : x.slot === 'rest' ? `rest day (${formatHm(x.time)})` : `${x.slot} ${formatHm(x.time)}`}: ${x.exercise}${x.also?.length ? ` + ${x.also.join(', ')}` : ''}, ${x.done ? 'DONE' : 'open'}`).join('; ')}.`];
+  const out = [`Tendon holds today: ${slots.map((x) => `${x.label} ${x.slot === 'after' ? 'after the session' : x.slot === 'rest' ? `rest day (${formatHm(x.time)})` : `${x.slot} ${formatHm(x.time)}`}: ${x.skipped ? 'skipped today (his choice)' : `${x.exercise}${x.also?.length ? ` + ${x.also.join(', ')}` : ''}${x.slot === 'rest' && x.holdIndex === 'other' ? ' (his own hold)' : ''}, ${x.done ? 'DONE' : x.ask ? 'not answered yet' : 'open'}`}`).join('; ')}.`];
+  // A2: the rest-day question. He answers; the coach never suggests a hold.
+  for (const x of slots.filter((y) => y.slot === 'rest' && y.ask)) {
+    const area = areas.find((a) => a.id === x.area);
+    out.push(`Rest-day ${x.label.toLowerCase()} hold: ask him what he wants today: the gym just for the ${x.restHold} hold, another hold he names, or skip today (record it with rest_day_hold). Never suggest a hold yourself.${x.last ? ` Last rest day (${dayText(x.last.date, s.today)}): ${restChoiceText(x.last, area)}.` : ''}`);
+  }
+  return out;
 }
 
 function suppDayKind(s, date) {

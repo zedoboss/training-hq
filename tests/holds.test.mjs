@@ -91,3 +91,41 @@ test('hold plan for the day (decisions 17 and 18)', async () => {
   assert.deepEqual(slotHolds(areas[1], 'after', 'push').map((x) => x.h.exercise), ['Press Hold', 'Raise Hold']);
   assert.deepEqual(slotHolds(areas[1], 'rest').map((x) => x.h.exercise), ['Raise Hold']);
 });
+
+test('rest-day hold (A2): asked each rest day; gym, his own hold or skip; the last gym/other answer stands until he answers', async () => {
+  const { holdSlots, restChoices, withRestChoice, restChoiceText, restAskAreas, openSlots } = await import('../app/js/lib/holds.js');
+  const areas = [
+    { id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Gym Hold', when: 'after Legs', where: 'gym' }, { exercise: 'Home Hold', where: 'home' }] },
+    { id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Press Hold', timing: ['after Push'] }, { exercise: 'Raise Hold', timing: ['after Push', 'rest days'] }] },
+  ];
+  assert.deepEqual(restAskAreas(areas).map((a) => a.id), ['shoulder']);
+  const slotOf = (days, date, rounds = {}) => holdSlots({ areas, dayKind: 'rest', dayType: null, roundsToday: rounds, restChoices: restChoices(days, date) }).find((x) => x.area === 'shoulder');
+  // Never answered: asked, the data's hold planned.
+  let x = slotOf({}, '2026-10-22');
+  assert.equal(x.ask, true); assert.equal(x.exercise, 'Raise Hold'); assert.equal(x.restHold, 'Raise Hold'); assert.equal(x.last, null);
+  // He names his own hold today.
+  let days = { '2026-10-22': withRestChoice(null, '2026-10-22', 'shoulder', { choice: 'other', holdName: ' Band hold ' }, 'app', 1) };
+  x = slotOf(days, '2026-10-22');
+  assert.equal(x.ask, false); assert.equal(x.holdIndex, 'other'); assert.equal(x.exercise, 'Band hold'); assert.deepEqual(x.also, []);
+  // Next rest day: asked again, his hold stands meanwhile, last answer shown.
+  x = slotOf(days, '2026-10-26');
+  assert.equal(x.ask, true); assert.equal(x.exercise, 'Band hold'); assert.equal(x.last.date, '2026-10-22');
+  assert.equal(restChoiceText(x.last, areas[1]), 'his own hold: Band hold');
+  // A skip counts for its day only: next time the last gym/other answer stands.
+  days['2026-10-26'] = withRestChoice(days['2026-10-26'], '2026-10-26', 'shoulder', { choice: 'skip' });
+  x = slotOf(days, '2026-10-26');
+  assert.equal(x.skipped, true);
+  assert.deepEqual(openSlots([x]), []);
+  x = slotOf(days, '2026-10-30');
+  assert.equal(x.ask, true); assert.equal(x.skipped, false); assert.equal(x.exercise, 'Band hold'); assert.equal(restChoiceText(x.last, areas[1]), 'skipped');
+  // Gym: the data's hold.
+  days['2026-10-30'] = withRestChoice({ date: '2026-10-30', sessionTime: '04:30' }, '2026-10-30', 'shoulder', { choice: 'gym' });
+  assert.equal(days['2026-10-30'].sessionTime, '04:30');
+  x = slotOf(days, '2026-10-30');
+  assert.equal(x.exercise, 'Raise Hold'); assert.equal(x.holdIndex, 1); assert.equal(restChoiceText(days['2026-10-30'].restHolds.shoulder, areas[1]), 'the gym for the Raise Hold hold');
+  // Done without answering: no longer asked.
+  x = slotOf({}, '2026-11-03', { shoulder: 1 });
+  assert.equal(x.done, true); assert.equal(x.ask, false);
+  // Training days are untouched.
+  assert.equal(holdSlots({ areas, dayKind: 'train', dayType: 'push', restChoices: restChoices(days, '2026-10-30') }).find((y) => y.area === 'shoulder').ask, undefined);
+});

@@ -56,9 +56,22 @@ test('rest day: shoulder rest-day hold with the morning knee hold; tomorrow with
   const days = { '2026-01-21': { date: '2026-01-21', sessionTime: '05:00' } };
   const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19' }, days });
   const k = byKind(items);
+  assert.equal(k['holds-morning'].title, 'Rest day holds: what today?');
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
+  assert.match(k.evening.body, /Tomorrow: Pull at 5:00 AM, check-in at 4:30 AM\.$/);
+});
+
+test('rest day (A2): his answer drives the reminder; a skip drops the shoulder from it and from the evening list', () => {
+  const day = (restHolds) => ({ '2026-01-20': { date: '2026-01-20', restHolds } });
+  const run = (restHolds) => byKind(remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19' }, days: day(restHolds) }));
+  let k = run({ shoulder: { choice: 'gym', at: 1 } });
   assert.equal(k['holds-morning'].title, 'Rest day holds');
   assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Raise Hold. 3 × 30 s each.');
-  assert.match(k.evening.body, /Tomorrow: Pull at 5:00 AM, check-in at 4:30 AM\.$/);
+  k = run({ shoulder: { choice: 'other', holdName: 'Band hold', at: 1 } });
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Band hold. 3 × 30 s each.');
+  k = run({ shoulder: { choice: 'skip', at: 1 } });
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each.');
+  assert.doesNotMatch(k.evening.body, /shoulder/);
 });
 
 test('settings: kinds switched off, own times', () => {

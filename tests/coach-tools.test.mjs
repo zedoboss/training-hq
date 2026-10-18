@@ -96,6 +96,25 @@ test('today: Neck after his chosen session (due today on a Legs plan), the weekl
   assert.doesNotMatch((await call('today')).text, /unplanned/);
 });
 
+test('rest_day_hold (A2): asked on a rest day, his answer recorded, never on a training day; "other" needs his words', async () => {
+  store.writeLocal('tendons', 'area.shoulder', { kind: 'area', id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Press Hold', timing: ['after Push'] }, { exercise: 'Raise Hold', timing: ['after Push', 'rest days'] }] });
+  assert.equal((await call('rest_day_hold', { choice: 'gym' })).wrote, undefined);
+  await call('schedule', { action: 'rest_today' });
+  assert.match((await call('today')).text, /Rest-day shoulder hold: ask him what he wants today: the gym just for the Raise Hold hold, another hold he names, or skip today/);
+  const no = await call('rest_day_hold', { choice: 'other' });
+  assert.match(no.text, /needs the hold he named/);
+  const r = await call('rest_day_hold', { choice: 'other', hold: 'Band hold' });
+  assert.equal(r.wrote, true);
+  assert.match(r.text, /Shoulder, Tuesday 1\/20: his own hold: Band hold\. 3 × 30 s, his rule\./);
+  const day = list('days').find((d) => d.date === '2026-01-20');
+  assert.equal(day.restHolds.shoulder.choice, 'other');
+  assert.ok(day.rest, 'the rest day stays');
+  assert.match((await call('today')).text, /Shoulder rest day \(7:30 AM\): Band hold \(his own hold\), open/);
+  assert.doesNotMatch((await call('today')).text, /Rest-day shoulder hold: ask him/);
+  await call('rest_day_hold', { choice: 'skip' });
+  assert.match((await call('today')).text, /Shoulder rest day \(7:30 AM\): skipped today \(his choice\)/);
+});
+
 test('programme gives exactly what Start would: the table capped at last load + 30%, with the bar split', async () => {
   const r = await call('programme');
   assert.match(r.text, /^Legs, today, week 3 column\./);

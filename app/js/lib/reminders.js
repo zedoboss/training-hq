@@ -3,7 +3,7 @@
 // fixed ones to an iPhone Shortcut (Reminders). Each item carries `due`: whether it still applies right now
 // (a check-in already done or holds already logged switch it off).
 import { rotationDay, LABEL, addDays, lastRotationSession, daysByDate } from './rotation.js';
-import { holdSlots, roundsByDate } from './holds.js';
+import { holdSlots, roundsByDate, restChoices, openSlots } from './holds.js';
 import { isoDate } from './time.js';
 import { weekColumn } from './programme.js';
 import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
@@ -27,7 +27,13 @@ export const KINDS = [
 
 const KEY_WORD = { L: 'legs', B: 'back' };
 const day = (iso) => formatDay(new Date(`${iso}T12:00:00Z`), 'UTC');
-const holdText = (s) => `${s.label}: ${s.exercise}${s.also?.length ? ` then ${s.also.join(', ')}` : ''}`;
+/** "Knees: Wall Hold. 3 × 30 s each. Shoulder: the gym for the ... hold, another hold, or skip today?" */
+const holdsBody = (shown) => {
+  const plain = shown.filter((s) => !s.ask);
+  return [plain.length ? `${plain.map(holdText).join('. ')}. 3 × 30 s each.` : '', ...shown.filter((s) => s.ask).map(holdText)].filter(Boolean).join(' ');
+};
+const holdText = (s) => (s.ask ? `${s.label}: the gym for the ${s.restHold || s.exercise} hold, another hold, or skip today?`
+  : `${s.label}: ${s.exercise}${s.also?.length ? ` then ${s.also.join(', ')}` : ''}`);
 
 /**
  * @param {object} o
@@ -87,16 +93,16 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
 
   // Tendon holds (decisions 17, 18): morning (and rest-day) holds, evening holds.
   const roundsToday = Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[date] || 0]));
-  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday, times: { morning: n.holdsMorning, evening: n.holdsEvening } });
+  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday, times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(days, date) });
   if (on('holds')) {
     for (const [part, hm] of [['morning', n.holdsMorning], ['evening', n.holdsEvening]]) {
-      const group = slots.filter((s) => (part === 'morning' ? s.slot === 'morning' || s.slot === 'rest' : s.slot === 'evening'));
+      const group = slots.filter((s) => (part === 'morning' ? s.slot === 'morning' || s.slot === 'rest' : s.slot === 'evening') && !s.skipped);
       if (!group.length) continue;
-      const open = group.filter((s) => !s.done);
+      const open = openSlots(group);
       out.push({
         id: `holds-${part}:${date}`, kind: 'holds', at: zonedTime(date, hm, tz), url: '#/holds', tag: `holds-${date}-${part}`, fixed: true,
-        title: `${part === 'morning' ? (rot.today.kind === 'rest' ? 'Rest day holds' : 'Morning holds') : 'Evening holds'}`,
-        body: `${(open.length ? open : group).map(holdText).join('. ')}. 3 × 30 s each.`,
+        title: `${part === 'morning' ? (rot.today.kind === 'rest' ? (open.some((s) => s.ask) ? 'Rest day holds: what today?' : 'Rest day holds') : 'Morning holds') : 'Evening holds'}`,
+        body: holdsBody(open.length ? open : group),
         due: open.length > 0,
       });
     }
@@ -118,7 +124,7 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
 
   // Evening: holds and supplements still open today, and tomorrow's session (or a nudge to set its time).
   if (on('evening')) {
-    const open = slots.filter((s) => !s.done);
+    const open = openSlots(slots);
     const tomorrow = addDays(date, 1);
     const rot2 = rotationDay({ last, today: tomorrow, days });
     let next = '';
