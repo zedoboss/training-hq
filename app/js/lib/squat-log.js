@@ -1,13 +1,15 @@
 // Squat Depth runs (5.3, 5.4): what one camera run did, rep by rep, and how it fills the squat set being logged.
 // A run is stored in the synced collection 'squats':
-//   {id, startedAt, endedAt, mode: 'camera', targetDeg, standDeg, reps: [{at, minDeg, good, late, early}],
-//    good, shallow, unsure, lowDeg, highDeg, sessionId, exKey, setId, exerciseName}
-// A rep whose bottom the camera lost is judged from the hip-and-head estimate: it also has est: true, band (the
-// estimate's uncertainty, either side), drops (to estimate it again), seenDeg (the deepest trusted reading), and
-// either good, or unsure: true (NOT SURE, his call) until he counts it (counted: true, good: true).
-// lowDeg is the deepest point of the run (the smallest knee angle, any rep but NOT SURE ones); highDeg the
-// shallowest good rep. A set filled from a run keeps set.depth = {good, shallow, lowDeg, highDeg, targetDeg, runId} (and
-// unsure, when NOT SURE reps were left uncounted).
+//   {id, startedAt, endedAt, mode: 'camera', targetDeg, countDeg, standDeg, reps: [{at, minDeg, good, late, early}],
+//    good, shallow, estimated, lowDeg, highDeg, sessionId, exKey, setId, exerciseName}
+// targetDeg is the ding, countDeg the count line (a rep counts at or below it; runs from before it existed count at the
+// ding). A rep whose bottom the camera lost is judged from the hip-and-head estimate: it also has est: true, band (the
+// estimate's uncertainty, either side), drops (to estimate it again), seenDeg (the deepest trusted reading) and judged
+// (no ding during the rep). It counts unless its whole range is above the count line; doubtful: the line was inside
+// the range. He can take a doubtful rep back (uncounted: true, good: false).
+// lowDeg is the deepest point of the run (the smallest knee angle, any rep); highDeg the shallowest good rep.
+// A set filled from a run keeps set.depth = {good, shallow, lowDeg, highDeg, targetDeg, runId} (and estimated, when
+// some of the good reps were estimated).
 import SquatCore from './squat-core.js';
 import { setFields } from './exercise-types.js';
 import { isoDate, formatTime } from './time.js';
@@ -18,10 +20,12 @@ export const newRunId = (now = Date.now()) => `squat-${now.toString(36)}-${rand(
 
 /** Squat Depth's own settings live on the device (as in the original app); the target is shown elsewhere too. */
 export const SETTINGS_KEY = 'thq.squat-depth-settings-v2';
-export function savedTargetDeg(fallback = 75) {
+/** The ding angle he set. A 75 saved before there was a count line was the old default, so it reads as the new one. */
+export function savedTargetDeg(fallback = SquatCore.TARGET_DEG_DEFAULT) {
   try {
-    const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')?.targetDeg;
-    return Number.isFinite(v) ? v : fallback;
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {};
+    if (saved.countDeg === undefined && saved.targetDeg === 75) return fallback;
+    return Number.isFinite(saved.targetDeg) ? saved.targetDeg : fallback;
   } catch { return fallback; }
 }
 
@@ -29,9 +33,9 @@ export function savedTargetDeg(fallback = 75) {
 export const isSquatExercise = (ex) => !!ex && /squat/i.test(ex.name || '') && setFields(ex.type, 'normal').includes('reps');
 
 /** A new run. link: {sessionId, exKey, setId, exerciseName} when started from a set, else null. */
-export function startRun({ startedAt = Date.now(), mode = 'camera', targetDeg, standDeg, link = null } = {}) {
+export function startRun({ startedAt = Date.now(), mode = 'camera', targetDeg, countDeg = targetDeg, standDeg, link = null } = {}) {
   return {
-    id: newRunId(startedAt), startedAt, endedAt: null, mode, targetDeg, standDeg, reps: [],
+    id: newRunId(startedAt), startedAt, endedAt: null, mode, targetDeg, countDeg, standDeg, reps: [],
     sessionId: link?.sessionId ?? null, exKey: link?.exKey ?? null, setId: link?.setId ?? null, exerciseName: link?.exerciseName ?? null,
     pendingLate: false,
   };
@@ -40,49 +44,49 @@ export function startRun({ startedAt = Date.now(), mode = 'camera', targetDeg, s
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /**
- * Record a RepMachine event. 'depth' marks how the coming rep's ding fired; 'rep', 'shallow' and 'unsure' (NOT SURE)
- * end a rep. An 'armed' event can carry the verdict on a rep that was lost at its bottom. 'unseen' is not kept.
+ * Record a RepMachine event. 'depth' marks how the coming rep's ding fired; 'rep' and 'shallow' end a rep. An 'armed'
+ * event can carry the verdict on a rep that was lost at its bottom. 'unseen' is not kept.
  */
 export function addRepEvent(run, ev, at = Date.now()) {
   if (!run || !ev) return run;
   if (ev.type === 'armed') return ev.rep ? addRepEvent(run, ev.rep, at) : run;
   if (ev.type === 'depth') { run.pendingLate = !!ev.late; return run; }
-  const est = ev.estimated || ev.type === 'unsure'
-    ? { est: true, band: round1(ev.band), seenDeg: Number.isFinite(ev.seenAngle) ? round1(ev.seenAngle) : null,
+  const est = ev.estimated
+    ? { est: true, judged: !!ev.judged, doubtful: !!ev.doubtful, band: round1(ev.band),
+        seenDeg: Number.isFinite(ev.seenAngle) ? round1(ev.seenAngle) : null,
         drops: ev.drops ? { hip: round4(ev.drops.hip), head: round4(ev.drops.head) } : null }
     : {};
   if (ev.type === 'rep') run.reps.push({ at, minDeg: round1(ev.minAngle), good: true, late: run.pendingLate, early: !!ev.anticipated, ...est });
   else if (ev.type === 'shallow') run.reps.push({ at, minDeg: round1(ev.minAngle), good: false, late: false, early: false, ...est });
-  else if (ev.type === 'unsure') run.reps.push({ at, minDeg: round1(ev.minAngle), good: false, unsure: true, late: false, early: false, ...est });
   else return run;
   run.pendingLate = false;
   return run;
 }
 
-/** He says a NOT SURE rep was deep enough (the latest one unless index is given): it counts as good. */
-export function countRep(run, index = null) {
-  const i = index ?? (run?.reps || []).findLastIndex((r) => r.unsure);
+/** He takes back a rep counted on the estimate's benefit of the doubt (the latest one unless index is given). */
+export function uncountRep(run, index = null) {
+  const i = index ?? (run?.reps || []).findLastIndex((r) => r.doubtful && r.good);
   const rep = run?.reps?.[i];
-  if (!rep || !rep.unsure) return null;
-  rep.unsure = false; rep.good = true; rep.counted = true;
+  if (!rep || !rep.doubtful || !rep.good) return null;
+  rep.good = false; rep.uncounted = true;
   return rep;
 }
 
 /**
- * The verdict at the end of the set: estimated reps that aren't good (shallow or NOT SURE) are judged again with
- * the calibration of the whole set. estimate(drops) -> {angle, band} or null. A good rep stays good (he heard the
- * ding, or counted it himself). Returns the reps that changed.
+ * The verdict at the end of the set: estimated reps judged without a ding are judged again with the calibration of
+ * the whole set. estimate(drops) -> {angle, band} or null. A rep that dinged stays counted, and one he took back stays
+ * out. Returns the reps that changed.
  */
-export function reviewEstimates(run, estimate, targetDeg = run?.targetDeg) {
+export function reviewEstimates(run, estimate, countDeg = run?.countDeg ?? run?.targetDeg) {
   const changed = [];
   for (const rep of run?.reps || []) {
-    if (!rep.est || rep.good || !rep.drops) continue;
+    if (!rep.est || !rep.drops || rep.uncounted || (rep.good && !rep.judged)) continue;
     const e = estimate({ hip: rep.drops.hip ?? -Infinity, head: rep.drops.head ?? -Infinity });
     if (!e) continue;
     const angle = round1(Math.min(e.angle, rep.seenDeg ?? Infinity)), band = round1(e.band);
-    const verdict = SquatCore.DepthEstimator.verdict({ angle, band }, targetDeg);
-    const next = { minDeg: angle, band, good: verdict === 'good', unsure: verdict === 'unsure' };
-    if (next.good === rep.good && next.unsure === !!rep.unsure && angle === rep.minDeg) continue;
+    const verdict = SquatCore.DepthEstimator.verdict({ angle, band }, countDeg);
+    const next = { minDeg: angle, band, good: verdict !== 'shallow', doubtful: verdict === 'doubtful', judged: true };
+    if (next.good === rep.good && next.doubtful === !!rep.doubtful && angle === rep.minDeg) continue;
     Object.assign(rep, next, { reviewed: true });
     changed.push(rep);
   }
@@ -94,13 +98,13 @@ export function resetReps(run) { if (run) { run.reps = []; run.pendingLate = fal
 
 export function summarizeRun(run) {
   const reps = run?.reps || [];
-  const good = reps.filter((r) => r.good), unsure = reps.filter((r) => r.unsure).length, judged = reps.filter((r) => !r.unsure);
+  const good = reps.filter((r) => r.good);
   return {
     good: good.length,
-    shallow: reps.length - good.length - unsure,
-    unsure,
+    shallow: reps.length - good.length,
+    estimated: good.filter((r) => r.est).length,
     total: reps.length,
-    lowDeg: judged.length ? Math.min(...judged.map((r) => r.minDeg)) : null,
+    lowDeg: reps.length ? Math.min(...reps.map((r) => r.minDeg)) : null,
     highDeg: good.length ? Math.max(...good.map((r) => r.minDeg)) : null,
     targetDeg: run?.targetDeg ?? null,
   };
@@ -111,7 +115,7 @@ export function finishRun(run, endedAt = Date.now()) {
   if (!run || !run.reps.length) return null;
   const { pendingLate, ...rest } = run;
   const s = summarizeRun(run);
-  return { ...rest, endedAt, good: s.good, shallow: s.shallow, unsure: s.unsure, lowDeg: s.lowDeg, highDeg: s.highDeg };
+  return { ...rest, endedAt, good: s.good, shallow: s.shallow, estimated: s.estimated, lowDeg: s.lowDeg, highDeg: s.highDeg };
 }
 
 /**
@@ -142,7 +146,7 @@ export function fillSet(set, summary, { runId = null, withShallow = false } = {}
   return {
     ...set,
     reps: summary.good + (withShallow ? summary.shallow : 0),
-    depth: { good: summary.good, shallow: summary.shallow, ...(summary.unsure ? { unsure: summary.unsure } : {}), lowDeg: summary.lowDeg, highDeg: summary.highDeg, targetDeg: summary.targetDeg, runId },
+    depth: { good: summary.good, shallow: summary.shallow, ...(summary.estimated ? { estimated: summary.estimated } : {}), lowDeg: summary.lowDeg, highDeg: summary.highDeg, targetDeg: summary.targetDeg, runId },
   };
 }
 
@@ -154,10 +158,10 @@ export function depthText(d) {
   return `DEPTH ${d.good} GOOD${d.lowDeg != null ? ` · LOW ${deg(d.lowDeg)}` : ''}${d.shallow ? ` · ${d.shallow} SHALLOW` : ''}`;
 }
 
-/** "8 good · 1 shallow · lowest 68°" (+ " · 1 not sure") */
+/** "8 good · 1 shallow · lowest 68°", "8 good (2 estimated) · ..." */
 export function runText(r) {
   const s = r.good != null ? r : summarizeRun(r);
-  return `${s.good} good${s.shallow ? ` · ${s.shallow} shallow` : ''}${s.unsure ? ` · ${s.unsure} not sure` : ''}${s.lowDeg != null ? ` · lowest ${deg(s.lowDeg)}` : ''}`;
+  return `${s.good} good${s.estimated ? ` (${s.estimated} estimated)` : ''}${s.shallow ? ` · ${s.shallow} shallow` : ''}${s.lowDeg != null ? ` · lowest ${deg(s.lowDeg)}` : ''}`;
 }
 
 /** One rep for a rep list: "74°", "~79°" for an estimate. */

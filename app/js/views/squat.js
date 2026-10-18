@@ -6,7 +6,7 @@
 // for use with no connection (5.2, lib/squat-offline.js).
 import SquatCore from '../lib/squat-core.js';
 import { MP_LOCAL as mpLocal, MODEL_LOCAL, offlineStatus, keepOffline, isDownloading, approxBytes, mb } from '../lib/squat-offline.js';
-import { SETTINGS_KEY, startRun, addRepEvent, countRep, reviewEstimates, resetReps, summarizeRun, finishRun, fillChoices, fillSet, runText, repDeg, isSquatExercise } from '../lib/squat-log.js';
+import { SETTINGS_KEY, startRun, addRepEvent, uncountRep, reviewEstimates, resetReps, summarizeRun, finishRun, fillChoices, fillSet, runText, repDeg, isSquatExercise } from '../lib/squat-log.js';
 import { ready } from '../lib/data.js';
 import { formatDay, formatTime } from '../lib/time.js';
 import { kg as fmtKg } from '../lib/loads.js';
@@ -44,6 +44,7 @@ const LOG_MAX = 300;
 
 const DEFAULT_SETTINGS = {
   targetDeg: C.TARGET_DEG_DEFAULT,
+  countDeg: C.COUNT_DEG_DEFAULT,
   standDeg: C.STAND_DEG_DEFAULT,
   sound: true,
   buzz: true,
@@ -58,6 +59,8 @@ const DEFAULT_SETTINGS = {
 function loadSettings() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch { /* private mode, bad JSON */ }
+  // Saved before there was a count line: a ding of 75 was the old default, so it moves to the new one.
+  if (saved.countDeg === undefined && saved.targetDeg === 75) delete saved.targetDeg;
   const s = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(s)) if (typeof saved[k] === typeof s[k]) s[k] = saved[k];
   if (s.model !== 'full') s.model = 'lite';
@@ -406,20 +409,19 @@ function processFrame(meta) {
   const tDet = performance.now();
 
   const points = result.landmarks && result.landmarks[0];
-  let sample = null, side = null, lockText = "CAN'T SEE YOU HEAD TO FEET", lockCls = 'bad';
+  let sample = null, side = null, knee = null, lockText = "CAN'T SEE YOU HEAD TO FEET", lockCls = 'bad';
   if (points) {
     const w = video.videoWidth, h = video.videoHeight;
     const problemL = C.legProblem(points, 'L', w, h), problemR = C.legProblem(points, 'R', w, h);
     side = sidePicker.update(points, !problemL, !problemR);
     const problem = side === 'L' ? problemL : problemR;
-    let knee = null; // this frame's knee angle, when it can be believed
     if (!problem) {
       const [hi, ki, ai] = C.LEG[side];
       const hip = points[hi], kneePoint = points[ki];
       const raw = C.kneeAngle(hip, kneePoint, points[ai], w, h);
       const thigh = Math.hypot((hip.x - kneePoint.x) * w, (hip.y - kneePoint.y) * h);
       if (kneeGuard.check(raw, hip.y * h, thigh, machine)) {
-        knee = raw;
+        knee = raw; // this frame's knee angle can be believed
         lockText = `LOCK · ${side === 'L' ? 'LEFT' : 'RIGHT'} LEG`; lockCls = 'good';
       } else {
         lockText = LEG_PROBLEM_LABEL.knee; lockCls = 'warn'; // the knee opened without the hip rising: not believed
@@ -427,21 +429,27 @@ function processFrame(meta) {
     } else {
       lockText = LEG_PROBLEM_LABEL[problem]; lockCls = 'warn';
     }
-    // The depth estimate follows the hip and head on every frame, before the machine judges this one.
-    estimator.frame({ knee, ...C.bodyHeights(points, side, w, h) }, machine);
     if (knee !== null) sample = tracker.update(knee, tSample);
   }
 
-  let ev = null;
+  // The ding comes first: nothing of the depth estimate runs before a measured knee's ding has been played.
   if (sample) {
     run.lostSince = 0;
-    ev = machine.update(sample.angle, sample.vel, tSample, sample.dtMs, sample.restarted);
-  } else {
-    if (points) ev = machine.hidden(tSample); // knee lost, rest of him in view: a clear estimate can still ding
+    const ev = machine.update(sample.angle, sample.vel, tSample, sample.dtMs, sample.restarted);
+    if (ev) onRepEvent(ev, sample, tFrame, tCb, tDet, clock);
+  }
+  if (points) {
+    // Then the estimate follows the hip and head. On a frame whose knee isn't believed, it can ding by itself.
+    estimator.frame({ knee, ...C.bodyHeights(points, side, video.videoWidth, video.videoHeight) }, machine);
+    if (knee === null) {
+      const ev = machine.hidden(tSample);
+      if (ev) onRepEvent(ev, null, tFrame, tCb, tDet, clock);
+    }
+  }
+  if (!sample) {
     if (!run.lostSince) run.lostSince = tDet;
     else if (tDet - run.lostSince > LOST_RESET_MS && machine.state !== C.State.UNKNOWN) { machine.resetState(); tracker.reset(); }
   }
-  if (ev) onRepEvent(ev, sample, tFrame, tCb, tDet, clock);
 
   // ----- Everything below is display only; the ding has already been fired. -----
   const tDone = performance.now();
@@ -509,20 +517,20 @@ function onRepEvent(ev, sample, tFrame, tCb, tDet, clock) {
     if (settings.sound) audio.ready();
     if (ev.rep) { onRepEvent(ev.rep, sample, tFrame, tCb, tDet, clock); return; } // verdict on a rep lost at its bottom (logs it)
   } else if (ev.type === 'rep') {
-    if (ev.judged) { if (settings.sound) audio.ding(); flash('hit'); } // counted from the estimate at the end of the rep
+    // Counted with no ding during the rep (an estimate, or a bottom between the ding and a deeper count line).
+    // Shown, not dinged: the ding means "go up", and he is already up.
+    if (ev.judged) {
+      flash('hit');
+      showBanner('COUNTED', SHALLOW_BANNER_MS, 'good', ev.estimated ? `ESTIMATED ~${Math.round(ev.minAngle)}°` : `${Math.round(ev.minAngle)}°`);
+    }
     renderCounts();
     if (ev.anticipated && !ev.confirmed) console.log(`[squat] early ding was not confirmed: min ${ev.minAngle.toFixed(1)}° vs target ${machine.targetDeg}°`);
   } else if (ev.type === 'shallow') {
     if (settings.sound && settings.buzz) audio.buzz();
     flash('shallow');
-    showBanner('TOO SHALLOW', SHALLOW_BANNER_MS, '', ev.estimated ? `ESTIMATED ~${Math.round(ev.minAngle)}°` : '');
+    showBanner('TOO SHALLOW', SHALLOW_BANNER_MS, '', `${ev.estimated ? 'ESTIMATED ~' : ''}${Math.round(ev.minAngle)}° · COUNTS AT ${machine.countDeg}°`);
     renderCounts();
     console.log(`[squat] shallow rep: min ${ev.minAngle.toFixed(1)}°${ev.estimated ? ` (estimated ±${ev.band.toFixed(1)})` : ''}`);
-  } else if (ev.type === 'unsure') {
-    // Too close to call from the hip and head: he decides with COUNT IT, never the app. No buzz.
-    flash('unseen');
-    showBanner('NOT SURE', UNSEEN_BANNER_MS, 'warn', `ESTIMATED ~${Math.round(ev.minAngle)}° · TARGET ${machine.targetDeg}°`);
-    console.log(`[squat] not sure: estimated ${ev.minAngle.toFixed(1)}° ±${ev.band.toFixed(1)}`);
   } else if (ev.type === 'unseen') {
     // Nothing to estimate from (no clean reps to calibrate on yet): not counted either way.
     flash('unseen');
@@ -531,16 +539,15 @@ function onRepEvent(ev, sample, tFrame, tCb, tDet, clock) {
     console.log(`[squat] bottom not seen: deepest reading before it was lost ${ev.minAngle.toFixed(1)}°`);
   }
   addRepEvent(current, ev); // Training HQ: keep the rep for the log (after the ding, never before it)
-  if (ev.type === 'unsure') renderCounts(); // after it is in the log, so COUNT IT finds it
 }
 
-/** COUNT IT: his call on the latest NOT SURE rep, it was deep enough. */
-function countLatest() {
-  const p = machine.countUnsure();
-  if (!p) return;
-  countRep(current);
+/** DON'T COUNT: his call on the last rep, counted on the estimate's benefit of the doubt. Nothing waits on it. */
+function uncountLatest() {
+  const d = machine.uncount();
+  if (!d) return;
+  uncountRep(current);
   renderCounts();
-  showBanner('COUNTED', SHALLOW_BANNER_MS, 'info', `~${Math.round(p.angle)}°, YOUR CALL`);
+  showBanner('NOT COUNTED', SHALLOW_BANNER_MS, 'info', `~${Math.round(d.angle)}°, YOUR CALL`);
 }
 
 // ===== Display =====
@@ -581,14 +588,12 @@ function renderCounts() {
   const sh = $('hudShallow');
   sh.textContent = `shallow ${machine.shallow}`;
   sh.className = 'sq-sub' + (machine.shallow ? ' some' : '');
-  const us = $('hudUnsure');
-  us.hidden = !machine.unsure; us.textContent = `not sure ${machine.unsure}`;
   const un = $('hudUnseen');
   un.hidden = !machine.unseen; un.textContent = `not seen ${machine.unseen}`;
   $('hudLast').textContent = machine.lastMin === null ? 'last –' : `last ${machine.lastEstimated ? '~' : ''}${Math.round(machine.lastMin)}°`;
-  const waiting = machine.pending[machine.pending.length - 1];
-  $('btnCount').hidden = !waiting;
-  if (waiting) $('btnCount').textContent = `COUNT IT · ~${Math.round(waiting.angle)}°${machine.pending.length > 1 ? ` (${machine.pending.length})` : ''}`;
+  const d = machine.doubtful; // the last rep counted on the estimate's benefit of the doubt: he can take it back
+  $('btnUncount').hidden = !d;
+  if (d) $('btnUncount').textContent = `DON'T COUNT · ~${Math.round(d.angle)}°`;
 }
 
 function renderDebug() {
@@ -645,7 +650,7 @@ async function start(mode, fileUrl = null) {
   $('btnReplay').hidden = mode !== 'file';
   $('startNotice').hidden = true;
   resetSession(); applyDisplaySettings();
-  current = startRun({ mode, targetDeg: settings.targetDeg, standDeg: settings.standDeg, link });
+  current = startRun({ mode, targetDeg: settings.targetDeg, countDeg: settings.countDeg, standDeg: settings.standDeg, link });
   showBanner(mode === 'camera' ? 'Starting camera…' : 'Loading video…', 0, 'info');
   try {
     if (mode === 'camera') await startCamera(); else await startFile(fileUrl);
@@ -694,11 +699,11 @@ function replay() {
 let repo = null;
 const viewAlive = () => !!$('start');
 
-/** One rep in a rep list: green good, red shallow, amber NOT SURE; "~" marks an estimate. */
-const repSpan = (x) => `<span class="${x.good ? 'c-green' : x.unsure ? 'c-amber' : 'c-red'}">${repDeg(x)}</span>`;
+/** One rep in a rep list: green counted, red shallow; "~" marks an estimate. */
+const repSpan = (x) => `<span class="${x.good ? 'c-green' : 'c-red'}">${repDeg(x)}</span>`;
 
 async function afterRun(r, { quiet }) {
-  // The verdict at the end of the set: shallow and NOT SURE estimates are judged again with every rep's calibration.
+  // The verdict at the end of the set: estimates judged without a ding are judged again with every rep's calibration.
   reviewEstimates(r, (drops) => estimator.estimate(drops));
   const summary = summarizeRun(r);
   repo ||= await ready;
@@ -720,14 +725,15 @@ function resultSheet({ run: r, doc, summary, session, sets }) {
   const names = [...new Set(choices.map((c) => c.name))];
   const chip = (c) => `<button class="chip ${c.setId === pick ? 'is-on' : ''}" data-set="${esc(c.setId)}" type="button">${names.length > 1 ? `${esc(c.name.replace(/\s*\(.*\)$/, ''))} ` : ''}${c.label === 'W' ? 'Warm-up' : `Set ${esc(c.label)}`}${c.kg != null ? ` · ${fmtKg(c.kg)} kg` : ''}${c.done ? ' ✓' : ''}</button>`;
   const repsLine = r.reps.map(repSpan).join(' ');
-  const unsure = r.reps.map((x, i) => ({ x, i })).filter(({ x }) => x.unsure);
+  const doubtful = r.reps.map((x, i) => ({ x, i })).filter(({ x }) => x.doubtful && x.good);
+  const countDeg = r.countDeg ?? summary.targetDeg;
   const { el, close } = overlay(`
     <div class="hud c-muted sheet-title">SQUAT DEPTH · ${doc ? 'SAVED' : 'VIDEO TEST, NOT SAVED'}</div>
-    <div class="sq-result"><span><b class="c-green">${summary.good}</b><span class="hud">GOOD</span></span>${summary.shallow ? `<span><b class="c-red">${summary.shallow}</b><span class="hud">SHALLOW</span></span>` : ''}${summary.unsure ? `<span><b class="c-amber">${summary.unsure}</b><span class="hud">NOT SURE</span></span>` : ''}
+    <div class="sq-result"><span><b class="c-green">${summary.good}</b><span class="hud">GOOD</span></span>${summary.shallow ? `<span><b class="c-red">${summary.shallow}</b><span class="hud">SHALLOW</span></span>` : ''}
       <span><b class="c-cyan">${summary.lowDeg != null ? `${Math.round(summary.lowDeg)}°` : '–'}</b><span class="hud">LOWEST</span></span></div>
-    <p class="hint">Each rep's lowest knee angle (target ${esc(summary.targetDeg)}°; ~ is estimated from your hip and head, where the camera lost your knee): ${repsLine}</p>
-    ${unsure.length ? `<p class="hint">NOT SURE: the estimate is too close to ${esc(summary.targetDeg)}° to call. Count a rep if it was deep enough.</p>
-      <div class="chips wrap">${unsure.map(({ x, i }) => `<button class="chip" data-count="${i}" type="button">Count rep ${i + 1} · ${repDeg(x)}</button>`).join('')}</div>` : ''}
+    <p class="hint">Each rep's lowest knee angle (counts at ${esc(countDeg)}° or deeper): ${repsLine}${summary.estimated ? `<br>~ is estimated from your hip and head where the camera lost your knee. It counts unless its whole range is above ${esc(countDeg)}°.` : ''}</p>
+    ${doubtful.length ? `<p class="hint">Counted on the benefit of the doubt (${esc(countDeg)}° was inside the estimate's range). Take one back if it wasn't deep enough:</p>
+      <div class="chips wrap">${doubtful.map(({ x, i }) => `<button class="chip" data-uncount="${i}" type="button">Don't count rep ${i + 1} · ${repDeg(x)}</button>`).join('')}</div>` : ''}
     ${choices.length ? `<div class="hud c-muted">FILL INTO ${esc(session.title.toUpperCase())}</div>
       <div class="chips wrap" data-k="chips">${choices.map(chip).join('')}</div>
       <button class="btn-primary" data-fill="good" type="button">Fill ${summary.good} rep${summary.good === 1 ? '' : 's'}</button>
@@ -740,9 +746,9 @@ function resultSheet({ run: r, doc, summary, session, sets }) {
     pick = b.dataset.set;
     el.querySelectorAll('[data-set]').forEach((x) => x.classList.toggle('is-on', x === b));
   });
-  el.querySelectorAll('[data-count]').forEach((b) => b.addEventListener('click', async () => {
-    // His call on a NOT SURE rep: it counts. Keep it in the saved run, then show the sheet again with the new numbers.
-    countRep(r, +b.dataset.count);
+  el.querySelectorAll('[data-uncount]').forEach((b) => b.addEventListener('click', async () => {
+    // His call on a doubtful estimate: it doesn't count. Keep it in the saved run, then show the sheet again.
+    uncountRep(r, +b.dataset.uncount);
     const again = doc ? finishRun(r, doc.endedAt) : null;
     if (again) await repo.put('squats', again.id, again);
     close();
@@ -816,9 +822,12 @@ async function drawRuns() {
 function openSettings() {
   const { el, close } = overlay(`
     <div class="hud c-muted sheet-title">SQUAT DEPTH · SETTINGS</div>
-    <label class="sq-row"><span class="sq-name">Target depth</span><span class="sq-val" id="sq-vTarget"></span>
+    <label class="sq-row"><span class="sq-name">Ding at</span><span class="sq-val" id="sq-vTarget"></span>
       <input id="sq-sTarget" type="range" step="1">
-      <span class="hint">Knee angle that earns the ding. Lower = deeper. Thighs parallel to the floor reads about 70&ndash;75&deg;; 90&deg; is well above parallel.</span></label>
+      <span class="hint">Knee angle that earns the ding: counted, go up. Lower = deeper. Thighs parallel usually reads about 75&ndash;80&deg; here; 90&deg; is well above parallel.</span></label>
+    <label class="sq-row"><span class="sq-name">Counts at</span><span class="sq-val" id="sq-vCount"></span>
+      <input id="sq-sCount" type="range" step="1">
+      <span class="hint">A rep counts when its bottom is at or below this, measured, or estimated from your hip and head when the camera loses your knee. Set it apart from the ding if you want; with the ding at or below it, every ding counts.</span></label>
     <label class="sq-row"><span class="sq-name">Standing / re-arm</span><span class="sq-val" id="sq-vStand"></span>
       <input id="sq-sStand" type="range" step="1">
       <span class="hint">You must come back above this to finish the rep and arm the next ding. Lower it if you don't lock out fully.</span></label>
@@ -844,7 +853,7 @@ function openSettings() {
     </div>
     <button class="sheet-btn sheet-cancel" data-cancel type="button">Done</button>`, () => { drawOffline(); drawRuns(); });
   el.querySelector('[data-cancel]').addEventListener('click', () => close());
-  for (const id of ['sTarget', 'sStand', 'sLead', 'sSound', 'sBuzz', 'sAnticipate', 'sPerf', 'sFull', 'sDebug']) {
+  for (const id of ['sTarget', 'sCount', 'sStand', 'sLead', 'sSound', 'sBuzz', 'sAnticipate', 'sPerf', 'sFull', 'sDebug']) {
     $(id).addEventListener('input', onSettingChange);
   }
   $('btnTestDing').addEventListener('click', () => { audio.unlock(); audio.ding(); audio.releaseSoonIfIdle(); });
@@ -858,9 +867,11 @@ function openSettings() {
 function syncSettingsUi() {
   if (!$('sTarget')) return; // sheet closed
   $('sTarget').min = C.TARGET_DEG_MIN; $('sTarget').max = C.TARGET_DEG_MAX; $('sTarget').value = settings.targetDeg;
+  $('sCount').min = C.TARGET_DEG_MIN; $('sCount').max = C.TARGET_DEG_MAX; $('sCount').value = settings.countDeg;
   $('sStand').min = C.STAND_DEG_MIN; $('sStand').max = C.STAND_DEG_MAX; $('sStand').value = settings.standDeg;
   $('sLead').value = settings.extraLeadMs;
   $('vTarget').textContent = settings.targetDeg + '°';
+  $('vCount').textContent = settings.countDeg + '°';
   $('vStand').textContent = settings.standDeg + '°';
   $('vLead').textContent = settings.extraLeadMs ? `1 frame + ${settings.extraLeadMs} ms` : '1 frame';
   $('sSound').checked = settings.sound; $('sBuzz').checked = settings.buzz;
@@ -870,6 +881,7 @@ function syncSettingsUi() {
 function onSettingChange() {
   const prevModel = settings.model;
   settings.targetDeg = +$('sTarget').value;
+  settings.countDeg = +$('sCount').value;
   settings.standDeg = +$('sStand').value;
   settings.extraLeadMs = +$('sLead').value;
   settings.sound = $('sSound').checked; settings.buzz = $('sBuzz').checked;
@@ -887,7 +899,7 @@ async function copyLog() {
     delegate: pose.delegate, model: pose.model, warmupMs: Math.round(stats.warmupMs),
     fps: +stats.fps.toFixed(1), inferMs: +stats.inferMs.toFixed(1), droppedFrames: stats.dropped, staleFrames: stats.stale,
     dings: machine.dings, lateDings: machine.late, earlyDings: machine.early, earlyMissed: machine.earlyMissed, unseenReps: machine.unseen,
-    unsureReps: machine.unsure, estimatedReps: machine.estimated,
+    estimatedReps: machine.estimated,
     earlyAvgLeadMs: machine.earlyConfirmed ? +(machine.earlyLeadSumMs / machine.earlyConfirmed).toFixed(1) : null,
     log: latencyLog,
   }, null, 1);
@@ -970,7 +982,6 @@ export function render(view, params = []) {
         <span class="sq-lbl">GOOD REPS</span>
         <span id="sq-hudReps" class="sq-huge">0</span>
         <span id="sq-hudShallow" class="sq-sub">shallow 0</span>
-        <span id="sq-hudUnsure" class="sq-sub" hidden>not sure 0</span>
         <span id="sq-hudUnseen" class="sq-sub" hidden>not seen 0</span>
         <span id="sq-hudLast" class="sq-sub">last &ndash;</span>
       </div>
@@ -981,7 +992,7 @@ export function render(view, params = []) {
         <span id="sq-forPill" class="sq-pill" hidden></span>
         <div id="sq-debug" hidden></div>
       </div>
-      <button id="sq-btnCount" type="button" hidden>COUNT IT</button>
+      <button id="sq-btnUncount" type="button" hidden>DON'T COUNT</button>
       <div class="sq-btns">
         <button id="sq-btnReplay" type="button" aria-label="Replay video" hidden>&#x27F2;</button>
         <button id="sq-btnSettingsRun" type="button" aria-label="Settings">&#x2699;&#xFE0E;</button>
@@ -1005,10 +1016,10 @@ export function render(view, params = []) {
     if (file) start('file', URL.createObjectURL(file));
   });
   $('btnStop').addEventListener('click', () => stop());
-  $('btnCount').addEventListener('click', countLatest);
+  $('btnUncount').addEventListener('click', uncountLatest);
   $('btnReplay').addEventListener('click', replay);
   video.addEventListener('ended', () => {
-    if (run.active && run.mode === 'file') showBanner(`Video ended: ${machine.good} good, ${machine.shallow} shallow${machine.unsure ? `, ${machine.unsure} not sure` : ''}${machine.unseen ? `, ${machine.unseen} not seen` : ''}. Tap ⟲ to replay, ✕ to finish.`, 0, 'info');
+    if (run.active && run.mode === 'file') showBanner(`Video ended: ${machine.good} good, ${machine.shallow} shallow${machine.estimated ? ` (${machine.estimated} estimated)` : ''}${machine.unseen ? `, ${machine.unseen} not seen` : ''}. Tap ⟲ to replay, ✕ to finish.`, 0, 'info');
   });
   $('btnSettings').addEventListener('click', openSettings);
   $('btnSettingsRun').addEventListener('click', openSettings);

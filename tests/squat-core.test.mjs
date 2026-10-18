@@ -632,9 +632,49 @@ test('regression: far leg picked while standing, hidden once the knees bend: the
   assert.equal(m.late, 0, 'a normal ding, not the late fallback');
 });
 
-test('default target is 75 degrees', () => {
-  assert.equal(C.TARGET_DEG_DEFAULT, 75);
-  assert.equal(new RepMachine().targetDeg, 75);
+test('default ding and count lines are 78 degrees, two settings; the count follows the ding when not set', () => {
+  assert.equal(C.TARGET_DEG_DEFAULT, 78);
+  assert.equal(C.COUNT_DEG_DEFAULT, 78);
+  assert.equal(new RepMachine().targetDeg, 78);
+  assert.equal(new RepMachine({ targetDeg: 75, countDeg: 80 }).countDeg, 80);
+  assert.equal(new RepMachine({ targetDeg: 90 }).countDeg, 90);
+});
+
+// ---------- Counting: the count line (Michael, Sunday 10/18: ding and count at 78) ----------
+
+test('his set: early-ding reps that stopped at 76 and 78 both count, a slow one stopping at 80 is shallow', () => {
+  for (const bottom of [76, 78]) {
+    const m = new RepMachine({ targetDeg: 78, countDeg: 78 });
+    const events = feed(m, [...hold(172, 2 * STAND), ...ramp(172, bottom, 240, 60), ...hold(bottom, 6), ...ramp(bottom, 172, 120, 60), ...hold(172, 10)], 60);
+    assert.deepEqual(types(events), ['depth', 'rep'], `bottom ${bottom}`);
+    assert.equal(m.good, 1);
+  }
+  const m = new RepMachine({ targetDeg: 78, countDeg: 78 });
+  assert.deepEqual(types(feed(m, [...hold(172, STAND), ...ramp(172, 100), ...ramp(100, 80, 10), ...hold(80, 3), ...ramp(80, 172), ...hold(172, 5)])), ['shallow']);
+});
+
+test('ding means counted: an early ding on a rep that stops a little short still counts (and shows as missed)', () => {
+  const m = new RepMachine({ targetDeg: 78, countDeg: 78 });
+  const events = feed(m, [...hold(172, STAND), ...ramp(172, 80, 150), ...hold(80, 5), ...ramp(80, 172), ...hold(172, 5)]);
+  assert.deepEqual(types(events), ['depth', 'rep']);
+  assert.equal(events[0].anticipated, true);
+  assert.equal(m.earlyMissed, 1);
+  assert.equal(m.good, 1);
+});
+
+test('count line apart from the ding: deeper count line counts without a ding, shallower ding still needs the line', () => {
+  // Ding at 75, counts at 78: a rep to 77 never dings but counts; one to 79 is shallow.
+  let m = new RepMachine({ targetDeg: 75, countDeg: 78, anticipate: false });
+  let events = feed(m, [...squat(77), ...squat(79)]);
+  assert.deepEqual(types(events), ['rep', 'shallow']);
+  assert.equal(events[0].judged, true, 'counted at the end of the rep, no ding');
+  assert.equal(m.dings, 0);
+  // Ding at 82, counts at 78: a rep to 80 dings ("go up") but is shallow at the count.
+  m = new RepMachine({ targetDeg: 82, countDeg: 78, anticipate: false });
+  events = feed(m, [...squat(80), ...squat(76)]);
+  assert.deepEqual(types(events), ['depth', 'shallow', 'depth', 'rep']);
+  assert.equal(events[1].afterDing, true);
+  assert.deepEqual([m.good, m.shallow], [1, 1]);
 });
 
 // ---------- Bottom not seen: no shallow call on a rep whose bottom the camera missed ----------
@@ -766,9 +806,10 @@ function feedBody(m, est, frames, fps = FPS) {
   m._t = m._t ?? 0;
   for (const { a, seen = true } of frames) {
     m._t += dt;
-    est.frame({ knee: seen ? a : null, ...bodyAt(a) }, m);
-    let ev;
-    if (seen) { ev = m.update(a, prev === null ? 0 : (a - prev) / dt * 1000, m._t, dt); prev = a; } else ev = m.hidden(m._t);
+    let ev = null;
+    if (seen) { ev = m.update(a, prev === null ? 0 : (a - prev) / dt * 1000, m._t, dt); prev = a; }
+    est.frame({ knee: seen ? a : null, ...bodyAt(a) }, m); // after the update, as on screen: never ahead of a ding
+    if (!seen) ev = m.hidden(m._t);
     if (ev && (ev.type !== 'armed' || ev.rep)) events.push(ev);
     if (ev && ev.rep) events.push(ev.rep);
   }
@@ -778,7 +819,7 @@ const seen = (angles) => angles.map((a) => ({ a }));
 const unseen = (angles) => angles.map((a) => ({ a, seen: false }));
 /** Standing, then three clean reps to 70: the calibration. */
 function calibrated() {
-  const est = new DepthEstimator(), m = new RepMachine({ anticipate: false, targetDeg: 75 }, est);
+  const est = new DepthEstimator(), m = new RepMachine({ anticipate: false }, est); // ding and count at 78
   const events = feedBody(m, est, seen([...hold(172, STAND), ...[1, 2, 3].flatMap(() => [...ramp(172, 70), ...hold(70, 3), ...ramp(70, 172), ...hold(172, 5)])]));
   assert.deepEqual(types(events), ['depth', 'rep', 'depth', 'rep', 'depth', 'rep']);
   return { est, m };
@@ -801,7 +842,7 @@ test('estimate: hidden bottom, clearly deep enough: dings while the knee is lost
   const events = feedBody(m, est, hiddenRep(60));
   assert.deepEqual(types(events), ['depth', 'rep']);
   assert.equal(events[0].estimated, true, 'the ding came from the estimate');
-  assert.ok(events[0].angle <= 75 - C.EST_BAND_MIN_DEG);
+  assert.ok(events[0].angle <= m.targetDeg);
   assert.equal(events[1].estimated, true);
   assert.equal(m.good, 4);
   assert.equal(m.lastEstimated, true);
@@ -817,17 +858,27 @@ test('estimate: hidden bottom, clearly short: shallow, with the estimate', () =>
   assert.equal(m.estimated, 1);
 });
 
-test('estimate: hidden bottom, too close to call: NOT SURE, not counted until he says so', () => {
+test('estimate: hidden bottom close to the count line: counts on the benefit of the doubt, and he can take it back', () => {
   const { est, m } = calibrated();
-  const events = feedBody(m, est, hiddenRep(77));
-  assert.deepEqual(types(events), ['unsure']);
-  assert.ok(Math.abs(events[0].minAngle - 77) < 2);
-  assert.ok(events[0].minAngle - events[0].band <= 75 && events[0].minAngle + events[0].band > 75);
-  assert.deepEqual([m.good, m.shallow, m.unsure], [3, 0, 1]);
-  const p = m.countUnsure();
-  assert.equal(p.angle, events[0].minAngle);
-  assert.deepEqual([m.good, m.unsure, m.pending.length], [4, 0, 0]);
-  assert.equal(m.countUnsure(), null, 'nothing left to count');
+  const events = feedBody(m, est, hiddenRep(80));
+  assert.deepEqual(types(events), ['rep'], 'no ding: the estimate never reached 78');
+  const e = events[0];
+  assert.ok(e.estimated && e.judged && e.doubtful);
+  assert.ok(Math.abs(e.minAngle - 80) < 2);
+  assert.ok(e.minAngle - e.band <= 78 && e.minAngle + e.band > 78, '78 is inside the uncertainty');
+  assert.deepEqual([m.good, m.shallow], [4, 0]);
+  assert.deepEqual(m.doubtful, { angle: e.minAngle, band: e.band }, 'he can take it back (next test)');
+});
+
+test('estimate: un-counting takes back only the last doubtful rep', () => {
+  const { est, m } = calibrated();
+  feedBody(m, est, hiddenRep(80));
+  const d = m.uncount();
+  assert.ok(Math.abs(d.angle - 80) < 2);
+  assert.deepEqual([m.good, m.shallow], [3, 1]);
+  assert.equal(m.uncount(), null, 'nothing left to take back');
+  feedBody(m, est, seen(squat(70).slice(STAND)));
+  assert.equal(m.doubtful, null, 'a measured rep is never doubtful');
 });
 
 test('estimate: lost at the bottom with a tracking restart, the verdict comes on re-arming', () => {
@@ -860,45 +911,49 @@ test('estimate: one stray hip reading cannot make a rep deep, and a rep stops ca
 
 const gym = JSON.parse(readFileSync(new URL('./squat-gym-set.json', import.meta.url), 'utf8'));
 
-/** The whole set through the app's pipeline. old: as the app was (no knee guard, no estimate). */
-function replaySet({ old = false } = {}) {
+/** The whole set through the app's pipeline. old: as the app was (no knee guard, no estimate); cfg: the machine's. */
+function replaySet({ old = false, cfg = {} } = {}) {
   const dt = 1000 / gym.fps, tracker = new AngleTracker(), guard = new KneeGuard();
-  const est = old ? null : new DepthEstimator(), m = new RepMachine({}, est);
+  const est = old ? null : new DepthEstimator(), m = new RepMachine(cfg, est);
   const events = [];
+  const add = (ev, i) => {
+    const e = ev && (ev.rep || ev);
+    if (e && e.type !== 'armed') events.push({ ...e, rep: gym.reps.findLastIndex((r) => r.from <= i) + 1 });
+  };
   gym.frames.forEach(([angle, hipY, thigh, scale, headY], i) => {
     const t = i * dt;
     const trusted = angle !== null && (old || guard.check(angle, hipY, thigh, m));
+    if (trusted) { const s = tracker.update(angle, t); if (s) add(m.update(s.angle, s.vel, t, s.dtMs, s.restarted), i); }
+    // As on screen: the estimate after the ding, and hidden() only on frames whose knee isn't believed.
     est?.frame({ knee: trusted ? angle : null, hipY: angle !== null ? hipY : null, headY, scale: scale ?? 0 }, m);
-    let ev = null;
-    if (trusted) { const s = tracker.update(angle, t); if (s) ev = m.update(s.angle, s.vel, t, s.dtMs, s.restarted); } else if (est) ev = m.hidden(t);
-    const e = ev && (ev.rep || ev);
-    if (e && e.type !== 'armed') events.push({ ...e, rep: gym.reps.findLastIndex((r) => r.from <= i) + 1 });
+    if (est && !trusted) add(m.hidden(t), i);
   });
   return { events, m, est, ofRep: (n) => events.filter((e) => e.rep === n).map((e) => e.type) };
 }
 
 test('regression (gym): as the app was, the third rep was called shallow on a reading from before its bottom', () => {
-  const { events, ofRep } = replaySet({ old: true });
+  const { events, ofRep } = replaySet({ old: true, cfg: { targetDeg: 75 } });
   assert.deepEqual(ofRep(3), ['shallow']);
   const e = events.find((x) => x.rep === 3);
   assert.ok(e.minAngle > 80 && e.minAngle < 85, `shallow at ${e.minAngle}`);
 });
 
-test('regression (gym): now the third rep gets an estimate from the hip and head, too close to call: his decision', () => {
+test('regression (gym): now the third rep is estimated from the hip and head and counts (78 inside its range)', () => {
   const { events, ofRep, est, m } = replaySet();
-  assert.deepEqual(ofRep(3), ['unsure']);
+  assert.deepEqual(ofRep(3), ['rep']);
   const e = events.find((x) => x.rep === 3);
+  assert.ok(e.estimated && e.judged && e.doubtful, 'counted on the estimate, marked as such');
   assert.ok(e.minAngle > 74 && e.minAngle < 86, `estimated ${e.minAngle}`);
-  assert.ok(e.minAngle - e.band <= 75 && e.minAngle + e.band > 75, `75 within ${e.minAngle} ± ${e.band}`);
-  // The verdict at the end of the set, with every rep's calibration, still can't call it.
+  assert.ok(e.minAngle - e.band <= 78 && e.minAngle + e.band > 78, `78 within ${e.minAngle} ± ${e.band}`);
+  // The verdict at the end of the set, with every rep's calibration, still counts it.
   const end = est.estimate(e.drops);
-  assert.equal(DepthEstimator.verdict(end, 75), 'unsure');
+  assert.notEqual(DepthEstimator.verdict(end, 78), 'shallow');
   assert.ok(Math.abs(end.angle - e.minAngle) < 6, `end of set ${end.angle}`);
   assert.equal(m.unseen, 0, 'never the bare "not seen"');
 });
 
 test('regression (gym): the clean reps of the set still ding and count as before', () => {
-  const now = replaySet(), before = replaySet({ old: true });
+  const now = replaySet(), before = replaySet({ old: true }); // same ding and count lines, without guard and estimate
   for (const n of [1, 5, 8]) {
     assert.deepEqual(now.ofRep(n), ['depth', 'rep'], `rep ${n}`);
     assert.deepEqual(before.ofRep(n), ['depth', 'rep'], `rep ${n}, as before`);

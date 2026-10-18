@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import SquatCore from '../app/js/lib/squat-core.js';
-import { startRun, addRepEvent, countRep, reviewEstimates, resetReps, summarizeRun, finishRun, fillChoices, fillSet, depthText, runText, repDeg, squatMarks, isSquatExercise } from '../app/js/lib/squat-log.js';
+import { startRun, addRepEvent, uncountRep, reviewEstimates, resetReps, summarizeRun, finishRun, fillChoices, fillSet, depthText, runText, repDeg, squatMarks, isSquatExercise } from '../app/js/lib/squat-log.js';
 
 const TZ = 'Asia/Ho_Chi_Minh';
 const AT = Date.UTC(2026, 9, 18, 22, 10); // Monday 10/19, 5:10 AM in Ho Chi Minh City
@@ -127,52 +127,55 @@ test('the calendar day carries the runs; a filled set reads with its depth', asy
 
 const drops = { hip: 0.47, head: 0.49 };
 
-test('estimated reps are kept with their estimate; NOT SURE reps count for nothing until he counts them', () => {
-  const r = startRun({ targetDeg: 75 });
+test('estimated reps count unless clearly short, are marked as estimated, and fill the set like any good rep', () => {
+  const r = startRun({ targetDeg: 78, countDeg: 78 });
+  assert.equal(r.countDeg, 78);
+  assert.equal(startRun({ targetDeg: 75 }).countDeg, 75, 'without a count line it counts at the ding');
   addRepEvent(r, { type: 'depth', late: false });
   addRepEvent(r, { type: 'rep', minAngle: 72.04 });
   addRepEvent(r, { type: 'depth', estimated: true });
   addRepEvent(r, { type: 'rep', minAngle: 64.96, estimated: true, band: 6.04, drops, seenAngle: 83.1 });
-  addRepEvent(r, { type: 'armed', rep: { type: 'unsure', minAngle: 79.31, band: 7.94, drops, seenAngle: 82.6 } }); // lost at its bottom
+  // lost at its bottom, judged when he was seen standing again: 79.3 +/- 7.9 has 78 inside, so it counts
+  addRepEvent(r, { type: 'armed', rep: { type: 'rep', minAngle: 79.31, estimated: true, judged: true, doubtful: true, band: 7.94, drops, seenAngle: 82.6 } });
   addRepEvent(r, { type: 'shallow', minAngle: 88.2, estimated: true, band: 5, drops, seenAngle: 91 });
   addRepEvent(r, { type: 'unseen', minAngle: 90 });
-  assert.deepEqual(r.reps.map((x) => [x.minDeg, x.good, !!x.unsure, !!x.est]), [[72, true, false, false], [65, true, false, true], [79.3, false, true, true], [88.2, false, false, true]]);
+  assert.deepEqual(r.reps.map((x) => [x.minDeg, x.good, !!x.est, !!x.doubtful]), [[72, true, false, false], [65, true, true, false], [79.3, true, true, true], [88.2, false, true, false]]);
   assert.deepEqual(r.reps[2].drops, drops);
   assert.equal(r.reps[2].seenDeg, 82.6);
   assert.deepEqual(r.reps.map(repDeg), ['72°', '~65°', '~79°', '~88°']);
   let s = summarizeRun(r);
-  assert.deepEqual([s.good, s.shallow, s.unsure, s.lowDeg], [2, 1, 1, 65]);
-  assert.equal(fillSet({ id: 'x' }, s).reps, 2, 'fill takes the good reps, estimated ones included');
-  assert.equal(runText(r), '2 good · 1 shallow · 1 not sure · lowest 65°');
-  // His call: the NOT SURE rep was deep enough.
-  assert.equal(countRep(r).counted, true);
-  assert.equal(countRep(r), null, 'nothing left to count');
+  assert.deepEqual([s.good, s.shallow, s.estimated, s.lowDeg], [3, 1, 2, 65]);
+  assert.equal(fillSet({ id: 'x' }, s).reps, 3, 'fill takes estimated reps too');
+  assert.equal(fillSet({ id: 'x' }, s).depth.estimated, 2);
+  assert.equal(runText(r), '3 good (2 estimated) · 1 shallow · lowest 65°');
+  // His call afterwards: the doubtful one wasn't deep enough.
+  assert.equal(uncountRep(r).uncounted, true);
+  assert.equal(uncountRep(r), null, 'nothing else to take back: the other estimate was clear');
   s = summarizeRun(r);
-  assert.deepEqual([s.good, s.shallow, s.unsure], [3, 1, 0]);
-  assert.equal(fillSet({ id: 'x' }, s).reps, 3, 'fill takes the rep he counted');
-  assert.equal(finishRun(r).unsure, 0);
+  assert.deepEqual([s.good, s.shallow], [2, 2]);
+  assert.equal(fillSet({ id: 'x' }, s).reps, 2);
+  assert.equal(finishRun(r).estimated, 1);
 });
 
-test('end of the set: shallow and NOT SURE estimates are judged again with the whole set; good reps stay good', () => {
-  const r = startRun({ targetDeg: 75 });
-  addRepEvent(r, { type: 'unsure', minAngle: 79, band: 8, drops, seenAngle: 82 });
-  addRepEvent(r, { type: 'unsure', minAngle: 77, band: 8, drops, seenAngle: 70 });
-  addRepEvent(r, { type: 'shallow', minAngle: 85, estimated: true, band: 6, drops, seenAngle: 90 });
-  addRepEvent(r, { type: 'rep', minAngle: 66, estimated: true, band: 5, drops, seenAngle: 80 });
-  countRep(r, 1);
-  // With more reps to calibrate on, the estimate firms up: 66 +/- 5 for every rep here.
-  const changed = reviewEstimates(r, () => ({ angle: 66, band: 5 }));
-  assert.deepEqual(r.reps.map((x) => [x.minDeg, x.good, !!x.unsure]), [[66, true, false], [77, true, false], [66, true, false], [66, true, false]]);
-  assert.equal(changed.length, 2, 'the counted rep and the good one are left alone');
-  // A later estimate can't make a rep shallower than a reading the camera did see.
-  const r2 = startRun({ targetDeg: 75 });
-  addRepEvent(r2, { type: 'unsure', minAngle: 79, band: 8, drops, seenAngle: 82 });
-  reviewEstimates(r2, () => ({ angle: 90, band: 4 }));
-  assert.deepEqual([r2.reps[0].minDeg, r2.reps[0].good, r2.reps[0].unsure], [82, false, false], '82 +/- 4 is clearly short');
-  assert.equal(summarizeRun(r2).shallow, 1);
+test('end of the set: estimates judged without a ding are judged again with the whole set; dinged and taken-back reps stay', () => {
+  const r = startRun({ targetDeg: 78, countDeg: 78 });
+  addRepEvent(r, { type: 'shallow', minAngle: 88, estimated: true, band: 5, drops, seenAngle: 90 });
+  addRepEvent(r, { type: 'rep', minAngle: 80, estimated: true, judged: true, doubtful: true, band: 8, drops, seenAngle: 84 });
+  addRepEvent(r, { type: 'rep', minAngle: 81, estimated: true, judged: true, doubtful: true, band: 8, drops, seenAngle: 85 });
+  addRepEvent(r, { type: 'rep', minAngle: 70, estimated: true, band: 5, drops, seenAngle: 80 }); // dinged from the estimate
+  uncountRep(r, 2);
+  // With more reps to calibrate on, the estimate firms up: 75 +/- 4 for every rep here.
+  const changed = reviewEstimates(r, () => ({ angle: 75, band: 4 }));
+  assert.deepEqual(r.reps.map((x) => [x.minDeg, x.good, !!x.doubtful]), [[75, true, true], [75, true, true], [81, false, true], [70, true, false]]);
+  assert.equal(changed.length, 2, 'the taken-back rep and the dinged one are left alone');
+  // A later estimate can't make a rep shallower than a reading the camera did see; whole range above 78 is shallow.
+  const r2 = startRun({ targetDeg: 78, countDeg: 78 });
+  addRepEvent(r2, { type: 'rep', minAngle: 79, estimated: true, judged: true, doubtful: true, band: 8, drops, seenAngle: 84 });
+  reviewEstimates(r2, () => ({ angle: 95, band: 4 }));
+  assert.deepEqual([r2.reps[0].minDeg, r2.reps[0].good], [84, false], '84 +/- 4 is clearly short of 78');
   // No estimate at the end: the verdict stays as it was.
-  const r3 = startRun({ targetDeg: 75 });
-  addRepEvent(r3, { type: 'unsure', minAngle: 76, band: 8, drops, seenAngle: 78 });
+  const r3 = startRun({ targetDeg: 78, countDeg: 78 });
+  addRepEvent(r3, { type: 'rep', minAngle: 79, estimated: true, judged: true, doubtful: true, band: 8, drops, seenAngle: 84 });
   assert.deepEqual(reviewEstimates(r3, () => null), []);
-  assert.equal(r3.reps[0].unsure, true);
+  assert.equal(r3.reps[0].good, true);
 });

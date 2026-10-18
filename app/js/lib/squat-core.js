@@ -5,8 +5,10 @@ const SquatCore = (() => {
   'use strict';
 
   // ===== Thresholds (degrees). The numbers that decide what counts as a rep. =====
-  const TARGET_DEG_DEFAULT = 75;    // knee angle that earns the ding. Thighs parallel reads about 70-75,
-                                    // not 90: the shins lean forward, which closes the knee angle further.
+  const TARGET_DEG_DEFAULT = 78;    // knee angle that earns the ding. Thighs parallel reads about 75-80 (the
+                                    // lifter's own parallel read 77-78), not 90: the shins lean forward, which closes the knee angle.
+  const COUNT_DEG_DEFAULT = 78;     // a rep counts when its bottom is at or below this, measured or estimated.
+                                    // A setting of its own; a machine configured without it counts at the ding target.
   const TARGET_DEG_MIN = 60;
   const TARGET_DEG_MAX = 130;
   const STAND_DEG_DEFAULT = 160;    // above this = standing; also the re-arm threshold
@@ -315,9 +317,13 @@ const SquatCore = (() => {
       for (const [x, y] of p) ss += (y - a - b * x) ** 2;
       return { a, b, sd: Math.sqrt(ss / (n - 2)), maxDrop: hi };
     }
-    /** 'good' (clearly at or past the target), 'shallow' (clearly above it) or 'unsure'. */
-    static verdict(est, targetDeg) {
-      return est.angle + est.band <= targetDeg ? 'good' : est.angle - est.band > targetDeg ? 'shallow' : 'unsure';
+    /**
+     * Against the count line: 'shallow' only when the whole uncertainty is above it; otherwise the rep counts,
+     * 'good' when the whole uncertainty is at or below it, 'doubtful' when the line is inside it (counted on the
+     * benefit of the doubt, and he can take it back).
+     */
+    static verdict(est, countDeg) {
+      return est.angle - est.band > countDeg ? 'shallow' : est.angle + est.band <= countDeg ? 'good' : 'doubtful';
     }
   }
 
@@ -326,12 +332,12 @@ const SquatCore = (() => {
    * update() returns at most one event:
    *   { type: 'depth', anticipated, late, angle, estimated } -> play the ding NOW (estimated: from the hip and head,
    *                                             the knee was lost at the bottom)
-   *   { type: 'rep', minAngle, estimated, judged } -> good rep finished (back to standing). judged: counted from the
-   *                                             estimate only now, with no ding during the rep: ding as it counts
-   *   { type: 'shallow', minAngle, estimated } -> dipped past the shallow line, never hit target (estimated: the bottom
-   *                                             was hidden and the estimate is clearly above the target)
-   *   { type: 'unsure', minAngle, band }     -> the bottom was hidden and the estimate is within `band` of the target:
-   *                                             not counted unless he says so (countUnsure)
+   *   { type: 'rep', minAngle, estimated, judged, doubtful } -> counted rep finished (back to standing). judged: no
+   *                                             ding during the rep, counted only now (an estimate, or a bottom between
+   *                                             the ding and a deeper count line). doubtful: an estimate whose
+   *                                             uncertainty straddles the count line, counted anyway (uncount() takes it back)
+   *   { type: 'shallow', minAngle, estimated } -> dipped past the shallow line, bottom above the count line (estimated:
+   *                                             the bottom was hidden and the estimate's whole range is above the line)
    *   { type: 'unseen', minAngle }           -> the bottom was hidden and there is nothing to estimate from: not counted
    *   { type: 'armed', rep }                 -> seen standing after not being armed: ready for a rep. rep: the verdict
    *                                             (one of the events above) on a rep whose tracking was lost at its bottom
@@ -346,9 +352,11 @@ const SquatCore = (() => {
    * frame after frame. If tracking is interrupted before the ding (`restarted`), the machine
    * disarms and waits to see a standing leg again rather than trust a reading from nowhere.
    *
-   * A shallow call needs a watched bottom too. A blind spot of BOTTOM_GAP_MS or more (or an interruption) after
-   * the deepest reading and before he is seen coming back up means the bottom wasn't seen. Then the estimator
-   * (hip and head) judges it: clearly deep enough counts, clearly short is shallow, too close to call is 'unsure'.
+   * The count is decided when the rep ends: it counts when its bottom is at or below countDeg, or when it dinged
+   * and the ding target is at or below countDeg (the ding means "counted, go up"; by default both are 78).
+   * A shallow call needs a watched bottom. A blind spot of BOTTOM_GAP_MS or more (or an interruption) after the
+   * deepest reading and before he is seen coming back up means the bottom wasn't seen. Then the estimator (hip and
+   * head) judges it: only an estimate whose whole uncertainty is above the count line is shallow; the rest counts.
    */
   class RepMachine {
     /** @param estimator optional DepthEstimator, fed by the caller, for reps whose bottom the knee point missed */
@@ -360,9 +368,10 @@ const SquatCore = (() => {
     configure(cfg = {}) {
       const clamp = (v, lo, hi, d) => Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d;
       this.targetDeg = clamp(cfg.targetDeg, TARGET_DEG_MIN, TARGET_DEG_MAX, TARGET_DEG_DEFAULT);
+      this.countDeg = clamp(cfg.countDeg, TARGET_DEG_MIN, TARGET_DEG_MAX, this.targetDeg);
       this.standDeg = clamp(cfg.standDeg, STAND_DEG_MIN, STAND_DEG_MAX, STAND_DEG_DEFAULT);
       this.descendDeg = this.standDeg - DESCEND_MARGIN_DEG;
-      this.shallowDeg = Math.min(this.descendDeg, Math.max(SHALLOW_DEG, this.targetDeg + SHALLOW_MIN_GAP_DEG));
+      this.shallowDeg = Math.min(this.descendDeg, Math.max(SHALLOW_DEG, Math.max(this.targetDeg, this.countDeg) + SHALLOW_MIN_GAP_DEG));
       this.anticipate = cfg.anticipate !== false;
       this.extraLeadMs = clamp(cfg.extraLeadMs, 0, 500, 0);
     }
@@ -381,9 +390,8 @@ const SquatCore = (() => {
       this.resetState();
       this.good = 0; this.shallow = 0; this.lastMin = null;
       this.unseen = 0;              // reps whose bottom the camera didn't see and couldn't estimate: neither good nor shallow
-      this.unsure = 0;              // reps whose estimate was too close to call, waiting for him (pending)
-      this.pending = [];            // ...their {angle, band, drops}, oldest first
-      this.estimated = 0;           // good or shallow reps judged from the estimate
+      this.estimated = 0;           // reps judged from the estimate (counted or shallow)
+      this.doubtful = null;         // the last rep, if it counted on the estimate's benefit of the doubt: {angle, band}
       this.lastEstimated = false;   // lastMin is an estimate
       this.dings = 0;               // total dings
       this.late = 0;                // dings given late, after a hold at depth, because the descent wasn't seen
@@ -450,7 +458,10 @@ const SquatCore = (() => {
           this.state = State.STANDING; this.minAngle = Infinity;
           if (min >= this.shallowDeg) return null;   // just a wiggle at the top
           if (this._bottomUnseen) return this._hiddenVerdict(min);
-          this.shallow++; this.lastMin = min; this.lastEstimated = false;
+          this.doubtful = null; this.lastMin = min; this.lastEstimated = false;
+          // No ding, but a count line deeper than the ding: a bottom between the two counts.
+          if (min <= this.countDeg) { this.good++; return { type: 'rep', minAngle: min, judged: true }; }
+          this.shallow++;
           return { type: 'shallow', minAngle: min };
         }
         if (angle <= this.targetDeg) return this._depth(false, angle, tMs);
@@ -473,9 +484,14 @@ const SquatCore = (() => {
         const ev = { type: 'rep', minAngle: this.minAngle, anticipated: this._anticipated, confirmed: !this._anticipated || this._confirmed };
         if (this._anticipated && !this._confirmed) this.earlyMissed++;
         if (this._est) { Object.assign(ev, { estimated: true }, this._est); this.estimated++; }
-        this.good++; this.lastMin = this.minAngle; this.lastEstimated = !!this._est;
+        this.lastMin = this.minAngle; this.lastEstimated = !!this._est;
+        this.doubtful = this._est?.doubtful ? { angle: this.minAngle, band: this._est.band } : null;
         this.state = State.STANDING; this.minAngle = Infinity;
-        return ev;
+        // The ding means "counted" when it is at or below the count line. With a ding above it (a shallower
+        // setting than the count), the bottom still has to reach the line.
+        if (this.targetDeg <= this.countDeg || ev.minAngle <= this.countDeg) { this.good++; return ev; }
+        this.shallow++; this.doubtful = null;
+        return { type: 'shallow', minAngle: ev.minAngle, afterDing: true, estimated: ev.estimated };
       }
       return null;
     }
@@ -489,41 +505,43 @@ const SquatCore = (() => {
       return { type: 'depth', anticipated, late, angle, estimated: !!est };
     }
     /**
-     * A frame where the knee isn't believed but the rest of him is in view. If the hip and head already put him
-     * clearly at or past the target, ding now, from the estimate, instead of waiting for a knee that may not come back.
+     * A frame where the knee isn't believed but the rest of him is in view. When the hip-and-head estimate reaches
+     * the ding target, ding now, rather than wait for a knee that may not come back. Only called on such frames,
+     * so it is never in the way of a ding from a measured knee.
      */
     hidden(tMs) {
       const lost = this.state === State.UNKNOWN && this._lostMin !== null;
       if (!this.estimator || (this.state !== State.DESCENDING && !lost)) return null;
       const est = this.estimator.estimate();
-      if (!est || DepthEstimator.verdict(est, this.targetDeg) !== 'good') return null;
+      if (!est || est.angle > this.targetDeg) return null;
       this.minAngle = Math.min(lost ? this._lostMin : this.minAngle, est.angle);
-      return this._depth(false, est.angle, tMs, false, { band: est.band, drops: { ...this.estimator.rep } });
+      const doubtful = DepthEstimator.verdict(est, this.countDeg) === 'doubtful';
+      return this._depth(false, est.angle, tMs, false, { band: est.band, drops: { ...this.estimator.rep }, doubtful });
     }
     /** The verdict on a rep whose bottom the knee point missed, from the hip-and-head estimate if there is one. */
     _hiddenVerdict(minAngle) {
+      this.doubtful = null;
+      // A trusted reading already at the count line: counted, whatever the estimate says.
+      if (minAngle <= this.countDeg) { this.good++; this.lastMin = minAngle; this.lastEstimated = false; return { type: 'rep', minAngle, judged: true }; }
       const est = this.estimator ? this.estimator.estimate() : null;
       if (!est) { this.unseen++; this.lastMin = null; return { type: 'unseen', minAngle }; }
       // A trusted reading deeper than the estimate wins: he was at least that deep.
       const angle = Math.min(est.angle, minAngle), band = est.band, drops = { ...this.estimator.rep }, seenAngle = minAngle;
-      const verdict = DepthEstimator.verdict({ angle, band }, this.targetDeg);
-      this.lastMin = angle; this.lastEstimated = true;
-      // Clearly deep enough but only known now (no ding during the rep): judged: the screen dings as it counts it.
-      if (verdict === 'good') {
-        this.good++; this.estimated++; this.dings++;
-        return { type: 'rep', minAngle: angle, estimated: true, judged: true, band, drops, seenAngle };
-      }
-      if (verdict === 'shallow') { this.shallow++; this.estimated++; return { type: 'shallow', minAngle: angle, estimated: true, band, drops, seenAngle }; }
-      this.unsure++;
-      this.pending.push({ angle, band, drops });
-      return { type: 'unsure', minAngle: angle, band, drops, seenAngle };
+      const verdict = DepthEstimator.verdict({ angle, band }, this.countDeg);
+      this.lastMin = angle; this.lastEstimated = true; this.estimated++;
+      if (verdict === 'shallow') { this.shallow++; return { type: 'shallow', minAngle: angle, estimated: true, band, drops, seenAngle }; }
+      // Counted, with no ding during the rep (judged). Doubtful: the count line is inside the uncertainty.
+      this.good++;
+      const doubtful = verdict === 'doubtful';
+      if (doubtful) this.doubtful = { angle, band };
+      return { type: 'rep', minAngle: angle, estimated: true, judged: true, doubtful, band, drops, seenAngle };
     }
-    /** He says the NOT SURE rep was deep enough: count the latest one as good. Returns it, or null if none is waiting. */
-    countUnsure() {
-      const p = this.pending.pop();
-      if (!p) return null;
-      this.unsure--; this.good++;
-      return p;
+    /** He says the last rep, counted on the estimate's benefit of the doubt, wasn't deep enough. Returns it, or null. */
+    uncount() {
+      const d = this.doubtful;
+      if (!d) return null;
+      this.doubtful = null; this.good--; this.shallow++;
+      return d;
     }
   }
 
@@ -558,7 +576,7 @@ const SquatCore = (() => {
 
   return {
     State, LEG, kneeAngle, legProblem, bodyHeights, OneEuroFilter, AngleTracker, KneeGuard, DepthEstimator, RepMachine, SidePicker,
-    TARGET_DEG_DEFAULT, TARGET_DEG_MIN, TARGET_DEG_MAX,
+    TARGET_DEG_DEFAULT, TARGET_DEG_MIN, TARGET_DEG_MAX, COUNT_DEG_DEFAULT,
     STAND_DEG_DEFAULT, STAND_DEG_MIN, STAND_DEG_MAX,
     DESCEND_MARGIN_DEG, SHALLOW_DEG, MIN_VISIBILITY, MAX_DEG_PER_SEC,
     ANTICIPATE_MIN_VEL, ANTICIPATE_MAX_DEG, SIDE_SWITCH_MARGIN, SIDE_SWITCH_FRAMES, GAP_RESET_MS, ARM_HOLD_MS, DEPTH_HOLD_MS, FRAME_MARGIN,
