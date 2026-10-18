@@ -9,6 +9,7 @@ import { EQUIPMENT } from '../lib/exercise-types.js';
 import { warmupSets } from '../lib/plates.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import { unlockAudio, play } from '../lib/sounds.js';
+import { notifyPanel } from '../ui/notify-panel.js';
 import { toast } from '../ui/toast.js';
 import { confirmSheet } from '../ui/sheet.js';
 
@@ -211,6 +212,8 @@ export function render(view) {
     <div class="section-label">Mac link</div>
     <dl class="card kv" id="mac-kv"></dl>
     <div id="mac-actions" class="stack"></div>
+    <div class="section-label">Notifications</div>
+    <div id="notify" class="stack"></div>
     <div id="prefs" class="stack"></div>
     <div class="section-label">Import and export</div>
     <ul class="lib-list">
@@ -312,7 +315,9 @@ export function render(view) {
   };
   wirePrefs(prefs);
 
-  const draw = (s) => { drawKv(s); drawActions(s); drawPrefs(s); };
+  const redrawNotify = notifyPanel(view.querySelector('#notify'));
+  let wasPaired = getState().paired;
+  const draw = (s) => { drawKv(s); drawActions(s); drawPrefs(s); if (s.paired !== wasPaired) { wasPaired = s.paired; redrawNotify(); } };
   draw(getState());
   const unsub = subscribe(draw);
   ready.then(() => drawPrefs(getState()));

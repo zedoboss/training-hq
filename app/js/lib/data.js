@@ -162,6 +162,10 @@ export async function rescanDemos() {
   return res.json();
 }
 
+/** JSON calls to the Mac (push subscriptions and other small requests). */
+export const macGet = async (path) => (await macFetch(path, { timeoutMs: 20000 })).json();
+export const macPost = async (path, body = {}) => (await macFetch(path, { method: 'POST', body: JSON.stringify(body), type: 'application/json', timeoutMs: 30000 })).json();
+
 // Imports (step 3) run on the Mac: it keeps the file, plans, and writes the records; they come back by sync.
 const postJson = async (path, body, timeoutMs = 120000) =>
   (await macFetch(path, { method: 'POST', body: JSON.stringify(body), type: 'application/json', timeoutMs })).json();

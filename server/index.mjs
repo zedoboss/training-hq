@@ -8,6 +8,7 @@ import { seedDocs, applySeed } from './seed.mjs';
 import { openDemos } from './demos.mjs';
 import { openImports } from './imports.mjs';
 import { scheduleNightly } from './backup.mjs';
+import { openPush, DEFAULT_SUBJECT } from './push.mjs';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -28,7 +29,10 @@ const stopBackup = scheduleNightly({ store, privateDir: p.privateDir, backupDir:
 
 const imports = openImports({ store, importsDir: p.importsDir });
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, log });
+// Web push (step 4): the Mac's VAPID keys live in config/vapid.json (made the first time, never in git).
+const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subject: config.pushSubject || DEFAULT_SUBJECT, log });
+
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });

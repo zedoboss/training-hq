@@ -52,3 +52,27 @@ self.addEventListener('fetch', (event) => {
       .then((hit) => hit || fetch(req))
   );
 });
+
+// Notifications from the Mac (step 4). The message is {title, body, url, tag}; tapping it opens that screen.
+self.addEventListener('push', (event) => {
+  let m = {};
+  try { m = event.data ? event.data.json() : {}; } catch { m = { body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(m.title || 'Training HQ', {
+    body: m.body || '', tag: m.tag || undefined, data: { url: m.url || '#/today' }, icon: scopeUrl('icons/icon-192.png'),
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const hash = event.notification.data?.url || '#/today';
+  event.waitUntil((async () => {
+    const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of open) {
+      if (!c.url.startsWith(self.registration.scope)) continue;
+      await c.focus();
+      c.postMessage({ type: 'open', url: hash });
+      return;
+    }
+    await self.clients.openWindow(scopeUrl(`index.html${hash}`));
+  })());
+});

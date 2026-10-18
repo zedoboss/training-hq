@@ -71,7 +71,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -214,6 +214,40 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const out = importCall(() => imports.undo({ importId }));
       log(`import ${importId} undone: ${JSON.stringify(out)}`);
       return out;
+    },
+
+    // Web push (step 4). The public key is the Mac's VAPID key: the phone subscribes with it.
+    'GET /api/push/key': async (req) => {
+      auth(req);
+      if (!push) throw new HttpError(404, 'push not available');
+      return { publicKey: push.publicKey };
+    },
+
+    'GET /api/push/status': async (req) => {
+      const device = auth(req);
+      if (!push) throw new HttpError(404, 'push not available');
+      return push.status(device);
+    },
+
+    'POST /api/push/subscribe': async (req) => {
+      const device = auth(req);
+      if (!push) throw new HttpError(404, 'push not available');
+      const { subscription, name } = await readJson(req);
+      try { return push.subscribe(device, subscription, name); } catch (e) { throw new HttpError(e.status || 500, e.message); }
+    },
+
+    'POST /api/push/unsubscribe': async (req) => {
+      const device = auth(req);
+      if (!push) throw new HttpError(404, 'push not available');
+      return push.unsubscribe(device);
+    },
+
+    'POST /api/push/test': async (req) => {
+      const device = auth(req);
+      if (!push) throw new HttpError(404, 'push not available');
+      const r = await push.notify({ title: 'Training HQ', body: 'Test from your Mac. Tap to open Settings.', url: '#/settings', tag: 'test' }, { deviceId: device.id });
+      if (!r.sent) throw new HttpError(502, r.dropped ? 'This phone\'s subscription has expired. Turn notifications off and on again.' : 'The push service did not accept the test.');
+      return r;
     },
 
     'POST /api/sync': async (req) => {
