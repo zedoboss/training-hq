@@ -128,3 +128,22 @@ test('weigh-in and calendar marks', () => {
   assert.equal(m[0].label, 'Sauna: 2 of 2 rounds (10, 10 min)');
   assert.equal(m[1].label, 'Sauna: 1 of 1 round (10 min) · stopped: symptoms');
 });
+
+test('the steps that end a session (shared by the round screen and the coach)', async () => {
+  const { feelOffState, endHereState, afterAnswerState, AFTER_MIN } = await import('../app/js/lib/sauna.js');
+  const s = { id: 'x', status: 'active', plannedRounds: 2, rounds: [{ n: 1, planned: 10, inAt: 1000, outAt: 2000 }, { n: 2, planned: 10, inAt: 3000, outAt: null }], breaks: [{ after: 1, startAt: 2000, endAt: 3000, symptoms: false }], symptoms: [], after: null };
+  const off = feelOffState(s, { when: 'coach', what: ['Dizzy'], now: 5000 });
+  assert.equal(off.status, 'stopped');
+  assert.equal(off.rounds[1].outAt, 5000, 'the open round closes');
+  assert.deepEqual(off.symptoms, [{ at: 5000, when: 'coach', what: ['Dizzy'] }]);
+  assert.equal(off.endedAt, 5000);
+  const inBreak = { ...s, rounds: [s.rounds[0]], breaks: [{ after: 1, startAt: 2000, endAt: null, symptoms: null }] };
+  assert.equal(feelOffState(inBreak, { when: 'break', now: 2500 }).breaks[0].symptoms, true);
+  const end = endHereState(inBreak, 2600);
+  assert.equal(end.status, 'ended');
+  assert.deepEqual(end.breaks[0], { after: 1, startAt: 2000, endAt: 2600, symptoms: false });
+  assert.equal(end.after.dueAt, 2600 + AFTER_MIN * 60000);
+  const ans = afterAnswerState(end, { symptoms: true, what: ['Headache'], now: 9000 });
+  assert.deepEqual([ans.after.answeredAt, ans.after.symptoms, ans.after.what], [9000, true, ['Headache']]);
+  assert.deepEqual(afterAnswerState(end, { symptoms: false, now: 9000 }).after.what, []);
+});

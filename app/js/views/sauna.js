@@ -10,6 +10,7 @@ import { isoDate, formatTime, formatDay, formatDate, formatHm } from '../lib/tim
 import {
   LADDER, GOAL_STEP, PASSES_TO_UNLOCK, OVERDUE_MIN, SYMPTOMS, GET_OUT, CHECKLIST, DOCTOR_QUESTION, DOCTOR_ANSWERS,
   stepText, stepShort, ladderState, todayStep, doctorDue, gates, phaseOf, fluidLost, hadSymptoms, passed,
+  feelOffState, endHereState, afterAnswerState,
 } from '../lib/sauna.js';
 import { rotationDay, lastRotationSession, daysByDate } from '../lib/rotation.js';
 import { newId } from '../lib/routines.js';
@@ -184,10 +185,7 @@ function renderRun(view, repo, alive, id) {
 
   const feelOff = async (when = 'button') => {
     alarm.stop();
-    const now = Date.now();
-    const rounds = (s.rounds || []).map((r) => (r.inAt && !r.outAt ? { ...r, outAt: now } : r));
-    const breaks = (s.breaks || []).map((b) => (b.symptoms == null && !b.endAt ? { ...b, symptoms: true, endAt: now } : b));
-    await save({ ...s, rounds, breaks, status: 'stopped', endedAt: s.endedAt ?? now, symptoms: [...(s.symptoms || []), { at: now, when, what: [] }] });
+    await save(feelOffState(s, { when }));
     stoppedView = true;
     draw();
   };
@@ -284,8 +282,7 @@ function renderRun(view, repo, alive, id) {
     };
     if ($('#r-end')) $('#r-end').onclick = async () => {
       if (!(await confirmSheet('End the session here, with no symptoms?', { ok: 'End here' }))) return;
-      const now2 = Date.now();
-      await save({ ...s, status: 'ended', endedAt: now2, breaks: s.breaks.map((b) => (b.symptoms == null ? { ...b, symptoms: false, endAt: now2 } : { ...b, endAt: b.endAt ?? now2 })), after: { dueAt: now2 + 15 * 60000, answeredAt: null, symptoms: null, what: [] } });
+      await save(endHereState(s));
       draw();
     };
     view.querySelectorAll('[data-felt]').forEach((b) => b.addEventListener('click', () => { const x = b.dataset.felt; if (felt.has(x)) felt.delete(x); else felt.add(x); b.classList.toggle('is-on'); }));
@@ -294,8 +291,8 @@ function renderRun(view, repo, alive, id) {
       await save({ ...s, symptoms: sym });
       toast('Saved.');
     };
-    if ($('#r-a-no')) $('#r-a-no').onclick = async () => { await save({ ...s, after: { ...s.after, answeredAt: Date.now(), symptoms: false } }); draw(); };
-    if ($('#r-a-yes')) $('#r-a-yes').onclick = async () => { await save({ ...s, after: { ...s.after, answeredAt: Date.now(), symptoms: true, what: [] } }); draw(); };
+    if ($('#r-a-no')) $('#r-a-no').onclick = async () => { await save(afterAnswerState(s, { symptoms: false })); draw(); };
+    if ($('#r-a-yes')) $('#r-a-yes').onclick = async () => { await save(afterAnswerState(s, { symptoms: true })); draw(); };
     if ($('#r-a-felt')) $('#r-a-felt').onclick = async () => { await save({ ...s, after: { ...s.after, what: [...felt] } }); draw(); };
     $('#r-kg')?.addEventListener('change', async (e) => {
       const v = Number(e.target.value.replace(',', '.'));
@@ -327,7 +324,18 @@ function renderRun(view, repo, alive, id) {
     }
   };
   draw().then(() => { timer = setInterval(tick, 500); if (s?.status === 'active' && phaseOf(s).phase === 'in') keepAwake(); });
-  const off = repo.onChange(async (cols) => { if (cols.includes('sauna-plan')) plan = (await repo.get('sauna-plan', 'main')) || {}; });
+  const off = repo.onChange(async (cols, origin) => {
+    if (cols.includes('sauna-plan')) plan = (await repo.get('sauna-plan', 'main')) || {};
+    // Changed elsewhere (the coach recorded symptoms or ended it from the Mac): follow it; a stop silences the alarm.
+    if (origin === 'remote' && cols.includes('sauna')) {
+      const next = await repo.get('sauna', id);
+      if (!next || !alive()) return;
+      const wasActive = s?.status === 'active';
+      s = next;
+      if (s.status !== 'active') { alarm.stop(); if (wasActive && s.status === 'stopped') stoppedView = true; }
+      key = ''; draw();
+    }
+  });
   return () => { clearInterval(timer); alarm.stop(); off(); document.removeEventListener('visibilitychange', onVis); wake?.release?.().catch(() => {}); };
 }
 

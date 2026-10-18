@@ -91,3 +91,13 @@ test('calendar marks: taken of scheduled, skips with reasons', () => {
   assert.equal(m[0].label, 'Supplements: 1 of 2 taken · skipped omega-3 (ran out)');
   assert.equal(m[0].all, false);
 });
+
+test('dayKindFrom: the rotation for today and later, what happened for past days', async () => {
+  const { dayKindFrom } = await import('../app/js/lib/supplements.js');
+  const legs = { id: 'a', kind: 'workout', dayType: 'legs', status: 'done', startedAt: Date.UTC(2026, 0, 19, 4) };
+  const base = { sessions: [legs], days: [], today: '2026-01-20', tz: 'UTC' };
+  assert.equal(dayKindFrom({ ...base, date: '2026-01-20' }), 'rest', 'the day after Legs');
+  assert.equal(dayKindFrom({ ...base, date: '2026-01-21' }), 'train');
+  assert.equal(dayKindFrom({ ...base, date: '2026-01-19' }), 'train', 'a workout was logged');
+  assert.equal(dayKindFrom({ ...base, date: '2026-01-18' }), 'rest');
+});

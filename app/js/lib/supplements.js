@@ -7,7 +7,8 @@
 //               status: 'active'|'paused'|'removed', history: [{on, status}], stock: {servings, countedAt}|null,
 //               perTake: {train, rest} (servings used per tick), note, order, source, changes: [{on, text}]}
 // supp-log     {id: '<date>.<supp id>', date, suppId, status: 'taken'|'skipped', reason, at, dose, dayKind, servings}
-import { addDays } from './rotation.js';
+import { addDays, rotationDay, lastRotationSession, daysByDate } from './rotation.js';
+import { isoDate } from './time.js';
 
 export const LOW_DAYS = 7;
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -57,6 +58,13 @@ export const servingsFor = (supp, dayKind) => Math.max(0, Number(supp.perTake?.[
 export function dayKindFor(date, { today, rotKind, workoutDates = new Set() }) {
   if (date >= today) return rotKind === 'rest' ? 'rest' : 'train';
   return workoutDates.has(date) ? 'train' : 'rest';
+}
+
+/** dayKindFor from the records themselves (the phone's screens and the coach on the Mac both use this). */
+export function dayKindFrom({ sessions = [], bridge = null, days = [], date, today, tz }) {
+  const rot = rotationDay({ last: lastRotationSession(sessions, bridge, tz), today: date > today ? date : today, days: daysByDate(days) });
+  const workoutDates = new Set(sessions.filter((x) => x.kind !== 'holds' && x.status === 'done').map((x) => isoDate(new Date(x.startedAt), tz)));
+  return dayKindFor(date, { today, rotKind: rot.today.kind, workoutDates });
 }
 
 /** "6 days a week · day off not set", "Mon, Wed, Fri", "every day". */

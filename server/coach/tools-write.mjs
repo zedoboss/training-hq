@@ -1,0 +1,512 @@
+// The coach's write tools (8.2, brief sections 7 and 11): the workout log (start a session, log or correct a set,
+// next exercise, the rest timer), meals, supplements and restock or "considering" answers, body scans, reminders,
+// notes, the sauna (start, end, symptoms) and the session time. They write the same records the phone's screens
+// write, with the same rule code, on the Mac; the phone gets them at once by sync. Things only the phone can do (its
+// rest timer, showing a screen) go to it as actions. Nothing here can bend a fixed rule: the 30% guard warns, the
+// sauna ladder and hard stops are untouched, supplements are only what he says he took.
+import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByName, wrote, refuse, k, formatHm } from './shared.mjs';
+import { currentExercise, nextSetText, activeText, mealsText, suppDayKind } from './tools-read.mjs';
+import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
+import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId } from '../../app/js/lib/session.js';
+import { guardCheck } from '../../app/js/lib/targets.js';
+import { setRecord, comebackStartOf } from '../../app/js/lib/finish.js';
+import { restFor, restText } from '../../app/js/lib/settings.js';
+import { modeOf } from '../../app/js/lib/progression.js';
+import { currentBodyweight } from '../../app/js/lib/health.js';
+import { newId } from '../../app/js/lib/routines.js';
+import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
+import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist } from '../../app/js/lib/supplements.js';
+import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics } from '../../app/js/lib/scans.js';
+import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS } from '../../app/js/lib/sauna.js';
+import { zonedTime, addMinutesHm } from '../../app/js/lib/time.js';
+
+const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
+const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
+const HM = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', description: '24-hour "HH:MM" in his time zone' };
+const SET_TYPE = { type: 'string', enum: ['warmup', 'normal', 'dropset', 'failure', 'hold'] };
+
+const put = (s, col, id, data) => s.store.writeLocal(col, id, data);
+const del = (s, col, id) => s.store.writeLocal(col, id, null, { deleted: true });
+const num = (v) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? undefined : Number(v));
+
+// ---- the workout log ----------------------------------------------------------------------------------------------
+
+/** The 30% guard on a load, as the session screen checks it (main lifts only; bodyweight + added for pull-ups). */
+function guardFor(s, session, ex, kgVal) {
+  if (!ex || kgVal == null || ex.capClass !== 'main') return null;
+  const history = s.history(session.id);
+  const bw = session.bodyweightKg;
+  if (BODYWEIGHT_TYPES.includes(ex.type) && bw != null) {
+    const hist = history.all(ex.name).map((e) => {
+      const work = e.sets.filter((x) => !x.hold && x.type !== 'warmup' && x.type !== 'hold');
+      return work.length ? { date: e.date, kg: guardLoad(ex.type, Math.max(...work.map((x) => x.kg ?? 0)), bw) } : null;
+    }).filter(Boolean);
+    const g = guardCheck({ kg: guardLoad(ex.type, kgVal, bw), capClass: ex.capClass, history: hist, today: s.today, smallestPlate: s.minPlate() });
+    if (!g) return null;
+    const back = (x) => Math.max(0, Math.round((ex.type === 'assisted_bodyweight' ? bw - x : x - bw) * 2) / 2);
+    return `Over his 30% cap (with ${k(bw)} kg bodyweight): heaviest in the last week was +${k(back(g.basis.kg))} kg (${dayText(g.basis.date, s.today)}); +${k(kgVal)} kg is ${g.over}% more. +${k(back(g.suggest))} kg keeps him under it.`;
+  }
+  const g = guardCheck({ kg: kgVal, capClass: ex.capClass, history: history.guardHistory(ex.name), today: s.today, barKg: ex.barKg, smallestPlate: s.minPlate() });
+  return g ? `Over his 30% cap: ${g.basis.window === '7 days' ? 'heaviest in the last 7 days' : 'last session'} was ${k(g.basis.kg)} kg (${dayText(g.basis.date, s.today)}); ${k(kgVal)} kg is ${g.over}% more; the cap is ${k(g.capKg)} kg. ${k(g.suggest)} kg keeps him under it.` : null;
+}
+
+function pickExercise(session, sets, name) {
+  if (!name) return { ex: currentExercise(session, sets) };
+  const { item, ambiguous } = findByName(session.exercises, name);
+  if (item) return { ex: item };
+  return { error: ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : `"${name}" isn't in this session. Its exercises: ${session.exercises.map((e) => e.name).join('; ')}.` };
+}
+
+function setNo(sets, set) { return sets.filter((x) => x.exKey === set.exKey).findIndex((x) => x.id === set.id) + 1; }
+const valuesText = (ex, x) => (x.type === 'hold' ? `hold ${x.durationS ?? '?'} s${x.kg != null ? ` at ${loadText(x.kg, ex.barKg)}` : ''}`
+  : BODYWEIGHT_TYPES.includes(ex.type) ? `${x.kg ? `${ex.type === 'assisted_bodyweight' ? '-' : '+'}${k(x.kg)} kg` : 'bodyweight'} × ${x.reps ?? '?'}`
+    : `${loadText(x.kg, ex.barKg)} × ${x.reps ?? '?'}`);
+
+async function logSet(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const session = s.active();
+  if (!session) return refuse('No session in progress. Start one first (start_session), or log it on the phone.');
+  const sets = s.setsOf(session.id);
+  const { ex, error } = pickExercise(session, sets, a.exercise);
+  if (error) return refuse(error);
+  if (!ex) return refuse('Every set of this session is ticked. Add an exercise on the phone, or finish the session there.');
+  const mine = sets.filter((x) => x.exKey === ex.key);
+  let set = a.set ? mine[a.set - 1] : mine.find((x) => !x.done && (!a.type || x.type === a.type));
+  if (set?.done) return refuse(`${ex.name} set ${a.set} is already ticked (${valuesText(ex, set)}). Use correct_set to change it.`);
+  let added = false;
+  if (!set) {
+    const last = mine.filter((x) => x.type !== 'warmup').at(-1) || mine.at(-1);
+    set = { id: newSetId(), sessionId: session.id, exKey: ex.key, order: Math.max(-1, ...sets.map((x) => x.order)) + 1, done: false, doneAt: null, rpe: null, note: '', type: a.type || (last?.type === 'warmup' ? 'normal' : last?.type) || 'normal', kg: last?.kg ?? null, reps: null, durationS: last?.durationS ?? null, target: last?.target ?? null };
+    added = true;
+  }
+  const patch = {};
+  if (num(a.kg) !== undefined) patch.kg = num(a.kg);
+  if (num(a.reps) !== undefined) patch.reps = Math.round(num(a.reps));
+  if (num(a.seconds) !== undefined) patch.durationS = Math.round(num(a.seconds));
+  if (a.type) patch.type = a.type;
+  if (num(a.rpe) !== undefined) patch.rpe = num(a.rpe);
+  if (a.note) patch.note = String(a.note).slice(0, 300);
+  const st = s.settings();
+  const history = s.history(session.id);
+  const prevAll = history.previous(ex.name, st.previousFrom === 'same-routine' ? { routineId: session.routineId, dayType: session.dayType } : null);
+  const withNew = added ? [...mine, set] : mine;
+  let filled = { ...set, ...patch };
+  filled = { ...filled, ...fillForTick(filled, previousFor(prevAll, withNew, filled)), done: true, doneAt: s.now };
+  const guard = filled.type === 'warmup' || filled.type === 'hold' ? null : guardFor(s, session, ex, filled.kg);
+  const rec = setRecord({ set: filled, name: ex.name, sessionId: session.id, otherSets: withNew, history, comebackStart: comebackStartOf(s.meta()) });
+  put(s, 'sets', filled.id, filled);
+  const after = withNew.map((x) => (x.id === filled.id ? filled : x));
+  const next = after.find((x) => !x.done);
+  let restLine = '';
+  if (!(set.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) {
+    const secs = restFor(ex, filled.type, st);
+    if (secs) { ctx.action({ kind: 'rest', seconds: secs, label: ex.name }); restLine = ` Rest ${restText(secs)} started on his phone.`; }
+  }
+  const t = set.target || {};
+  const allSets = [...sets.filter((x) => x.id !== filled.id), filled].sort((p, q) => p.order - q.order);
+  const nowEx = currentExercise(session, allSets);
+  const lines = [`Logged ${ex.name}, set ${setNo(after, filled)} of ${after.length}${added ? ' (an extra set)' : ''}${filled.type !== 'normal' ? ` (${filled.type})` : ''}: ${valuesText(ex, filled)}.${t.kg != null || t.reps ? ` Target was ${t.kg != null ? k(t.kg) : '?'} × ${repsText(t.reps) || '?'}.` : ''}${restLine}`];
+  if (guard) lines.push(guard);
+  else if (t.kg > 0 && filled.kg != null && filled.kg > t.kg * 1.5 && filled.type !== 'warmup') lines.push(`Check it: ${k(filled.kg)} kg is far above today's target of ${k(t.kg)} kg on ${ex.name}.`);
+  if (rec) lines.push(`New comeback best on ${ex.name}: ${k(rec.kg)} kg${rec.previous ? ` (before: ${k(rec.previous)} kg)` : ''}.`);
+  lines.push(nowEx ? `Next: ${nextSetText(nowEx, allSets)}.` : 'That was the last set of the session: he finishes it on the phone (summary and records).');
+  return wrote(lines.join('\n'), `${ex.name} ${valuesText(ex, filled)}${guard ? ' · over 30% cap' : ''}`);
+}
+
+/** The session to correct: the one in progress, else the last one he finished in the past 24 hours. */
+function sessionToFix(s) {
+  const active = s.active();
+  if (active) return active;
+  return s.list('sessions').filter((x) => x.kind !== 'holds' && x.status === 'done' && (x.endedAt || x.startedAt) > s.now - 86400000).sort((a, b) => b.startedAt - a.startedAt)[0] || null;
+}
+
+async function correctSet(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const session = sessionToFix(s);
+  if (!session) return refuse('No session in progress or finished in the last 24 hours. Older sessions are edited on the phone (History).');
+  const sets = s.setsOf(session.id);
+  const { ex, error } = pickExercise(session, sets, a.exercise);
+  if (error || !ex) return refuse(error || 'Which exercise?');
+  const mine = sets.filter((x) => x.exKey === ex.key);
+  const set = a.set ? mine[a.set - 1] : [...mine].filter((x) => x.done).sort((p, q) => (q.doneAt || 0) - (p.doneAt || 0))[0];
+  if (!set) return refuse(`${ex.name} has ${plural(mine.length, 'set')}${a.set ? `; there is no set ${a.set}` : ' and none is ticked yet'}.`);
+  const n = setNo(sets, set);
+  if (a.remove) {
+    del(s, 'sets', set.id);
+    return wrote(`Removed ${ex.name} set ${n} (${valuesText(ex, set)}) from ${session.title}.`, `${ex.name} set ${n} removed`);
+  }
+  const next = { ...set };
+  if (num(a.kg) !== undefined) next.kg = num(a.kg);
+  if (num(a.reps) !== undefined) next.reps = Math.round(num(a.reps));
+  if (num(a.seconds) !== undefined) next.durationS = Math.round(num(a.seconds));
+  if (a.type) next.type = a.type;
+  if (num(a.rpe) !== undefined) next.rpe = num(a.rpe);
+  if (a.note !== undefined) next.note = String(a.note).slice(0, 300);
+  if (a.done === true && !set.done) { next.done = true; next.doneAt = s.now; }
+  if (a.done === false) { next.done = false; next.doneAt = null; }
+  put(s, 'sets', set.id, next);
+  const guard = next.kg !== set.kg && next.type !== 'warmup' && next.type !== 'hold' ? guardFor(s, session, ex, next.kg) : null;
+  return wrote(`${ex.name} set ${n} of ${session.title} is now ${valuesText(ex, next)}${next.done ? '' : ' (not ticked)'} (was ${valuesText(ex, set)}).${guard ? `\n${guard}` : ''}`, `${ex.name} set ${n}: ${valuesText(ex, next)}`);
+}
+
+async function startSession(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const active = s.active();
+  if (active) return refuse(`${activeText(s, active)} Finish or discard it on the phone before starting another.`);
+  const routines = s.list('routines');
+  let routine = null;
+  if (a.empty) routine = null;
+  else if (a.routine) {
+    const { item, ambiguous } = findByName(routines, a.routine, (r) => r.title, (r) => [r.dayType, LABEL[r.dayType]]);
+    if (!item) return refuse(ambiguous.length ? `Which routine: ${ambiguous.join('; ')}?` : `No routine called "${a.routine}". Routines: ${routines.map((r) => r.title).join('; ')}.`);
+    routine = item;
+  } else {
+    const type = a.dayType || s.rotation().next.dayType;
+    const mode = modeOf(s.one('progression', 'modes'), type);
+    routine = routines.filter((r) => r.dayType === type && r.folderId === (mode === 'normal' ? 'normal' : 'comeback')).sort((x, y) => x.order - y.order)[0] || routines.find((r) => r.dayType === type) || null;
+    if (!routine) return refuse(`No routine for ${LABEL[type] || type}.`);
+  }
+  const st = s.settings();
+  const rd = s.days()[s.today]?.readiness;
+  const lighter = rd && routine && rd.dayType === routine.dayType && (rd.action === 'lighter-all' || rd.action === 'lighter-area') ? { all: rd.action === 'lighter-all', names: rd.lighterExercises || [], params: rd.params, rule: rd.rule } : null;
+  const { session, sets } = buildSession({
+    routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((d) => d.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now,
+    smallestPlate: s.minPlate(), gym: st.gym.name, warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine',
+    bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter,
+  });
+  s.store.writeLocalMany([...sets.map((x) => ({ col: 'sets', id: x.id, data: x })), { col: 'sessions', id: session.id, data: session }]);
+  ctx.action({ kind: 'open', url: `#/session/${session.id}`, label: 'Open the session' });
+  const first = session.exercises.find((e) => sets.some((x) => x.exKey === e.key));
+  const rot = s.rotation();
+  const notes = [];
+  if (routine?.dayType && rot.today.kind !== 'train') notes.push(`Today is ${rot.today.kind === 'done' ? `${LABEL[rot.today.dayType]} done already` : 'a rest day in the rotation'}.`);
+  else if (routine?.dayType && rot.today.dayType !== routine.dayType) notes.push(`The rotation says ${LABEL[rot.today.dayType]} today.`);
+  if (routine?.dayType && !rd) notes.push('Check-in not done today.');
+  if (lighter) notes.push(`Lighter from today's check-in (rule ${lighter.rule}).`);
+  return wrote(`Started ${session.title}${session.week ? ` (week ${session.week} column)` : ''}: ${plural(session.exercises.length, 'exercise')}, ${plural(sets.length, 'set')}. It is open on his phone.${first ? ` First: ${nextSetText(first, sets)}.` : ''}${notes.length ? ` ${notes.join(' ')}` : ''}`, `${session.title} started`);
+}
+
+async function nextExercise(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const session = s.active();
+  if (!session) return refuse('No session in progress.');
+  const sets = s.setsOf(session.id);
+  const isOpen = (e) => sets.some((x) => x.exKey === e.key && !x.done);
+  const open = session.exercises.filter(isOpen);
+  if (!open.length) return refuse('Every set is ticked: he finishes the session on the phone.');
+  // From the exercise he worked on last (or the first with sets left): the next one after it with sets left.
+  const lastTicked = sets.filter((x) => x.done).sort((p, q) => (q.doneAt || 0) - (p.doneAt || 0))[0];
+  const cur = lastTicked ? session.exercises.find((e) => e.key === lastTicked.exKey) : open[0];
+  const i = session.exercises.findIndex((e) => e.key === cur?.key);
+  const after = session.exercises.slice(i + 1).find(isOpen) || session.exercises.slice(0, Math.max(0, i)).find(isOpen) || cur;
+  ctx.action({ kind: 'focus', sessionId: session.id, exKey: after.key });
+  const left = cur && cur.key !== after.key ? sets.filter((x) => x.exKey === cur.key && !x.done).length : 0;
+  return { text: `Next: ${nextSetText(after, sets)}.${left ? ` (${cur.name} still has ${plural(left, 'set')} unticked.)` : ''}`, summary: after.name };
+}
+
+async function restTimer(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const what = a.action || 'start';
+  if (what === 'skip') { ctx.action({ kind: 'rest-skip' }); return { text: 'Rest timer skipped on his phone.', summary: 'skip' }; }
+  if (what === 'add') {
+    const secs = Math.round(num(a.seconds) ?? 15);
+    ctx.action({ kind: 'rest-add', seconds: secs });
+    return { text: `Rest timer ${secs >= 0 ? '+' : ''}${secs} s on his phone.`, summary: `${secs >= 0 ? '+' : ''}${secs} s` };
+  }
+  let secs = num(a.seconds);
+  let label = 'Rest';
+  if (secs === undefined) {
+    const session = s.active();
+    const sets = session ? s.setsOf(session.id) : [];
+    const lastTicked = sets.filter((x) => x.done).sort((p, q) => (q.doneAt || 0) - (p.doneAt || 0))[0];
+    const ex = session && (lastTicked ? session.exercises.find((e) => e.key === lastTicked.exKey) : currentExercise(session, sets));
+    secs = restFor(ex || { capClass: 'main' }, lastTicked?.type || 'normal', s.settings()) || s.settings().rest.mainS;
+    if (ex) label = ex.name;
+  }
+  secs = Math.max(5, Math.min(3600, Math.round(secs)));
+  ctx.action({ kind: 'rest', seconds: secs, label });
+  return { text: `Rest timer ${mmss(secs)} started on his phone.`, summary: mmss(secs) };
+}
+
+// ---- meals --------------------------------------------------------------------------------------------------------
+
+const ITEMS = { type: 'array', minItems: 1, maxItems: 30, items: obj({ name: { type: 'string' }, grams: { type: 'number', minimum: 0 }, kcal: { type: 'number', minimum: 0 }, protein: { type: 'number', minimum: 0, description: 'grams of protein' } }, ['name', 'grams', 'kcal', 'protein']) };
+
+const momentOf = (s, date, hm) => (hm ? zonedTime(date || s.today, hm, s.tz) : s.now);
+
+async function logMeal(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const at = momentOf(s, a.date, a.time);
+  if (at > s.now + 3600000) return refuse('That time is in the future. Meals are logged once eaten.');
+  const id = newId('meal');
+  const items = cleanItems(a.items);
+  const meal = newMeal({ id, at, name: a.name ? String(a.name).slice(0, 40) : defaultMealName(at, s.settings().fuel?.mealTimes, s.tz), tz: s.tz });
+  meal.before = { ...meal.before, items, confirmedAt: s.now };
+  meal.by = 'coach';
+  if (a.note) meal.note = String(a.note).slice(0, 300);
+  put(s, 'meals', id, meal);
+  const t = itemTotals(items);
+  const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
+  return wrote(`Logged ${meal.name}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein.\n${day}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+}
+
+async function correctMeal(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const meal = s.one('meals', a.meal) || s.list('meals').find((m) => m.id === a.meal);
+  if (!meal) return refuse(`No meal with id ${a.meal}. The meals tool lists the ids.`);
+  if (a.remove) { del(s, 'meals', meal.id); return wrote(`Deleted ${meal.name} (${timeText(meal.at, s.tz)}, ${dayText(meal.date, s.today)}).`, `${meal.name} deleted`); }
+  const next = { ...meal };
+  if (a.items) next.before = { ...(meal.before || {}), items: cleanItems(a.items), confirmedAt: s.now, edited: true };
+  if (a.name) next.name = String(a.name).slice(0, 40);
+  if (a.time) { next.at = zonedTime(meal.date, a.time, s.tz); }
+  if (a.note !== undefined) next.note = String(a.note).slice(0, 300);
+  put(s, 'meals', meal.id, next);
+  const t = itemTotals(next.before?.items || []);
+  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${meal.after && !meal.after.none ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
+}
+
+// ---- supplements --------------------------------------------------------------------------------------------------
+
+function findSupp(s, name) {
+  const supps = s.list('supplements').filter((x) => statusOn(x, s.today) !== 'removed');
+  return findByName(supps, name, (x) => x.name, (x) => [x.short, x.id.replace(/^supp\./, '')]);
+}
+
+async function supplement(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const date = a.date || s.today;
+  if (date > s.today) return refuse('That day is still to come. Supplements are ticked when taken.');
+  const dayKind = suppDayKind(s, date);
+  const done = []; const problems = []; const notes = [];
+  const log = s.list('supp-log');
+  for (const name of a.names || []) {
+    const { item: supp, ambiguous } = findSupp(s, name);
+    if (!supp) { problems.push(ambiguous.length ? `"${name}": which one, ${ambiguous.join(' or ')}?` : `"${name}" isn't on his list.`); continue; }
+    if (a.status === 'undo') { del(s, 'supp-log', logId(date, supp.id)); done.push(`${supp.short || supp.name}: answer removed`); continue; }
+    if (!scheduledOn(supp, date)) notes.push(`${supp.short || supp.name} isn't scheduled ${date === s.today ? 'today' : `on ${dayText(date, s.today)}`} (${statusOn(supp, date) === 'paused' ? 'paused' : 'not one of its days'}); logged anyway.`);
+    const e = logEntry({ supp, date, dayKind, status: a.status, reason: a.reason || '', at: s.now, by: 'coach' });
+    put(s, 'supp-log', e.id, e);
+    done.push(`${supp.short || supp.name} ${a.status === 'taken' ? `${e.dose} taken` : `skipped${a.reason ? ` (${a.reason})` : ''}`}`);
+    const stock = stockStatus(supp, [...log.filter((x) => x.id !== e.id), e]);
+    if (stock?.low) notes.push(`${supp.name}: ${stock.left} servings left, ${lastsText(stock.days)}.`);
+  }
+  if (!done.length) return refuse(problems.join(' ') || 'Which supplement?');
+  const after = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const open = checklist({ supps: after.list('supplements'), log: after.list('supp-log'), date, dayKind }).flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
+  return wrote([`${dayText(date, s.today)}: ${done.join('; ')}.`, ...problems, ...notes, open.length ? `Still open: ${open.join(', ')}.` : 'Everything for the day is answered.'].join('\n'), done.join('; '));
+}
+
+async function supplementPlan(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const today = s.today;
+  if (a.kind === 'restock') {
+    const { item: supp, ambiguous } = findSupp(s, a.supplement || '');
+    if (!supp) return refuse(ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : 'Which supplement is this about?');
+    if (!['restock', 'not-now', 'stop'].includes(a.answer)) return refuse('The restock answer is restock, not-now or stop.');
+    const id = newId('ans');
+    put(s, 'supp-answers', id, { id, kind: 'low', suppId: supp.id, countedAt: supp.stock?.countedAt ?? null, answer: a.answer, text: a.text || '', at: s.now, date: today, by: 'coach' });
+    return wrote(`Recorded for ${supp.name}: ${a.answer === 'restock' ? 'restocking' : a.answer === 'stop' ? `stopping it (it stays on his list until he removes it there)` : 'not now'}.${a.answer === 'restock' ? ' When the new pack arrives he enters the count on the supplement.' : ''}`, `${supp.short || supp.name}: ${a.answer}`);
+  }
+  if (a.kind === 'weekly') {
+    if (!['nothing', 'restock-some', 'add'].includes(a.answer)) return refuse('The weekly answer is nothing, restock-some or add.');
+    const id = newId('ans');
+    put(s, 'supp-answers', id, { id, kind: 'weekly', answer: a.answer, text: a.text || '', at: s.now, date: today, by: 'coach' });
+    if (a.answer === 'add' && a.text) { const cid = newId('consider'); put(s, 'supp-considering', cid, { id: cid, name: String(a.text).slice(0, 60), note: a.note || '', addedOn: today, status: 'considering' }); }
+    return wrote(`Recorded this week's answer: ${a.answer === 'nothing' ? 'nothing this week' : a.answer === 'add' ? `something new${a.text ? ` (${a.text}, on the considering list)` : ''}` : `restocking${a.text ? ` ${a.text}` : ''}`}.`, `weekly: ${a.answer}`);
+  }
+  if (a.kind === 'considering') {
+    if (!a.name) return refuse('What is he considering?');
+    const id = newId('consider');
+    put(s, 'supp-considering', id, { id, name: String(a.name).slice(0, 60), note: a.note || '', addedOn: today, status: 'considering' });
+    return wrote(`Added to his considering list: ${a.name}. It stays there until he decides; nothing is added to his supplements.`, `considering ${a.name}`);
+  }
+  if (a.kind === 'drop_considering') {
+    const { item } = findByName(s.list('supp-considering').filter((c) => c.status === 'considering'), a.name || '');
+    if (!item) return refuse(`"${a.name}" isn't on the considering list.`);
+    put(s, 'supp-considering', item.id, { ...item, status: 'dropped', droppedOn: today });
+    return wrote(`Took ${item.name} off the considering list.`, `dropped ${item.name}`);
+  }
+  return refuse('kind is restock, weekly, considering or drop_considering.');
+}
+
+// ---- body scans ---------------------------------------------------------------------------------------------------
+
+async function bodyScan(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const plan = s.one('scan-plan', 'main') || {};
+  const savePlan = (p) => put(s, 'scan-plan', 'main', p);
+  const st = scanStatus({ plan, scans: s.list('body-scans'), today: s.today, last: s.last(), days: s.days() });
+  if (a.action === 'confirm_date') {
+    const date = a.date || st.proposal.date;
+    if (date <= s.today) return refuse(`Pick a day after today (${dayText(s.today, s.today)}): the evening before he gets the preparation list.`);
+    savePlan(confirmDate(plan, date, { proposedDate: st.proposal.date, at: s.now }));
+    return wrote(`Body scan confirmed for ${dayText(date, s.today)}${date !== st.proposal.date ? ` (the app had proposed ${dayText(st.proposal.date, s.today)})` : ''}: first thing at the gym, before the workout. Reminders two evenings before, the evening before with the list, and at his session time.`, `scan ${date}`);
+  }
+  if (a.action === 'cancel_date') {
+    if (!st.next) return refuse('No scan date is confirmed.');
+    savePlan(cancelDate(plan, s.now));
+    return wrote(`The scan on ${dayText(st.next.date, s.today)} is cancelled. The app proposes ${dayText(st.proposal.date, s.today)}.`, 'scan cancelled');
+  }
+  if (a.action === 'safety_read') {
+    savePlan({ ...plan, safety: { readAt: s.now } });
+    return wrote("Recorded: he has read the scanner's own safety notice.", 'safety notice read');
+  }
+  if (a.action === 'staff_said') {
+    if (!a.text) return refuse('What did the staff say?');
+    savePlan({ ...plan, staff: [...(plan.staff || []), { at: s.now, text: String(a.text).slice(0, 1000) }] });
+    return wrote(`Recorded what his gym's staff said. He can change the checklist to match on the Body scan screen.`, 'staff instructions');
+  }
+  if (a.action === 'record_results') {
+    const date = a.date || s.today;
+    const metrics = cleanMetrics((a.metrics || []).map((m) => ({ label: m.label, value: m.value, text: m.text ?? (m.value != null ? String(m.value) : ''), unit: m.unit || '' })));
+    if (!metrics.length) return refuse('Which numbers? Give each as label, value and unit, exactly as the scan shows them.');
+    const rec = s.one('body-scans', scanId(date));
+    const items = protocolOf(plan);
+    const base = conditionsFrom(rec, items);
+    const conditions = { ...base, fasted: a.fasted ?? base.fasted, trainedBefore: a.trainedBefore ?? base.trainedBefore, unusual: String(a.unusual || '').slice(0, 300) };
+    const hm = a.time || s.days()[date]?.sessionTime || '05:00';
+    put(s, 'body-scans', scanId(date), withResults(rec, { date, at: zonedTime(date, hm, s.tz), metrics, conditions, photos: rec?.photos || [], source: 'coach', note: rec?.note || '' }, s.now));
+    return wrote(`Saved the scan of ${dayText(date, s.today)} at ${formatHm(hm)}: ${metrics.map((m) => `${m.label} ${m.text}${m.unit ? ` ${m.unit}` : ''}`).join('; ')}. He can check or fix them on the Body scan screen.`, `scan ${date}: ${metrics.length} numbers`);
+  }
+  return refuse('action is confirm_date, cancel_date, safety_read, staff_said or record_results.');
+}
+
+// ---- reminders and notes ------------------------------------------------------------------------------------------
+
+async function setReminder(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  if (a.cancel) {
+    const r = s.one('coach-reminders', a.cancel);
+    if (!r) return refuse(`No reminder with id ${a.cancel}.`);
+    put(s, 'coach-reminders', r.id, { ...r, cancelledAt: s.now });
+    return wrote(`Cancelled the reminder for ${dayText(s.date(r.at), s.today)}, ${timeText(r.at, s.tz)}: ${r.text}`, 'reminder cancelled');
+  }
+  if (!a.time || !a.text) return refuse('A reminder needs a time and what to say.');
+  let date = a.date || s.today;
+  let at = zonedTime(date, a.time, s.tz);
+  if (!a.date && at <= s.now) { date = addDays(s.today, 1); at = zonedTime(date, a.time, s.tz); }
+  if (at <= s.now) return refuse('That time has passed.');
+  const id = newId('rem');
+  put(s, 'coach-reminders', id, { id, at, date, hm: a.time, text: String(a.text).slice(0, 200), createdAt: s.now, by: 'coach' });
+  return wrote(`Reminder set for ${dayText(date, s.today)}, ${formatHm(a.time)}: "${a.text}". It comes as a notification from the Mac (when notifications are on) [id ${id}].`, `${dayText(date, s.today)} ${formatHm(a.time)}`);
+}
+
+async function writeNote(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  if (a.remove) {
+    const n = s.one('coach-notes', a.remove);
+    if (!n) return refuse(`No note with id ${a.remove}.`);
+    del(s, 'coach-notes', n.id);
+    return wrote(`Deleted the note: ${n.text}`, 'note deleted');
+  }
+  if (!a.text) return refuse('What should the note say?');
+  const id = newId('note');
+  put(s, 'coach-notes', id, { id, at: s.now, date: s.today, text: String(a.text).slice(0, 2000), topic: a.topic ? String(a.topic).slice(0, 40) : '', by: 'coach' });
+  return wrote(`Noted${a.topic ? ` (${a.topic})` : ''}: ${a.text}`, a.topic || 'note');
+}
+
+// ---- sauna --------------------------------------------------------------------------------------------------------
+
+async function sauna(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const sessions = s.list('sauna');
+  const active = sessions.find((x) => x.status === 'active');
+  const openAfter = sessions.filter((x) => x.status !== 'active' && x.after && !x.after.answeredAt).sort((p, q) => q.startedAt - p.startedAt)[0];
+  const words = (a.symptoms || []).map((x) => String(x).trim()).filter(Boolean).map((x) => SYMPTOMS.find((y) => y.toLowerCase().replace(/"/g, '') === x.toLowerCase().replace(/"/g, '')) || x.slice(0, 60));
+  if (a.action === 'symptoms') {
+    if (active) {
+      put(s, 'sauna', active.id, feelOffState(active, { when: 'coach', what: words, now: s.now }));
+      ctx.action({ kind: 'open', url: `#/sauna/run/${active.id}`, label: 'Open the sauna screen' });
+      return wrote(`STOPPED. The round and the whole session are over; recorded: ${words.join(', ') || 'symptoms'}. Tell him exactly: ${GET_OUT} The next session goes back a step.`, `stopped: ${words.join(', ') || 'symptoms'}`);
+    }
+    if (openAfter) {
+      put(s, 'sauna', openAfter.id, afterAnswerState(openAfter, { symptoms: true, what: words, now: s.now }));
+      return wrote(`Recorded symptoms after the sauna of ${dayText(openAfter.date, s.today)}: ${words.join(', ') || 'symptoms'}. Tell him: ${GET_OUT} The next session goes back a step.`, `after: ${words.join(', ') || 'symptoms'}`);
+    }
+    const recent = sessions.filter((x) => x.endedAt && s.now - x.endedAt < 6 * 3600000).sort((p, q) => q.endedAt - p.endedAt)[0];
+    if (recent) {
+      put(s, 'sauna', recent.id, { ...recent, symptoms: [...(recent.symptoms || []), { at: s.now, when: 'later', what: words }] });
+      return wrote(`Recorded symptoms after the sauna of ${dayText(recent.date, s.today)}: ${words.join(', ') || 'symptoms'}. Tell him: ${GET_OUT}`, 'symptoms later');
+    }
+    return { text: `No sauna session today to record it on. Still tell him: ${GET_OUT}`, summary: 'no session' };
+  }
+  if (a.action === 'start') {
+    if (active) return refuse('A sauna session is already running on his phone.');
+    const st = ladderState(sessions, s.today, s.one('sauna-plan', 'main') || {});
+    ctx.action({ kind: 'open', url: '#/sauna/check', label: 'Open the sauna checklist' });
+    return { text: `Today's step: ${stepText(st.step)}. He ticks the checklist on his phone (the sauna screen is open); the app decides whether today is a go. Never before lifting.`, summary: stepText(st.step) };
+  }
+  if (a.action === 'end') {
+    if (!active) return refuse('No sauna session is running.');
+    put(s, 'sauna', active.id, endHereState(active, s.now));
+    ctx.action({ kind: 'open', url: `#/sauna/run/${active.id}`, label: 'Open the sauna screen' });
+    return wrote(`Ended the sauna session with no symptoms. It doesn't count as a clean session for the ladder. The app asks once more in 15 minutes whether he has any symptoms.`, 'ended, no symptoms');
+  }
+  if (a.action === 'after_answer') {
+    const target = openAfter;
+    if (!target) return refuse('No question is open after a sauna session.');
+    if (words.length || a.none === false) {
+      put(s, 'sauna', target.id, afterAnswerState(target, { symptoms: true, what: words, now: s.now }));
+      return wrote(`Recorded symptoms 15 minutes after: ${words.join(', ') || 'symptoms'}. Tell him: ${GET_OUT}`, 'after: symptoms');
+    }
+    put(s, 'sauna', target.id, afterAnswerState(target, { symptoms: false, now: s.now }));
+    return wrote('Recorded: no symptoms 15 minutes after.', 'after: none');
+  }
+  return refuse('action is start, symptoms, end or after_answer.');
+}
+
+// ---- schedule -----------------------------------------------------------------------------------------------------
+
+async function schedule(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const days = s.days();
+  const rot = s.rotation();
+  const pre = s.settings().notify.readinessMin;
+  if (a.action === 'set_time' || a.action === 'clear_time') {
+    let date = a.date || rot.next.date;
+    if (date < s.today) return refuse('That day has passed.');
+    // "4:30" said in the evening, with today's session not done: he means tomorrow (the rotation carries it over).
+    let moved = false;
+    if (!a.date && a.action === 'set_time' && date === s.today && zonedTime(date, a.time, s.tz) <= s.now) { date = addDays(s.today, 1); moved = true; }
+    if (a.action === 'set_time' && !a.time) return refuse('What time?');
+    put(s, 'days', date, withTime(days[date], date, a.action === 'set_time' ? a.time : null, s.now));
+    const type = date === rot.next.date || moved ? rot.next.dayType : null;
+    return wrote(a.action === 'set_time' ? `${type ? `${LABEL[type]} ` : ''}${dayText(date, s.today)} at ${formatHm(a.time)}; check-in ${formatHm(addMinutesHm(a.time, -pre))}.${moved ? ` (${formatHm(a.time)} today has passed, so this is for tomorrow.)` : ''}${type ? '' : ' (That day is not the next training day in the rotation.)'}` : `Session time cleared for ${dayText(date, s.today)}.`, a.action === 'set_time' ? `${dayText(date, s.today)} ${formatHm(a.time)}` : 'time cleared');
+  }
+  if (a.action === 'rest_today') {
+    if (s.active()) return refuse('A session is in progress. Finish or discard it on the phone first.');
+    if (rot.today.kind !== 'train') return refuse(rot.today.kind === 'done' ? 'He already trained today.' : 'Today is already a rest day.');
+    const hm = days[s.today]?.sessionTime;
+    const nextDays = { ...days, [s.today]: withRest(days[s.today], s.today, 'added', s.now) };
+    put(s, 'days', s.today, nextDays[s.today]);
+    const moved = rotationDay({ last: s.last(), today: s.today, days: nextDays }).next;
+    if (hm && !days[moved.date]?.sessionTime) put(s, 'days', moved.date, withTime(days[moved.date], moved.date, hm, s.now));
+    return wrote(`Today is a rest day now (his rule: skip it, carry on with the next day type; no make-up). Next: ${LABEL[moved.dayType]}, ${dayText(moved.date, s.today)}${hm ? ` at ${formatHm(hm)}` : ''}. Tendon holds as planned.`, 'rest today');
+  }
+  if (a.action === 'undo_rest') {
+    const r = days[s.today]?.rest;
+    if (!r || rot.today.reason === 'rotation') return refuse(rot.today.reason === 'rotation' ? "Today is the rotation's own rest day (the day after Legs); it can't be undone." : 'Today is not a rest day he added.');
+    put(s, 'days', s.today, withRest(days[s.today], s.today, null, s.now));
+    return wrote(`Rest day taken back: today is ${LABEL[rot.next.dayType]} again.`, 'rest undone');
+  }
+  return refuse('action is set_time, clear_time, rest_today or undo_rest.');
+}
+
+const write = (name, title, description, inputSchema, run) => ({ name, title, description, inputSchema, run });
+
+export const WRITE_TOOLS = [
+  write('start_session', 'Start a session', "Start a workout exactly like Train > Start: today's targets, the check-in's lighter targets, warm-ups. Default: the next session in the rotation; or a day type, a routine name, or empty. Refuses while another session is in progress. Opens it on his phone.", obj({ dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] }, routine: { type: 'string' }, empty: { type: 'boolean' } }), startSession),
+  write('log_set', 'Log a set', 'Tick the next set of the session in progress with what he did ("80 for 8" = kg 80, reps 8). kg is the TOTAL including the bar as he says it; for weighted pull-ups the added kg (0 = bodyweight). Missing values come from the target or last time. Default exercise: the one he is on. Returns the 30% cap warning and records if any, starts his rest timer, and names the next set.', obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600, description: 'for holds and timed sets' }, type: SET_TYPE, set: { type: 'integer', minimum: 1, description: 'set number, if he names one' }, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' } }), logSet),
+  write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),
+  write('next_exercise', 'Next exercise', 'Move his phone to the next exercise with sets left and say its next set.', obj(), nextExercise),
+  write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
+  write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams, kcal and protein. Use his own numbers; where he gave none, estimate from typical values and say they are estimates. Time defaults to now.', obj({ items: ITEMS, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default from the time' }, time: HM, date: ISO, note: { type: 'string' } }, ['items']), logMeal),
+  write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
+  write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
+  write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
+  write('body_scan', 'Body scan', "Confirm the next scan date (default: the app's proposal) or cancel it; record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
+  write('set_reminder', 'Set a reminder', 'A notification to his phone at a time (today, or tomorrow if the time has passed, or a date), or cancel one by id.', obj({ time: HM, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
+  write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
+  write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
+  write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
+];

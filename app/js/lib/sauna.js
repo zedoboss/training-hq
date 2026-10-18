@@ -154,6 +154,28 @@ export function phaseOf(s, now = Date.now()) {
   return { phase: 'ready', round: 0 };
 }
 
+// The steps of a running session that end it, shared by the round screen and the coach (the coach can record what
+// he says; it can never add a round or time). Each returns the new session record.
+
+/** I FEEL OFF (or "yes" to the break question): the round and the whole session end now, with what he felt. */
+export function feelOffState(s, { when = 'button', what = [], now = Date.now() } = {}) {
+  const rounds = (s.rounds || []).map((r) => (r.inAt && !r.outAt ? { ...r, outAt: now } : r));
+  const breaks = (s.breaks || []).map((b) => (b.symptoms == null && !b.endAt ? { ...b, symptoms: true, endAt: now } : b));
+  return { ...s, rounds, breaks, status: 'stopped', endedAt: s.endedAt ?? now, symptoms: [...(s.symptoms || []), { at: now, when, what: [...what] }] };
+}
+
+/** End here, with no symptoms: an open round closes now; the 15-minute question follows. Doesn't count as clean. */
+export function endHereState(s, now = Date.now()) {
+  const rounds = (s.rounds || []).map((r) => (r.inAt && !r.outAt ? { ...r, outAt: now } : r));
+  const breaks = (s.breaks || []).map((b) => (b.symptoms == null ? { ...b, symptoms: false, endAt: now } : { ...b, endAt: b.endAt ?? now }));
+  return { ...s, rounds, status: 'ended', endedAt: now, breaks, after: { dueAt: now + AFTER_MIN * 60000, answeredAt: null, symptoms: null, what: [] } };
+}
+
+/** His answer to the question 15 minutes after. */
+export function afterAnswerState(s, { symptoms, what = [], now = Date.now() }) {
+  return { ...s, after: { ...(s.after || { dueAt: now }), answeredAt: now, symptoms: !!symptoms, what: symptoms ? [...what] : [] } };
+}
+
 /** The 15-minutes-after question time. */
 export const afterDueAt = (s) => (s.endedAt ?? Date.now()) + AFTER_MIN * 60000;
 

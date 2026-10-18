@@ -7,8 +7,8 @@ import { ready } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { isoDate, formatHm, formatDay, formatTime } from '../lib/time.js';
-import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFor, scheduledOn, logId, streak } from '../lib/supplements.js';
-import { rotationDay, lastRotationSession, daysByDate, addDays } from '../lib/rotation.js';
+import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFrom, scheduledOn, logId, streak } from '../lib/supplements.js';
+import { addDays } from '../lib/rotation.js';
 import { actionSheet, promptText, promptLong, confirmSheet } from '../ui/sheet.js';
 import { lowAnswered, weeklyAnsweredSince } from '../lib/fuel-reminders.js';
 import { newId } from '../lib/routines.js';
@@ -56,11 +56,8 @@ const SKIP_REASONS = ['Day off', 'Ran out', 'Forgot it', 'Not today'];
 
 /** Training or rest day for a date (magnesium's dose), from the rotation and the sessions. */
 export async function dayKindOn(repo, date) {
-  const [sessions, bridge, dayList] = await Promise.all([repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days')]);
-  const today = isoDate(new Date());
-  const rot = rotationDay({ last: lastRotationSession(sessions, bridge), today: date > today ? date : today, days: daysByDate(dayList) });
-  const workoutDates = new Set(sessions.filter((x) => x.kind !== 'holds' && x.status === 'done').map((x) => isoDate(new Date(x.startedAt))));
-  return dayKindFor(date, { today, rotKind: rot.today.kind, workoutDates });
+  const [sessions, bridge, days] = await Promise.all([repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days')]);
+  return dayKindFrom({ sessions, bridge, days, date, today: isoDate(new Date()) });
 }
 
 /** Mark one supplement taken or skipped on a date (also used by the Fuel card and, later, by voice). */
@@ -201,7 +198,8 @@ function renderPlan(view, repo, alive, suppId) {
       } else if (kind === 'add') {
         text = await promptText('What might you get?', '', { placeholder: 'name' });
         if (!text) return;
-        await repo.put('supp-considering', newId('consider'), { id: newId('consider'), name: text, note: '', addedOn: today, status: 'considering' });
+        const cid = newId('consider');
+        await repo.put('supp-considering', cid, { id: cid, name: text, note: '', addedOn: today, status: 'considering' });
       }
       await answer({ id: newId('ans'), kind: 'weekly', answer: kind, text: text || '', at: Date.now(), date: today });
       toast('Noted.');
