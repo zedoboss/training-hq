@@ -39,6 +39,9 @@ function seed() {
   w('supplements', 'supp.powder', { id: 'supp.powder', kind: 'supplement', name: 'Test powder', short: 'powder', dose: '5 g', days: { type: 'daily' }, status: 'active', order: 1, stock: { servings: 3, countedAt: at('2026-01-19') } });
   w('supplements', 'supp.caps', { id: 'supp.caps', kind: 'supplement', name: 'Test capsules', short: 'caps', dose: '2 caps', days: { type: 'daily' }, status: 'active', order: 2 });
   w('fuel', 'plan', { kind: 'plan', kcal: 2000, proteinG: 150, foods: [{ name: 'Rice' }] });
+  w('tendons', 'area.knees', { kind: 'area', id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Wall Hold', sets: 3, seconds: 30, where: 'home' }], loadsArea: { exercises: ['Leg Extension (Machine)'] } });
+  w('tendons', 'readiness', { kind: 'readiness', status: 'draft', workingArea: { legs: ['L'], pull: [], push: [] },
+    ratings: [{ key: 'T', label: 'Sore tendon area', levels: ['none', 'slight', 'at the limit', 'above it'] }, { key: 'L', label: 'Legs', levels: ['none', 'slight', 'clearly', 'very'] }, { key: 'E', label: 'Energy', levels: ['drained', 'low', 'normal', 'high'] }] });
 }
 
 beforeEach(() => {
@@ -235,6 +238,35 @@ test('body scan: confirm the proposed date (never today), record the safety noti
   assert.equal(scan.status, 'done');
   assert.equal(scan.conditions.fasted, true);
   assert.equal(scan.source, 'coach');
+});
+
+test('check-in by talking: refused on a draft table; missing ratings asked for; his rules decide; a move applied only on his word', async () => {
+  const draft = await call('check_in', { energy: 2 });
+  assert.match(draft.text, /still a draft/);
+  assert.equal(actions.at(-1).url, '#/checkin');
+  const t = store.getRecord('tendons', 'readiness').data;
+  store.writeLocal('tendons', 'readiness', { ...t, status: 'confirmed' });
+  const part = await call('check_in', { areas: [{ area: 'knees', sore: 2 }] });
+  assert.match(part.text, /Still needed .*Knees: worse than yesterday, yes or no; legs soreness 0-3; energy 0-3/);
+  assert.match(part.text, /sore tendon area 0 none, 1 slight, 2 at the limit, 3 above it/);
+  assert.equal(store.getRecord('days', '2026-01-20'), undefined, 'nothing saved');
+  const r = await call('check_in', { areas: [{ area: 'knees', sore: 2, worse: false }], legs: 0, energy: 2 });
+  assert.match(r.text, /rule 4/);
+  assert.match(r.text, /Lighter today: Leg Extension \(Machine\) [\d.]+ kg × 6-10/);
+  const rec = store.getRecord('days', '2026-01-20').data.readiness;
+  assert.deepEqual([rec.rule, rec.action, rec.lighterExercises, rec.by], [4, 'lighter-area', ['Leg Extension (Machine)'], 'coach']);
+  assert.match((await call('check_in', { areas: [{ area: 'knees', sore: 0, worse: false }], legs: 0, energy: 2 })).text, /already checked in today/);
+  const move = await call('check_in', { areas: [{ area: 'knees', sore: 0, worse: false }], legs: 0, energy: 0, again: true });
+  assert.match(move.text, /rule 2.*\n.*Not applied yet/s);
+  assert.equal(store.getRecord('days', '2026-01-20').data.rest, undefined);
+  await call('check_in', { apply: true });
+  assert.equal(store.getRecord('days', '2026-01-20').data.rest.reason, 'moved');
+  assert.match((await call('today')).text, /^Today: rest \(session moved to tomorrow at the check-in\)\. Next: Legs, Wednesday 1\/21/);
+});
+
+test('today projects the coming days from the rotation (dates never worked out by hand)', async () => {
+  const r = await call('today');
+  assert.match(r.text, /Coming up, if each planned session happens on its day: Wednesday 1\/21 rest; Thursday 1\/22 Pull \(week 4\); Friday 1\/23 Push \(week 4\)/);
 });
 
 test('read tools answer on an empty database without failing', async () => {

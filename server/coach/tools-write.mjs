@@ -19,6 +19,7 @@ import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checkli
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm } from '../../app/js/lib/time.js';
+import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -226,6 +227,98 @@ async function restTimer(a, ctx) {
   secs = Math.max(5, Math.min(3600, Math.round(secs)));
   ctx.action({ kind: 'rest', seconds: secs, label });
   return { text: `Rest timer ${mmss(secs)} started on his phone.`, summary: mmss(secs) };
+}
+
+// ---- readiness check-in ------------------------------------------------------------------------------------------
+
+const AREA_ORDER = ['knees', 'shoulder', 'wrist'];
+const KEY_NAME = { L: 'legs', B: 'back' };
+
+function routineFor(s, dayType) {
+  const mode = modeOf(s.one('progression', 'modes'), dayType);
+  const routines = s.list('routines');
+  return routines.filter((r) => r.dayType === dayType && r.folderId === (mode === 'normal' ? 'normal' : 'comeback')).sort((x, y) => x.order - y.order)[0] || routines.find((r) => r.dayType === dayType) || null;
+}
+
+const levelsText = (table, keyList) => keyList.map((k2) => {
+  const r = (table.ratings || []).find((x) => x.key === k2);
+  return r ? `${r.label.toLowerCase()} ${r.levels.map((l, i) => `${i} ${l}`).join(', ')}` : null;
+}).filter(Boolean).join('; ');
+
+/** The readiness check-in by talking: the same table, rules and record as the check-in screen (#/checkin). */
+async function checkIn(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const table = s.one('tendons', 'readiness');
+  if (!table) return refuse("The readiness table hasn't reached the Mac yet.");
+  if (table.status !== 'confirmed') {
+    ctx.action({ kind: 'open', url: '#/checkin', label: 'Open the check-in' });
+    return refuse('His readiness table is still a draft. He confirms or edits it on the check-in screen first (decision 23); until then it is not used.');
+  }
+  const areas = askedAreas(s.list('tendons')).sort((x, y) => AREA_ORDER.indexOf(x.id) - AREA_ORDER.indexOf(y.id));
+  const rot = s.rotation();
+  const days = s.days();
+  const dayType = rot.today.kind === 'train' ? rot.today.dayType : null;
+  const routine = dayType ? routineFor(s, dayType) : null;
+  const exNames = (routine?.exercises || []).map((e) => e.name);
+  const loaded = dayType ? loadedAreas(areas, exNames) : [];
+  const keys = dayType ? workingKeys(table, dayType) : [];
+  const saved = days[s.today]?.readiness;
+
+  if (a.apply) {
+    if (!saved || !['move', 'rest-holds'].includes(saved.action)) return refuse('Nothing to apply: today\'s check-in says to train.');
+    const cur = days[s.today] || { date: s.today };
+    if (cur.rest) return refuse('Already done: today is a rest day.');
+    const reason = saved.action === 'move' ? 'moved' : 'rest-holds';
+    const next = withRest(cur, s.today, reason, s.now);
+    put(s, 'days', s.today, next);
+    if (cur.sessionTime) {
+      const to = rotationDay({ last: s.last(), today: s.today, days: { ...days, [s.today]: next } }).next.date;
+      if (!days[to]?.sessionTime) put(s, 'days', to, withTime(days[to], to, cur.sessionTime, s.now));
+    }
+    return wrote(saved.action === 'move' ? `${LABEL[saved.dayType]} moved to tomorrow, ${dayText(addDays(s.today, 1), s.today)}. ${LABEL[saved.dayType]} stays next.` : `Rest and tendon holds today, with less weight or less effort. ${LABEL[saved.dayType]} stays next.`, saved.action);
+  }
+
+  const ratings = { T: {}, W: {} };
+  const unknown = [];
+  for (const r of a.areas || []) {
+    const { item } = findByName(areas, r.area || '', (x) => x.label, (x) => [x.id]);
+    if (!item) { unknown.push(r.area); continue; }
+    if (Number.isInteger(r.sore)) ratings.T[item.id] = r.sore;
+    if (typeof r.worse === 'boolean') ratings.W[item.id] = r.worse;
+  }
+  if (Number.isInteger(a.legs)) ratings.L = a.legs;
+  if (Number.isInteger(a.back)) ratings.B = a.back;
+  if (Number.isInteger(a.energy)) ratings.E = a.energy;
+  const ids = areas.map((x) => x.id);
+  const ok = dayType ? complete(ratings, ids, keys) : ids.every((id) => Number.isInteger(ratings.T[id]) && typeof ratings.W[id] === 'boolean');
+  if (!ok) {
+    const missing = [
+      ...areas.filter((x) => !Number.isInteger(ratings.T[x.id])).map((x) => `${x.label} soreness 0-3`),
+      ...areas.filter((x) => typeof ratings.W[x.id] !== 'boolean').map((x) => `${x.label}: worse than yesterday, yes or no`),
+      ...keys.filter((k2) => !Number.isInteger(ratings[k2])).map((k2) => `${KEY_NAME[k2]} soreness 0-3`),
+      ...(dayType && !Number.isInteger(ratings.E) ? ['energy 0-3'] : []),
+    ];
+    return { text: `${unknown.length ? `Not an area in his check-in: ${unknown.join(', ')}. ` : ''}Still needed before the table can decide: ${missing.join('; ')}. Ask only for what's missing, in his words: "${areas.map((x) => x.label).join(', ')}${keys.length ? `, ${keys.map((k2) => KEY_NAME[k2]).join(', ')}` : ''}${dayType ? ', then energy' : ''}. Zero to three." Levels (his table): ${levelsText(table, ['T', ...keys, ...(dayType ? ['E'] : [])])}. Nothing saved yet.`, summary: 'ratings missing' };
+  }
+  if (saved && !a.again) return refuse(`He already checked in today (rule ${saved.rule}: ${ACTION_TEXT[saved.action] || saved.action}). To check in again, call check_in with again: true.`);
+  const movedYesterday = days[addDays(s.today, -1)]?.rest?.reason === 'moved';
+  const d = decide({ table, ratings, dayType, loaded, movedYesterday });
+  const names = d.action === 'lighter-area' ? exercisesLoading(areas, d.lighterAreas, exNames) : [];
+  const rec = { at: s.now, dayType, routineId: routine?.id ?? null, ratings, ...d, lighterExercises: names, params: paramsOf(table), by: 'coach' };
+  put(s, 'days', s.today, { ...(days[s.today] || { date: s.today }), date: s.today, readiness: rec });
+  const label = (id) => areas.find((x) => x.id === id)?.label || id;
+  const lines = [`Check-in saved, ${dayText(s.today, s.today)}: rule ${d.rule}${d.why ? ` (${d.why})` : ''}. ${ACTION_TEXT[d.action] || d.action}`];
+  if (d.action.startsWith('lighter') && routine) {
+    // The lighter targets, exactly as Start will set them.
+    const st = s.settings();
+    const { session, sets } = buildSession({ routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((x) => x.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now, smallestPlate: s.minPlate(), warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine', bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter: { all: d.action === 'lighter-all', names, params: rec.params, rule: d.rule } });
+    const easy = session.exercises.filter((e) => e.target?.lighter);
+    if (easy.length) lines.push(`Lighter today: ${easy.map((e) => { const w = sets.find((x) => x.exKey === e.key && x.type !== 'warmup'); return `${e.name} ${e.target.kg != null ? loadText(e.target.kg, e.barKg) : w?.kg != null ? loadText(w.kg, e.barKg) : ''} × ${repsText(e.target.reps || w?.target?.reps)} (${e.target.why})`; }).join('; ')}.`);
+  }
+  if (d.easeHolds?.length) lines.push(`Holds for ${d.easeHolds.map(label).join(', ')}: less weight or less effort today (his rule).`);
+  if (['move', 'rest-holds'].includes(d.action)) lines.push(`Not applied yet: when he agrees, call check_in with apply: true (or he taps it on the check-in screen). He can also train anyway.`);
+  ctx.action({ kind: 'open', url: '#/checkin', label: 'Open the check-in' });
+  return wrote(lines.join('\n'), `rule ${d.rule}: ${d.action}`);
 }
 
 // ---- meals --------------------------------------------------------------------------------------------------------
@@ -508,5 +601,6 @@ export const WRITE_TOOLS = [
   write('set_reminder', 'Set a reminder', 'A notification to his phone at a time (today, or tomorrow if the time has passed, or a date), or cancel one by id.', obj({ time: HM, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
+  write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
 ];

@@ -16,7 +16,7 @@ import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js'
 import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks } from '../../app/js/lib/meals.js';
 import { checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered } from '../../app/js/lib/fuel-reminders.js';
-import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK } from '../../app/js/lib/scans.js';
+import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN } from '../../app/js/lib/sauna.js';
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
@@ -61,6 +61,15 @@ export function activeText(s, session) {
 
 const weekOf = (s, dayType, date) => weekColumn(s.meta()?.firstSessions?.[dayType], date);
 
+/** The days ahead from today, if each planned session happens on its day: [{date, kind, dayType}]. */
+export const ahead = (s, n = 8) => projectRotation({ last: s.last(), days: s.days(), from: s.today, n });
+
+/** "Coming up ...": dates and day types from the app's rotation, so nobody works out a weekday by hand. */
+function comingUp(s, n = 8) {
+  const list = ahead(s, n).filter((d) => d.date > s.today);
+  return `Coming up, if each planned session happens on its day: ${list.map((d) => `${dayText(d.date, s.today)} ${d.kind === 'rest' ? 'rest' : `${LABEL[d.dayType]} (week ${weekOf(s, d.dayType, d.date)})`}`).join('; ')}.`;
+}
+
 function rotationLines(s) {
   const rot = s.rotation(); const t = rot.today; const days = s.days();
   const out = [];
@@ -76,6 +85,7 @@ function rotationLines(s) {
   if (t.kind !== 'rest' || rd) out.push(rd ? `Check-in today: rule ${rd.rule}, ${ACTION_TEXT[rd.action] || rd.action}${rd.lighterExercises?.length ? ` (${rd.lighterExercises.join(', ')})` : ''}` : 'Check-in today: not done.');
   const last = s.last();
   if (last) out.push(`Last rotation session: ${LABEL[last.dayType]}, ${dayText(last.date, s.today)}.`);
+  out.push(comingUp(s));
   const modes = s.one('progression', 'modes');
   if (modeOf(modes, nxt.dayType) === 'comeback' && wk >= 5 && !isConfirmed(s.list('progression'), nxt.dayType, wk)) out.push(`Week ${wk} numbers for ${LABEL[nxt.dayType]} need his OK (Train > Review); until then the last confirmed numbers apply.`);
   return out;
@@ -134,7 +144,7 @@ export function todayText(s) {
 /** The context block of every message: the rotation and the session in progress (short; the 'today' tool has the rest). */
 export function contextLine({ store, tz, now }) {
   const s = snapshot(store, { tz, now });
-  const lines = rotationLines(s).slice(0, 3);
+  const lines = [...rotationLines(s).slice(0, 3), comingUp(s, 6)];
   const active = s.active();
   if (active) lines.push(activeText(s, active));
   return lines.join('\n');
@@ -145,7 +155,7 @@ export function contextLine({ store, tz, now }) {
 function programmeText(s, { dayType = null, week = null } = {}) {
   const rot = s.rotation();
   const type = dayType || rot.next.dayType;
-  const date = type === rot.next.dayType ? rot.next.date : s.today;
+  const date = type === rot.next.dayType ? rot.next.date : ahead(s, 14).find((d) => d.kind !== 'rest' && d.dayType === type && d.date >= s.today)?.date || s.today;
   const wkNow = weekOf(s, type, date);
   const wk = week || wkNow;
   const modes = s.one('progression', 'modes');
