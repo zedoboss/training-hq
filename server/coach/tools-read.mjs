@@ -19,8 +19,8 @@ import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/m
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered } from '../../app/js/lib/fuel-reminders.js';
-import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation } from '../../app/js/lib/scans.js';
-import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN, proposeSaunaDays, SAUNA_TIME } from '../../app/js/lib/sauna.js';
+import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
+import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN, proposeSaunaDays, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
@@ -519,13 +519,15 @@ function saunaText(s) {
   const planned = (plan.planned || []).filter((p) => p.date >= s.today);
   lines.push(planned.length ? `Planned sauna days: ${planned.map((p) => `${dayText(p.date, s.today)} ${formatHm(p.time || SAUNA_TIME)}`).join('; ')}.` : 'No sauna days planned.');
   const prop = saunaProposal(s);
-  lines.push(prop.items.length ? `The app would propose (${prop.perWeek === 1 ? 'once a week at his level' : 'about two a week while building up, separate days'}; rest days first, never before lifting): ${prop.items.map((x) => `${dayText(x.date, s.today)} ${formatHm(x.time)} (${x.kind === 'rest' ? 'rest day' : `after ${LABEL[x.dayType] || 'the session'}`})`).join('; ')}. Offer them; plan only what he agrees to (sauna_plan).` : `Nothing more to propose this week (${prop.perWeek} a week${planned.length ? ', already planned' : ''}).`);
+  lines.push(prop.items.length ? `The app would propose (${prop.perWeek === 1 ? 'once a week at his level' : 'about two a week while building up, separate days'}; rest days first, never before lifting): ${prop.items.map((x) => `${dayText(x.date, s.today)} ${formatHm(x.time)} (${proposalDayText(x, LABEL)})`).join('; ')}.${prop.items.some((x) => x.maybe) ? ` Today's session isn't done, so where a day reads "X, or Y": X if today's session moves to tomorrow, Y if he does it today; the time is after lifting either way.` : ''} Offer them; plan only what he agrees to (sauna_plan).` : `Nothing more to propose this week (${prop.perWeek} a week${planned.length ? ', already planned' : ''}).`);
   return lines.join('\n');
 }
 
 /** A9: the proposal for the coming week from the rotation and his session times. */
 export function saunaProposal(s) {
-  const rotation = projectRotation({ last: s.last(), days: s.days(), from: s.today, n: 8 });
+  // While today's session is open, the days ahead depend on it (decision 15): a day that is rest only if he trains
+  // today counts as training, so nothing is proposed before lifting either way.
+  const rotation = projectRotationEitherWay({ last: s.last(), days: s.days(), from: s.today, n: 8 });
   return proposeSaunaDays({ sessions: s.list('sauna'), plan: s.one('sauna-plan', 'main') || {}, rotation, days: s.days(), today: s.today });
 }
 

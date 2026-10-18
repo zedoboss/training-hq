@@ -10,10 +10,10 @@ import { isoDate, formatTime, formatDay, formatDate, formatHm } from '../lib/tim
 import {
   LADDER, GOAL_STEP, PASSES_TO_UNLOCK, OVERDUE_MIN, SYMPTOMS, GET_OUT, CHECKLIST, DOCTOR_QUESTION, DOCTOR_ANSWERS,
   stepText, stepShort, ladderState, todayStep, doctorDue, gates, phaseOf, fluidLost, hadSymptoms, passed,
-  feelOffState, endHereState, afterAnswerState, proposeSaunaDays, planSaunaDay, SAUNA_TIME,
+  feelOffState, endHereState, afterAnswerState, proposeSaunaDays, planSaunaDay, SAUNA_TIME, proposalDayText,
 } from '../lib/sauna.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
-import { projectRotation, expectedOn } from '../lib/scans.js';
+import { projectRotationEitherWay, expectedEitherWay } from '../lib/scans.js';
 import { newId } from '../lib/routines.js';
 import * as alarm from '../lib/alarm.js';
 import { confirmSheet, promptTime } from '../ui/sheet.js';
@@ -42,13 +42,14 @@ async function schedule(repo) {
   const [sessions, bridge, dayList] = await Promise.all([repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days')]);
   const days = daysByDate(dayList);
   const last = lastRotationSession(sessions, bridge);
-  return { last, days, rotation: projectRotation({ last, days, from: isoDate(new Date()), n: 8 }) };
+  return { last, days };
 }
 
 function suggestHtml(p) {
   if (!p.items.length) return `<p class="hint">Nothing to suggest this week: ${p.perWeek === 1 ? 'once a week at your level' : 'about two a week while building up'}, already planned or no day fits.</p>`;
   return `<div class="hud c-cyan">SUGGESTED · ${p.perWeek === 1 ? 'ONCE A WEEK AT YOUR LEVEL' : 'ABOUT TWO A WEEK WHILE BUILDING UP'}</div>
-    ${p.items.map((x, i) => `<div class="ex-head"><span>${esc(formatDay(new Date(`${x.date}T12:00:00`)))}, ${esc(formatHm(x.time))} <span class="hint">${x.kind === 'rest' ? 'rest day' : `after ${esc(LABEL[x.dayType] || 'the session')}`}</span></span><button class="pill" type="button" data-plan-i="${i}">Plan</button></div>`).join('')}
+    ${p.items.map((x, i) => `<div class="ex-head"><span>${esc(formatDay(new Date(`${x.date}T12:00:00`)))}, ${esc(formatHm(x.time))} <span class="hint">${esc(proposalDayText(x, LABEL))}</span></span><button class="pill" type="button" data-plan-i="${i}">Plan</button></div>`).join('')}
+    ${p.items.some((x) => x.maybe) ? `<p class="hint">Today's ${esc(LABEL[p.openType] || 'session')} isn't logged yet, so the days ahead shift if it moves to tomorrow: first is if it moves, second if you do it today. Each time is after lifting either way.</p>` : ''}
     <p class="hint">Rest days first; never before lifting. You decide.</p>
     ${p.items.length > 1 ? '<button class="btn-ghost small" id="s-plan-all" type="button">Plan all</button>' : ''}`;
 }
@@ -75,7 +76,8 @@ function renderHome(view, repo, alive) {
     const history = sessions.filter((s) => s.status !== 'active').sort((a, b) => b.startedAt - a.startedAt);
     const planned = (plan.planned || []).filter((p) => p.date >= today).sort((a, b) => a.date.localeCompare(b.date));
     const sched = await schedule(repo);
-    const proposal = proposeSaunaDays({ sessions, plan, rotation: projectRotation({ last: sched.last, days: sched.days, from: today, n: 8 }), days: sched.days, today });
+    const rotation = projectRotationEitherWay({ last: sched.last, days: sched.days, from: today, n: 8 });
+    const proposal = { ...proposeSaunaDays({ sessions, plan, rotation, days: sched.days, today }), openType: rotation[0]?.kind === 'train' ? rotation[0].dayType : null };
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/fuel">Fuel</a><a class="pill" href="#/sauna/settings">Settings</a></div>
       <h1 class="view-title">Sauna</h1>
@@ -117,7 +119,7 @@ function renderHome(view, repo, alive) {
         e.preventDefault();
         const date = el.querySelector('#pd').value; const time = el.querySelector('#pt').value;
         const sc = await schedule(repo); // fresh: a session time may have been set since the screen was drawn
-        const exp = date >= today ? expectedOn({ last: sc.last, days: sc.days, today, date }) : null;
+        const exp = date >= today ? expectedEitherWay({ last: sc.last, days: sc.days, today, date }) : null;
         const r = planSaunaDay(plan, { date, time }, { today, kind: exp?.kind, sessionTime: sc.days[date]?.sessionTime || null });
         if (r.error) { toast(r.error); return; }
         await savePlan(repo, r.plan);
@@ -132,7 +134,7 @@ function renderHome(view, repo, alive) {
     const planOne = async (d) => {
       const cur = (await loadAll(repo)).plan;
       const sc = await schedule(repo);
-      const exp = expectedOn({ last: sc.last, days: sc.days, today, date: d.date });
+      const exp = expectedEitherWay({ last: sc.last, days: sc.days, today, date: d.date });
       const r = planSaunaDay(cur, d, { today, kind: exp?.kind, sessionTime: sc.days[d.date]?.sessionTime || null });
       if (r.error) { toast(r.error); return; }
       await savePlan(repo, r.plan);

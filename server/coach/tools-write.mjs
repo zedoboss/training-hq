@@ -16,8 +16,8 @@ import { currentBodyweight } from '../../app/js/lib/health.js';
 import { newId } from '../../app/js/lib/routines.js';
 import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
-import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedOn } from '../../app/js/lib/scans.js';
-import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME } from '../../app/js/lib/sauna.js';
+import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay } from '../../app/js/lib/scans.js';
+import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
 import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods.js';
@@ -640,7 +640,7 @@ function saunaPlan(a, ctx) {
     const p = saunaProposal(s);
     const st = ladderState(s.list('sauna'), s.today, plan);
     if (!p.items.length) return { text: `Nothing to propose: ${p.perWeek} a week and the coming week already has ${p.perWeek === 1 ? 'one' : 'them'} planned, or no day fits (never before lifting).`, summary: 'nothing to propose' };
-    return { text: `Proposal (not planned yet; he decides): ${p.items.map((x) => `${dayText(x.date, s.today)} at ${formatHm(x.time)} (${x.kind === 'rest' ? 'rest day' : `after ${LABEL[x.dayType] || 'the session'}, never before lifting`})`).join('; ')}. Step: ${stepText(st.step)}. ${p.perWeek === 1 ? 'Once a week at his level.' : 'While building up: about two a week on separate days (he decides).'} His checklist before each: ${checklistText()}. Say only this checklist about food and drink; never tell him to fast. Plan with action plan once he says yes.`, summary: `${p.items.length} day${p.items.length === 1 ? '' : 's'} proposed` };
+    return { text: `Proposal (not planned yet; he decides): ${p.items.map((x) => `${dayText(x.date, s.today)} at ${formatHm(x.time)} (${proposalDayText(x, LABEL)}${x.kind === 'rest' ? '' : ', never before lifting'})`).join('; ')}.${p.items.some((x) => x.maybe) ? ' Today\'s session isn\'t done: "X, or Y" means X if it moves to tomorrow, Y if he does it today.' : ''} Step: ${stepText(st.step)}. ${p.perWeek === 1 ? 'Once a week at his level.' : 'While building up: about two a week on separate days (he decides).'} His checklist before each: ${checklistText()}. Say only this checklist about food and drink; never tell him to fast. Plan with action plan once he says yes.`, summary: `${p.items.length} day${p.items.length === 1 ? '' : 's'} proposed` };
   }
   if (a.action === 'set_time') {
     if (!a.time) return refuse('Give the time (HH:MM).');
@@ -657,7 +657,7 @@ function saunaPlan(a, ctx) {
     if (!list.length) return refuse('Which days? Give dates (and times) he agreed to.');
     let next = plan; const done = [];
     for (const d of list) {
-      const exp = expectedOn({ last: s.last(), days: s.days(), today: s.today, date: d.date });
+      const exp = expectedEitherWay({ last: s.last(), days: s.days(), today: s.today, date: d.date });
       const r = planSaunaDay(next, d, { today: s.today, kind: exp?.kind, sessionTime: s.days()[d.date]?.sessionTime || null });
       if (r.error) return refuse(`${dayText(d.date, s.today)}: ${r.error} Nothing planned.`);
       next = r.plan; done.push(`${dayText(d.date, s.today)} ${formatHm(next.planned.find((p) => p.date === d.date).time)}`);

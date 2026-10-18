@@ -344,9 +344,11 @@ test('log_meal by packs and counts (A7): his foods sized from his packs; unknown
 });
 
 test('sauna_plan (A9): proposes from the rotation with his checklist and no fasting; plans what he agrees to', async () => {
-  // Today (Tue 1/20) is Legs; Wed 1/21 is the rest day after Legs.
+  // Today (Tue 1/20) is Legs, not done yet: Wed 1/21 is the rest day after Legs if he trains today, Legs if it moves.
   const p = await call('sauna_plan', { action: 'propose' });
-  assert.match(p.text, /^Proposal \(not planned yet; he decides\): Wednesday 1\/21 at 5:00 PM \(rest day\)/);
+  assert.match(p.text, /^Proposal \(not planned yet; he decides\): Wednesday 1\/21 at 5:00 PM \(after Legs, or rest day, never before lifting\); Thursday 1\/22 at 5:00 PM \(rest day, or after Pull, never before lifting\)/);
+  assert.match(p.text, /"X, or Y" means X if it moves to tomorrow, Y if he does it today/);
+  assert.match((await call('sauna')).text, /The app would propose .*Wednesday 1\/21 5:00 PM \(after Legs, or rest day\).*Y if he does it today/);
   assert.match(p.text, /I've eaten and drunk water in the last few hours/);
   assert.match(p.text, /never tell him to fast/);
   assert.doesNotMatch(p.text, /\bfast(ed|ing)? before\b/i);

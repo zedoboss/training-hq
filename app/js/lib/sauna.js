@@ -215,7 +215,8 @@ export const SAUNA_TIME = '17:00';
  * @param {object} o
  * @param {Array} o.sessions  sauna sessions
  * @param {object} o.plan     sauna-plan doc
- * @param {Array} o.rotation  the coming days from the rotation: [{date, kind: 'train'|'rest', dayType}]
+ * @param {Array} o.rotation  the coming days from the rotation: [{date, kind: 'train'|'rest', dayType}], from
+ *   projectRotationEitherWay while today's session is still open (a maybe day counts as training)
  * @param {object} [o.days]   day records by date (session times)
  * @param {string} o.today
  * @returns {{perWeek: number, time: string, step: number, items: Array<{date, time, kind: 'rest'|'after-training', dayType}>}}
@@ -232,15 +233,26 @@ export function proposeSaunaDays({ sessions = [], plan = {}, rotation = [], days
   // Never before lifting: a training day only when its session is set earlier than the sauna time (or not set: he
   // trains before sunrise).
   const ok = (d) => d.kind === 'rest' || !days[d.date]?.sessionTime || days[d.date].sessionTime < time;
-  const order = [...window.filter((d) => d.kind === 'rest'), ...window.filter((d) => d.kind !== 'rest')];
+  // Rest days first; while today's session is open, then the days that are rest one way (see proposalDayText).
+  const restish = (d) => (d.kind === 'rest' ? 0 : d.maybe && [d.ifDone, d.ifMoved].some((v) => v.kind === 'rest') ? 1 : 2);
+  const order = [...window].sort((a, b) => restish(a) - restish(b));
   const items = [];
   for (const d of order) {
     if (items.length >= want) break;
     if (taken.has(d.date) || !ok(d)) continue;
-    items.push({ date: d.date, time, kind: d.kind === 'rest' ? 'rest' : 'after-training', dayType: d.dayType || null });
+    items.push({ date: d.date, time, kind: d.kind === 'rest' ? 'rest' : 'after-training', dayType: d.dayType || null, ...(d.maybe ? { maybe: true, ifDone: d.ifDone, ifMoved: d.ifMoved } : {}) });
     taken.add(d.date);
   }
   return { perWeek, time, step: st.step, items: items.sort((a, b) => a.date.localeCompare(b.date)) };
+}
+
+/** Plain words for a proposed day: "rest day", "after Legs", or, while today's session is open, both ways. */
+export function proposalDayText(x, label = {}) {
+  const one = (k, t) => (k === 'rest' ? 'rest day' : `after ${label[t] || 'the session'}`);
+  if (!x.maybe) return one(x.kind === 'rest' ? 'rest' : 'train', x.dayType);
+  const [a, b] = [x.ifMoved, x.ifDone];
+  if (a.kind === 'train' && b.kind === 'train') return `after ${label[a.dayType] || 'the session'} or ${label[b.dayType] || 'the session'}`;
+  return `${one(a.kind, a.dayType)}, or ${one(b.kind, b.dayType)}`;
 }
 
 /** Plan a day, refusing one before lifting. Returns {plan} or {error}. */

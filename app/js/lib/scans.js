@@ -58,6 +58,31 @@ export function projectRotation({ last, days = {}, from, n }) {
   return out;
 }
 
+/**
+ * The rotation ahead while today's session may still happen or carry over to tomorrow (decision 15: a missed day
+ * pauses the plan). A day that differs between the two gets maybe: true, with both versions (ifDone: today's session
+ * happens today; ifMoved: it moves to tomorrow), and counts as training when either version trains, so nothing is
+ * planned before lifting whichever way today goes. Once today is done or a rest day, this is projectRotation.
+ */
+export function projectRotationEitherWay({ last, days = {}, from, n }) {
+  const onTime = projectRotation({ last, days, from, n });
+  if (onTime[0]?.kind !== 'train' || n < 2) return onTime;
+  const moved = projectRotation({ last, days, from: addDays(from, 1), n: n - 1 });
+  return onTime.map((d, i) => {
+    const m = moved[i - 1];
+    if (!i || (d.kind === m.kind && d.dayType === m.dayType)) return d;
+    const train = d.kind === 'train' ? d : m;
+    return { date: d.date, kind: train.kind, dayType: m.kind === 'train' ? m.dayType : train.dayType, maybe: true,
+      ifDone: { kind: d.kind, dayType: d.dayType }, ifMoved: { kind: m.kind, dayType: m.dayType } };
+  });
+}
+
+/** expectedOn, either way today goes (projectRotationEitherWay). */
+export function expectedEitherWay({ last, days, today, date }) {
+  if (date < today) return null;
+  return projectRotationEitherWay({ last, days, from: today, n: daysBetween(today, date) + 1 }).at(-1);
+}
+
 /** Day type the rotation expects on `date` ('train' with its day type, or 'rest'), or null when it is in the past. */
 export function expectedOn({ last, days, today, date }) {
   if (date < today) return null;
