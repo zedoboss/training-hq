@@ -33,7 +33,8 @@ export const DEFAULT_SETTINGS = {
   bodyweight: { kg: null, at: null },
   // Step 4: the readiness check-in comes this many minutes before the session time he sets.
   // Hold reminders (decision 18: he confirms the times the first time).
-  notify: { readinessMin: 30, holdsMorning: '07:30', holdsEvening: '19:30', holdTimesConfirmedOn: null },
+  // Notifications from the Mac: which kinds, the evening round-up time, the weekday of the neck reminder (0 = Sunday).
+  notify: { readinessMin: 30, holdsMorning: '07:30', holdsEvening: '19:30', holdTimesConfirmedOn: null, eveningCheck: '20:30', neckWeekday: 0, kinds: {} },
 };
 
 export const DEFAULT_EQUIPMENT = {

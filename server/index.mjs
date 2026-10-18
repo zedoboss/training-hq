@@ -9,6 +9,7 @@ import { openDemos } from './demos.mjs';
 import { openImports } from './imports.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
+import { startNotifier } from './notify.mjs';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -32,6 +33,9 @@ const imports = openImports({ store, importsDir: p.importsDir });
 // Web push (step 4): the Mac's VAPID keys live in config/vapid.json (made the first time, never in git).
 const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subject: config.pushSubject || DEFAULT_SUBJECT, log });
 
+// Reminders (step 4): checked once a minute, sent as push notifications.
+const notifier = startNotifier({ store, push, log });
+
 const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
@@ -40,6 +44,7 @@ server.listen(config.port, '127.0.0.1', () => {
 const shutdown = (sig) => {
   log(`stopping (${sig})`);
   stopBackup();
+  notifier.stop();
   server.close(() => { store.close(); process.exit(0); });
   setTimeout(() => process.exit(0), 3000).unref();
 };
