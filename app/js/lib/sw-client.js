@@ -90,8 +90,10 @@ export async function checkForUpdate() {
  * The data on this device (IndexedDB) and kept demo clips are not touched.
  */
 export async function reloadAppFiles() {
-  for (const r of (await navigator.serviceWorker?.getRegistrations()) || []) await r.unregister();
+  // Not unregister: that drops this phone's push subscription (Mon 10/19, no notifications arrived after updates).
+  // Emptying the app's caches and checking for a new worker fetches every file again just as well.
   for (const k of await caches.keys()) if (k.startsWith('thq-')) await caches.delete(k);
+  try { await (await navigator.serviceWorker?.getRegistration())?.update(); } catch { /* offline: the reload still refetches */ }
   location.reload();
 }
 

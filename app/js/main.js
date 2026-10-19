@@ -135,6 +135,17 @@ route();
 mountVoiceHud(document.getElementById('voice-chip'));
 resumeVoice();
 ready.then((repo) => watchNudges(repo)).catch(() => {});
+// Notifications stay connected: the Mac gets this phone's subscription at every start; if it was lost, one tap.
+ready.then(async () => {
+  if (!getState().paired) return;
+  const { keepPush, enablePush } = await import('./lib/push.js');
+  const name = /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : 'Mac browser';
+  const st = await keepPush(name).catch(() => 'error');
+  if (st === 'lost') {
+    const { toast } = await import('./ui/toast.js');
+    toast('Notifications from the coach got disconnected on this phone.', { action: 'Turn on', ms: 0, onAction: () => enablePush(name).then(() => toast('Notifications on.')).catch((e) => toast(e.message)) });
+  }
+}).catch(() => {});
 registerServiceWorker();
 // Squat Depth's pose files (about 19 MB) are fetched once in the background so it works at the gym with no signal.
 autoKeepOffline();

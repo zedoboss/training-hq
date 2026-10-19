@@ -46,5 +46,20 @@ export async function disablePush() {
   if (sub) await sub.unsubscribe();
 }
 
+/**
+ * At every app start (Mon 10/19: an app update had silently dropped this phone's subscription, so nothing arrived
+ * though the Mac's pushes were accepted): when notifications are allowed, send the current subscription to the Mac
+ * again ('ok'), or report that it is gone ('lost': turning it back on needs a tap). 'off' when not allowed or unsupported.
+ */
+export async function keepPush(name = 'iPhone') {
+  if (!pushSupported() || permission() !== 'granted') return 'off';
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  const { publicKey } = await macGet('/api/push/key');
+  if (!sub || !sameKey(sub, publicKey)) return 'lost';
+  await macPost('/api/push/subscribe', { subscription: sub.toJSON(), name });
+  return 'ok';
+}
+
 export const testPush = () => macPost('/api/push/test');
 export const pushStatus = () => macGet('/api/push/status');

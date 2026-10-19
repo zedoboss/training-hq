@@ -15,9 +15,10 @@ export function openPush({ store, vapidFile, vapid = null, subject = DEFAULT_SUB
     if (!sub || typeof sub.endpoint !== 'string' || !/^https:\/\//.test(sub.endpoint) || !sub.keys?.p256dh || !sub.keys?.auth) {
       const e = new Error('not a push subscription'); e.status = 400; throw e;
     }
+    const known = list().some((s) => s.deviceId === device.id && s.endpoint === sub.endpoint && s.keys?.auth === sub.keys.auth);
     const rest = list().filter((s) => s.deviceId !== device.id && s.endpoint !== sub.endpoint);
     save([...rest, { deviceId: device.id, name: name || device.name, endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, createdAt: Date.now() }]);
-    log(`push: ${device.name} subscribed (${new URL(sub.endpoint).host})`);
+    if (!known) log(`push: ${device.name} subscribed (${new URL(sub.endpoint).host})`);
     return { subscribed: true };
   }
 

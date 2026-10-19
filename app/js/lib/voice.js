@@ -146,6 +146,13 @@ function bargeCheck() {
   }, 1000);
 }
 
+// When the microphone can't be opened (Mon 10/19: under iPhone Mirroring iOS refuses it with a dialog), the app must not
+// ask again on every return to the screen: that kept the dialog coming back and the phone stuck. Automatic retries
+// wait this long; a tap on the chip always tries at once.
+const MIC_RETRY_MS = 120000;
+let micFailedAt = 0;
+const mayRetry = () => Date.now() - micFailedAt >= MIC_RETRY_MS;
+
 async function openListening() {
   if (mic || held || opening) return opening;
   opening = (async () => {
@@ -166,6 +173,7 @@ async function openListening() {
     } catch (e) {
       mic = null;
       error = e.message;
+      micFailedAt = Date.now();
       setPhase('tap');
       throw e;
     } finally { opening = null; }
@@ -185,6 +193,7 @@ export async function start() {
   const st = await macGet('/api/voice/status');
   if (!st.canListen) throw new Error('Calibrate and test your voice first (Settings > Voice).');
   ls.set(KEY, '1'); ls.set(SEEN, '1');
+  micFailedAt = 0; // a tap: try now
   await openListening();
   macPost('/api/voice/warm').catch(() => {});
   emit();
@@ -241,7 +250,7 @@ export function hold(on) {
 // (iPhone may want a tap for that: the chip then says TAP TO LISTEN).
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { closeListening(); player.stop(); if (listening()) setPhase('paused'); }
-  else if (listening() && !held) openListening().catch(() => {});
+  else if (listening() && !held && mayRetry()) openListening().catch(() => {});
 });
 // The first tap after the app opens lets iPhone play sound again.
 document.addEventListener('pointerdown', () => { audioContext(); rest.unlockAudio(); }, { once: true, capture: true });
@@ -253,5 +262,6 @@ export async function resume() {
     const st = await macGet('/api/voice/status');
     if (!st.canListen) { stop(); return; }
   } catch { /* Mac unreachable: listening waits; the chip says so */ setPhase('tap'); error = 'Mac unreachable'; emit(); return; }
+  if (!mayRetry()) { setPhase('tap'); return; }
   openListening().catch(() => {});
 }
