@@ -46,6 +46,8 @@ test('nudges: the morning sleep question, the session and the Evolt, food behind
   assert.match(c.find((x) => x.key === 'session').text, /^Legs at 6:00 AM\. Evolt first when you get there/);
   c = nudgeCandidates({ ...base, now: at(D, '06:40'), sessionHm: '06:00' });
   assert.match(c.find((x) => x.key === 'session').text, /^Legs was due at 6:00 AM\. Go now, or tell me the new time/);
+  // Trained (the rotation now says done): the Evolt number.
+  assert.deepEqual(keys(nudgeCandidates({ ...base, rot: { today: { kind: 'done', dayType: 'pull' } }, now: at(D, '13:00'), session: { started: true, done: true }, eaten: { kcal: 2500, protein: 200 } })), ['evolt']);
   // Trained, no weigh-in: the Evolt number.
   c = nudgeCandidates({ ...base, now: at(D, '08:00'), session: { started: true, done: true }, eaten: { kcal: 900, protein: 80 } });
   assert.deepEqual(keys(c), ['evolt']);

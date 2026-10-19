@@ -86,6 +86,8 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
 
   // Today's session, and the Evolt before it.
   const train = rot?.today?.kind === 'train';
+  // A gym day: still to train, or trained already (the rotation then says 'done').
+  const gymDay = train || rot?.today?.kind === 'done';
   const label = LABEL[rot?.today?.dayType] || 'Your session';
   if (train && !session.started && !session.done) {
     if (sessionHm) {
@@ -96,7 +98,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       out.push({ key: 'session', priority: 65, gapMin: 90, url: '#/train', text: `${label} today and no time set. When are you going? Evolt first when you get there.` });
     }
   }
-  if (train && (session.started || session.done) && !weighedToday) {
+  if (gymDay && (session.started || session.done) && !weighedToday) {
     out.push({ key: 'evolt', priority: 75, gapMin: 40, url: '#/coach', text: 'Evolt number from today? Tell me the weight (and body fat if you have it).' });
   }
 
