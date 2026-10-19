@@ -10,6 +10,8 @@ import { cleanTranscript } from './whisper.mjs';
 import { decodeWav, encodeWav, resample, normalise, VOICE_RATE } from '../../app/js/lib/wav.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
 
+import { addressed } from './address.mjs';
+
 export const MAX_CLIP_SEC = 15;
 /** The same words from two devices within this time are one utterance (the phone and the Mac both listening). */
 export const DUPLICATE_MS = 5000;
@@ -107,7 +109,17 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
       return null;
     }
     lastHeard = { key, device: deviceId, at: now() };
-    log(`voice: heard you (${d.score}), ${raw.ms} ms to text, ${now() - t0} ms in all`);
+    // Talking to someone else: only his naming it, the app's own subjects, or an answer to the coach go on (Mon 10/19).
+    const live = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+    const lastCoachAt = Math.max(0, ...live('coach-messages').filter((m) => m.role === 'assistant').map((m) => m.at || 0));
+    const names = [...live('exercises').map((x) => String(x.name || '').replace(/\s*\(.*?\)\s*/g, ' ').trim()), ...live('supplements').filter((x) => !x.removedAt).map((x) => String(x.name || '').replace(/\s*\(.*?\)\s*/g, ' ').trim())];
+    const to = addressed(text, { names, lastCoachAt, now: now(), inSession: live('sessions').some((x) => x.status === 'active') });
+    if (!to.ok) {
+      log(`voice: heard you (${d.score}), not for the coach`);
+      emit({ type: 'heard', ok: false, reason: 'aside', score: d.score });
+      return null;
+    }
+    log(`voice: heard you (${d.score}, ${to.why}), ${raw.ms} ms to text, ${now() - t0} ms in all`);
     emit({ type: 'heard', ok: true, score: d.score, text, ms: now() - t0 });
     if (!coach) throw fail(503, 'coach not available');
     return coach.send({ text, model, deviceId, tz, via: 'voice', emit });
