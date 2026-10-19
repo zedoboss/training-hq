@@ -89,7 +89,7 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     const c = check(bytes);
     const d = c.decision;
     if (!d.ok) {
-      log(`voice: ignored (${d.reason}${d.score != null ? ` ${d.score}` : ''})`);
+      log(`voice: ignored (${d.reason}${d.score != null ? ` ${d.score}` : ''}; ${c.analysis ? `${Math.round(c.analysis.speechSec * 10) / 10} s speech of ${Math.round(c.analysis.sec * 10) / 10} s` : 'no analysis'})`);
       emit({ type: 'heard', ok: false, reason: d.reason, score: d.score });
       return null;
     }

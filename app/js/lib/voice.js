@@ -206,6 +206,27 @@ export function speakText(text) {
   for (const s of [...split.push(String(text || '')), ...split.flush()]) speak(s);
 }
 
+/**
+ * Mon 10/19: the coach says its nudges and reminders out loud too, when the app is open and listening is on (they
+ * arrive by sync within about 30 seconds). Only new ones: what was already there when the app opened stays quiet.
+ */
+export function watchNudges(repo) {
+  const said = new Set();
+  let primed = false;
+  const check = async () => {
+    const msgs = (await repo.list('coach-messages')).filter((m) => m && m.role === 'assistant' && (m.kind === 'nudge' || m.kind === 'reminder'));
+    for (const m of msgs) {
+      if (said.has(m.id)) continue;
+      said.add(m.id);
+      const fresh = Date.now() - (m.at || 0) < 3 * 60000;
+      if (primed && fresh && listening() && document.visibilityState === 'visible') speakText(m.text);
+    }
+    primed = true;
+  };
+  check().catch(() => {});
+  return repo.onChange((cols) => { if (cols.includes('coach-messages')) check().catch(() => {}); });
+}
+
 /** Stop the coach talking (a tap on the chip while it speaks). */
 export const hush = () => { player.stop(); quietQueue.length = 0; };
 

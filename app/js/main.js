@@ -1,6 +1,6 @@
 // Training HQ entry point: draws the shell (header, section tabs) and switches views by URL hash.
 import { registerServiceWorker } from './lib/sw-client.js';
-import './lib/data.js';
+import { ready } from './lib/data.js';
 import * as today from './views/today.js';
 import * as train from './views/train.js';
 import * as fuel from './views/fuel.js';
@@ -34,7 +34,7 @@ import { withDefaults } from './lib/settings.js';
 import { MODEL_LABEL } from './lib/coach.js';
 import { autoKeepOffline } from './lib/squat-offline.js';
 import { mountVoiceHud } from './ui/voice-hud.js';
-import { resume as resumeVoice } from './lib/voice.js';
+import { resume as resumeVoice, watchNudges } from './lib/voice.js';
 
 const VIEWS = {
   today: { mod: today, label: 'Today' },
@@ -134,6 +134,7 @@ route();
 // Voice (step 9): the header chip, and listening again if it was on for this device.
 mountVoiceHud(document.getElementById('voice-chip'));
 resumeVoice();
+ready.then((repo) => watchNudges(repo)).catch(() => {});
 registerServiceWorker();
 // Squat Depth's pose files (about 19 MB) are fetched once in the background so it works at the gym with no signal.
 autoKeepOffline();
