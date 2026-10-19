@@ -12,7 +12,8 @@ import { guardCheck } from '../../app/js/lib/targets.js';
 import { setRecord, comebackStartOf } from '../../app/js/lib/finish.js';
 import { restFor, restText } from '../../app/js/lib/settings.js';
 import { modeOf } from '../../app/js/lib/progression.js';
-import { currentBodyweight } from '../../app/js/lib/health.js';
+import { currentBodyweight, weightSeries, dailyWeights } from '../../app/js/lib/health.js';
+import { measureIdFor } from '../../app/js/lib/body.js';
 import { newId } from '../../app/js/lib/routines.js';
 import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
@@ -202,7 +203,7 @@ async function startSession(a, ctx) {
   const { session, sets } = buildSession({
     routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((d) => d.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now,
     smallestPlate: s.minPlate(), gym: st.gym.name, warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine',
-    bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter,
+    bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter,
   });
   s.store.writeLocalMany([...sets.map((x) => ({ col: 'sets', id: x.id, data: x })), { col: 'sessions', id: session.id, data: zoned(s, 'sessions', session.id, session) }]);
   ctx.action({ kind: 'open', url: `#/session/${session.id}`, label: 'Open the session' });
@@ -340,7 +341,7 @@ async function checkIn(a, ctx) {
   if (d.action.startsWith('lighter') && routine) {
     // The lighter targets, exactly as Start will set them.
     const st = s.settings();
-    const { session, sets } = buildSession({ routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((x) => x.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now, smallestPlate: s.minPlate(), warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine', bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter: { all: d.action === 'lighter-all', names, params: rec.params, rule: d.rule } });
+    const { session, sets } = buildSession({ routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((x) => x.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now, smallestPlate: s.minPlate(), warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine', bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter: { all: d.action === 'lighter-all', names, params: rec.params, rule: d.rule } });
     const easy = session.exercises.filter((e) => e.target?.lighter);
     if (easy.length) lines.push(`Lighter today: ${easy.map((e) => { const w = sets.find((x) => x.exKey === e.key && x.type !== 'warmup'); return `${e.name} ${e.target.kg != null ? loadText(e.target.kg, e.barKg) : w?.kg != null ? loadText(w.kg, e.barKg) : ''} × ${repsText(e.target.reps || w?.target?.reps)} (${e.target.why})`; }).join('; ')}.`);
   }
@@ -765,9 +766,52 @@ function recoveryLog(a, ctx) {
   return refuse('Unknown action.');
 }
 
+// ---- weigh-ins and sleep (Mon 10/19) ---------------------------------------------------------------------------------
+// His rules: the Evolt at the gym every gym day, and the coach tells him; no watch, so the coach asks about his sleep.
+
+const hoursText = (min) => `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+
+/** A weigh-in (usually the Evolt before training): one entry per day in measurements, like Body > Measurements. */
+function logWeight(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const kg = Number(a.kg);
+  if (!(kg > 30 && kg < 300)) return refuse('Give his weight in kg exactly as the scanner showed it.');
+  const date = a.date || s.today;
+  if (date > s.today) return refuse('Not a future date.');
+  const id = measureIdFor(date, s.list('measurements'));
+  const cur = s.one('measurements', id);
+  const next = { ...(cur || { id, date, source: 'evolt' }), weightKg: kg, updatedAt: s.now };
+  if (!cur && date === s.today) next.at = s.now;
+  if (a.bodyFatPct != null) next.fatPercent = Number(a.bodyFatPct);
+  if (a.leanMassKg != null) next.leanMassKg = Number(a.leanMassKg);
+  if (a.note) next.note = String(a.note).slice(0, 400);
+  const before = dailyWeights(weightSeries(s.list('health'), s.list('measurements'))).filter((w) => w.date < date).at(-1);
+  put(s, 'measurements', id, next);
+  const diff = before ? Math.round((kg - before.kg) * 10) / 10 : null;
+  const extra = [a.bodyFatPct != null ? `body fat ${a.bodyFatPct}%` : '', a.leanMassKg != null ? `lean mass ${a.leanMassKg} kg` : ''].filter(Boolean).join(', ');
+  return wrote(`Saved for ${dayText(date, s.today)}: ${kg} kg${extra ? `, ${extra}` : ''}.${before ? ` ${diff >= 0 ? '+' : '−'}${Math.abs(diff)} kg since ${dayText(before.date, s.today)} (${before.kg} kg).` : ' His first weigh-in in the app.'} It shows on Body.`, `weight ${kg} kg`);
+}
+
+/** Last night's sleep as he tells it: bed and wake times; the night belongs to the morning he woke up. */
+function logSleep(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const date = a.date || s.today;
+  if (date > s.today) return refuse('Not a future date.');
+  const wake = zonedTime(date, a.wake, s.tz);
+  let bed = zonedTime(date, a.bed, s.tz);
+  if (bed >= wake) bed = zonedTime(addDays(date, -1), a.bed, s.tz);
+  const inBedMin = Math.round((wake - bed) / 60000);
+  if (inBedMin < 60 || inBedMin > 16 * 60) return refuse(`That reads as ${hoursText(inBedMin)} in bed. Check the times with him.`);
+  const awake = Math.max(0, Math.min(inBedMin, Number(a.awakeMin) || 0));
+  put(s, 'sleep-log', date, { id: date, date, bed, wake, inBedMin, asleepMin: inBedMin - awake, quality: a.quality ?? null, note: a.note ? String(a.note).slice(0, 400) : '', source: 'coach', at: s.now });
+  return wrote(`Sleep saved for the night to ${dayText(date, s.today)}: ${formatHm(a.bed)} to ${formatHm(a.wake)}, ${hoursText(inBedMin - awake)} asleep${awake ? ` (${awake} min awake)` : ''}. It shows on Body as last night.`, 'sleep logged');
+}
+
 const write = (name, title, description, inputSchema, run) => ({ name, title, description, inputSchema, run });
 
 export const WRITE_TOOLS = [
+  write('log_weight', 'Weight', "His weigh-in, usually the Evolt at the gym before training (his rule: an Evolt every gym day, and you remind him): kg exactly as shown, and body fat % or lean mass kg if he reads them out. One entry per day (another one that day replaces the numbers). Shows on Body's weight tile and chart.", obj({ kg: { type: 'number', minimum: 30, maximum: 300 }, bodyFatPct: { type: 'number', minimum: 2, maximum: 60 }, leanMassKg: { type: 'number', minimum: 20, maximum: 200 }, date: ISO, note: { type: 'string' } }, ['kg']), logWeight),
+  write('log_sleep', 'Sleep', "Last night's sleep as he tells it (no watch, so you ask each morning): bed and wake times, 24-hour; date = the morning he woke up (default today); awakeMin when he says he lay awake; quality 1-5 only if he gives one. Shows on Body as last night.", obj({ bed: HM, wake: HM, date: ISO, awakeMin: { type: 'integer', minimum: 0, maximum: 600 }, quality: { type: 'integer', minimum: 1, maximum: 5 }, note: { type: 'string' } }, ['bed', 'wake']), logSleep),
   write('start_session', 'Start a session', "Start a workout exactly like Train > Start: today's targets, the check-in's lighter targets, warm-ups. Default: the next session in the rotation; or a day type, a routine name, or empty. Asks first (his rule): the first call never starts it and gives you the question to ask him; call again with the same choice only after his yes in his next message. Refuses while another session is in progress. Opens it on his phone.", obj({ dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] }, routine: { type: 'string' }, empty: { type: 'boolean' } }), startSession),
   write('log_set', 'Log a set', 'Tick the next set of the session in progress with what he did ("80 for 8" = kg 80, reps 8). kg is the TOTAL including the bar as he says it; for weighted pull-ups the added kg (0 = bodyweight). Missing values come from the target or last time. Default exercise: the one he is on. Returns the 30% cap warning and records if any, starts his rest timer, and names the next set.', obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600, description: 'for holds and timed sets' }, type: SET_TYPE, set: { type: 'integer', minimum: 1, description: 'set number, if he names one' }, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' } }), logSet),
   write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),

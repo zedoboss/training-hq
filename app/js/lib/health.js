@@ -331,6 +331,17 @@ export function weightSeries(healthDocs = [], measurements = []) {
   return out.sort((a, b) => a.at - b.at);
 }
 
+/** Health day docs with the sleep he told the coach (collection 'sleep-log', Mon 10/19: no watch) filled in on nights
+ * Apple Health has no sleep for. Marked told: true. */
+export function withSleepLog(docs = [], logs = []) {
+  const by = new Map(docs.map((d) => [d.date, d]));
+  for (const l of logs) {
+    if (!l?.date || by.get(l.date)?.sleep) continue;
+    by.set(l.date, { ...(by.get(l.date) || { date: l.date }), sleep: { asleepMin: l.asleepMin ?? null, inBedMin: l.inBedMin, bed: l.bed, wake: l.wake, stages: {}, told: true } });
+  }
+  return [...by.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 /** One weight per day (the last weigh-in that day), oldest first. */
 export function dailyWeights(series) {
   const m = new Map();
@@ -342,9 +353,15 @@ export function dailyWeights(series) {
  * Bodyweight for bodyweight exercises (decision 12): the newest of the last Apple Health weigh-in and the value he set
  * by hand (Settings or "Bodyweight today"), as long as it is from the last `maxDays` days. {kg, at, from} or null.
  */
-export function currentBodyweight({ healthDocs = [], manual = null, now = Date.now(), maxDays = 30 } = {}) {
+export function currentBodyweight({ healthDocs = [], measurements = [], manual = null, now = Date.now(), maxDays = 30 } = {}) {
   let health = null;
   for (const d of healthDocs) for (const w of d.weights || []) if (w.at <= now && (!health || w.at > health.at)) health = { kg: w.kg, at: w.at, from: 'health' };
+  // Weigh-ins in measurements count too (Mon 10/19: the Evolt at the gym every gym day, saved by the coach).
+  for (const m of measurements) {
+    if (m?.weightKg == null || !m.date) continue;
+    const at = m.at ?? Date.parse(`${m.date}T12:00:00Z`);
+    if (at <= now && (!health || at > health.at)) health = { kg: Number(m.weightKg), at, from: m.source === 'evolt' ? 'evolt' : 'scale' };
+  }
   if (health && now - health.at > maxDays * 86400000) health = null;
   const hand = manual?.kg != null ? { kg: Number(manual.kg), at: manual.at ?? 0, from: 'manual' } : null;
   if (health && hand) return hand.at > health.at ? hand : health;

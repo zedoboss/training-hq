@@ -1,0 +1,144 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  awakeAt, dayFraction, coachVoice, coachReminder, nudgeCandidates, nudgeDue, pickNudge, QUIET_AFTER_MIN,
+} from '../app/js/lib/nudges.js';
+import { withSleepLog, currentBodyweight } from '../app/js/lib/health.js';
+
+const TZ = 'Asia/Ho_Chi_Minh';
+const at = (iso, hm) => Date.parse(`${iso}T${hm}:00+07:00`);
+const D = '2026-01-20';
+const legsDay = { today: { kind: 'train', dayType: 'legs' } };
+const fixed = () => 0; // pickLine's first choice
+const keys = (c) => c.map((x) => x.key);
+
+test('waking hours and how far through his eating day it is', () => {
+  assert.equal(awakeAt(at(D, '04:39'), TZ, '04:40', '18:00'), false);
+  assert.equal(awakeAt(at(D, '04:40'), TZ, '04:40', '18:00'), true);
+  assert.equal(awakeAt(at(D, '18:00'), TZ, '04:40', '18:00'), false);
+  assert.equal(awakeAt(at(D, '01:00'), TZ, '07:00', '02:00'), true, 'a bedtime after midnight');
+  assert.equal(dayFraction(at(D, '04:40'), TZ, '04:40', '18:00'), 0);
+  assert.equal(dayFraction(at(D, '16:00'), TZ, '04:40', '18:00'), 1, 'eating day ends 2 hours before bed');
+  assert.ok(Math.abs(dayFraction(at(D, '10:20'), TZ, '04:40', '18:00') - 0.5) < 0.01);
+});
+
+test('every notification is the coach\'s: facts first, one line in his moods; calm kinds plain', () => {
+  const v = coachVoice('Supplements: 3 still open.', { rng: fixed });
+  assert.equal(v.title, 'Coach');
+  assert.equal(v.body, 'Supplements: 3 still open. Get it done.');
+  const bank = { moods: { hype: { nudge: [[3, 'Come on, move!']] } } };
+  assert.equal(coachVoice('Eat.', { bank, rng: fixed, intensity: 3 }).body, 'Eat. Come on, move!');
+  assert.equal(coachVoice('Eat.', { bank, rng: fixed, intensity: 2 }).body, 'Eat. Get it done.', 'nothing above his intensity');
+  assert.equal(coachReminder({ kind: 'session', title: 'Legs at 4:30 AM', body: 'Week 3 column.' }, { rng: fixed }).body, 'Legs at 4:30 AM. Week 3 column. Get it done.');
+  assert.equal(coachReminder({ kind: 'readiness', title: 'Sore, or good to go?', body: 'Check in.' }, { rng: fixed }).body, 'Sore, or good to go? Check in. Get it done.');
+  assert.equal(coachReminder({ kind: 'sauna', title: 'Sauna: time is up', body: 'Get out now.' }, { rng: fixed }).body, 'Sauna: time is up. Get out now.', 'sauna stays calm');
+});
+
+test('nudges: the morning sleep question, the session and the Evolt, food behind pace, fresh steps only', () => {
+  const base = { tz: TZ, wakeHm: '04:40', bedHm: '18:00', rot: legsDay, targets: { kcal: 3174, protein: 242.5 }, eaten: { kcal: 0, protein: 0 } };
+  // 5:30 AM, no sleep logged, no session time: sleep first, then the session with the Evolt.
+  let c = nudgeCandidates({ ...base, now: at(D, '05:30'), sleepLogged: false });
+  assert.deepEqual(keys(c), ['sleep', 'session']);
+  assert.match(c[0].text, /your schedule: 6:00 PM to 4:40 AM/);
+  assert.match(c[1].text, /^Legs today and no time set\. When are you going\? Evolt first/);
+  // Session time 6:00 AM: an hour before it says the time; after it, that it's waiting.
+  c = nudgeCandidates({ ...base, now: at(D, '05:15'), sessionHm: '06:00' });
+  assert.match(c.find((x) => x.key === 'session').text, /^Legs at 6:00 AM\. Evolt first when you get there/);
+  c = nudgeCandidates({ ...base, now: at(D, '06:40'), sessionHm: '06:00' });
+  assert.match(c.find((x) => x.key === 'session').text, /^Legs was due at 6:00 AM\. Go now, or tell me the new time/);
+  // Trained, no weigh-in: the Evolt number.
+  c = nudgeCandidates({ ...base, now: at(D, '08:00'), session: { started: true, done: true }, eaten: { kcal: 900, protein: 80 } });
+  assert.deepEqual(keys(c), ['evolt']);
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '08:00'), session: { started: true, done: true }, weighedToday: true, eaten: { kcal: 900, protein: 80 } }).length, 0);
+  // Food: 2:00 PM with 900 kcal is far behind (near 2,600 expected).
+  c = nudgeCandidates({ ...base, now: at(D, '14:00'), session: { done: true }, weighedToday: true, eaten: { kcal: 900, protein: 70 } });
+  assert.deepEqual(keys(c), ['food']);
+  assert.equal(c[0].text, 'Food: 900 of 3,174 kcal and 70 of 242.5 g protein at 2:00 PM. You should be near 2,600 kcal by now. Eat.');
+  // Rest day: no session or Evolt nudges.
+  assert.deepEqual(keys(nudgeCandidates({ ...base, now: at(D, '09:00'), rot: { today: { kind: 'rest' } }, eaten: { kcal: 1000, protein: 80 } })), []);
+  // Steps: only when Apple Health's numbers are under 3 hours old.
+  const steps = { steps: 1200, asOf: at(D, '12:00') };
+  const s1 = nudgeCandidates({ ...base, rot: null, now: at(D, '13:00'), stepGoal: 8000, steps, eaten: { kcal: 2500, protein: 200 } });
+  assert.deepEqual(keys(s1), ['steps']);
+  assert.equal(s1[0].text, 'Steps: 1,200 by 12:00 PM, goal 8,000. Walk 15 minutes.');
+  assert.equal(nudgeCandidates({ ...base, rot: null, now: at(D, '16:00'), stepGoal: 8000, steps, eaten: { kcal: 3000, protein: 230 } }).length, 0);
+});
+
+test('nudges: planned reminders that went out and are still open come back; done or future ones do not', () => {
+  const reminders = [
+    { id: 'supps-a', kind: 'supps', tag: 'supps-morning', at: at(D, '07:00'), due: true, title: 'Morning supplements', body: 'Vitamin C, D3 + K2.', url: '#/supps' },
+    { id: 'holds-m', kind: 'holds', tag: 'holds-morning', at: at(D, '07:30'), due: false, title: 'Morning holds', body: '' },
+    { id: 'rec', kind: 'recovery', tag: 'recovery-checkin', at: at(D, '20:15'), due: true, title: 'Recovery', body: 'Weekly check-in.' },
+  ];
+  const c = nudgeCandidates({ tz: TZ, now: at(D, '09:00'), reminders, rot: null, wakeHm: '04:40', bedHm: '18:00' });
+  assert.deepEqual(keys(c), ['supps:supps-morning']);
+  assert.equal(c[0].text, 'Morning supplements. Vitamin C, D3 + K2.');
+  assert.equal(c[0].url, '#/supps');
+});
+
+test('when to nudge: his interval, waking hours, quiet during a session, after a notification or while talking', () => {
+  const now = at(D, '10:00');
+  const ok = { now, everyMin: 20, awake: true, lastNudgeAt: now - 21 * 60000, lastNoticeAt: 0, lastUserAt: 0, busy: false };
+  assert.equal(nudgeDue(ok), true);
+  assert.equal(nudgeDue({ ...ok, lastNudgeAt: now - 19 * 60000 }), false);
+  assert.equal(nudgeDue({ ...ok, everyMin: 0 }), false, 'off');
+  assert.equal(nudgeDue({ ...ok, awake: false }), false);
+  assert.equal(nudgeDue({ ...ok, busy: true }), false, 'a session or sauna is running');
+  assert.equal(nudgeDue({ ...ok, lastNoticeAt: now - (QUIET_AFTER_MIN - 1) * 60000 }), false);
+  assert.equal(nudgeDue({ ...ok, lastUserAt: now - 5 * 60000 }), false);
+  // The same thing waits for its own gap; the next most important goes instead.
+  const cands = [{ key: 'session', priority: 80, gapMin: 30 }, { key: 'food', priority: 55, gapMin: 60 }];
+  assert.equal(pickNudge(cands, { session: now - 20 * 60000 }, now).key, 'food');
+  assert.equal(pickNudge(cands, { session: now - 31 * 60000 }, now).key, 'session');
+  assert.equal(pickNudge(cands, { session: now - 1, food: now - 1 }, now), null);
+});
+
+test('the Mac sends a nudge from the coach, writes it into Talk, and keeps quiet when it should', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { nudgeTick } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-nudge-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { nudgeEveryMin: 20, wakeHm: '04:40', bedHm: '18:00' } });
+    store.writeLocal('fuel', 'plan', { kcal: 3174, proteinG: 242.5 });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    let r = await nudgeTick({ store, push, now: at(D, '14:00'), tz: TZ });
+    assert.ok(r, 'something is open');
+    assert.equal(sent[0].title, 'Coach');
+    const talk = store.listRecords('coach-messages').map((x) => x.data);
+    assert.equal(talk.length, 1);
+    assert.equal(talk[0].role, 'assistant');
+    assert.equal(talk[0].kind, 'nudge');
+    assert.equal(talk[0].text, sent[0].body);
+    // 10 minutes later: not yet. After he writes to the coach: quiet for 10 minutes.
+    assert.equal(await nudgeTick({ store, push, now: at(D, '14:10'), tz: TZ }), null);
+    store.writeLocal('coach-messages', 'u1', { id: 'u1', role: 'user', text: 'eating now', at: at(D, '14:25') });
+    assert.equal(await nudgeTick({ store, push, now: at(D, '14:30'), tz: TZ }), null);
+    // After bedtime: nothing.
+    assert.equal(await nudgeTick({ store, push, now: at(D, '19:00'), tz: TZ }), null);
+    // A session running: nothing.
+    store.writeLocal('sessions', 's1', { id: 's1', status: 'active', startedAt: at(D, '15:00') });
+    assert.equal(await nudgeTick({ store, push, now: at(D, '15:30'), tz: TZ }), null);
+    r = null;
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sleep he told the coach fills nights Apple Health has none for; Evolt weigh-ins set his bodyweight', () => {
+  const docs = [{ date: '2026-01-19', steps: 5000 }, { date: '2026-01-20', sleep: { asleepMin: 400 } }];
+  const logs = [{ date: '2026-01-19', bed: 1, wake: 2, inBedMin: 600, asleepMin: 580 }, { date: '2026-01-20', inBedMin: 300 }, { date: '2026-01-21', inBedMin: 610, asleepMin: 610 }];
+  const out = withSleepLog(docs, logs);
+  assert.deepEqual(out.map((d) => [d.date, d.sleep?.asleepMin ?? null, d.sleep?.told ?? false, d.steps ?? null]),
+    [['2026-01-19', 580, true, 5000], ['2026-01-20', 400, false, null], ['2026-01-21', 610, true, null]]);
+  const now = at(D, '12:00');
+  const healthDocs = [{ date: '2026-01-10', weights: [{ at: at('2026-01-10', '07:00'), kg: 79 }] }];
+  const measurements = [{ date: D, at: at(D, '05:10'), weightKg: 80.4, source: 'evolt' }];
+  assert.deepEqual(currentBodyweight({ healthDocs, measurements, now }), { kg: 80.4, at: at(D, '05:10'), from: 'evolt' });
+  assert.equal(currentBodyweight({ healthDocs, now }).kg, 79);
+});

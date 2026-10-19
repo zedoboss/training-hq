@@ -8,7 +8,7 @@ import { weekColumn } from '../../app/js/lib/programme.js';
 import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js';
 import { targetFor } from '../../app/js/lib/targets.js';
 import { confirmedKg, modeOf, isConfirmed } from '../../app/js/lib/progression.js';
-import { currentBodyweight, healthDays, hoursText, weightSeries } from '../../app/js/lib/health.js';
+import { currentBodyweight, healthDays, hoursText, weightSeries, withSleepLog } from '../../app/js/lib/health.js';
 import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText } from '../../app/js/lib/holds.js';
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
@@ -24,7 +24,7 @@ import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUES
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
-import { addMinutesHm } from '../../app/js/lib/time.js';
+import { addMinutesHm, formatTime } from '../../app/js/lib/time.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 
@@ -176,7 +176,22 @@ export function contextLine({ store, tz, now }) {
   if (active) lines.push(activeText(s, active));
   lines.push(moodLine(s));
   lines.push(...recoveryContext(s));
+  lines.push(...noticeLines(s));
   return lines.join('\n');
+}
+
+/** Mon 10/19: what the app (as the coach) sent him lately, so a short reply ("done", "yes", "82.4") makes sense, and
+ * whether today's weigh-in and last night's sleep are in. */
+function noticeLines(s) {
+  const recent = s.list('coach-messages').filter((m) => (m.kind === 'nudge' || m.kind === 'reminder') && s.now - (m.at || 0) <= 3 * 3600000)
+    .sort((a, b) => b.at - a.at).slice(0, 4);
+  const health = s.one('health', s.today);
+  const weighed = s.list('measurements').some((m) => m.date === s.today && m.weightKg != null) || Boolean(health?.weights?.length);
+  const slept = Boolean(health?.sleep || s.one('sleep-log', s.today));
+  return [
+    recent.length ? `Your notifications to him in the last 3 hours, newest first (he may be answering one): ${recent.map((m) => `${formatTime(new Date(m.at), s.tz)} "${m.text}"`).join('; ')}.` : '',
+    `Today: weigh-in ${weighed ? 'logged' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
+  ].filter(Boolean);
 }
 
 /** A15: his mood settings, so the coach's replies follow the same dial as the app's lines. */
@@ -243,7 +258,7 @@ function programmeText(s, { dayType = null, week = null } = {}) {
     const { session, sets } = buildSession({
       routine, meta: s.meta(), programmeRoutines: progDocs, lib, history, today: date, now: s.now,
       smallestPlate: s.minPlate(), gym: null, warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine',
-      bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress, lighter,
+      bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress, lighter,
     });
     session.exercises.forEach((ex, i) => {
       const mine = sets.filter((x) => x.exKey === ex.key);
@@ -376,7 +391,7 @@ function calendarText(s, { month = null, from = null, to = null }) {
 
 function healthText(s, { days = 14 }) {
   const n = Math.min(Math.max(Number(days) || 14, 1), 120);
-  const docs = s.list('health').filter((d) => d.date >= addDays(s.today, -(n - 1)) && d.date <= s.today).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const docs = withSleepLog(s.list('health'), s.list('sleep-log')).filter((d) => d.date >= addDays(s.today, -(n - 1)) && d.date <= s.today).sort((a, b) => (a.date < b.date ? 1 : -1));
   const meta = s.one('health-meta', 'status');
   const lines = [meta?.last?.at ? `Apple Health: last file from the iPhone made ${whenText(meta.last.at, s.tz, s.today)}.` : 'Apple Health: no file from the iPhone yet (the Shortcut is his to set up).'];
   for (const d of docs) {
@@ -387,7 +402,7 @@ function healthText(s, { days = 14 }) {
     for (const w of d.workouts || []) parts.push(`workout: ${w.activity || 'other'}${w.minutes ? ` ${Math.round(w.minutes)} min` : ''}${w.start ? ` at ${timeText(w.start, s.tz)}` : ''}`);
     if (parts.length) lines.push(`${dayText(d.date, s.today)}: ${parts.join(', ')}`);
   }
-  const bw = currentBodyweight({ healthDocs: s.list('health'), manual: s.settings().bodyweight, now: s.now });
+  const bw = currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: s.settings().bodyweight, now: s.now });
   if (bw) lines.push(`Bodyweight used for pull-ups: ${k(bw.kg)} kg (${bw.from === 'health' ? 'Apple Health' : 'typed in'}${bw.at ? `, ${whenText(bw.at, s.tz, s.today)}` : ''}).`);
   const shown = latestByField(s.list('measurements')).map((f) => `${f.label} ${k(f.value)}${f.kind === 'kg' ? ' kg' : f.kind === 'cm' ? ' cm' : f.kind === '%' ? '%' : ''} (${dayText(f.date, s.today)}${f.prev != null ? `; before ${k(f.prev)}` : ''})`);
   if (shown.length) lines.push(`Latest measurements: ${shown.join('; ')}.`);

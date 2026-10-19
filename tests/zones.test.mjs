@@ -100,6 +100,7 @@ test('the Mac follows the zone the phone reported last; without one, its own', a
     assert.deepEqual((await n.tick()).map((i) => i.id), ['readiness:2026-10-26']);
     now = Date.parse('2026-10-26T03:30:00Z');
     assert.deepEqual((await n.tick()).map((i) => i.id), ['session:2026-10-26']);
-    assert.equal(sent[1].title, 'Legs at 4:30 AM');
+    assert.equal(sent[1].title, 'Coach');
+    assert.match(sent[1].body, /^Legs at 4:30 AM\. /);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

@@ -12,8 +12,9 @@ import { kg as fmtKg } from '../lib/loads.js';
 import { unlockAudio, play } from '../lib/sounds.js';
 import { notifyPanel } from '../ui/notify-panel.js';
 import { toast } from '../ui/toast.js';
-import { confirmSheet } from '../ui/sheet.js';
+import { confirmSheet, promptTime } from '../ui/sheet.js';
 import { EVERY_LABEL, MOOD_LABEL, MOOD_TEXT } from '../lib/coach-talk.js';
+import { NUDGE_EVERY } from '../lib/nudges.js';
 
 const isPhone = /iPhone|iPad|Android/.test(navigator.userAgent);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -151,6 +152,9 @@ function prefsHtml(st, eq) {
       ${seg('coach.intensity', [1, 2, 3, 4, 5].map((n) => [n, String(n)]), st.coach.intensity)}
       ${['commander', 'hype', 'dark', 'warrior', 'rival'].map((m) => opt(MOOD_LABEL[m], MOOD_TEXT[m], sw(`coach.moods.${m}`, st.coach.moods[m] !== false))).join('')}
       ${opt('Calm', MOOD_TEXT.calm, '<span class="hud c-green">ON</span>')}
+      ${opt('Nudges from the coach', 'Notifications in its voice through your waking hours: the most important thing still open (session and Evolt, sleep, food, supplements, holds). Quiet while you train, while you talk to it, and at night.', '')}
+      ${seg('notify.nudgeEveryMin', NUDGE_EVERY, st.notify.nudgeEveryMin)}
+      ${opt('Awake', `${formatHm(st.notify.wakeHm)} to ${formatHm(st.notify.bedHm)}. No nudges outside these hours.`, '<button class="btn-ghost small" id="awake-hours" type="button">Change</button>')}
       ${opt('Rep calls on squat-camera sets', '"Two more", "Last one", only while you stand at the top. Off until it is checked on your iPhone that the depth ding is not slowed or covered; while off, the coach stays silent during squat-camera sets.', sw('coach.squatCalls', st.coach.squatCalls === true))}
       ${opt('Get ready before a hold', 'Seconds to set up after Start, then 3, 2, 1 and the hold.', '')}
       ${seg('holds.getReadyS', [[10, '10 s'], [15, '15 s'], [20, '20 s']], st.holds.getReadyS)}
@@ -222,10 +226,19 @@ function wirePrefs(box) {
 
   box.addEventListener('click', async (e) => {
     if (e.target.closest('#meal-times')) { editMealTimes(); return; }
+    if (e.target.closest('#awake-hours')) {
+      const wake = await promptTime('You wake up at', st().notify.wakeHm);
+      if (!wake) return;
+      const bed = await promptTime('Bedtime', st().notify.bedHm);
+      if (!bed) return;
+      await saveSettings({ notify: { wakeHm: wake, bedHm: bed } });
+      toast(`Awake ${formatHm(wake)} to ${formatHm(bed)}.`);
+      return;
+    }
     const t = e.target.closest('button');
     if (!t) return;
     if (t.dataset.seg) {
-      const v = ['firstDayOfWeek', 'coach.intensity', 'holds.getReadyS'].includes(t.dataset.seg) ? Number(t.dataset.v) : t.dataset.v;
+      const v = ['firstDayOfWeek', 'coach.intensity', 'holds.getReadyS', 'notify.nudgeEveryMin'].includes(t.dataset.seg) ? Number(t.dataset.v) : t.dataset.v;
       await save(t.dataset.seg, v);
     } else if (t.dataset.test) {
       preview('sounds.restEnd');

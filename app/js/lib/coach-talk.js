@@ -15,7 +15,7 @@ export const MOOD_TEXT = {
   rival: 'Your pre-layoff self is the rival.',
   calm: 'Plain and short whenever a safety rule applies. Always on.',
 };
-export const MOMENTS = ['hold-ready', 'hold-go', 'hold-push', 'hold-mid', 'hold-end', 'set-start', 'set-push', 'record'];
+export const MOMENTS = ['hold-ready', 'hold-go', 'hold-push', 'hold-mid', 'hold-end', 'set-start', 'set-push', 'record', 'nudge'];
 // How often it pushes during a set or hold: seconds between lines (0 = the start line only, plus a hold's halfway).
 export const EVERY = { often: 7, steady: 12, once: 0 };
 export const EVERY_LABEL = [['often', 'Every few seconds'], ['steady', 'Steady'], ['once', 'Once a set']];
@@ -28,6 +28,8 @@ const BY_MOMENT = {
   'hold-ready': ['warrior', 'dark', 'commander'], 'hold-go': ['warrior', 'commander'], 'hold-push': ['warrior', 'hype', 'commander'],
   'hold-mid': ['warrior', 'commander'], 'hold-end': ['warrior', 'commander'],
   'set-start': ['dark', 'warrior', 'hype', 'rival', 'commander'], 'set-push': ['hype', 'warrior', 'commander'], record: ['rival', 'hype', 'commander'],
+  // His notifications through the day (Mon 10/19): the coach bumping him about what is still open.
+  nudge: ['hype', 'warrior', 'dark', 'rival', 'commander'],
 };
 
 // The plain fallback: Commander and Calm, no flavour.
@@ -35,11 +37,13 @@ export const BASE_BANK = {
   commander: {
     'hold-ready': [[1, 'Get ready.']], 'hold-go': [[1, 'Hold.']], 'hold-push': [[1, 'Keep it still.']], 'hold-mid': [[1, 'Halfway.']],
     'hold-end': [[1, 'Done.']], 'set-start': [[1, 'Control the bottom.']], 'set-push': [[1, 'Controlled.']], record: [[1, 'New best.']],
+    nudge: [[1, 'Get it done.']],
   },
   calm: {
     'hold-ready': [[1, 'Get ready. Easy setup.']], 'hold-go': [[1, 'Hold.']], 'hold-push': [[1, 'Breathe. Steady.']],
     'hold-mid': [[1, 'Halfway. Stay inside your limit.']], 'hold-end': [[1, 'Done. Rate it honestly.']],
     'set-start': [[1, 'Smooth reps. Control the bottom.']], 'set-push': [[1, 'Steady.']], record: [[1, 'New best.']],
+    nudge: [[1, 'One thing at a time.']],
   },
 };
 

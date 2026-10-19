@@ -131,7 +131,10 @@ test('the Mac notifier: sends what is due once, skips what is stale, nothing wit
     now = at('2026-01-20', '04:30');
     const s = await n.tick();
     assert.deepEqual(s.map((i) => i.id), ['session:2026-01-20']);
-    assert.equal(sent[1].body, 'Tuesday 1/20. Week 3 column.');
+    // Mon 10/19: the coach says it: title Coach, the reminder's title first, one short line (the plain bank's here).
+    assert.equal(sent[1].title, 'Coach');
+    assert.equal(sent[1].body, 'Legs at 4:30 AM. Tuesday 1/20. Week 3 column. Get it done.');
+    assert.ok(store.listRecords('coach-messages').some((r) => r.data.kind === 'reminder' && r.data.text === sent[1].body), 'it also shows in Talk');
     // The Mac was asleep through the evening holds time: 40 minutes late is skipped, the round-up still comes.
     now = at('2026-01-20', '20:31');
     assert.deepEqual((await n.tick()).map((i) => i.id), ['evening:2026-01-20']);

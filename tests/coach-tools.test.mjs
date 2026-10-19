@@ -403,3 +403,28 @@ test('micronutrients (A12): his references, food and supplements ticked taken, n
   assert.match(t, /- Vitamin A: 288 mcg \(38% of 750\); planned 720; 10% of the limit 3000 \(EFSA UL\)/);
   assert.match(t, /- Vitamin C: 1000 mg \(909% of 110\), 1000 from supplements/);
 });
+
+test('log_weight and log_sleep (Mon 10/19): the Evolt weigh-in and last night as he tells it', async () => {
+  const w = await call('log_weight', { kg: 80.4, bodyFatPct: 14.2 });
+  assert.equal(w.wrote, true);
+  assert.match(w.text, /^Saved for Tuesday 1\/20: 80\.4 kg, body fat 14\.2%\./);
+  const m = list('measurements').find((x) => x.date === '2026-01-20');
+  assert.equal(m.weightKg, 80.4);
+  assert.equal(m.fatPercent, 14.2);
+  assert.equal(m.source, 'evolt');
+  // A second weigh-in that day replaces the number, keeps one entry.
+  await call('log_weight', { kg: 80.1 });
+  assert.equal(list('measurements').filter((x) => x.date === '2026-01-20').length, 1);
+  assert.equal(list('measurements').find((x) => x.date === '2026-01-20').weightKg, 80.1);
+  assert.match((await call('log_weight', { kg: 12 })).text, /exactly as the scanner showed/);
+  // Sleep: bed the evening before, up this morning.
+  const sl = await call('log_sleep', { bed: '18:30', wake: '04:40' });
+  assert.equal(sl.wrote, true);
+  assert.match(sl.text, /6:30 PM to 4:40 AM, 10 h 10 min asleep/);
+  const doc = store.getRecord('sleep-log', '2026-01-20').data;
+  assert.equal(doc.inBedMin, 610);
+  assert.match((await call('log_sleep', { bed: '04:00', wake: '04:40' })).text, /Check the times with him/);
+  // The coach's context says today's weigh-in and sleep are in.
+  const { contextLine } = await import('../server/coach/tools.mjs');
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /Today: weigh-in logged; last night's sleep known\./);
+});

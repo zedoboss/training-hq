@@ -7,7 +7,7 @@ import { getState } from '../lib/store.js';
 import { withDefaults, toUnit } from '../lib/settings.js';
 import { formatDay, formatTime, isoDate } from '../lib/time.js';
 import { addDays } from '../lib/rotation.js';
-import { weightSeries, dailyWeights, hoursText, average } from '../lib/health.js';
+import { weightSeries, dailyWeights, hoursText, average, withSleepLog } from '../lib/health.js';
 import { columnChart, timeLine, bindTips, bindCrosshair, tableView } from '../ui/charts.js';
 import { promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -44,8 +44,9 @@ export function render(view, params = []) {
   let stepDays = 14; let range = '90';
 
   const draw = async (repo) => {
-    const [docs, status, measurements, bodyPhotos, scanPlan, scans, recPlan, recState, notes] = await Promise.all([repo.list('health'), repo.get('health-meta', 'status'), repo.list('measurements'), repo.list('body-photos'), repo.get('scan-plan', 'main'), repo.list('body-scans'), repo.get('recovery', 'main'), repo.get('recovery', 'state'), repo.list('coach-notes')]);
+    const [healthDocs, sleepLog, status, measurements, bodyPhotos, scanPlan, scans, recPlan, recState, notes] = await Promise.all([repo.list('health'), repo.list('sleep-log'), repo.get('health-meta', 'status'), repo.list('measurements'), repo.list('body-photos'), repo.get('scan-plan', 'main'), repo.list('body-scans'), repo.get('recovery', 'main'), repo.get('recovery', 'state'), repo.list('coach-notes')]);
     if (!alive) return;
+    const docs = withSleepLog(healthDocs, sleepLog);
     const st = withDefaults(getState().settings);
     const wu = st.units.weight;
     const fmtW = (kg) => `${toUnit(kg, wu)} ${wu}`;
@@ -174,7 +175,7 @@ export function render(view, params = []) {
 
   untip = bindTips(view);
   ready.then((repo) => {
-    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'health-meta', 'measurements', 'body-photos', 'settings', 'scan-plan', 'body-scans', 'recovery', 'coach-notes'].includes(c))) draw(repo); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'sleep-log', 'health-meta', 'measurements', 'body-photos', 'settings', 'scan-plan', 'body-scans', 'recovery', 'coach-notes'].includes(c))) draw(repo); });
     draw(repo);
   });
   return () => { alive = false; off(); untip(); unx(); };

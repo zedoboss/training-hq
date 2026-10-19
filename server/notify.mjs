@@ -3,8 +3,11 @@
 // Sent ids are remembered in the server's meta table, so nothing is sent twice; a reminder more than 30 minutes
 // late (the Mac was asleep or off) is skipped rather than sent late.
 import { remindersFor, dueNow, reminderState } from '../app/js/lib/reminders.js';
-import { addDays } from '../app/js/lib/rotation.js';
+import { addDays, rotationDay } from '../app/js/lib/rotation.js';
 import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
+import { withDefaults } from '../app/js/lib/settings.js';
+import { dayTotals } from '../app/js/lib/meals.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt } from '../app/js/lib/nudges.js';
 
 const SENT = 'notify:sent';
 
@@ -45,6 +48,73 @@ export function phoneZone(store, fallback = deviceTimeZone()) {
   return (latest(here.filter((d) => d.phone)) || latest(here))?.tz || fallback;
 }
 
+const NUDGES = 'nudge:sent';
+const LAST = 'notify:last';
+const MSGS = 'coach-messages';
+
+/** The coach's voice settings: his line bank, moods and intensity. */
+function voiceOpts(store) {
+  const r = store.getRecord('coach-lines', 'bank');
+  const st = withDefaults(store.getRecord('settings', 'main')?.data);
+  return { bank: r && !r.deleted ? r.data : null, moods: st.coach.moods, intensity: st.coach.intensity };
+}
+
+/** Every notification also appears in Talk as a coach message, so he can answer it there. */
+function sayInTalk(store, { text, at, tz, kind, ref }) {
+  const id = `n${at.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  store.writeLocal(MSGS, id, { id, role: 'assistant', text, at, tz, kind, ref });
+}
+
+/** What the nudges need, read from the Mac's database. */
+export function nudgeInputs(store, now, tz) {
+  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
+  const st = stateFrom(store, tz);
+  const date = isoDate(new Date(now), tz);
+  const n = withDefaults(one('settings', 'main')).notify;
+  const health = one('health', date);
+  const plan = one('fuel', 'plan');
+  const eaten = dayTotals(list('meals'), list('meal-estimates'), date);
+  const trained = st.trainedDates?.has?.(date) || false;
+  return {
+    date, n,
+    busy: list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active'),
+    lastUserAt: Math.max(0, ...list(MSGS).filter((m) => m.role === 'user').map((m) => m.at || 0)),
+    args: {
+      now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm,
+      reminders: remindersFor({ ...st, date }),
+      rot: rotationDay({ last: st.last, today: date, days: st.days || {} }),
+      sessionHm: st.days?.[date]?.sessionTime || null,
+      session: { started: trained, done: trained },
+      weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length),
+      sleepLogged: Boolean(health?.sleep || one('sleep-log', date)),
+      eaten: { kcal: eaten.kcal, protein: eaten.protein },
+      targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
+      steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,
+      stepGoal: withDefaults(one('settings', 'main')).body.stepGoal,
+    },
+  };
+}
+
+/** One nudge if it's time and something is open: pushed and written into Talk. Returns what was sent, or null. */
+export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
+  const inp = nudgeInputs(store, now, tz);
+  const state = store.getMeta(NUDGES) || { last: 0, byKey: {} };
+  const awake = awakeAt(now, tz, inp.n.wakeHm, inp.n.bedHm);
+  if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy })) return null;
+  const pick = pickNudge(nudgeCandidates(inp.args), state.byKey, now);
+  if (!pick) return null;
+  const v = coachVoice(pick.text, { ...voiceOpts(store), calm: pick.calm });
+  const r = await push.notify({ title: v.title, body: v.body, url: pick.url, tag: `nudge-${pick.key.split(':')[0]}` });
+  sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: pick.key });
+  state.last = now; state.byKey[pick.key] = now;
+  for (const [k, at] of Object.entries(state.byKey)) if (now - at > 2 * 86400000) delete state.byKey[k];
+  store.setMeta(NUDGES, state);
+  store.setMeta(LAST, now);
+  log(`nudge ${pick.key}: ${v.body.slice(0, 80)} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
+  return { ...pick, body: v.body };
+}
+
 export function startNotifier({ store, push, log = () => {}, tz = () => phoneZone(store), now = () => Date.now(), everyMs = 60000 }) {
   let busy = false;
   let lastZone = null;
@@ -55,19 +125,26 @@ export function startNotifier({ store, push, log = () => {}, tz = () => phoneZon
       const t = now();
       const zone = typeof tz === 'function' ? tz() : tz;
       if (zone !== lastZone) { if (lastZone) log(`notify: reminders now follow ${zone}`); lastZone = zone; }
+      if (!push.list().length) return [];
       const sent = store.getMeta(SENT) || {};
       const items = dueNow(plan(store, t, zone), t, sent);
-      if (!items.length) return [];
-      if (!push.list().length) return [];
-      for (const i of items) {
-        const r = await push.notify({ title: i.title, body: i.body, url: i.url, tag: i.tag });
-        sent[i.id] = t;
-        log(`notify ${i.id}: ${i.title} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
+      if (items.length) {
+        const opts = voiceOpts(store);
+        for (const i of items) {
+          // The coach says it (Mon 10/19): title "Coach", the reminder's facts, one short line in his moods.
+          const v = coachReminder(i, opts);
+          const r = await push.notify({ title: v.title, body: v.body, url: i.url, tag: i.tag });
+          sent[i.id] = t;
+          sayInTalk(store, { text: v.body, at: t, tz: zone, kind: 'reminder', ref: i.id });
+          log(`notify ${i.id}: ${i.title} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
+        }
+        // Forget ids older than 3 days.
+        for (const [id, at] of Object.entries(sent)) if (t - at > 3 * 86400000) delete sent[id];
+        store.setMeta(SENT, sent);
+        store.setMeta(LAST, t);
       }
-      // Forget ids older than 3 days.
-      for (const [id, at] of Object.entries(sent)) if (t - at > 3 * 86400000) delete sent[id];
-      store.setMeta(SENT, sent);
-      return items;
+      const nudge = await nudgeTick({ store, push, log, now: t, tz: zone });
+      return nudge ? [...items, nudge] : items;
     } catch (e) {
       log(`notify error: ${e.stack || e}`);
       return [];
