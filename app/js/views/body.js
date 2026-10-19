@@ -59,7 +59,9 @@ export function render(view, params = []) {
     const nightDate = byDate.get(today)?.sleep ? today : byDate.get(addDays(today, -1))?.sleep ? addDays(today, -1) : null;
     const weights = dailyWeights(weightSeries(docs, measurements));
     const lastW = weights.at(-1);
-    const monthAgo = [...weights].reverse().find((w) => w.date <= addDays(today, -28));
+    // The weigh-in from 4 weeks back, only when a newer one exists (one old weigh-in alone has no change to show).
+    const backThen = [...weights].reverse().find((w) => w.date <= addDays(today, -28));
+    const monthAgo = backThen && lastW && backThen.date < lastW.date ? backThen : null;
     const goal = st.body.stepGoal;
 
     // Steps: the last 14 or 30 days.
