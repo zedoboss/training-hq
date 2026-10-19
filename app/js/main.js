@@ -118,6 +118,13 @@ function route() {
 }
 
 shell();
+// The tabs stay pinned at the top when a screen scrolls: the header sticks this far up (the brand row's height).
+{
+  const top = document.querySelector('.top'); const tabs = top?.querySelector('.tabs');
+  const fit = () => { if (top && tabs && window.scrollY < 4) top.style.setProperty('--tabs-off', `${Math.max(0, tabs.offsetTop)}px`); };
+  fit();
+  if (top && 'ResizeObserver' in window) new ResizeObserver(fit).observe(top);
+}
 // The coach's model (Settings or the Talk screen) in the header.
 const showModel = () => { const el = document.getElementById('active-model'); if (el) el.textContent = MODEL_LABEL[withDefaults(getState().settings).coach.model] || MODEL_LABEL.fast; };
 showModel();

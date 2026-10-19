@@ -16,8 +16,14 @@ button { font: inherit; color: inherit; }
 }
 .boot-msg { font: 500 11px/1 var(--mono); letter-spacing: 0.3em; color: var(--faint); margin: 40vh auto 0; text-align: center; }
 
-/* Header */
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+/* Header. It stays at the top while a long screen scrolls (Mon 10/19: Talk's history pushed the tabs out of reach):
+   the brand row scrolls away and the section tabs stay; --tabs-off (the brand row plus the gap) is set by main.js. */
+.top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px;
+  position: sticky; top: calc(var(--safe-top) - var(--tabs-off, 0px)); z-index: 30;
+  margin: 0 -16px; padding: 0 16px 8px; background: var(--bg);
+}
+.top::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: calc(var(--safe-top) + 14px); background: var(--bg); }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand-mark { flex-shrink: 0; }
 .brand-name { font: 600 18px/1 var(--mono); letter-spacing: 0.34em; white-space: nowrap; }
