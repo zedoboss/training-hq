@@ -428,3 +428,15 @@ test('log_weight and log_sleep (Mon 10/19): the Evolt weigh-in and last night as
   const { contextLine } = await import('../server/coach/tools.mjs');
   assert.match(contextLine({ store, tz: TZ, now: clock }), /Today: weigh-in logged; last night's sleep known\./);
 });
+
+test('nudges by talking: how often, waking hours, a pause and resume', async () => {
+  assert.match((await call('nudges')).text, /^Nudges: every 20 minutes, 7:00 AM to 10:00 PM\.$/);
+  const r = await call('nudges', { wakeHm: '04:40', bedHm: '18:00', everyMin: 15 });
+  assert.equal(r.text, 'Nudges every 15 minutes, from 4:40 AM, until 6:00 PM.');
+  assert.deepEqual([store.getRecord('settings', 'main').data.notify.wakeHm, store.getRecord('settings', 'main').data.notify.bedHm], ['04:40', '18:00']);
+  assert.match((await call('nudges', { pauseMin: 120 })).text, /^Nudges paused until \d+:\d\d [AP]M\.$/);
+  assert.ok(store.getRecord('settings', 'main').data.notify.nudgePausedUntil > clock);
+  assert.equal((await call('nudges', { resume: true })).text, 'Nudges back on now.');
+  assert.equal(store.getRecord('settings', 'main').data.notify.nudgePausedUntil, 0);
+});
+

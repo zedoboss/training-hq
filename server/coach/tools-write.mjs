@@ -769,6 +769,25 @@ function recoveryLog(a, ctx) {
 // ---- weigh-ins and sleep (Mon 10/19) ---------------------------------------------------------------------------------
 // His rules: the Evolt at the gym every gym day, and the coach tells him; no watch, so the coach asks about his sleep.
 
+/** His nudges, by talking: how often, his waking hours, a pause ("stop for 2 hours", "I'm going to bed"), resume. */
+function nudgeSettings(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const cur = s.one('settings', 'main') || {};
+  const n = { ...(cur.notify || {}) };
+  const said = [];
+  if (a.everyMin != null) { n.nudgeEveryMin = a.everyMin; said.push(a.everyMin ? `every ${a.everyMin} minutes` : 'off'); }
+  if (a.wakeHm) { n.wakeHm = a.wakeHm; said.push(`from ${formatHm(a.wakeHm)}`); }
+  if (a.bedHm) { n.bedHm = a.bedHm; said.push(`until ${formatHm(a.bedHm)}`); }
+  if (a.pauseMin) { n.nudgePausedUntil = s.now + a.pauseMin * 60000; said.push(`paused until ${timeText(n.nudgePausedUntil, s.tz)}`); }
+  if (a.resume) { n.nudgePausedUntil = 0; said.push('back on now'); }
+  if (!said.length) {
+    const st = s.settings().notify;
+    return { text: `Nudges: ${st.nudgeEveryMin ? `every ${st.nudgeEveryMin} minutes` : 'off'}, ${formatHm(st.wakeHm)} to ${formatHm(st.bedHm)}${st.nudgePausedUntil > s.now ? `, paused until ${timeText(st.nudgePausedUntil, s.tz)}` : ''}.`, summary: 'nudge settings' };
+  }
+  s.store.writeLocal('settings', 'main', { ...cur, notify: n });
+  return wrote(`Nudges ${said.join(', ')}.`, `nudges ${said.join(', ')}`);
+}
+
 const hoursText = (min) => `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
 
 /** A weigh-in (usually the Evolt before training): one entry per day in measurements, like Body > Measurements. */
@@ -812,6 +831,7 @@ const write = (name, title, description, inputSchema, run) => ({ name, title, de
 export const WRITE_TOOLS = [
   write('log_weight', 'Weight', "His weigh-in, usually the Evolt at the gym before training (his rule: an Evolt every gym day, and you remind him): kg exactly as shown, and body fat % or lean mass kg if he reads them out. One entry per day (another one that day replaces the numbers). Shows on Body's weight tile and chart.", obj({ kg: { type: 'number', minimum: 30, maximum: 300 }, bodyFatPct: { type: 'number', minimum: 2, maximum: 60 }, leanMassKg: { type: 'number', minimum: 20, maximum: 200 }, date: ISO, note: { type: 'string' } }, ['kg']), logWeight),
   write('log_sleep', 'Sleep', "Last night's sleep as he tells it (no watch, so you ask each morning): bed and wake times, 24-hour; date = the morning he woke up (default today); awakeMin when he says he lay awake; quality 1-5 only if he gives one. Shows on Body as last night.", obj({ bed: HM, wake: HM, date: ISO, awakeMin: { type: 'integer', minimum: 0, maximum: 600 }, quality: { type: 'integer', minimum: 1, maximum: 5 }, note: { type: 'string' } }, ['bed', 'wake']), logSleep),
+  write('nudges', 'Nudges', "The notifications you send him through the day: how often (everyMin 15, 20 or 30; 0 = off), his waking hours (wakeHm, bedHm; none outside them), a pause in minutes when he says stop for a while or he's going to bed early (pauseMin), or resume. With nothing set, says the current settings.", obj({ everyMin: { type: 'integer', enum: [0, 15, 20, 30] }, wakeHm: HM, bedHm: HM, pauseMin: { type: 'integer', minimum: 5, maximum: 1440 }, resume: { type: 'boolean' } }), nudgeSettings),
   write('start_session', 'Start a session', "Start a workout exactly like Train > Start: today's targets, the check-in's lighter targets, warm-ups. Default: the next session in the rotation; or a day type, a routine name, or empty. Asks first (his rule): the first call never starts it and gives you the question to ask him; call again with the same choice only after his yes in his next message. Refuses while another session is in progress. Opens it on his phone.", obj({ dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] }, routine: { type: 'string' }, empty: { type: 'boolean' } }), startSession),
   write('log_set', 'Log a set', 'Tick the next set of the session in progress with what he did ("80 for 8" = kg 80, reps 8). kg is the TOTAL including the bar as he says it; for weighted pull-ups the added kg (0 = bodyweight). Missing values come from the target or last time. Default exercise: the one he is on. Returns the 30% cap warning and records if any, starts his rest timer, and names the next set.', obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600, description: 'for holds and timed sets' }, type: SET_TYPE, set: { type: 'integer', minimum: 1, description: 'set number, if he names one' }, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' } }), logSet),
   write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),

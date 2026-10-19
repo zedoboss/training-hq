@@ -106,7 +106,7 @@ export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
   const state = store.getMeta(NUDGES) || { last: 0, byKey: {} };
   const awake = awakeAt(now, tz, inp.n.wakeHm, inp.n.bedHm);
-  if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy })) return null;
+  if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy, pausedUntil: inp.n.nudgePausedUntil })) return null;
   const pick = pickNudge(nudgeCandidates(inp.args), state.byKey, now);
   if (!pick) return null;
   const v = coachVoice(pick.text, { ...voiceOpts(store), calm: pick.calm });

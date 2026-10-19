@@ -133,8 +133,8 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
 }
 
 /** Whether it's time for a nudge at all. */
-export function nudgeDue({ now, everyMin = NUDGE_DEFAULTS.everyMin, awake = true, lastNudgeAt = 0, lastNoticeAt = 0, lastUserAt = 0, busy = false }) {
-  if (!everyMin || !awake || busy) return false;
+export function nudgeDue({ now, everyMin = NUDGE_DEFAULTS.everyMin, awake = true, lastNudgeAt = 0, lastNoticeAt = 0, lastUserAt = 0, busy = false, pausedUntil = 0 }) {
+  if (!everyMin || !awake || busy || now < (pausedUntil || 0)) return false;
   if (now - lastNudgeAt < everyMin * 60000) return false;
   if (now - lastNoticeAt < QUIET_AFTER_MIN * 60000) return false;
   if (now - lastUserAt < QUIET_AFTER_MIN * 60000) return false;

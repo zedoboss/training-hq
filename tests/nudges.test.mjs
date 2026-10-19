@@ -96,6 +96,8 @@ test('when to nudge: his interval, waking hours, quiet during a session, after a
   assert.equal(nudgeDue({ ...ok, busy: true }), false, 'a session or sauna is running');
   assert.equal(nudgeDue({ ...ok, lastNoticeAt: now - (QUIET_AFTER_MIN - 1) * 60000 }), false);
   assert.equal(nudgeDue({ ...ok, lastUserAt: now - 5 * 60000 }), false);
+  assert.equal(nudgeDue({ ...ok, pausedUntil: now + 60000 }), false, 'he said stop for a while');
+  assert.equal(nudgeDue({ ...ok, pausedUntil: now - 1 }), true);
   // The same thing waits for its own gap; the next most important goes instead.
   const cands = [{ key: 'session', priority: 80, gapMin: 30 }, { key: 'food', priority: 55, gapMin: 60 }];
   assert.equal(pickNudge(cands, { session: now - 20 * 60000 }, now).key, 'food');
