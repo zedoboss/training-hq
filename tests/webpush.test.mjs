@@ -71,7 +71,12 @@ test('send: headers and body to the endpoint; 410 means the subscription is gone
   assert.equal(calls[0].url, sub.endpoint);
   assert.equal(init.headers['Content-Encoding'], 'aes128gcm');
   assert.equal(init.headers.TTL, '3600');
-  assert.equal(init.headers.Topic, 'holdsevening', 'Apple rejects a dash in the Topic (BadWebPushTopic)');
+  // Apple's rule (BadWebPushTopic): valid base64url, at most 32 characters; the same tag gives the same topic.
+  assert.match(init.headers.Topic, /^[A-Za-z0-9_-]{32}$/);
+  const { topicFor } = await import('../server/webpush.mjs');
+  assert.equal(init.headers.Topic, topicFor('holds-evening'));
+  assert.notEqual(topicFor('nudge-session'), topicFor('nudge-food'));
+  assert.equal(Buffer.from(topicFor('nudge-session'), 'base64url').length, 24);
   assert.match(init.headers.Authorization, /^vapid t=/);
   assert.deepEqual(JSON.parse(decrypt(init.body, ua.getPrivateKey(), ua.getPublicKey(), auth)), { title: 'T', body: 'B', url: '#/holds', tag: 'holds-evening' });
   const r2 = await sendPush(sub, { title: 'T' }, keys, { subject: 'https://example.org/', fetchImpl });

@@ -2,10 +2,15 @@
 // Message encryption: RFC 8291 (aes128gcm content coding, RFC 8188). Sender identification: VAPID (RFC 8292), an
 // ES256 JWT signed with the Mac's own key pair. The key pair is made once and kept in the private folder's config/
 // (never in git); the public half is what the phone subscribes with.
-import { createECDH, createHmac, createCipheriv, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { createECDH, createHash, createHmac, createCipheriv, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 export const b64u = (buf) => Buffer.from(buf).toString('base64url');
+
+/** The Topic header for a tag (same tag, same topic, so a newer push replaces an undelivered older one). Apple answers
+ * 400 BadWebPushTopic unless it is valid base64url of at most 32 characters: a length of 13 or 17 fails (Mon 10/19:
+ * "nudge-session", "nudgesuppsuntimed"), 4 or 12 passes. 24 bytes of the tag's SHA-256 are always 32 valid characters. */
+export const topicFor = (tag) => b64u(createHash('sha256').update(String(tag)).digest().subarray(0, 24));
 export const unb64u = (s) => Buffer.from(String(s), 'base64url');
 
 const hmac = (key, data) => createHmac('sha256', key).update(data).digest();
@@ -82,8 +87,7 @@ export async function sendPush(sub, message, vapid, { subject, ttl = 3600, urgen
     method: 'POST',
     headers: {
       'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: String(ttl), Urgency: urgency,
-      // Apple answers 400 BadWebPushTopic to a dash ("nudge-session", Mon 10/19): letters and digits only.
-      ...(message.tag ? { Topic: String(message.tag).replace(/[^A-Za-z0-9]/g, '').slice(0, 32) } : {}),
+      ...(message.tag ? { Topic: topicFor(message.tag) } : {}),
       Authorization: vapidAuth(sub.endpoint, vapid, { subject }),
     },
     body,
