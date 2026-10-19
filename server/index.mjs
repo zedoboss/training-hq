@@ -7,6 +7,7 @@ import { writePrecache } from '../scripts/precache.mjs';
 import { seedDocs, applySeed } from './seed.mjs';
 import { openDemos } from './demos.mjs';
 import { openImports } from './imports.mjs';
+import { openImportInbox } from './import-inbox.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
 import { startNotifier, phoneZone } from './notify.mjs';
@@ -43,6 +44,11 @@ log(`demos: ${scan.clips} clips (${scan.added} new, ${scan.removed} gone) in ${p
 const stopBackup = scheduleNightly({ store, privateDir: p.privateDir, backupDir: join(p.dataDir, 'backup'), hour: 1, log });
 
 const imports = openImports({ store, importsDir: p.importsDir });
+// The Mac's import folder (Mon 10/19): Hevy or Strong exports dropped into imports/inbox/ are imported within a minute.
+const inbox = openImportInbox({ imports, dir: join(p.importsDir, 'inbox'), tz: () => phoneZone(store), log });
+const scanInbox = () => { try { inbox.scan(); } catch (e) { log(`import inbox: ${e.stack || e}`); } };
+setTimeout(scanInbox, 4000).unref();
+setInterval(scanInbox, 60000).unref();
 
 // Web push (step 4): the Mac's VAPID keys live in config/vapid.json (made the first time, never in git).
 const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subject: config.pushSubject || DEFAULT_SUBJECT, log });
