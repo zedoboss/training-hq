@@ -82,7 +82,8 @@ export async function sendPush(sub, message, vapid, { subject, ttl = 3600, urgen
     method: 'POST',
     headers: {
       'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: String(ttl), Urgency: urgency,
-      ...(message.tag ? { Topic: String(message.tag).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) } : {}),
+      // Apple answers 400 BadWebPushTopic to a dash ("nudge-session", Mon 10/19): letters and digits only.
+      ...(message.tag ? { Topic: String(message.tag).replace(/[^A-Za-z0-9]/g, '').slice(0, 32) } : {}),
       Authorization: vapidAuth(sub.endpoint, vapid, { subject }),
     },
     body,

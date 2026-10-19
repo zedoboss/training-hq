@@ -64,6 +64,16 @@ test('nudges: the morning sleep question, the session and the Evolt, food behind
   assert.equal(nudgeCandidates({ ...base, rot: null, now: at(D, '16:00'), stepGoal: 8000, steps, eaten: { kcal: 3000, protein: 230 } }).length, 0);
 });
 
+test('nudges: supplements with no time set, once the morning is over', () => {
+  const suppsUntimed = { total: 8, open: ['Vitamin C', 'D3 + K2', 'Omega-3', 'Creatine', 'Magnesium', 'Carnitine'] };
+  const base = { tz: TZ, rot: null, wakeHm: '04:40', bedHm: '18:00', eaten: { kcal: 3000, protein: 230 }, targets: { kcal: 3174, protein: 242.5 } };
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '06:00'), suppsUntimed }).length, 0);
+  const c = nudgeCandidates({ ...base, now: at(D, '09:00'), suppsUntimed });
+  assert.deepEqual(keys(c), ['supps-untimed']);
+  assert.equal(c[0].text, 'Supplements: 2 of 8 taken today. Still open: Vitamin C, D3 + K2, Omega-3, Creatine and 2 more. Take them and tell me.');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '09:00'), suppsUntimed: { total: 8, open: [] } }).length, 0);
+});
+
 test('nudges: planned reminders that went out and are still open come back; done or future ones do not', () => {
   const reminders = [
     { id: 'supps-a', kind: 'supps', tag: 'supps-morning', at: at(D, '07:00'), due: true, title: 'Morning supplements', body: 'Vitamin C, D3 + K2.', url: '#/supps' },

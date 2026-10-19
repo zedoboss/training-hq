@@ -71,7 +71,7 @@ test('send: headers and body to the endpoint; 410 means the subscription is gone
   assert.equal(calls[0].url, sub.endpoint);
   assert.equal(init.headers['Content-Encoding'], 'aes128gcm');
   assert.equal(init.headers.TTL, '3600');
-  assert.equal(init.headers.Topic, 'holds-evening');
+  assert.equal(init.headers.Topic, 'holdsevening', 'Apple rejects a dash in the Topic (BadWebPushTopic)');
   assert.match(init.headers.Authorization, /^vapid t=/);
   assert.deepEqual(JSON.parse(decrypt(init.body, ua.getPrivateKey(), ua.getPublicKey(), auth)), { title: 'T', body: 'B', url: '#/holds', tag: 'holds-evening' });
   const r2 = await sendPush(sub, { title: 'T' }, keys, { subject: 'https://example.org/', fetchImpl });

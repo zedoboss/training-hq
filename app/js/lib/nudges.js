@@ -67,12 +67,13 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  * @param {{kcal: number, protein: number}|null} o.targets
  * @param {{steps: number, asOf: number}|null} o.steps   today's steps from Apple Health and when they were read
  * @param {number|null} o.stepGoal
+ * @param {{open: string[], total: number}|null} o.suppsUntimed  today's supplements with no time set: names still open
  * @param {string} o.wakeHm
  * @param {string} o.bedHm
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
-  eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm }) {
+  eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm }) {
   const out = [];
   const nowHm = formatHm(hmOf(new Date(now), tz));
   const sinceWake = ((minOf(hmOf(new Date(now), tz)) - minOf(wakeHm)) + 1440) % 1440;
@@ -109,6 +110,12 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
 
   // Food behind the day's pace (wake up to 2 hours before bed).
   const frac = dayFraction(now, tz, wakeHm, bedHm);
+  // Supplements with no time set (no planned reminder asks about them): once the morning is over.
+  if (suppsUntimed?.open?.length && frac >= 0.25) {
+    const o = suppsUntimed.open;
+    out.push({ key: 'supps-untimed', priority: 58, gapMin: 60, url: '#/supps',
+      text: `Supplements: ${suppsUntimed.total - o.length} of ${suppsUntimed.total} taken today. Still open: ${o.slice(0, 4).join(', ')}${o.length > 4 ? ` and ${o.length - 4} more` : ''}. Take them and tell me.` });
+  }
   if (targets?.kcal && frac >= 0.15) {
     const expect = targets.kcal * frac;
     if (eaten.kcal < expect * 0.7 && expect - eaten.kcal >= 400) {

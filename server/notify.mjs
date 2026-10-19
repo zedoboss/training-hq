@@ -7,6 +7,7 @@ import { addDays, rotationDay } from '../app/js/lib/rotation.js';
 import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals } from '../app/js/lib/meals.js';
+import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt } from '../app/js/lib/nudges.js';
 
 const SENT = 'notify:sent';
@@ -76,6 +77,9 @@ export function nudgeInputs(store, now, tz) {
   const plan = one('fuel', 'plan');
   const eaten = dayTotals(list('meals'), list('meal-estimates'), date);
   const trained = st.trainedDates?.has?.(date) || false;
+  const rot = rotationDay({ last: st.last, today: date, days: st.days || {} });
+  const untimed = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' })
+    .filter((g) => !g.time).flatMap((g) => g.items);
   return {
     date, n,
     busy: list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active'),
@@ -83,7 +87,8 @@ export function nudgeInputs(store, now, tz) {
     args: {
       now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm,
       reminders: remindersFor({ ...st, date }),
-      rot: rotationDay({ last: st.last, today: date, days: st.days || {} }),
+      rot,
+      suppsUntimed: untimed.length ? { total: untimed.length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length),
