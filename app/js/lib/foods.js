@@ -122,6 +122,12 @@ export function withUsda(db, items, { prefer = [], keepTyped = true } = {}) {
     let food = x.fdcId ? db.byId.get(Number(x.fdcId)) : null;
     // An id that doesn't fit the USDA words given with it (his white rice's id on "Rice, brown, ..."): the words win.
     if (food && x.usda && !fits(food, tokens(x.usda))) food = matchFood(db, x.usda, { prefer: [...mine.keys()] }) || food;
+    // One of his foods by his own name ("Butter (cooking the beef and eggs)", "Greek yogurt"), when every word given
+    // is in his name (so "Brown rice" never becomes his white rice).
+    if (!food && !x.usda && x.name) {
+      const h = prefer.find((p) => p.fdcId && tokens(x.name).length && tokens(x.name).every((t) => tokens(p.name).includes(t)));
+      if (h) food = db.byId.get(Number(h.fdcId)) || null;
+    }
     if (!food && x.usda) food = matchFood(db, x.usda, { prefer: [...mine.keys()] });
     if (!food && x.name) food = matchFood(db, x.name, { prefer: [...mine.keys()] });
     if (!food) { const { usda, ...rest } = x; return { ...rest, source: rest.source || 'estimate' }; }
