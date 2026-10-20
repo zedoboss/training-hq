@@ -4,7 +4,8 @@
 // (on arrival at the gym); the scanner's own safety notice read once and recorded. Pure helpers; the screen is
 // views/body-scan.js, the reminders are planned in reminders.js and sent by the Mac.
 //
-// scan-plan   'main': {next: {date, confirmedAt, proposedDate, how: 'proposal'|'picked'} | null,
+// scan-plan   'main': {cadence: 'training'|'monthly' (none = monthly), next: {date, confirmedAt, proposedDate,
+//             how: 'proposal'|'picked'} | null,
 //             safety: {readAt} | null, staff: [{at, text}], protocol: {items: [{id, when, text}], changes: [{at, note}]}
 //             | null (= the brief's protocol), log: [{at, what, date}]}
 // body-scans  'scan.<date>': {id, date, status: 'prep'|'done', prep: {ticks: {<item id>: true}, items: [{id, when,
@@ -14,6 +15,13 @@ import { daysBetween, zonedTime, formatDay, hmOf, zoneOf, addMinutesHm } from '.
 
 /** Every 4 weeks (brief: scanning more often mostly measures day-to-day water changes). */
 export const EVERY_DAYS = 28;
+
+/**
+ * How often he scans. His answer (Tue 10/20): "every day except my rest days", so 'training': a scan on every training
+ * day, first thing at the gym, with nothing to confirm. 'monthly': every 4 weeks on a date he confirms (the brief's).
+ */
+export const CADENCE = [['training', 'Every training day'], ['monthly', 'Every 4 weeks']];
+export const cadenceOf = (plan) => (plan?.cadence === 'training' ? 'training' : 'monthly');
 
 /** The starting protocol, in the brief's words (general guidance from gyms that use this scanner). His gym wins. */
 export const PROTOCOL = [
@@ -90,6 +98,28 @@ export function expectedOn({ last, days, today, date }) {
 }
 
 /**
+ * On every-training-day scans: the next training day from today with no scan yet. Today counts while its session is
+ * still to come (once trained, it is too late for a scan before the workout). A later day counts when it trains
+ * whichever way today's open session goes; if today's moves, tomorrow becomes a training day when it comes.
+ */
+export function nextTrainingScan({ scans = [], today, last, days = {} }) {
+  let ahead = projectRotationEitherWay({ last, days, from: today, n: 9 });
+  // Scanned today: he is at the gym, so today's session happens today.
+  if (ahead[0]?.kind === 'train' && scans.some((x) => x.date === today && isDone(x))) {
+    ahead = projectRotation({ last: { dayType: ahead[0].dayType, date: today }, days, from: today, n: 9 });
+  }
+  const trains = (p) => p.kind === 'train' && (!p.maybe || (p.ifDone.kind === 'train' && p.ifMoved.kind === 'train'));
+  return ahead.find((p) => trains(p) && !scans.some((x) => x.date === p.date && isDone(x)))?.date || null;
+}
+
+/** The plan as the reminders, nudges and screens use it: on every-training-day scans, next is the next training day. */
+export function planFor(plan = {}, { scans = [], today, last, days = {} } = {}) {
+  if (cadenceOf(plan) !== 'training') return plan || {};
+  const date = nextTrainingScan({ scans, today, last, days });
+  return { ...plan, next: date ? { date, how: 'training' } : null };
+}
+
+/**
  * The proposed next scan date. Rules (brief section 6, decision 22):
  * - 4 weeks after the last scan, so it falls on the same weekday; the first scan: tomorrow;
  * - never before tomorrow, so the evening-before reminder and the preparation can happen;
@@ -122,13 +152,15 @@ export function proposeNext({ scans = [], today, last, days = {}, every = EVERY_
  *   onRest: the confirmed date is a rest day in the rotation now, with the next training day to move it to.
  */
 export function scanStatus({ plan = {}, scans = [], today, last, days = {} }) {
+  const training = cadenceOf(plan) === 'training';
+  if (training) plan = planFor(plan, { scans, today, last, days });
   const n = plan?.next?.date ? plan.next : null;
   const doneOn = (d) => scans.some((s) => s.date === d && isDone(s));
   const next = n && n.date >= today && !doneOn(n.date) ? n : null;
-  const missed = n && n.date < today && !scans.some((s) => s.date >= n.date && isDone(s)) ? n.date : null;
+  const missed = !training && n && n.date < today && !scans.some((s) => s.date >= n.date && isDone(s)) ? n.date : null;
   const proposal = proposeNext({ scans, today, last, days });
   let onRest = null;
-  if (next) {
+  if (next && !training) {
     const exp = expectedOn({ last, days, today, date: next.date });
     if (exp && exp.kind === 'rest') {
       const ahead = projectRotation({ last, days, from: today, n: daysBetween(today, next.date) + 8 });
@@ -137,7 +169,7 @@ export function scanStatus({ plan = {}, scans = [], today, last, days = {} }) {
     }
   }
   const prep = next ? scans.find((s) => s.date === next.date) || null : null;
-  return { next, missed, proposal, prep, onRest };
+  return { next, missed, proposal, prep, onRest, cadence: training ? 'training' : 'monthly' };
 }
 
 /** The plan with a confirmed date (from the proposal or picked by him), dated in its log. */
@@ -189,15 +221,17 @@ export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, even
   const items = protocolOf(plan);
   const base = { kind: 'scan', url: '#/body/scan', tag: `scan-${d}`, fixed: true, due };
   const hm = days[d]?.sessionTime || null;
-  if (date === addDays(d, -3)) {
+  // Every training day: no countdown evenings (a scan nearly every day), only the morning and the gym reminders.
+  const ladder = cadenceOf(plan) !== 'training';
+  if (ladder && date === addDays(d, -3)) {
     const before = items.filter((i) => i.when === 'before');
     return [{ ...base, id: `scan-3days:${d}`, at: zonedTime(date, eveningHm, tz), title: 'Body scan in three days', body: `${dayText(d)}, first thing at the gym, before the workout.${before.length ? ` Coming up: ${joinTexts(before)}.` : ''}` }];
   }
-  if (date === addDays(d, -2)) {
+  if (ladder && date === addDays(d, -2)) {
     const alcohol = items.find((i) => i.id === 'no-alcohol');
     return [{ ...base, id: `scan-alcohol:${d}`, at: zonedTime(date, eveningHm, tz), title: 'Body scan in two days', body: `${dayText(d)}, first thing at the gym.${alcohol ? ` ${alcohol.text}` : ''}` }];
   }
-  if (date === addDays(d, -1)) {
+  if (ladder && date === addDays(d, -1)) {
     const before = items.filter((i) => i.when === 'before'); const on = items.filter((i) => i.when !== 'before');
     return [{
       ...base, id: `scan-eve:${d}`, at: zonedTime(date, eveningHm, tz), title: 'Body scan tomorrow',
@@ -214,9 +248,12 @@ export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, even
   return [];
 }
 
-/** What the Mac sends when the iPhone says he arrived at the gym (A10): the scan first, on a scan day; else nothing. */
+/**
+ * What the Mac sends when the iPhone says he arrived at the gym (A10): the scan first, on a scan day; else nothing.
+ * Every training day: at the gym means training, so a scan unless one is saved today.
+ */
 export function arrivalMessage({ plan = {}, scans = [], date }) {
-  if (plan?.next?.date !== date || scans.some((s) => s.date === date && isDone(s))) return null;
+  if ((cadenceOf(plan) !== 'training' && plan?.next?.date !== date) || scans.some((s) => s.date === date && isDone(s))) return null;
   const on = protocolOf(plan).filter((i) => i.when !== 'before');
   return { title: 'Body scan first', body: `You're at the gym: scan before the workout. ${joinTexts(on)}. Tick the checklist.`, url: '#/body/scan', tag: `scan-${date}` };
 }

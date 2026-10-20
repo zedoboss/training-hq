@@ -141,7 +141,7 @@ function foodLine(s) {
 
 function scanLine(s) {
   const st = scanStatus({ plan: s.one('scan-plan', 'main') || {}, scans: s.list('body-scans'), today: s.today, last: s.last(), days: s.days() });
-  if (st.next) return `Body scan: next ${dayText(st.next.date, s.today)}${st.next.date === s.today ? ' (TODAY, first thing at the gym)' : ''}, confirmed.`;
+  if (st.next) return `Body scan: ${st.cadence === 'training' ? 'every training day; ' : ''}next ${dayText(st.next.date, s.today)}${st.next.date === s.today ? ' (TODAY, first thing at the gym)' : ''}${st.cadence === 'training' ? '' : ', confirmed'}.`;
   return `Body scan: none confirmed; the app proposes ${dayText(st.proposal.date, s.today)}.`;
 }
 
@@ -469,13 +469,13 @@ function scansText(s) {
   const scans = s.list('body-scans');
   const st = scanStatus({ plan, scans, today: s.today, last: s.last(), days: s.days() });
   const items = protocolOf(plan);
-  const lines = ['Body scans (Evolt 360 at his gym; every 4 weeks, first thing at the gym before the workout, same conditions). Describe changes in numbers; never diagnose.'];
-  lines.push(st.next ? `Next scan: ${dayText(st.next.date, s.today)} (confirmed)${st.onRest ? `; that is now a rest day in the rotation, the next training day is ${dayText(st.onRest.to, s.today)}` : ''}.` : `No date confirmed. Proposed: ${dayText(st.proposal.date, s.today)}${st.proposal.dayType ? ` (a ${LABEL[st.proposal.dayType]} day)` : st.proposal.either ? ` (a training day either way: ${LABEL[st.proposal.either.ifMoved]} if today's ${LABEL[st.proposal.open]} moves to tomorrow, ${LABEL[st.proposal.either.ifDone]} if he does it today)` : ''}${st.proposal.lastDate ? `, 4 weeks after ${dayText(st.proposal.lastDate, s.today)}` : ', the first scan'}.`);
+  const lines = [`Body scans (Evolt 360 at his gym; ${st.cadence === 'training' ? 'every training day' : 'every 4 weeks'}, first thing at the gym before the workout, same conditions). Describe changes in numbers; never diagnose.${st.cadence === 'training' ? ' Day to day, the numbers move with water and food: compare weekly averages, not one day to the next.' : ''}`];
+  lines.push(st.next ? `Next scan: ${dayText(st.next.date, s.today)} (${st.cadence === 'training' ? 'the next training day' : 'confirmed'})${st.onRest ? `; that is now a rest day in the rotation, the next training day is ${dayText(st.onRest.to, s.today)}` : ''}.` : `No date confirmed. Proposed: ${dayText(st.proposal.date, s.today)}${st.proposal.dayType ? ` (a ${LABEL[st.proposal.dayType]} day)` : st.proposal.either ? ` (a training day either way: ${LABEL[st.proposal.either.ifMoved]} if today's ${LABEL[st.proposal.open]} moves to tomorrow, ${LABEL[st.proposal.either.ifDone]} if he does it today)` : ''}${st.proposal.lastDate ? `, 4 weeks after ${dayText(st.proposal.lastDate, s.today)}` : ', the first scan'}.`);
   if (st.missed) lines.push(`Missed: the scan confirmed for ${dayText(st.missed, s.today)} has no results.`);
   lines.push(plan.safety?.readAt ? `Safety notice read: ${whenText(plan.safety.readAt, s.tz, s.today)}.` : `Safety notice: not read yet. ${SAFETY_ASK}`);
   if (plan.staff?.length) lines.push(`What his gym's staff said: ${plan.staff.map((x) => x.text).join(' | ')}`);
   const rec = st.next ? scans.find((x) => x.date === st.next.date) : null;
-  lines.push(`Preparation checklist${rec ? ` for ${dayText(rec.date, s.today)}` : ''}: ${items.map((i) => `${i.text}${rec?.prep?.ticks?.[i.id] ? ' [ticked]' : ''}`).join(' / ')}`);
+  lines.push(`Preparation checklist${rec ? ` for ${dayText(rec.date, s.today)}` : ''}: ${items.map((i) => `${i.text} (${i.id})${rec?.prep?.ticks?.[i.id] ? ' [ticked]' : ''}`).join(' / ')}`);
   const done = scans.filter(isDone).sort((a, b) => (a.date < b.date ? 1 : -1));
   for (const x of done.slice(0, 4)) {
     const notes = conditionNotes(x, items);

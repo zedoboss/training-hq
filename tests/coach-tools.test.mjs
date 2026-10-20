@@ -293,7 +293,7 @@ test('body scan: confirm the proposed date (today too, with the checklist; never
   assert.match((await call('body_scans')).text, /No date confirmed\. Proposed: Friday 1\/23 \(a training day either way: Pull if today's Legs moves to tomorrow, Push if he does it today\)/);
   assert.match((await call('body_scan', { action: 'confirm_date', date: '2026-01-19' })).text, /Pick today or a later day/);
   const t = await call('body_scan', { action: 'confirm_date', date: '2026-01-20' });
-  assert.match(t.text, /^Body scan confirmed for today, Tuesday 1\/20\. Go through this with him now .*Nothing eaten before the scan; Normal water intake.*Bathroom first; Barefoot\. If he ate something, water only until about 2 to 3 hours after it/);
+  assert.match(t.text, /^Body scan confirmed for today, Tuesday 1\/20\. Go through this with him now .*Nothing eaten before the scan; Normal water intake.*Bathroom first; Barefoot\. If he ate something the checklist doesn't allow, record it/);
   const c = await call('body_scan', { action: 'confirm_date' });
   assert.match(c.text, /^Body scan confirmed for [A-Z][a-z]+day \d+\/\d+/);
   assert.ok(store.getRecord('scan-plan', 'main').data.next.date > '2026-01-20');
@@ -305,6 +305,15 @@ test('body scan: confirm the proposed date (today too, with the checklist; never
   assert.equal(scan.status, 'done');
   assert.equal(scan.conditions.fasted, true);
   assert.equal(scan.source, 'coach');
+  // Every training day (Tue 10/20): no dates to confirm; one checklist line in his words.
+  assert.match((await call('body_scan', { action: 'every', every: 'training' })).text, /^Scans now every training day/);
+  assert.equal(store.getRecord('scan-plan', 'main').data.cadence, 'training');
+  assert.match((await call('body_scan', { action: 'confirm_date' })).text, /every training day: no date to confirm/);
+  assert.match((await call('body_scans')).text, /every training day.*Next scan: [A-Z][a-z]+day \d+\/\d+ \(the next training day\).*Nothing eaten before the scan\. \(fasted\)/s);
+  assert.match((await call('body_scan', { action: 'checklist_line', line: 'fasted', text: 'Only the usual banana on waking.' })).text, /line changed: Only the usual banana on waking\./);
+  const items = store.getRecord('scan-plan', 'main').data.protocol.items;
+  assert.equal(items.find((i) => i.id === 'fasted').text, 'Only the usual banana on waking.');
+  assert.equal(items.length, 8);
 });
 
 test('check-in by talking: refused on a draft table; missing ratings asked for; his rules decide; a move applied only on his word', async () => {

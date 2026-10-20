@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt } from '../app/js/lib/nudges.js';
-import { protocolOf, isDone } from '../app/js/lib/scans.js';
+import { protocolOf, isDone, planFor } from '../app/js/lib/scans.js';
 import { zonedTime } from '../app/js/lib/time.js';
 
 const SENT = 'notify:sent';
@@ -105,14 +105,15 @@ export function nudgeInputs(store, now, tz) {
       suppsUntimed: untimed.length ? { total: untimed.length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
-      weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length),
+      weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
+        || list('body-scans').some((x) => x.date === date && isDone(x)),
       sleepLogged: Boolean(health?.sleep || one('sleep-log', date)),
       eaten: { kcal: eaten.kcal, protein: eaten.protein },
       targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
       steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,
       stepGoal: withDefaults(one('settings', 'main')).body.stepGoal,
       scanToday: (() => {
-        const sp = one('scan-plan', 'main');
+        const sp = planFor(one('scan-plan', 'main') || {}, { scans: list('body-scans'), today: date, last: st.last, days: st.days || {} });
         if (sp?.next?.date !== date || list('body-scans').some((x) => x.date === date && isDone(x))) return null;
         return { items: protocolOf(sp).filter((i) => i.when === 'day').map((i) => i.text.replace(/\.$/, '')) };
       })(),

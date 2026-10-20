@@ -6,7 +6,7 @@ import { ready, saveSettings } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults, toUnit } from '../lib/settings.js';
 import { formatDay, formatTime, isoDate } from '../lib/time.js';
-import { addDays } from '../lib/rotation.js';
+import { addDays, lastRotationSession, daysByDate } from '../lib/rotation.js';
 import { weightSeries, dailyWeights, hoursText, average, withSleepLog } from '../lib/health.js';
 import { columnChart, timeLine, bindTips, bindCrosshair, tableView } from '../ui/charts.js';
 import { promptText } from '../ui/sheet.js';
@@ -17,7 +17,7 @@ import * as measure from './body-measure.js';
 import * as photos from './body-photos.js';
 import * as scan from './body-scan.js';
 import * as recovery from './body-recovery.js';
-import { isDone } from '../lib/scans.js';
+import { isDone, cadenceOf, planFor } from '../lib/scans.js';
 import { checkInStatus, photoStatus, openTasks, sinceText } from '../lib/recovery.js';
 
 const SUB = { health, measure, photos, scan, recovery };
@@ -44,7 +44,11 @@ export function render(view, params = []) {
   let stepDays = 14; let range = '90';
 
   const draw = async (repo) => {
-    const [healthDocs, sleepLog, status, measurements, bodyPhotos, scanPlan, scans, recPlan, recState, notes] = await Promise.all([repo.list('health'), repo.list('sleep-log'), repo.get('health-meta', 'status'), repo.list('measurements'), repo.list('body-photos'), repo.get('scan-plan', 'main'), repo.list('body-scans'), repo.get('recovery', 'main'), repo.get('recovery', 'state'), repo.list('coach-notes')]);
+    const [healthDocs, sleepLog, status, measurements, bodyPhotos, planDoc, scans, recPlan, recState, notes] = await Promise.all([repo.list('health'), repo.list('sleep-log'), repo.get('health-meta', 'status'), repo.list('measurements'), repo.list('body-photos'), repo.get('scan-plan', 'main'), repo.list('body-scans'), repo.get('recovery', 'main'), repo.get('recovery', 'state'), repo.list('coach-notes')]);
+    // Every training day: the next one comes from the rotation.
+    const training = cadenceOf(planDoc) === 'training';
+    const scanPlan = training ? planFor(planDoc, { scans, today: isoDate(new Date()),
+      last: lastRotationSession(await repo.list('sessions'), await repo.get('bridge', 'last-loads')), days: daysByDate(await repo.list('days')) }) : planDoc;
     if (!alive) return;
     const docs = withSleepLog(healthDocs, sleepLog);
     const st = withDefaults(getState().settings);
@@ -96,7 +100,8 @@ export function render(view, params = []) {
     // Body scan: the confirmed date, else a nudge to plan one.
     const nextScan = scanPlan?.next?.date >= today && !scans.some((x) => x.date === scanPlan.next.date && isDone(x)) ? scanPlan.next.date : null;
     const lastScan = scans.filter(isDone).map((x) => x.date).sort().at(-1);
-    const scanLine = nextScan ? `Next ${dayName(nextScan)}${nextScan === today ? ' (today)' : ''}` : `${lastScan ? `Last ${dayName(lastScan)} · ` : ''}Plan the next one`;
+    const scanLine = training ? `Every training day${nextScan ? ` · ${nextScan === today ? 'today' : `next ${dayName(nextScan)}`}` : ''}`
+      : nextScan ? `Next ${dayName(nextScan)}${nextScan === today ? ' (today)' : ''}` : `${lastScan ? `Last ${dayName(lastScan)} · ` : ''}Plan the next one`;
 
     // A13: his recovery record, when he has one: what is due.
     let recCard = '';
@@ -175,7 +180,7 @@ export function render(view, params = []) {
 
   untip = bindTips(view);
   ready.then((repo) => {
-    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'sleep-log', 'health-meta', 'measurements', 'body-photos', 'settings', 'scan-plan', 'body-scans', 'recovery', 'coach-notes'].includes(c))) draw(repo); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'sleep-log', 'health-meta', 'measurements', 'body-photos', 'settings', 'scan-plan', 'body-scans', 'recovery', 'coach-notes', 'days', 'sessions'].includes(c))) draw(repo); });
     draw(repo);
   });
   return () => { alive = false; off(); untip(); unx(); };

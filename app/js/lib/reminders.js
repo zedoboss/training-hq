@@ -10,7 +10,7 @@ import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
 import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
 import { mealReminders, suppReminders, planReminders, saunaReminders } from './fuel-reminders.js';
-import { scanReminders } from './scans.js';
+import { scanReminders, planFor } from './scans.js';
 import { recoveryReminders } from './recovery.js';
 
 export const KINDS = [
@@ -115,7 +115,7 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   const supps = on('supps') ? suppReminders({ date, tz, supps: supplements, log: suppLog, dayKind: rot.today.kind === 'rest' ? 'rest' : 'train', follow: { everyMin: n.suppFollowMin, max: n.suppFollowMax } }) : { items: [], open: [] };
   out.push(...supps.items);
   if (on('sauna')) out.push(...saunaReminders({ date, tz, sessions: sauna, plan: saunaPlan || {} }));
-  if (on('scan')) out.push(...scanReminders({ date, tz, plan: scanPlan || {}, scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin }));
+  if (on('scan')) out.push(...scanReminders({ date, tz, plan: planFor(scanPlan || {}, { scans, today: date, last, days }), scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin }));
   if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday }));
   // Step 8: reminders he asked the coach for, at their time, in his words.
   if (on('coach')) {

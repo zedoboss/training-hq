@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PROTOCOL, EVERY_DAYS, proposeNext, projectRotation, scanStatus, scanReminders, confirmDate, cancelDate, withTick, unticked,
-  withProtocol, protocolOf, expectedOn, lastDone,
+  withProtocol, protocolOf, expectedOn, lastDone, cadenceOf, planFor, nextTrainingScan, arrivalMessage,
 } from '../app/js/lib/scans.js';
 import { remindersFor } from '../app/js/lib/reminders.js';
 import { fixedReminders } from '../app/js/lib/backup-reminders.js';
@@ -167,6 +167,33 @@ test('arrival at the gym (A10): the scan first on a scan day with results still 
   assert.match(m.body, /^You're at the gym: scan before the workout\. First thing at the gym/);
   assert.equal(arrivalMessage({ plan, date: '2026-01-21' }), null);
   assert.equal(arrivalMessage({ plan, date: '2026-01-22', scans: [done('2026-01-22')] }), null);
+});
+
+test('every training day (Tue 10/20): the next training day without a scan; no dates, no evening countdown', () => {
+  const plan = { cadence: 'training', next: { date: '2026-03-01' } };
+  assert.equal(cadenceOf(plan), 'training'); assert.equal(cadenceOf({}), 'monthly');
+  // Today (Legs) is next; scanned today: Thursday (Wednesday is the rotation's rest day).
+  assert.equal(nextTrainingScan({ today, last, days: {} }), today);
+  assert.equal(nextTrainingScan({ today, last, days: {}, scans: [done(today)] }), '2026-01-22');
+  // Trained today already: too late for today's scan.
+  assert.equal(nextTrainingScan({ today, last: { dayType: 'legs', date: today }, days: {} }), '2026-01-22');
+  assert.equal(planFor(plan, { today, last, days: {} }).next.date, today);
+  assert.equal(planFor({ next: { date: '2026-03-01' } }, { today, last }).next.date, '2026-03-01');
+  const st = scanStatus({ plan, scans: [], today, last, days: {} });
+  assert.equal(st.cadence, 'training'); assert.equal(st.next.date, today); assert.equal(st.missed, null); assert.equal(st.onRest, null);
+  // A past confirmed date isn't "missed" any more.
+  assert.equal(scanStatus({ plan: { cadence: 'training', next: { date: '2026-01-10' } }, scans: [], today, last }).missed, null);
+  // Reminders: only the morning one and the gym one, from his session time.
+  const days = { '2026-01-22': { date: '2026-01-22', sessionTime: '04:30' } };
+  const p22 = planFor(plan, { today: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20' }, days });
+  assert.equal(p22.next.date, '2026-01-22');
+  assert.deepEqual(scanReminders({ date: '2026-01-21', tz: TZ, plan: p22, days }), []);
+  assert.deepEqual(scanReminders({ date: '2026-01-22', tz: TZ, plan: p22, days }).map((r) => r.id.split(':')[0]), ['scan-morning', 'scan-arrive']);
+  const items = remindersFor({ tz: TZ, date: '2026-01-22', last: { dayType: 'legs', date: '2026-01-20' }, days, scanPlan: plan });
+  assert.deepEqual(items.filter((i) => i.kind === 'scan').map((i) => i.id), ['scan-morning:2026-01-22', 'scan-arrive:2026-01-22']);
+  // At the gym: scan first unless one is saved today.
+  assert.equal(arrivalMessage({ plan, date: '2026-01-21' }).title, 'Body scan first');
+  assert.equal(arrivalMessage({ plan, date: '2026-01-21', scans: [done('2026-01-21')] }), null);
 });
 
 test('results: labels matched to the usual metrics, numbers as printed, photos merged without duplicates', async () => {

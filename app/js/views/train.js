@@ -15,7 +15,7 @@ import { actionSheet, promptText, confirmSheet, promptTime } from '../ui/sheet.j
 import { toast } from '../ui/toast.js';
 import { SQUAT_ICON } from './squat.js';
 import { savedTargetDeg } from '../lib/squat-log.js';
-import { isDone } from '../lib/scans.js';
+import { isDone, planFor } from '../lib/scans.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)' };
@@ -71,7 +71,8 @@ export function render(view) {
     const hm = days[nextDate]?.sessionTime || null;
     const checkMin = withDefaults(getState().settings).notify.readinessMin;
     // Body scan day (step 7): first thing at the gym, before this session.
-    const [scanPlan, scans] = await Promise.all([repo.get('scan-plan', 'main'), repo.list('body-scans')]);
+    const [planDoc, scans] = await Promise.all([repo.get('scan-plan', 'main'), repo.list('body-scans')]);
+    const scanPlan = planFor(planDoc || {}, { scans, today, last, days });
     const scanFirst = scanPlan?.next?.date === nextDate && t.kind !== 'done' && !scans.some((x) => x.date === nextDate && isDone(x));
     const whenLine = hm
       ? `${nextDate === today ? 'Today' : esc(day(nextDate))}, ${formatHm(hm)} · check-in ${formatHm(addMinutesHm(hm, -checkMin))}`

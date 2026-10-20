@@ -15,7 +15,7 @@ import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, h
 import { addDays, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import {
   EVERY_DAYS, PROTOCOL, WHEN, SAFETY_TEXT, SAFETY_ASK, STAFF_QUESTIONS, protocolOf, scanStatus, confirmDate, cancelDate,
-  withTick, unticked, withProtocol, scanReminders, expectedEitherWay, scanId,
+  withTick, unticked, withProtocol, scanReminders, expectedEitherWay, scanId, CADENCE,
   METRICS, keyFor, cleanMetrics, mergeReads, conditionsFrom, withResults, metricValue, isDone, conditionNotes,
   metricsAvailable, scanSeries, latestChange,
 } from '../lib/scans.js';
@@ -94,7 +94,8 @@ function home(view) {
     const canTick = next && today >= addDays(next.date, -1);
     const open = next ? unticked(rec, items) : items;
     const hm = next ? ctx.days[next.date]?.sessionTime || null : null;
-    const rem = next ? [-3, -2, -1, 0].flatMap((k) => scanReminders({ date: addDays(next.date, k), tz: deviceTimeZone(), plan, scans, days: ctx.days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin })) : [];
+    const training = st.cadence === 'training';
+    const rem = next ? [-3, -2, -1, 0].flatMap((k) => scanReminders({ date: addDays(next.date, k), tz: deviceTimeZone(), plan: training ? { ...plan, next } : plan, scans, days: ctx.days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin })) : [];
     const remOn = n.kinds?.scan !== false;
     const p = st.proposal;
     const restWhy = p.baseMaybe ? `may be a rest day, as today's ${LABEL[p.open]} isn't logged yet` : 'is a rest day in the rotation';
@@ -113,11 +114,13 @@ function home(view) {
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/body">Body</a></div>
       <h1 class="view-title">Body scan</h1>
-      <p class="hint">Evolt 360 at your gym. Every ${EVERY_DAYS / 7} weeks, first thing at the gym before the workout, same conditions each time, so scans stay comparable.</p>
+      <p class="hint">Evolt 360 at your gym. ${training ? 'Every training day' : `Every ${EVERY_DAYS / 7} weeks`}, first thing at the gym before the workout, same conditions each time, so scans stay comparable.</p>
+      <div class="seg" role="group" aria-label="How often" id="sc-cadence">${CADENCE.map(([v, l]) => `<button class="pill ${v === st.cadence ? 'is-on' : ''}" type="button" data-cadence="${v}" aria-pressed="${v === st.cadence}">${esc(l)}</button>`).join('')}</div>
       ${plan.safety?.readAt ? '' : `<section class="card pad-card confirm-card" id="sc-safety"><div class="hud c-amber">BEFORE YOUR FIRST SCAN</div>
         <p class="c-text">${esc(SAFETY_TEXT)}</p><p class="c-text">${esc(SAFETY_ASK)}</p>
         <p class="hint">The app records that you've read it and gives no other medical advice.</p>
         <button class="btn-ghost" type="button" id="sc-read">I've read it</button></section>`}
+      ${training && !next ? '<p class="hint" id="sc-none">No training day in the next week: the next scan comes with the next workout.</p>' : ''}
       ${st.missed && !next ? `<p class="hint c-amber" id="sc-missed">Planned for ${esc(dayName(st.missed))}: no scan recorded.</p>` : ''}
       ${next ? `<section class="card pad-card scan-next" id="sc-next">
           <div class="hud c-cyan">NEXT SCAN${next.date === today ? ' · TODAY' : ''}</div>
@@ -128,9 +131,9 @@ function home(view) {
           <div class="scan-rem"><span class="hud c-muted">REMINDERS${remOn ? '' : ' · OFF IN SETTINGS'}</span>
             ${rem.filter((r) => r.at > Date.now()).map((r) => `<span class="hint">${esc(formatDay(new Date(r.at)))}, ${esc(formatTime(new Date(r.at)))}: ${esc(REM_TEXT[r.id.split(':')[0]])}</span>`).join('')}
             ${hm ? '' : '<span class="hint">On the day: at your session time, once you set it.</span>'}
-            <button class="link-btn" type="button" id="sc-eve">Evening reminders at ${esc(formatHm(n.scanEvening))}: change</button></div>
-          <div class="btn-row"><button class="btn-ghost" type="button" id="sc-pick">Change date</button><button class="btn-ghost" type="button" id="sc-cancel">Cancel this scan</button></div>
-        </section>` : `<section class="card pad-card scan-next" id="sc-next">
+            ${training ? '' : `<button class="link-btn" type="button" id="sc-eve">Evening reminders at ${esc(formatHm(n.scanEvening))}: change</button>`}</div>
+          ${training ? '' : '<div class="btn-row"><button class="btn-ghost" type="button" id="sc-pick">Change date</button><button class="btn-ghost" type="button" id="sc-cancel">Cancel this scan</button></div>'}
+        </section>` : training ? '' : `<section class="card pad-card scan-next" id="sc-next">
           <div class="hud c-amber">PROPOSED NEXT SCAN</div>
           <b class="scan-big">${esc(withType(p.date, ctx, today))}</b>
           <span class="hint">${esc(why)} Confirm it, or pick another day.</span>
@@ -177,6 +180,12 @@ function home(view) {
       ${plan.safety?.readAt ? `<p class="hint">Scanner safety notice read ${esc(formatDate(new Date(plan.safety.readAt)))}.</p>` : ''}`;
 
     const $ = (s) => view.querySelector(s);
+    view.querySelectorAll('[data-cadence]').forEach((b) => b.addEventListener('click', async () => {
+      const v = b.dataset.cadence;
+      if (v === st.cadence) return;
+      await savePlan(repo, { ...plan, cadence: v, log: [...(plan.log || []), { at: Date.now(), what: `every ${v === 'training' ? 'training day' : '4 weeks'}`, date: null }] });
+      toast(v === 'training' ? 'Scans: every training day, first thing at the gym.' : 'Scans: every 4 weeks. Confirm the next date.');
+    }));
     $('#sc-read')?.addEventListener('click', async () => { await savePlan(repo, { ...plan, safety: { readAt: Date.now() } }); toast('Recorded: safety notice read.'); });
     $('#sc-confirm')?.addEventListener('click', async () => {
       await savePlan(repo, confirmDate(plan, p.date, { proposedDate: p.date }));

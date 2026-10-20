@@ -17,7 +17,7 @@ import { measureIdFor } from '../../app/js/lib/body.js';
 import { newId } from '../../app/js/lib/routines.js';
 import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
-import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay } from '../../app/js/lib/scans.js';
+import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
@@ -490,14 +490,31 @@ async function bodyScan(a, ctx) {
   const plan = s.one('scan-plan', 'main') || {};
   const savePlan = (p) => put(s, 'scan-plan', 'main', p);
   const st = scanStatus({ plan, scans: s.list('body-scans'), today: s.today, last: s.last(), days: s.days() });
+  // How often (Tue 10/20, his answer: "every day except my rest days").
+  if (a.action === 'every') {
+    const v = a.every === 'monthly' ? 'monthly' : 'training';
+    savePlan({ ...plan, cadence: v, log: [...(plan.log || []), { at: s.now, what: `every ${v === 'training' ? 'training day' : '4 weeks'}`, date: null }] });
+    return wrote(v === 'training' ? 'Scans now every training day, first thing at the gym before the workout; no dates to confirm. The app nudges him on each training day until the numbers are saved.' : `Scans now every 4 weeks. The app proposes ${dayText(st.proposal.date, s.today)}: confirm it with him.`, `scans every ${v === 'training' ? 'training day' : '4 weeks'}`);
+  }
+  // One checklist line in his words (his gym's instructions or his own routine win), or a new one.
+  if (a.action === 'checklist_line') {
+    const text = String(a.text || '').trim();
+    if (!text) return refuse('Which words for the line?');
+    const items = protocolOf(plan).map((i) => ({ ...i }));
+    const i = items.findIndex((x) => x.id === a.line);
+    if (i >= 0) items[i].text = text; else items.push({ id: `own-${s.now.toString(36)}`, when: a.when === 'before' ? 'before' : 'day', text });
+    savePlan(withProtocol(plan, items, `${i >= 0 ? `Changed "${a.line}"` : 'Added a line'} (coach)`, s.now));
+    return wrote(`Checklist ${i >= 0 ? 'line changed' : 'line added'}: ${text}`, 'scan checklist');
+  }
   if (a.action === 'confirm_date') {
+    if (st.cadence === 'training') return refuse('Scans are every training day: no date to confirm. Use every: "monthly" first if he wants dates again.');
     const date = a.date || st.proposal.date;
     if (date < s.today) return refuse(`Pick today or a later day.`);
     savePlan(confirmDate(plan, date, { proposedDate: st.proposal.date, at: s.now }));
     // Tue 10/20: he wanted his scan today. No evening-before list then: give him the on-the-day checklist now.
     if (date === s.today) {
       const day = protocolOf(plan).filter((i) => i.when === 'day').map((i) => i.text.replace(/\.$/, '')).join('; ');
-      return wrote(`Body scan confirmed for today, ${dayText(date, s.today)}. Go through this with him now (the app also nudges him until it's done): ${day}. If he ate something, water only until about 2 to 3 hours after it, and record it with the results (fasted: false). Scan before the workout; then save the numbers with record_results.`, 'scan today');
+      return wrote(`Body scan confirmed for today, ${dayText(date, s.today)}. Go through this with him now (the app also nudges him until it's done): ${day}. If he ate something the checklist doesn't allow, record it with the results (fasted: false). Scan before the workout; then save the numbers with record_results.`, 'scan today');
     }
     return wrote(`Body scan confirmed for ${dayText(date, s.today)}${date !== st.proposal.date ? ` (the app had proposed ${dayText(st.proposal.date, s.today)})` : ''}: first thing at the gym, before the workout. Reminders two evenings before, the evening before with the list, and at his session time.`, `scan ${date}`);
   }
@@ -846,7 +863,7 @@ export const WRITE_TOOLS = [
   write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
   write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
-  write('body_scan', 'Body scan', "Confirm the next scan date (default: the app's proposal) or cancel it; record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
+  write('body_scan', 'Body scan', "How often he scans (every: 'training' = every training day, 'monthly' = every 4 weeks on a confirmed date); confirm the next scan date (monthly only; default: the app's proposal) or cancel it; change one preparation checklist line in his words (line: its id from body_scans, or none to add one; text; when: 'before' or 'day'); record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['every', 'checklist_line', 'confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, every: { type: 'string', enum: ['training', 'monthly'] }, line: { type: 'string' }, when: { type: 'string', enum: ['before', 'day'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
   write('set_reminder', 'Set a reminder', 'A notification to his phone at a time (today, or tomorrow if the time has passed, or a date), or cancel one by id.', obj({ time: HM, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
