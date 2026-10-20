@@ -36,6 +36,12 @@ export async function stepsToday(repo) {
   return { steps: doc.steps, asOf: doc.fileAt ?? null, goal: withDefaults(getState().settings).body.stepGoal };
 }
 
+/** When Apple Health last reached the app (the newest file), or null. Tue 10/20: "why aren't my steps added?" */
+export async function healthAsOf(repo) {
+  const docs = await repo.list('health');
+  return docs.reduce((a, d) => Math.max(a, d?.fileAt || 0), 0) || null;
+}
+
 export function render(view, params = []) {
   const sub = SUB[params[0]];
   if (sub) return sub.render(view, params.slice(1));

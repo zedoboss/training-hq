@@ -12,7 +12,8 @@ import { roundsByDate, holdSlots, restChoices, openSlots } from '../lib/holds.js
 import { logMealFromFile, cameraInput } from './meal.js';
 import { dayTotals } from '../lib/meals.js';
 import { checklist, dayKindFor } from '../lib/supplements.js';
-import { stepsToday } from './body.js';
+import { stepsToday, healthAsOf } from './body.js';
+import { runShortcutUrl } from './body-health.js';
 import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
 import * as voice from '../lib/voice.js';
 
@@ -196,7 +197,7 @@ export function render(view) {
 
   let train = null;
   let fuel = null;
-  let steps = null;
+  let steps = null; let healthAt = null;
   let talk = null;
   const draw = (s) => {
     set('model', MODEL_LABEL[withDefaults(s.settings).coach.model] || MODEL_LABEL.fast);
@@ -206,7 +207,11 @@ export function render(view) {
     set('r-train', train ? train.readout : '—');
     set('r-fuel', fuel ? `<a class="readout-link" href="#/fuel">${fuel.readout}</a>` : '—');
     set('r-tendons', train ? `<a class="readout-link" href="#/holds">${train.holds.readout}</a>` : '—');
-    set('r-steps', steps ? `<a class="readout-link" href="#/body">${steps.steps.toLocaleString('en-US')}${steps.asOf ? `<br>AS OF ${formatTime(new Date(steps.asOf))}` : ''}</a>` : '<a class="readout-link" href="#/body">—</a>');
+    // Tue 10/20: his steps weren't in because the Health Shortcut hadn't run today. Stale (no file in 4 hours):
+    // the readout is a tap that runs the Shortcut now.
+    const stale = !healthAt || Date.now() - healthAt > 4 * 3600000;
+    set('r-steps', steps && !stale ? `<a class="readout-link" href="#/body">${steps.steps.toLocaleString('en-US')}${steps.asOf ? `<br>AS OF ${formatTime(new Date(steps.asOf))}` : ''}</a>`
+      : `<a class="readout-link c-amber" href="${runShortcutUrl()}">${steps ? steps.steps.toLocaleString('en-US') : '—'}<br>TAP TO UPDATE${healthAt ? ` · ${formatTime(new Date(healthAt))}` : ''}</a>`);
     const m = macLine(s);
     set('mac', `<span class="${m.cls}">${m.text}</span>`);
     set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone.toUpperCase().replace('_', ' '));
@@ -224,7 +229,7 @@ export function render(view) {
   let gone = false;
   ready.then((repo) => {
     const refresh = async () => {
-      train = await trainToday(repo); fuel = await fuelToday(repo); steps = await stepsToday(repo);
+      train = await trainToday(repo); fuel = await fuelToday(repo); steps = await stepsToday(repo); healthAt = await healthAsOf(repo);
       talk = todayCounts(await repo.list('coach-messages'), isoDate(new Date()), (ms) => isoDate(new Date(ms)));
       if (!gone) draw(getState());
     };

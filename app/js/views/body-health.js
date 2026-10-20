@@ -47,7 +47,7 @@ function steps() {
     </ol>
     <div class="section-label">What it can't do</div>
     <ul class="hk-steps">
-      <li>The iPhone keeps Health locked while the phone is locked, so a run at a moment it is locked may save nothing. Nothing is lost: every run covers days back (sleep 8 days, steps 30, weight 400), and <b>Update now</b> above runs it while you hold the phone.</li>
+      <li>Run it at times you are up and holding the phone (Tue 10/20: 10:30 AM, 7:30 PM and 11:30 PM). The iPhone keeps Health locked while the phone is locked, so a run at a moment it is locked may save nothing. Nothing is lost: every run covers days back (sleep 8 days, steps 30, weight 400), and <b>Update now</b> above runs it while you hold the phone.</li>
       <li>It goes one way: Training HQ reads Health; it can't write your workouts into Health.</li>
       <li>The Mac only reads the file. It never changes or deletes anything in iCloud Drive.</li>
     </ul>`;
