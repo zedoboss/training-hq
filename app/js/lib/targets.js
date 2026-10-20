@@ -68,7 +68,7 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     return out;
   }
   if (cell.load.type === 'bodyweight') { out.bodyweight = true; out.why = 'bodyweight'; return out; }
-  if (cell.load.type === 'added') { out.added = true; out.kg = cell.load.kg; out.why = `${week > 4 && progressKg != null ? `week ${week} (confirmed)` : 'table'}: +${cell.load.kg} kg added`; return out; }
+  if (cell.load.type === 'added') { out.added = true; out.kg = cell.load.kg; out.why = `${week > 4 && progressKg != null ? `Week ${week} step (confirmed)` : 'Plan'}: bodyweight + ${cell.load.kg} kg`; return out; }
 
   const table = cell.load.kg;
   const src = week > 4 && progressKg != null ? `week ${week} (confirmed)` : 'table';

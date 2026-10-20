@@ -280,7 +280,9 @@ export function render(view, params = []) {
     const work = all.filter((x) => x.type !== 'warmup' && x.type !== 'hold');
     const t = n.set.target || {};
     const kgv = n.set.kg ?? t.kg ?? null;
-    const start = setStartText({ setNo: Math.max(1, work.indexOf(n.set) + 1), total: work.length, type: n.set.type, kg: t.bodyweight || t.added ? null : kgv, reps: n.set.reps ?? t.reps ?? null, bodyweight: Boolean(t.bodyweight || t.added || BODYWEIGHT_TYPES.includes(n.ex.type)), added: t.added ? kgv : null });
+    // Tue 10/20 on his phone: a weighted pull-up with +10 kg was called "Bodyweight". The added kg counts.
+    const added = t.added || (n.ex.type === 'weighted_bodyweight' && kgv > 0) ? kgv : null;
+    const start = setStartText({ setNo: Math.max(1, work.indexOf(n.set) + 1), total: work.length, type: n.set.type, kg: t.bodyweight || added != null ? null : kgv, reps: n.set.reps ?? t.reps ?? null, bodyweight: Boolean(t.bodyweight || added != null || BODYWEIGHT_TYPES.includes(n.ex.type)), added });
     const c = ceilingFor(ctx.ceilings, n.ex.name);
     const rival = c ? { kg: c.kg, reps: c.reps ?? null, lift: n.ex.name.replace(/\s*\(.*\)\s*/g, ' ').trim().toLowerCase() } : null;
     const script = setScript({ start, bank: ctx.bank, ...talk.talkPrefs(), calm: ctx.calm || talk.isCalm(), rival, avoid: new Set(talk.recentLines()) });
