@@ -34,8 +34,11 @@ export function render(view, params = []) {
     const rows = microRows(micro, t, planned);
     const logged = week ? t.days : t.items;
     const row = (r) => {
-      const fill = r.pct != null ? Math.min(100, r.pct) : r.within === 'within' ? 100 : r.within === 'above' ? 100 : r.ref ? Math.min(100, Math.round((r.total / (Array.isArray(r.ref) ? r.ref[0] : r.ref)) * 100)) : 0;
-      const status = r.pct != null ? `${r.pct}%` : r.within ? r.within : '';
+      // No official daily value (K2, EPA, DHA): the bar fills against his own planned day instead (Tue 10/20: his K2
+      // read 200 mcg with an empty bar, so he thought it wasn't counted).
+      const ofPlan = r.pct == null && !r.within && !r.ref && r.planned > 0 ? Math.round((r.total / r.planned) * 100) : null;
+      const fill = r.pct != null ? Math.min(100, r.pct) : r.within === 'within' ? 100 : r.within === 'above' ? 100 : r.ref ? Math.min(100, Math.round((r.total / (Array.isArray(r.ref) ? r.ref[0] : r.ref)) * 100)) : ofPlan != null ? Math.min(100, ofPlan) : 0;
+      const status = r.pct != null ? `${r.pct}%` : r.within ? r.within : ofPlan != null ? `${ofPlan}% of plan` : '';
       return `<li class="micro-row ${r.over ? 'is-over' : ''}" data-key="${esc(r.key)}">
         <div class="micro-top"><b>${esc(r.name)}</b><span class="mono">${num(r.total)} ${esc(r.unit)}${status ? ` <span class="c-muted">· ${esc(status)}</span>` : ''}</span></div>
         <span class="micro-track"><span class="micro-fill" style="width:${fill}%"></span></span>
