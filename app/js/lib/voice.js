@@ -5,7 +5,7 @@
 // timer, sync, the session screen's exercise). Barge-in: when someone talks over the coach, the first second goes to
 // the Mac's voice check, and only his voice stops it. The screen stays on while listening (wake lock).
 import { micSession } from './voice-rec.js';
-import { audioContext } from './voice-mic.js';
+import { audioContext, audioRunning, resetAudio } from './voice-mic.js';
 import { createPlayer } from './voice-player.js';
 import { encodeWav } from './wav.js';
 import { sentenceSplitter, replyGate } from './voice-text.js';
@@ -189,6 +189,9 @@ function closeListening() {
 
 /** Switch listening on for this device (from a tap: it also lets iPhone play the coach's voice). */
 export async function start() {
+  // A tap: if the audio context isn't running (another app or iPhone Mirroring had the audio), start a fresh one now,
+  // while the tap still lets iPhone run it.
+  if (!audioRunning()) resetAudio();
   audioContext(); rest.unlockAudio();
   const st = await macGet('/api/voice/status');
   if (!st.canListen) throw new Error('Calibrate and test your voice first (Settings > Voice).');

@@ -7,15 +7,43 @@ let ctx = null;
 /** The app's audio context for voice (made on a tap, so iPhone lets it play). */
 export function audioContext() {
   if (!ctx || ctx.state === 'closed') ctx = new (window.AudioContext || window.webkitAudioContext)();
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  // 'interrupted' is iPhone's state after something else took the audio (Tue 10/20: iPhone Mirroring).
+  if (ctx.state === 'suspended' || ctx.state === 'interrupted') ctx.resume().catch(() => {});
   return ctx;
 }
+
+/** Whether the shared audio context is running (false when there is none yet). */
+export const audioRunning = () => !!ctx && ctx.state === 'running';
+
+/** Drop the shared audio context, so the next audioContext() makes a fresh one (best from a tap). */
+export function resetAudio() {
+  const old = ctx; ctx = null;
+  try { old?.close(); } catch { /* already closed */ }
+}
+
+// Tue 10/20: after iPhone Mirroring had the microphone, the app said "Listening" but heard nothing: its audio
+// context stayed stopped and no sound came through. A mic that gives no frames this soon is not trusted.
+const FIRST_FRAME_MS = 2500;
 
 /**
  * @param {{onFrame: (f: Float32Array) => void, onEnded?: () => void}} o
  * @returns {Promise<{close: () => void, stream: MediaStream}>}
  */
 export async function openMic({ onFrame, onEnded = () => {} }) {
+  try {
+    return await openMicOnce({ onFrame, onEnded });
+  } catch (e) {
+    if (e?.code !== 'silent') throw e;
+    // No sound at all: a fresh audio context and a fresh microphone, once.
+    resetAudio();
+    try { return await openMicOnce({ onFrame, onEnded }); } catch (e2) {
+      if (e2?.code === 'silent') throw new Error('No sound from the microphone. Tap the mic to start it again.');
+      throw e2;
+    }
+  }
+}
+
+async function openMicOnce({ onFrame, onEnded }) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('No microphone access in this browser.');
   // iPhone: record and play at the same time, through the speaker (Safari's audio session, where it exists).
   try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch { /* older Safari */ }
@@ -33,12 +61,13 @@ export async function openMic({ onFrame, onEnded = () => {} }) {
   const mute = ac.createGain();
   mute.gain.value = 0;
   src.connect(node); node.connect(mute); mute.connect(ac.destination);
-  node.port.onmessage = (e) => onFrame(e.data);
+  let gotFrame = false;
+  node.port.onmessage = (e) => { gotFrame = true; onFrame(e.data); };
   const track = stream.getAudioTracks()[0];
   const ended = () => onEnded();
   track?.addEventListener('ended', ended);
   let closed = false;
-  return {
+  const mic = {
     stream,
     close() {
       if (closed) return;
@@ -49,4 +78,13 @@ export async function openMic({ onFrame, onEnded = () => {} }) {
       for (const t of stream.getTracks()) t.stop();
     },
   };
+  if (ac.state !== 'running') await ac.resume().catch(() => {});
+  const t0 = Date.now();
+  while (!gotFrame && Date.now() - t0 < FIRST_FRAME_MS) await new Promise((r) => setTimeout(r, 100));
+  if (!gotFrame) {
+    mic.close();
+    const e = new Error('silent'); e.code = 'silent';
+    throw e;
+  }
+  return mic;
 }
