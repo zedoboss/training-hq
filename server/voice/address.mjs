@@ -1,7 +1,12 @@
 // Is he talking to the coach? (Michael, Mon 10/19: "it should always listen", but random talk must not get an answer.)
-// After the voice lock and Whisper: the coach answers only when he names it (Jarvis, coach, AI), when the words are
-// about what the app does (sets, food, supplements, sleep, the sauna, his body...), or when he is answering the coach
-// (within a minute of it speaking or nudging him). Anything else is dropped like noise: not answered, not saved.
+// After the voice lock and Whisper. Tue 10/20, his words: "There are no people talking here... If I am talking to
+// someone else, then it is not for coach, but I don't have to say coach, Jarvis, or AI in every instance." So:
+// - He names it (Jarvis, coach, AI), answers the coach (within a minute of it speaking), says numbers, a command or
+//   the app's own subjects: always the coach's.
+// - Alone (the voice lock heard nobody else lately): everything he says is for the coach, except self-talk on its
+//   own ("okay", "come on", "let's go", counting, a lone swear).
+// - Someone else talking near him (another voice in the last few minutes): only the above; the rest is dropped like
+//   noise, not answered, not saved.
 // Pure, so it is tested directly.
 
 /** He names it: "Jarvis", "coach", "AI" (anywhere: "yo Jarvis", "what's next, coach?"). */
@@ -38,6 +43,16 @@ const has = (n, w) => n.includes(` ${w} `);
 /** "80 for 8", "62.5 for 10", "bodyweight for 12", "100 kilos", "3 sets", "30 seconds". */
 const NUMBERS = /\b(\d+(\.\d+)?|bodyweight)\s*(for|x|times)\s*\d+\b|\b\d+(\.\d+)?\s*(kg|kilos?|reps?|sets?|seconds?|minutes?|grams?|g)\b/i;
 
+// Self-talk: a clip made only of these words is him talking to himself (mid-set, between sets), not to the coach.
+const SELF = new Set(['ok', 'okay', 'k', 'yeah', 'yea', 'yep', 'yup', 'yes', 'no', 'nope', 'nah', 'alright', 'right', 'hmm', 'mm', 'mhm',
+  'come', 'on', 'lets', "let's", 'go', 'fuck', 'fucking', 'shit', 'damn', 'bro', 'man', 'dude', 'god', 'oh', 'jesus', 'wow', 'nice', 'good',
+  'light', 'weight', 'baby', 'push', 'up', 'again', 'one', 'more', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'last', 'easy', 'breathe', 'focus', 'whatever', 'anyway', 'so', 'well', 'uh', 'um', 'huh', 'and', 'the']);
+export const selfTalk = (t) => {
+  const w = String(t || '').toLowerCase().replace(/[’']/g, "'").split(/[^\p{L}\p{N}']+/u).filter(Boolean);
+  return w.length > 0 && w.length <= 5 && w.every((x) => SELF.has(x) || /^\d+$/.test(x));
+};
+
 /**
  * @param {string} text  what Whisper heard
  * @param {object} o
@@ -46,9 +61,10 @@ const NUMBERS = /\b(\d+(\.\d+)?|bodyweight)\s*(for|x|times)\s*\d+\b|\b\d+(\.\d+)
  * @param {number} [o.now]
  * @param {boolean} [o.inSession]  a workout is running
  * @param {number} [o.followMs]    how long after the coach spoke an answer counts
- * @returns {{ok: boolean, why: 'named'|'answer'|'command'|'about'|'aside'}}
+ * @param {boolean} [o.othersAround] another voice was heard near him lately (the voice lock rejected it)
+ * @returns {{ok: boolean, why: 'named'|'answer'|'command'|'about'|'alone'|'aside'|'self-talk'}}
  */
-export function addressed(text, { names = [], lastCoachAt = 0, now = Date.now(), inSession = false, followMs = 60000 } = {}) {
+export function addressed(text, { names = [], lastCoachAt = 0, now = Date.now(), inSession = false, followMs = 60000, othersAround = false } = {}) {
   const raw = String(text || '');
   if (WAKE.test(raw) || AI.test(raw)) return { ok: true, why: 'named' };
   if (lastCoachAt && now - lastCoachAt <= followMs) return { ok: true, why: 'answer' };
@@ -57,9 +73,22 @@ export function addressed(text, { names = [], lastCoachAt = 0, now = Date.now(),
   if (COMMAND.test(raw)) return { ok: true, why: 'command' };
   if (STRONG.some((w) => has(n, w))) return { ok: true, why: 'about' };
   if (names.some((w) => w && w.length >= 4 && n.includes(` ${norm(w).trim()} `))) return { ok: true, why: 'about' };
+  if (selfTalk(raw)) return { ok: false, why: 'self-talk' };
   const weak = WEAK.filter((w) => has(n, w)).length;
   if (weak >= 2 || (inSession && weak >= 1)) return { ok: true, why: 'about' };
+  if (!othersAround) return { ok: true, why: 'alone' };
   return { ok: false, why: 'aside' };
+}
+
+/**
+ * Was this rejected clip someone else talking near him? Clearly not his voice (score at most 0.25; his own clips score
+ * 0.44 to 0.81, short ones of his near 0.4), at least a second of speech, and not right after the coach spoke (its
+ * own voice from his speaker must not count as a person).
+ */
+export const OTHER_VOICE = { maxScore: 0.25, minSpeechSec: 1, afterCoachMs: 45000, aroundMs: 3 * 60000 };
+export function otherVoice({ reason, score, speechSec, lastCoachAt = 0, now = Date.now() }) {
+  return reason === 'not-you' && score != null && score <= OTHER_VOICE.maxScore && speechSec >= OTHER_VOICE.minSpeechSec
+    && !(lastCoachAt && now - lastCoachAt < OTHER_VOICE.afterCoachMs);
 }
 
 /** He trailed off mid-thought ("I woke up before 10, so...", "and", a comma): more is probably coming in the next clip. */

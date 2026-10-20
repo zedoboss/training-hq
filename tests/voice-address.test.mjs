@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addressed, looksUnfinished } from '../server/voice/address.mjs';
+import { addressed, looksUnfinished, selfTalk, otherVoice } from '../server/voice/address.mjs';
 
 const now = Date.parse('2026-10-19T16:30:00+07:00');
-const ok = (t, o = {}) => addressed(t, { now, ...o });
+const ok = (t, o = {}) => addressed(t, { now, othersAround: true, ...o }); // someone else talking near him
+const alone = (t, o = {}) => addressed(t, { now, ...o });
 
 test('the coach answers when he names it: Jarvis, coach, AI', () => {
   for (const t of ['Yo Jarvis, what is up', 'Hey coach', 'What do you think, coach?', 'AI, how many calories left?', 'A.I. what time is it'])
@@ -42,3 +43,25 @@ test('a clip that ends mid-thought waits for the rest', () => {
   for (const t of ['I went to bed around 12 a.m.', '80 for 8', 'Yo Jarvis', 'Next exercise.']) assert.equal(looksUnfinished(t), false, t);
 });
 
+
+test('alone (Tue 10/20, his words: "There are no people talking here"): everything he says is for the coach, but self-talk', () => {
+  for (const t of ["Yo, what's up?", 'What do you think?', 'How am I doing today', 'Bro did you see that game last night', 'Tell me something'])
+    assert.deepEqual(alone(t), { ok: true, why: 'alone' }, t);
+  for (const t of ['Okay', 'Come on!', "Let's go", 'One more', 'Fuck', 'Eight, nine, ten', 'Yeah yeah', 'Light weight baby'])
+    assert.deepEqual(alone(t), { ok: false, why: 'self-talk' }, t);
+  assert.deepEqual(alone('Yeah', { lastCoachAt: now - 20000 }), { ok: true, why: 'answer' }, 'an answer to the coach is never self-talk');
+  assert.deepEqual(alone('Come on coach'), { ok: true, why: 'named' });
+  assert.equal(selfTalk("Let's go, let's go, come on, push, push, one more"), false, 'more than five words is more than self-talk');
+});
+
+test('someone else near him: a clip the voice lock rejected, clearly not him, a second or more, not the coach\'s own voice', () => {
+  const base = { reason: 'not-you', score: 0.05, speechSec: 4, lastCoachAt: 0, now };
+  assert.equal(otherVoice(base), true);
+  assert.equal(otherVoice({ ...base, score: 0.43 }), false, 'a short clip of his own scores near 0.4');
+  assert.equal(otherVoice({ ...base, speechSec: 0.5 }), false, 'too short to be a conversation');
+  assert.equal(otherVoice({ ...base, reason: 'noise' }), false);
+  assert.equal(otherVoice({ ...base, reason: 'music' }), false);
+  assert.equal(otherVoice({ ...base, score: null, reason: 'unsure' }), false);
+  assert.equal(otherVoice({ ...base, lastCoachAt: now - 20000 }), false, 'the coach just spoke: its own voice from his speaker');
+  assert.equal(otherVoice({ ...base, lastCoachAt: now - 60000 }), true);
+});

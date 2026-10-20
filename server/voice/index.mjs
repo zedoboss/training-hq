@@ -10,7 +10,7 @@ import { cleanTranscript } from './whisper.mjs';
 import { decodeWav, encodeWav, resample, normalise, VOICE_RATE } from '../../app/js/lib/wav.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
 
-import { addressed, looksUnfinished } from './address.mjs';
+import { addressed, looksUnfinished, otherVoice, OTHER_VOICE } from './address.mjs';
 
 export const MAX_CLIP_SEC = 15;
 // Tue 10/20: he paused mid-answer ("I woke up slightly before 10:00, so..." then "I went to bed around 12"), the phone
@@ -113,10 +113,19 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     return true;
   }
 
+  // When each phone last heard someone else talking (Tue 10/20): alone, he needn't name the coach.
+  const others = new Map();
+  const live = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const lastCoachAtNow = () => Math.max(0, ...live('coach-messages').filter((m) => m.role === 'assistant').map((m) => m.at || 0));
+
   async function utterance({ bytes, deviceId = null, model = 'fast', tz = null, screen = null, emit = () => {} }) {
     const t0 = now();
     const c = check(bytes);
     const d = c.decision;
+    if (!d.ok && c.analysis && otherVoice({ reason: d.reason, score: d.score, speechSec: c.analysis.speechSec, lastCoachAt: lastCoachAtNow(), now: now() })) {
+      others.set(deviceId || '', now());
+      log('voice: someone else is talking near him (the coach needs its name for a few minutes)');
+    }
     if (!d.ok) {
       log(`voice: ignored (${d.reason}${d.score != null ? ` ${d.score}` : ''}; ${c.analysis ? `${Math.round(c.analysis.speechSec * 10) / 10} s speech of ${Math.round(c.analysis.sec * 10) / 10} s` : 'no analysis'})`);
       emit({ type: 'heard', ok: false, reason: d.reason, score: d.score });
@@ -147,13 +156,13 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
       return null;
     }
     // Talking to someone else: only his naming it, the app's own subjects, or an answer to the coach go on (Mon 10/19).
-    const live = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
-    const lastCoachAt = Math.max(0, ...live('coach-messages').filter((m) => m.role === 'assistant').map((m) => m.at || 0));
+    const lastCoachAt = lastCoachAtNow();
     const names = [...live('exercises').map((x) => String(x.name || '').replace(/\s*\(.*?\)\s*/g, ' ').trim()), ...live('supplements').filter((x) => !x.removedAt).map((x) => String(x.name || '').replace(/\s*\(.*?\)\s*/g, ' ').trim())];
-    const to = addressed(text, { names, lastCoachAt, now: now(), inSession: live('sessions').some((x) => x.status === 'active') });
+    const othersAround = now() - (others.get(deviceId || '') || 0) < OTHER_VOICE.aroundMs;
+    const to = addressed(text, { names, lastCoachAt, now: now(), inSession: live('sessions').some((x) => x.status === 'active'), othersAround });
     if (!to.ok) {
-      log(`voice: heard you (${d.score}), not for the coach`);
-      emit({ type: 'heard', ok: false, reason: 'aside', score: d.score });
+      log(`voice: heard you (${d.score}), ${to.why === 'self-talk' ? 'self-talk' : 'not for the coach (someone else is talking near him)'}`);
+      emit({ type: 'heard', ok: false, reason: to.why, score: d.score });
       return null;
     }
     log(`voice: heard you (${d.score}, ${to.why}), ${raw.ms} ms to text, ${now() - t0} ms in all`);

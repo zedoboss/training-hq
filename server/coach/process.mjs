@@ -62,6 +62,7 @@ export function openCoachProcess({ system, mcpUrl, claude = findClaude, spawn = 
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'text') {
         if (t.text) { t.text += '\n\n'; t.onEvent({ type: 'text', delta: '\n\n' }); }
       } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
+        if (t.firstAt == null) t.firstAt = now();
         t.text += ev.delta.text;
         t.onEvent({ type: 'text', delta: ev.delta.text });
       } else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
@@ -81,7 +82,7 @@ export function openCoachProcess({ system, mcpUrl, claude = findClaude, spawn = 
     }
     // The streamed text is what he saw; the result's own text is the fallback when no deltas came.
     const text = (t.text || String(msg.result ?? '')).trim();
-    t.resolve({ text, ms: now() - t.started, model: c.model, usage: msg.usage || null, cost: msg.total_cost_usd ?? null });
+    t.resolve({ text, ms: now() - t.started, firstMs: t.firstAt != null ? t.firstAt - t.started : null, model: c.model, usage: msg.usage || null, cost: msg.total_cost_usd ?? null });
   }
 
   function start(key) {

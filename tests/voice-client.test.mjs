@@ -84,8 +84,9 @@ test('quiet rule: a lone "Logged." is a tick; anything more is spoken in order',
   assert.deepEqual(g.sentence('Rest 3:00.'), ['Rest 3:00.']);
   assert.deepEqual(g.end(), { speak: [], tick: false });
   g = replyGate();
-  assert.deepEqual(g.sentence('Legs today.'), []);
-  assert.deepEqual(g.end(), { speak: ['Legs today.'], tick: false });
+  assert.deepEqual(g.sentence('Legs today.'), ['Legs today.'], 'any other first sentence is spoken at once');
+  assert.deepEqual(g.sentence('Week 4 column.'), ['Week 4 column.']);
+  assert.deepEqual(g.end(), { speak: [], tick: false });
   assert.deepEqual(replyGate().end(), { speak: [], tick: false });
 });
 

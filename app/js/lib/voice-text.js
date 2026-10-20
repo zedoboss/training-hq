@@ -27,7 +27,7 @@ export function calibrationPhrases(suppNames = []) {
 }
 
 /** Short words for the silent readout when speech was heard but not acted on. */
-export const REASON_TEXT = { you: 'YOU', noise: 'NOISE', music: 'MUSIC', unsure: 'TOO SHORT', 'not-you': 'NOT YOU', 'not-calibrated': 'NOT SET UP', empty: 'NO WORDS', duplicate: 'ALREADY HEARD', aside: 'NOT FOR COACH' };
+export const REASON_TEXT = { you: 'YOU', noise: 'NOISE', music: 'MUSIC', unsure: 'TOO SHORT', 'not-you': 'NOT YOU', 'not-calibrated': 'NOT SET UP', empty: 'NO WORDS', duplicate: 'ALREADY HEARD', aside: 'OTHERS TALKING · SAY COACH', 'self-talk': 'SELF-TALK' };
 
 /** Why a calibration phrase was not kept, in his words. */
 export const ENROL_PROBLEM = {
@@ -88,7 +88,8 @@ export function sentenceSplitter() {
 /**
  * Quiet rule for spoken replies (9.9, brief section 4): after a set, speak only if it differs from the target or
  * breaks a rule. The coach answers a plain logged set with exactly "Logged."; that is a tick sound, not words. The
- * first sentence waits for a second one (or the end) to tell the two apart.
+ * first sentence waits for a second one (or the end) only when it is "Logged.": any other first sentence is spoken at
+ * once (Tue 10/20: holding every first sentence cost a second or more before each answer).
  * sentence(s) returns the sentences to speak now; end() returns {speak, tick}.
  */
 export function replyGate() {
@@ -96,7 +97,7 @@ export function replyGate() {
   return {
     sentence(s) {
       count++;
-      if (count === 1) { first = s; return []; }
+      if (count === 1 && /^logged\.?$/i.test(String(s).trim())) { first = s; return []; }
       const out = first != null ? [first, s] : [s];
       first = null;
       return out;

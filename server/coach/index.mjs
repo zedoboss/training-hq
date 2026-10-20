@@ -117,7 +117,9 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
           return turnText({ text: words, now: now(), tz: zone, recap, extra, voice, screen });
         },
       });
-      reply = { role: 'assistant', text: res.text || '(no answer)', model: key, ms: res.ms, ...(voice ? { via: 'voice' } : {}) };
+      reply = { role: 'assistant', text: res.text || '(no answer)', model: key, ms: res.ms, ...(res.firstMs != null ? { firstMs: res.firstMs } : {}), ...(voice ? { via: 'voice' } : {}) };
+      // Tue 10/20 (16 s for "Yo, what's up?"): every answer's timing in the log, so a slow one can be pinned down.
+      log(`coach: answered in ${(res.ms / 1000).toFixed(1)} s (first words ${res.firstMs != null ? `${(res.firstMs / 1000).toFixed(1)} s` : '-'}, ${t.tools.length} tool${t.tools.length === 1 ? '' : 's'}${res.usage?.output_tokens != null ? `, ${res.usage.output_tokens} tokens out` : ''})`);
     } catch (e) {
       reply = { role: 'assistant', text: e.message, error: true, model: key };
     } finally {
