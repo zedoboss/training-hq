@@ -75,6 +75,12 @@ async function openScreen(a, ctx) {
     const { item, ambiguous } = findByName(items, a.name, nameOf, sc.needs === 'routine' ? (r) => [r.dayType, LABEL[r.dayType]] : () => []);
     if (!item) return refuse(ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : `No ${sc.needs} called "${a.name}".`);
     url = `${sc.hash}${item.id}`; what = `${sc.label}: ${nameOf(item)}`;
+  } else if (sc.needs === 'meal') {
+    // A meal by its id, or "latest" / nothing: his latest meal.
+    const meals = s.list('meals').filter((m) => m?.id && m.at).sort((a, b) => b.at - a.at);
+    const m = (a.name && meals.find((x) => x.id === a.name)) || meals[0];
+    if (!m) return refuse('No meals logged yet.');
+    url = `${sc.hash}${m.id}`; what = `${sc.label.replace(/ \(.*$/, '')}: ${m.name || 'meal'}`;
   } else if (sc.needs === 'date') {
     const d = /^\d{4}-\d{2}-\d{2}$/.test(a.date || '') ? a.date : s.today;
     url = `${sc.hash}${d}`; what = `${sc.label} (${d})`;

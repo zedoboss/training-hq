@@ -1,7 +1,7 @@
 // MEAL (#/meal/<id>): one meal, laid out as the design board "Fuel: log a meal". BEFORE and AFTER photos, the scale
 // reading, the Mac's estimate (items, grams, kcal, protein) and his confirmation. Photos are kept on the phone and
 // go to the Mac with the next sync; the Mac reads them (6.2) and its estimate comes back by sync.
-import { ready, syncNow } from '../lib/data.js';
+import { ready, syncNow, coachSend } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
 import { fileToJpeg, newPhotoId, photoTime } from '../lib/photos.js';
 import { newId } from '../lib/routines.js';
@@ -231,6 +231,37 @@ export function render(view, [id]) {
   };
   view.querySelector('#m-before').addEventListener('change', addPhoto('before'));
   view.querySelector('#m-after').addEventListener('change', addPhoto('after'));
+  // Tue 10/20, his words: "I wanted to talk to the AI there directly and modify its estimate" (the mic button said
+  // "Voice arrives in step 9"). He tells the coach what was really on the plate; the coach sees this meal's screen
+  // (its id is in the link) and corrects it (correct_meal). The answer shows here; the meal redraws by sync.
+  const talkAboutMeal = () => {
+    const { el, close } = overlay(`<form class="sheet-form meal-talk">
+      <div class="hud c-muted sheet-title">TELL THE COACH ABOUT THIS MEAL</div>
+      <textarea class="input area" rows="3" id="mt-text" placeholder="e.g. 10 eggs, not 5. About 55 g of almonds." aria-label="What to change"></textarea>
+      <div class="meal-talk-reply hint" id="mt-reply" hidden></div>
+      <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Close</button><button class="btn-primary" type="submit" id="mt-send">Send</button></div>
+      <p class="hint">With the mic on (the chip at the top), you can also just say it.</p></form>`);
+    const text = el.querySelector('#mt-text'); const reply = el.querySelector('#mt-reply'); const send = el.querySelector('#mt-send');
+    el.querySelector('[data-cancel]').onclick = () => close();
+    setTimeout(() => text.focus(), 50);
+    el.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const words = text.value.trim();
+      if (!words) return;
+      send.disabled = true; reply.hidden = false; reply.textContent = 'The coach is on it…';
+      let said = '';
+      try {
+        await coachSend({ text: words, model: withDefaults(getState().settings).coach.model, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, screen: location.hash,
+          onEvent: (ev) => {
+            if (ev.type === 'text') { said += ev.delta; reply.textContent = said; }
+            else if (ev.type === 'done') { reply.textContent = ev.message?.text || said; }
+            else if (ev.type === 'error') { reply.textContent = ev.error; }
+          } });
+        text.value = ''; syncNow();
+      } catch (err) { reply.textContent = err.message || 'The Mac could not be reached.'; }
+      send.disabled = false;
+    });
+  };
   // Redraw when the Mac link changes (reachable or not), not on every sync tick: typing in the scale box stays put.
   let net = null;
   const unsub = subscribe((s) => { const k = `${s.paired}|${s.mac.reachable}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
@@ -282,7 +313,7 @@ export function render(view, [id]) {
         <span class="meal-scale-in"><input class="input" id="m-scale" inputmode="decimal" value="${scaleG ?? ''}" aria-label="Grams on the scale"><span class="c-muted">g</span></span></label>` : ''}
       <section class="card meal-est">
         <div class="meal-est-head hud c-muted"><span>${headTag}</span><span>G · KCAL · PROTEIN</span></div>
-        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.portion ? ` <span class="c-faint">${esc(x.portion)}</span>` : ''}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'estimate' ? '<span class="src-tag">EST.</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
+        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.portion ? ` <span class="c-faint">${esc(x.portion)}</span>` : ''}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'label' ? '<span class="src-tag">LABEL</span>' : x.source === 'estimate' ? '<span class="src-tag">EST.</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
           : `<p class="hint">${waiting ? 'Waiting for the estimate.' : meal.source === 'manual' ? 'Nothing yet. Tap Fix to type what you ate.' : 'No items.'}</p>`}
         ${l.items.length ? `<div class="meal-left hud c-amber">LEFT ON THE PLATE${l.estimated ? ' · ESTIMATE' : ''}</div>${l.items.map((x) => `<div class="meal-row c-muted"><span>− ${esc(leftName(x.index) || x.name)}</span><span class="mono">${n0(x.grams)} g</span></div>`).join('')}` : ''}
         ${l.pending && meal.after?.photoId ? '<p class="hint">Leftovers: waiting for the Mac to read the after photo.</p>' : ''}
@@ -351,7 +382,7 @@ export function render(view, [id]) {
       } });
       if (opts.length === 1) opts[0].run(); else actionSheet('Fix', opts);
     };
-    $('#m-mic').onclick = () => toast('Voice arrives in step 9. Use Fix, or Ask the Mac again with a note.');
+    $('#m-mic').onclick = () => talkAboutMeal();
     $('#m-again').onclick = async () => {
       const hint = await promptLong('Tell the Mac what it got wrong (optional)', meal.hint || '', { placeholder: 'e.g. it is beef tri-tip, about 200 g, and brown rice', ok: 'Ask again' });
       if (hint === null) return;

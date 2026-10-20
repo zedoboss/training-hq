@@ -25,6 +25,7 @@ export const SCREENS = [
   ['readiness_table', '#/readiness', 'Readiness table'],
   ['squat', '#/squat', 'Squat Depth'],
   ['fuel', '#/fuel', 'Fuel'],
+  ['meal', '#/meal/', 'One meal (its id is the end of the link)', 'meal'],
   ['supplements', '#/supps', 'Supplements today'],
   ['supplements_list', '#/supps/list', 'All supplements'],
   ['supplements_plan', '#/supps/plan', 'Supplement plans and restock'],

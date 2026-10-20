@@ -127,6 +127,12 @@ export function withUsda(db, items, { prefer = [], keepTyped = true } = {}) {
     if (!food) { const { usda, ...rest } = x; return { ...rest, source: rest.source || 'estimate' }; }
     // His name for his food, unless the name given says more ("Brown rice" is not his "Rice").
     const his = mine.get(food.id)?.name;
+    // His own product's label (Tue 10/20: his yogurt, almonds and chia) beats USDA for kcal and protein; the USDA id
+    // stays for the vitamins and minerals the label doesn't give.
+    const lab2 = mine.get(food.id)?.label;
+    if (lab2 && (!x.name || !his || tokens(x.name).every((t) => tokens(his).includes(t)) || sameFood(his, x.name))) {
+      return { ...labelItem({ name: his, label: lab2 }, x.grams, { unsure: !!x.unsure }), fdcId: food.id, ...keep };
+    }
     let name = his && (!x.name || tokens(x.name).every((t) => tokens(his).includes(t))) ? his : x.name || his;
     // Not his food, but named like one of his (his rice's name on brown rice): USDA's words instead.
     if (!his && hisNames.has(x.name)) name = shortName(food.name);
@@ -207,8 +213,8 @@ export function planItems(db, plan) {
   const items = (plan?.foods || []).map((f) => {
     const g = Number(f.gramsPerDay) || 0;
     const food = f.fdcId && db?.byId.get(Number(f.fdcId));
+    if (f.label) return { ...labelItem(f, g), ...(food ? { fdcId: food.id } : {}) };
     if (food) return foodItem(db, food, g, { name: f.name });
-    if (f.label) return labelItem(f, g);
     return { name: f.name, grams: g, kcal: 0, protein: 0, unsure: false, source: 'estimate' };
   });
   const kcal = Math.round(items.reduce((a, x) => a + x.kcal, 0));
