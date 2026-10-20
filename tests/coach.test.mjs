@@ -118,7 +118,7 @@ test('the chat routes: streamed reply, status, new conversation; a token is need
   assert.equal(lines.at(-1).message.model, 'deep');
   assert.equal(lines[0].message.device, 'a1b2c3d4e5f6');
   const st = await (await fetch(`${base}/api/coach/status`, { headers: { authorization: `Bearer ${token}` } })).json();
-  assert.equal(st.models.fast, 'Sonnet 5.5 · low');
+  assert.equal(st.models.fast, 'Sonnet 5.5 · medium');
   assert.equal(st.models.deep, 'Opus 5.5 · high');
   assert.equal((await (await post('/api/coach/new', {})).json()).marker.role, 'marker');
   assert.equal((await (await post('/api/coach/warm', { model: 'fast' })).json()).started, true);

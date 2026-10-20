@@ -71,8 +71,15 @@ export function createPlayer({ context, fetchSpeech, onState = () => {} }) {
       if (my !== gen) break;
       items.shift();
     }
-    // Wait for the last sound to finish before saying it's done.
-    while (my === gen && context().currentTime < endAt) await new Promise((r) => setTimeout(r, 60));
+    // Wait for the last sound to finish before saying it's done, on the clock it was scheduled on (Tue 10/20: when
+    // the microphone made a fresh audio context mid-sentence, the new clock started at 0 and the chip stayed on
+    // SPEAKING for minutes). A closed context (resetAudio closes the old one) ends the wait at once.
+    // A stopped clock (iPhone paused the audio) doesn't move: give up after 3 s of it.
+    let stoppedSince = 0;
+    while (my === gen && ctx.state !== 'closed' && ctx.currentTime < endAt) {
+      if (ctx.state !== 'running') { stoppedSince ||= Date.now(); if (Date.now() - stoppedSince > 3000) break; } else stoppedSince = 0;
+      await new Promise((r) => setTimeout(r, 60));
+    }
     if (my === gen) { playing = false; level = 0; onState(false); }
   }
 

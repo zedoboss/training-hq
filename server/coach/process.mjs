@@ -7,7 +7,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { findClaude, MODELS } from '../claude.mjs';
+import { findClaude, COACH_MODELS as MODELS } from '../claude.mjs';
 
 export const TURN_TIMEOUT_MS = { fast: 180000, deep: 420000 };
 export const IDLE_MS = 60 * 60000;

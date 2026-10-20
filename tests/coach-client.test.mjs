@@ -42,5 +42,5 @@ test('today counts, tool labels, safe text', () => {
   assert.equal(textHtml('a <b>\nc'), 'a &lt;b&gt;<br>c');
   assert.equal(textHtml('- **Legs not done today:** Monday'), '- <b>Legs not done today:</b> Monday');
   assert.equal(textHtml('2 * 3 = 6 **'), '2 * 3 = 6 **');
-  assert.equal(MODEL_LABEL.fast, 'SONNET 5.5 · LOW');
+  assert.equal(MODEL_LABEL.fast, 'SONNET 5.5 · MEDIUM');
 });

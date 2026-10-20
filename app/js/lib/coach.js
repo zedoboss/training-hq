@@ -2,7 +2,7 @@
 // collection (written by the Mac); a reply also arrives as a stream of events while it is written. Pure helpers here;
 // the screen is views/coach.js. Actions are what only this device can do for the coach: its rest timer, a sync.
 
-export const MODEL_LABEL = { fast: 'SONNET 5.5 · LOW', deep: 'OPUS 5.5 · HIGH' };
+export const MODEL_LABEL = { fast: 'SONNET 5.5 · MEDIUM', deep: 'OPUS 5.5 · HIGH' };
 
 /** Splits a byte stream of JSON lines into events. push(text) as chunks arrive, end() at the end. */
 export function lineReader(onEvent) {

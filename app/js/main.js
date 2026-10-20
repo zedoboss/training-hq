@@ -90,7 +90,7 @@ function shell() {
         <button class="voice-chip" id="voice-chip" type="button" hidden></button>
         <div class="model-readout">
           <div class="hud c-faint" style="letter-spacing:.4em">ACTIVE MODEL</div>
-          <div class="hud c-cyan" id="active-model" style="font-size:16px;letter-spacing:.24em;margin-top:6px">SONNET 5.5 · LOW</div>
+          <div class="hud c-cyan" id="active-model" style="font-size:16px;letter-spacing:.24em;margin-top:6px">SONNET 5.5 · MEDIUM</div>
         </div>
         <a class="icon-btn" href="#/settings" data-tab="settings" aria-label="Settings">${GEAR}</a>
       </div>

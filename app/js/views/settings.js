@@ -143,8 +143,8 @@ function prefsHtml(st, eq) {
     </div>
     <div class="section-label">Coach</div>
     <div class="card opt-list">
-      ${opt('The coach thinks with', 'Claude on your Mac. Sonnet at low effort answers in a few seconds; Opus at high effort thinks deeper and takes longer. Also on the Talk screen.', '')}
-      ${seg('coach.model', [['fast', 'Sonnet 5.5 · low'], ['deep', 'Opus 5.5 · high']], st.coach.model)}
+      ${opt('The coach thinks with', 'Claude on your Mac. Sonnet at medium effort answers in a few seconds; Opus at high effort thinks deeper and takes longer. Also on the Talk screen, and a tap on the model on Today switches it.', '')}
+      ${seg('coach.model', [['fast', 'Sonnet 5.5 · medium'], ['deep', 'Opus 5.5 · high']], st.coach.model)}
       ${opt('Talks during sets and holds', 'In its moods, with lines ready before the set or hold starts. Only your real words stop it. Mute it on the set or hold screen.', sw('coach.talk.during', st.coach.talk.during))}
       ${opt('How often', 'Lines during a set or a hold.', '')}
       ${seg('coach.talk.every', EVERY_LABEL, st.coach.talk.every)}

@@ -10,6 +10,12 @@ export const MODELS = {
   fast: { model: 'claude-sonnet-5-5', effort: 'low', label: 'Sonnet 5.5 · low' },
   deep: { model: 'claude-opus-5-5', effort: 'high', label: 'Opus 5.5 · high' },
 };
+// The coach (Tue 10/20, his choice): Sonnet at medium effort (low answered too hastily), Opus at high. The photo
+// readers keep MODELS.
+export const COACH_MODELS = {
+  fast: { model: 'claude-sonnet-5-5', effort: 'medium', label: 'Sonnet 5.5 · medium' },
+  deep: { model: 'claude-opus-5-5', effort: 'high', label: 'Opus 5.5 · high' },
+};
 
 const numeric = (a, b) => a.localeCompare(b, 'en', { numeric: true });
 

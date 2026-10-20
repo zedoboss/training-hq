@@ -54,3 +54,11 @@ export function addressed(text, { names = [], lastCoachAt = 0, now = Date.now(),
   if (weak >= 2 || (inSession && weak >= 1)) return { ok: true, why: 'about' };
   return { ok: false, why: 'aside' };
 }
+
+/** He trailed off mid-thought ("I woke up before 10, so...", "and", a comma): more is probably coming in the next clip. */
+export function looksUnfinished(text) {
+  const t = String(text || '').trim();
+  if (/(\.\.\.|…|,|-)$/.test(t)) return true;
+  return /\b(and|so|but|or|because|then|like|um|uh|plus|also|with|to|the|a|my)$/i.test(t.replace(/[.?!]+$/, ''));
+}
+

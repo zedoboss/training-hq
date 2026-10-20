@@ -191,7 +191,7 @@ function closeListening() {
 export async function start() {
   // A tap: if the audio context isn't running (another app or iPhone Mirroring had the audio), start a fresh one now,
   // while the tap still lets iPhone run it.
-  if (!audioRunning()) resetAudio();
+  if (!audioRunning()) { player.stop(); resetAudio(); }
   audioContext(); rest.unlockAudio();
   const st = await macGet('/api/voice/status');
   if (!st.canListen) throw new Error('Calibrate and test your voice first (Settings > Voice).');

@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { openCoachProcess } from './process.mjs';
 import { openMcp } from './mcp.mjs';
 import { systemPrompt, turnText, recapText } from './prompt.mjs';
-import { MODELS } from '../claude.mjs';
+import { COACH_MODELS as MODELS } from '../claude.mjs';
 import { deviceTimeZone } from '../../app/js/lib/time.js';
 
 export const COL = 'coach-messages';

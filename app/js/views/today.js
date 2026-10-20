@@ -5,7 +5,7 @@ import { toast } from '../ui/toast.js';
 import { getState, subscribe } from '../lib/store.js';
 import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, formatDay, formatHm, addMinutesHm } from '../lib/time.js';
 import { withDefaults } from '../lib/settings.js';
-import { ready } from '../lib/data.js';
+import { ready, saveSettings } from '../lib/data.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
 import { weekColumn } from '../lib/programme.js';
 import { roundsByDate, holdSlots, restChoices, openSlots } from '../lib/holds.js';
@@ -126,7 +126,7 @@ export function render(view) {
 
       <div class="home-status hud">
         <span class="c-muted" data-k="voice">VOICE · OFF</span>
-        <span class="model-chip" data-k="model">SONNET 5.5 · LOW</span>
+        <button class="model-chip" data-k="model" id="t-model" type="button" aria-label="Switch the coach between Sonnet and Opus">SONNET 5.5 · MEDIUM</button>
       </div>
 
       <section class="card spoke">
@@ -176,6 +176,13 @@ export function render(view) {
   });
   view.querySelectorAll('[data-later]').forEach((b) => {
     b.addEventListener('click', () => { if (b.dataset.later === 'checkin') location.hash = '#/checkin'; else toast(LATER[b.dataset.later]); });
+  });
+  // Tue 10/20: switch the coach between Sonnet and Opus with one tap.
+  view.querySelector('#t-model')?.addEventListener('click', async () => {
+    const cur = withDefaults(getState().settings).coach.model;
+    const next = cur === 'deep' ? 'fast' : 'deep';
+    await saveSettings({ coach: { model: next } });
+    toast(`Coach: ${MODEL_LABEL[next]}`);
   });
 
   const tick = () => {

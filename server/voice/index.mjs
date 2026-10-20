@@ -10,9 +10,13 @@ import { cleanTranscript } from './whisper.mjs';
 import { decodeWav, encodeWav, resample, normalise, VOICE_RATE } from '../../app/js/lib/wav.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
 
-import { addressed } from './address.mjs';
+import { addressed, looksUnfinished } from './address.mjs';
 
 export const MAX_CLIP_SEC = 15;
+// Tue 10/20: he paused mid-answer ("I woke up slightly before 10:00, so..." then "I went to bed around 12"), the phone
+// sent two clips, and the coach answered the first half and asked again for what came in the second. A clip that ends
+// unfinished now waits this long for the next one from the same phone, and the two go to the coach as one message.
+export const JOIN_MS = 1800;
 /** The same words from two devices within this time are one utterance (the phone and the Mac both listening). */
 export const DUPLICATE_MS = 5000;
 const HINT = '80 for 8. 62.5 for 10. Next exercise. Start the timer. Add 15 seconds. Skip the rest. Smith machine.';
@@ -84,6 +88,8 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
    * nothing is transcribed, saved or answered, and the audio is gone when this returns. His words go to the coach
    * like a typed message (marked as spoken); the coach's events follow on `emit`.
    */
+  const waiting = new Map(); // device -> {texts, timer, fire}: a clip that ended unfinished, waiting for the rest
+
   async function utterance({ bytes, deviceId = null, model = 'fast', tz = null, emit = () => {} }) {
     const t0 = now();
     const c = check(bytes);
@@ -109,6 +115,14 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
       return null;
     }
     lastHeard = { key, device: deviceId, at: now() };
+    // The rest of a clip that ended unfinished: joins it and goes to the coach with it.
+    const w = waiting.get(deviceId || '');
+    if (w) {
+      w.texts.push(text); clearTimeout(w.timer); w.timer = setTimeout(w.fire, JOIN_MS);
+      log(`voice: heard you (${d.score}), joined to the clip before`);
+      emit({ type: 'heard', ok: true, score: d.score, text, joined: true, ms: now() - t0 });
+      return null;
+    }
     // Talking to someone else: only his naming it, the app's own subjects, or an answer to the coach go on (Mon 10/19).
     const live = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
     const lastCoachAt = Math.max(0, ...live('coach-messages').filter((m) => m.role === 'assistant').map((m) => m.at || 0));
@@ -122,7 +136,17 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     log(`voice: heard you (${d.score}, ${to.why}), ${raw.ms} ms to text, ${now() - t0} ms in all`);
     emit({ type: 'heard', ok: true, score: d.score, text, ms: now() - t0 });
     if (!coach) throw fail(503, 'coach not available');
-    return coach.send({ text, model, deviceId, tz, via: 'voice', emit });
+    let said = text;
+    if (looksUnfinished(text)) {
+      const texts = [text];
+      await new Promise((res) => {
+        const entry = { texts, fire: () => { waiting.delete(deviceId || ''); res(); } };
+        entry.timer = setTimeout(entry.fire, JOIN_MS);
+        waiting.set(deviceId || '', entry);
+      });
+      said = texts.join(' ');
+    }
+    return coach.send({ text: said, model, deviceId, tz, via: 'voice', emit });
   }
 
   return {
