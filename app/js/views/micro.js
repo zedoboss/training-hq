@@ -10,7 +10,7 @@ import { dayKindOn } from './supps.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const num = (v) => { const a = Math.abs(v); return a >= 100 ? Math.round(v).toLocaleString('en-US') : a >= 10 ? String(Math.round(v * 10) / 10) : String(Math.round(v * 100) / 100); };
-const refText = (r) => (r.ref == null ? 'no reference' : Array.isArray(r.ref) ? `${num(r.ref[0])}-${num(r.ref[1])} ${r.unit}` : `${r.atLeast ? '≥' : ''}${num(r.ref)} ${r.unit}`);
+const refText = (r) => (r.ref == null ? 'no official daily value' : Array.isArray(r.ref) ? `${num(r.ref[0])}-${num(r.ref[1])} ${r.unit}` : `${r.atLeast ? '≥' : ''}${num(r.ref)} ${r.unit}`);
 
 export function render(view, params = []) {
   const today = isoDate(new Date());

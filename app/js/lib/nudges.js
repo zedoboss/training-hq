@@ -79,14 +79,20 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
  * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
  * @param {number|null} [o.healthAt]  when Apple Health last reached the Mac (the newest file), ms; null = never; left out = don't say
+ * @param {{open: string[], mealAt: number}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, and when that meal was logged
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, lastMealAt = null, healthAt = undefined }) {
+  wokeAt = null, morning = null, workoutEndedAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null }) {
   const out = [];
+  // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
+  if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt) {
+    out.push({ key: 'supps-after-meal', priority: 91, gapMin: 30, url: '#/supps',
+      text: `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });
+  }
   // After the workout (Tue 10/20, his words: "I'm usually not hungry immediately and I obviously need to take a
   // shower... wait 20 minutes after my workout is finished and then he should bump me about my first meal"): quiet
   // for 20 minutes, then the meal comes first, before supplements and the rest.

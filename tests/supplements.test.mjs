@@ -101,3 +101,14 @@ test('dayKindFrom: the rotation for today and later, what happened for past days
   assert.equal(dayKindFrom({ ...base, date: '2026-01-19' }), 'train', 'a workout was logged');
   assert.equal(dayKindFrom({ ...base, date: '2026-01-18' }), 'rest');
 });
+
+test('supplements taken after the first meal are their own group (Tue 10/20)', async () => {
+  const { checklist } = await import('../app/js/lib/supplements.js');
+  const supps = [
+    { id: 'a', name: 'A', days: { type: 'daily' }, status: 'active', order: 1, time: '09:00', perTake: { train: 1, rest: 1 } },
+    { id: 'b', name: 'B', days: { type: 'daily' }, status: 'active', order: 2, afterMeal: 'first', perTake: { train: 1, rest: 1 } },
+    { id: 'c', name: 'C', days: { type: 'daily' }, status: 'active', order: 3, perTake: { train: 1, rest: 1 } },
+  ];
+  const g = checklist({ supps, log: [], date: '2026-10-20', dayKind: 'train' });
+  assert.deepEqual(g.map((x) => [x.key, x.label, x.items.map((i) => i.supp.id)]), [['09:00', 'Morning', ['a']], ['after-meal', 'After your first meal', ['b']], ['', 'No time set', ['c']]]);
+});

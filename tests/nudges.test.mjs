@@ -225,3 +225,41 @@ test('Apple Health stale for 6 hours: one calm nudge to open the app (Tue 10/20)
   assert.equal(nudgeCandidates({ ...base, now: at(D, '10:30'), healthAt: null }).some((x) => x.key === 'health'), false, 'not in the first hour');
   assert.match(nudgeCandidates({ ...base, now: at(D, '12:00'), healthAt: null }).find((x) => x.key === 'health').text, /nothing from Apple Health yet/);
 });
+
+test('after the first meal (Tue 10/20): the supplements he takes with it come first, until ticked', () => {
+  const base = { tz: TZ, rot: { today: { kind: 'train', dayType: 'push' } }, wakeHm: '10:00', bedHm: '00:00', sleepLogged: true, suppsUntimed: { total: 5, open: ['Creatine'] } };
+  const c = nudgeCandidates({ ...base, now: at(D, '12:00'), suppsAfterMeal: { open: ['Vitamin D3 + K2 (MK-7)', 'Ashwagandha KSM-66', 'Omega-3 fish oil'], mealAt: at(D, '11:50') } });
+  assert.equal(c[0].key, 'supps-after-meal');
+  assert.equal(c[0].text, 'First meal logged: take your supplements now: Vitamin D3 + K2 (MK-7), Ashwagandha KSM-66, Omega-3 fish oil. Tell me when they\'re down.');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '12:00'), suppsAfterMeal: { open: [], mealAt: at(D, '11:50') } }).some((x) => x.key === 'supps-after-meal'), false, 'all ticked');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '11:00'), suppsAfterMeal: null }).some((x) => x.key === 'supps-after-meal'), false, 'no meal yet');
+});
+
+test('the Mac asks for his after-meal supplements the moment the first meal is logged, then the dishes (Tue 10/20)', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-supps-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('supplements', 'supp.d3', { id: 'supp.d3', kind: 'supplement', name: 'Vitamin D3 + K2', short: 'D3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
+    store.writeLocal('supplements', 'supp.mg', { id: 'supp.mg', kind: 'supplement', name: 'Magnesium', short: 'Mg', days: { type: 'daily' }, status: 'active', order: 2, perTake: { train: 1, rest: 1 } });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ }); // first run: notes what is there
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '11:30'), name: 'Breakfast', source: 'manual', before: { items: [] } });
+    const r = await dishesTick({ store, push, now: at(D, '11:31'), tz: TZ });
+    assert.equal(r.key, 'supps-after-meal');
+    assert.match(sent[0].body, /^Breakfast logged\. Take your supplements now: Vitamin D3 \+ K2\./);
+    assert.equal(sent[0].url, '#/supps');
+    // Two minutes later: the dishes. A second meal that day: no supplements prompt again.
+    const d = await dishesTick({ store, push, now: at(D, '11:34'), tz: TZ });
+    assert.equal(d.key, 'dishes');
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '15:00'), name: 'Lunch', source: 'manual', before: { items: [] } });
+    assert.equal(await dishesTick({ store, push, now: at(D, '15:00'), tz: TZ }), null);
+    assert.equal(sent.filter((m) => m.tag === 'supps-after-meal').length, 1);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

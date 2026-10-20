@@ -85,11 +85,12 @@ export function checklist({ supps = [], log = [], date, dayKind }) {
   const entries = new Map(log.filter((e) => e.date === date).map((e) => [e.suppId, e]));
   const groups = new Map();
   for (const s of supps.filter((x) => scheduledOn(x, date)).sort(byOrder)) {
-    const key = s.time || '';
-    if (!groups.has(key)) groups.set(key, { key, time: s.time || null, label: s.time ? partOf(s.time) : 'No time set', items: [] });
+    // Tue 10/20: the ones he takes right after his first meal (afterMeal 'first') are a group of their own.
+    const key = s.afterMeal === 'first' ? 'after-meal' : s.time || '';
+    if (!groups.has(key)) groups.set(key, { key, time: s.time || null, afterMeal: s.afterMeal === 'first', label: s.afterMeal === 'first' ? 'After your first meal' : s.time ? partOf(s.time) : 'No time set', items: [] });
     groups.get(key).items.push({ supp: s, dose: doseFor(s, dayKind), servings: servingsFor(s, dayKind), entry: entries.get(s.id) || null });
   }
-  return [...groups.values()].sort((a, b) => (a.time ? 0 : 1) - (b.time ? 0 : 1) || String(a.time).localeCompare(String(b.time)))
+  return [...groups.values()].sort((a, b) => (a.time ? 0 : a.afterMeal ? 1 : 2) - (b.time ? 0 : b.afterMeal ? 1 : 2) || String(a.time).localeCompare(String(b.time)))
     .map((g) => ({ ...g, open: g.items.filter((i) => !i.entry) }));
 }
 

@@ -93,8 +93,10 @@ export function nudgeInputs(store, now, tz) {
   const eaten = dayTotals(list('meals'), list('meal-estimates'), date);
   const trained = st.trainedDates?.has?.(date) || false;
   const rot = rotationDay({ last: st.last, today: date, days: st.days || {} });
-  const untimed = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' })
-    .filter((g) => !g.time).flatMap((g) => g.items);
+  const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
+  const untimed = groups.filter((g) => !g.time && !g.afterMeal).flatMap((g) => g.items);
+  const afterMeal = groups.filter((g) => g.afterMeal).flatMap((g) => g.items);
+  const firstMealAt = Math.min(...list('meals').filter((m) => m.date === date && m.at).map((m) => m.at));
   return {
     date, n,
     busy: list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active'),
@@ -104,6 +106,7 @@ export function nudgeInputs(store, now, tz) {
       reminders: remindersFor({ ...st, date }),
       rot,
       suppsUntimed: untimed.length ? { total: untimed.length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
+      suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
@@ -147,8 +150,26 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   }
   for (const [id, at] of Object.entries(state.seen)) if (now - at > 2 * 86400000) { delete state.seen[id]; delete state.sent[id]; }
   const busy = list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active');
-  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now });
   let out = null;
+  // The first meal of the day, the moment it is logged (Tue 10/20, his words): "take your supplements" at once, with
+  // the ones he takes after it that aren't ticked yet. Then the dishes, two minutes later, as below.
+  const first = meals.filter((m) => m.at).sort((a, b) => a.at - b.at)[0];
+  if (first && st && !state.suppsFor?.[date] && state.seen[first.id] === now) {
+    const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' });
+    const open = groups.filter((g) => g.afterMeal).flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.name);
+    state.suppsFor = { [date]: now };
+    if (open.length) {
+      const opts = voiceOpts(store);
+      const line = pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
+      const body = `${first.name || 'First meal'} logged. Take your supplements now: ${open.join(', ')}.${line?.text ? ` ${line.text}` : ''}`;
+      const r = push.list().length ? await push.notify({ title: 'Coach', body, url: '#/supps', tag: 'supps-after-meal' }) : { sent: 0 };
+      sayInTalk(store, { text: body, at: now, tz, kind: 'nudge', ref: `supps-after-meal:${first.id}` });
+      store.setMeta(LAST, now);
+      log(`supplements after ${first.name || first.id} (${r.sent} sent)`);
+      out = { key: 'supps-after-meal', body };
+    }
+  }
+  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now });
   if (due.length) {
     for (const m of due) state.sent[m.id] = now;
     const opts = voiceOpts(store);
@@ -160,6 +181,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     log(`dishes after ${due.map((m) => m.name || m.id).join(', ')} (${r.sent} sent)`);
     out = { key: 'dishes', body };
   }
+  if (state.suppsFor) for (const d of Object.keys(state.suppsFor)) if (d < date) delete state.suppsFor[d];
   store.setMeta(DISHES, state);
   return out;
 }
