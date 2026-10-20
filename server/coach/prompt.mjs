@@ -75,6 +75,27 @@ export function recapText(messages = []) {
   return lines.length ? lines.join('\n') : '';
 }
 
+/**
+ * A day in short, for the fresh chat of the next day (Tue 10/20, his words: "for every day, a new chat, a new context
+ * window, clean and fresh... a summary should sum up the entire context"). Deterministic: what he said (the latest
+ * ones), what was logged through the tools, and your last words to him. About a screenful at most.
+ */
+export function daySummary(messages = [], { tz = 'UTC' } = {}) {
+  const msgs = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text);
+  if (!msgs.length) return '';
+  const day = formatDay(new Date(msgs[0].at), tz);
+  const his = msgs.filter((m) => m.role === 'user').map((m) => clip(String(m.text).replace(/\s+/g, ' ').trim(), 140));
+  const logged = [];
+  for (const m of msgs) for (const t of m.tools || []) if (t.ok !== false && t.summary && !/^asked first|^listed|^status$|^no change$/.test(t.summary)) logged.push(`${t.name}: ${clip(String(t.summary), 80)}`);
+  const lastYou = [...msgs].reverse().find((m) => m.role === 'assistant' && !m.error);
+  return [
+    `${day}: ${msgs.length} messages.`,
+    his.length ? `He said (latest last): ${his.slice(-12).map((x) => `"${x}"`).join(' · ')}` : '',
+    logged.length ? `Logged or changed through the tools: ${[...new Set(logged)].slice(-20).join('; ')}.` : '',
+    lastYou ? `Your last words to him: "${clip(String(lastYou.text).replace(/\s+/g, ' ').trim(), 300)}"` : '',
+  ].filter(Boolean).join('\n');
+}
+
 /** What goes to Claude for one message: the recap (fresh process only), his words, and the context block. */
 export function turnText({ text, now = Date.now(), tz, recap = '', extra = '', voice = false, screen = null }) {
   const d = new Date(now);
@@ -82,7 +103,7 @@ export function turnText({ text, now = Date.now(), tz, recap = '', extra = '', v
   const on = screen ? `On his phone: the ${screenOf(screen).label} screen (${screen}).` : '';
   const ctx = [`Now: ${formatDay(d, tz)}, ${formatTime(d, tz)} (${isoDate(d, tz)}, time zone ${tz}).`, on, voice ? VOICE_NOTE : '', extra].filter(Boolean).join('\n');
   return [
-    recap ? `<earlier-conversation note="The coach process restarted; this is the end of the conversation so far, from the app's log. Don't answer it again.">\n${recap}\n</earlier-conversation>` : '',
+    recap ? `<earlier-conversation note="From the app's log: the day before in short (each day is a fresh chat), and the end of today's conversation so far if the coach process restarted. Don't answer it again.">\n${recap}\n</earlier-conversation>` : '',
     String(text),
     `<context>\n${ctx}\n</context>`,
   ].filter(Boolean).join('\n\n');

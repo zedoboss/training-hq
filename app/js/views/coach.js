@@ -12,6 +12,8 @@ import { conversationOf, MODEL_LABEL, toolLabel, runAction, textHtml } from '../
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { stop as voiceStop } from '../lib/voice.js';
+import { startDictation } from '../lib/dictate.js';
+import { addDays } from '../lib/rotation.js';
 import { updateApp } from '../lib/sw-client.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -20,6 +22,7 @@ const draftGet = () => { try { return localStorage.getItem(DRAFT) || ''; } catch
 const draftSet = (v) => { try { if (v) localStorage.setItem(DRAFT, v); else localStorage.removeItem(DRAFT); } catch { /* private mode */ } };
 const modelOf = () => withDefaults(getState().settings).coach.model;
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const MIC_ICON = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
 const SEND = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2.5-6.5z"/></svg>';
 
 /** Actions the coach asked this device for (its rest timer, a sync, moving the session screen to an exercise).
@@ -61,8 +64,12 @@ function renderChat(view) {
       <div><div class="hud c-muted">COACH · TEXT AND VOICE</div><div class="hud coach-state" id="c-state">…</div></div>
       <div class="seg" role="group" id="c-model">${Object.entries(MODEL_LABEL).map(([k, l]) => `<button class="pill" type="button" data-model="${k}" aria-pressed="false">${l}</button>`).join('')}</div>
     </div>
+    <div class="fuel-head coach-day"><button class="pill" id="c-prev" type="button" aria-label="Day before">‹</button>
+      <div class="hud c-muted" id="c-day"></div>
+      <button class="pill" id="c-next" type="button" aria-label="Next day">›</button></div>
     <div class="coach-log" id="c-log" aria-live="polite"></div>
     <form class="coach-compose" id="c-form" autocomplete="off">
+      <button class="btn-ghost coach-mic" id="c-mic" type="button" aria-label="Dictate into the box" aria-pressed="false">${MIC_ICON}</button>
       <textarea class="input coach-input" id="c-text" rows="1" placeholder="Ask, or tell it what you did: 80 for 8" aria-label="Message to the coach"></textarea>
       <button class="btn-primary coach-send" id="c-send" type="submit" aria-label="Send">${SEND}</button>
     </form>
@@ -84,21 +91,45 @@ function renderChat(view) {
   };
   const fit = () => { box.style.height = 'auto'; box.style.height = `${Math.min(160, box.scrollHeight)}px`; };
 
+  // Tue 10/20, his words: "the chat there... is just an endless scroll from multiple days' history... make it only one
+  // per day and have a calendar there where I can click the arrows". One day at a time; today by default.
+  let day = isoDate(new Date());
+  const today = () => isoDate(new Date());
   const draw = ({ scroll = true } = {}) => {
-    const msgs = conversationOf(stored, live.filter((m) => m !== pendingLive));
-    let lastDay = '';
-    const parts = [];
-    for (const m of msgs) {
-      const d = isoDate(new Date(m.at));
-      if (d !== lastDay) { parts.push(`<div class="section-label">${esc(formatDay(new Date(m.at)).toUpperCase())}</div>`); lastDay = d; }
-      parts.push(msgHtml(m));
-    }
-    if (pendingLive) parts.push(msgHtml(pendingLive, { live: true }));
-    $('#c-log').innerHTML = parts.join('') || `<div class="card pad-card coach-empty"><div class="hud c-muted">ASK ANYTHING ABOUT YOUR TRAINING</div>
+    const all = conversationOf(stored, live.filter((m) => m !== pendingLive));
+    const msgs = all.filter((m) => isoDate(new Date(m.at)) === day);
+    const onToday = day === today();
+    $('#c-day').textContent = formatDay(new Date(`${day}T12:00:00`)).toUpperCase() + (onToday ? ' · TODAY' : '');
+    $('#c-next').disabled = onToday;
+    const parts = msgs.map((m) => msgHtml(m));
+    if (pendingLive && onToday) parts.push(msgHtml(pendingLive, { live: true }));
+    $('#c-log').innerHTML = parts.join('') || (all.length && !onToday ? '<p class="hint coach-empty">Nothing on this day.</p>' : `<div class="card pad-card coach-empty"><div class="hud c-muted">ASK ANYTHING ABOUT YOUR TRAINING</div>
       <p class="hint c-text">"What's today?" · "Bench number?" · "80 for 8" · "Took creatine and mag" · "Knees 2, not worse; legs 1, back 0, energy 2" · "Set tomorrow at 4:30".</p>
-      <p class="hint">It reads your programme, history, food, supplements, body and sauna, and logs what you tell it. It follows your rules and gives no medical or supplement advice.</p></div>`;
-    if (scroll) window.scrollTo(0, document.documentElement.scrollHeight);
+      <p class="hint">It reads your programme, history, food, supplements, body and sauna, and logs what you tell it. It follows your rules and gives no medical or supplement advice.</p></div>`);
+    if (scroll && onToday) window.scrollTo(0, document.documentElement.scrollHeight);
   };
+  $('#c-prev').addEventListener('click', () => { day = addDays(day, -1); draw({ scroll: false }); window.scrollTo(0, 0); });
+  $('#c-next').addEventListener('click', () => { if (day < today()) { day = addDays(day, 1); draw({ scroll: day === today() }); } });
+  $('#c-day').addEventListener('click', () => { day = today(); draw(); });
+  // The dictation mic: tap to record, tap again to put the words in the box (nothing sent).
+  let dict = null;
+  $('#c-mic').addEventListener('click', async () => {
+    const b = $('#c-mic'); const box = $('#c-text');
+    if (dict) {
+      const d = dict; dict = null; b.classList.remove('is-rec'); b.setAttribute('aria-pressed', 'false'); b.classList.add('is-busy');
+      try {
+        const text = await d.stop();
+        if (text) { box.value = `${box.value.trim()}${box.value.trim() ? ' ' : ''}${text}`; box.dispatchEvent(new Event('input')); box.focus(); } else toast('Nothing heard.');
+      } catch (e) { toast(e.message || 'The Mac could not hear that.'); }
+      b.classList.remove('is-busy');
+      return;
+    }
+    try {
+      dict = await startDictation();
+      b.classList.add('is-rec'); b.setAttribute('aria-pressed', 'true');
+      toast('Recording. Tap the mic again when you\'re done.');
+    } catch (e) { toast(e.message || 'Microphone not available.'); }
+  });
 
   const liveEl = () => view.querySelector('.c-msg.is-live');
   const updateLive = () => {
@@ -215,7 +246,7 @@ function renderChat(view) {
     // Start the coach's Claude on the Mac now, so the first answer comes sooner.
     if (getState().paired) macPost('/api/coach/warm', { model: modelOf() }).then(() => { if (!busy) idleState(); }).catch(() => { if (!busy) setState('MAC UNREACHABLE', 'c-amber'); });
   });
-  return () => { gone = true; busy?.abort(); unsub(); off(); window.removeEventListener('thq:voice-event', onVoice); };
+  return () => { gone = true; busy?.abort(); unsub(); off(); dict?.cancel(); window.removeEventListener('thq:voice-event', onVoice); };
 }
 
 function renderNotes(view) {

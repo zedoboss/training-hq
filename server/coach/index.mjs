@@ -8,7 +8,8 @@
 import { randomBytes } from 'node:crypto';
 import { openCoachProcess } from './process.mjs';
 import { openMcp } from './mcp.mjs';
-import { systemPrompt, turnText, recapText } from './prompt.mjs';
+import { systemPrompt, turnText, recapText, daySummary } from './prompt.mjs';
+import { isoDate } from '../../app/js/lib/time.js';
 import { COACH_MODELS as MODELS } from '../claude.mjs';
 import { deviceTimeZone } from '../../app/js/lib/time.js';
 
@@ -19,12 +20,18 @@ export const RECAP_MESSAGES = 16;
 const rand = () => randomBytes(3).toString('hex');
 export const messageId = (at) => `cm.${String(at).padStart(13, '0')}.${rand()}`;
 
-/** Messages of the current conversation (after the last "new conversation" marker), oldest first. */
+/** Messages of the current conversation (after the last "new conversation" or "new day" marker), oldest first. */
 export function conversation(store) {
   const all = store.listRecords(COL).map((r) => r.data).filter(Boolean).sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
   let from = 0;
   all.forEach((m, i) => { if (m.role === 'marker') from = i + 1; });
   return all.slice(from);
+}
+
+/** The last marker (its summary carries the day before into the fresh chat), or null. */
+export function lastMarker(store) {
+  const all = store.listRecords(COL).map((r) => r.data).filter((m) => m?.role === 'marker').sort((a, b) => a.at - b.at);
+  return all.at(-1) || null;
 }
 
 /**
@@ -82,7 +89,16 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
     const zone = tzIn || tz;
     const at = now();
     const turnId = `turn.${at.toString(36)}.${rand()}`;
-    const earlier = conversation(store);
+    let earlier = conversation(store);
+    // A new day is a fresh chat (Tue 10/20, his words): the process starts over with the day before in short.
+    const lastAt = earlier.filter((m) => m.role !== 'marker').at(-1)?.at;
+    if (lastAt && isoDate(new Date(lastAt), zone) !== isoDate(new Date(at), zone)) {
+      const summary = daySummary(earlier, { tz: zone });
+      proc.stop('new day');
+      save({ id: messageId(at - 1), role: 'marker', text: 'New day', at: at - 1, summary });
+      log(`coach: new day, fresh chat (${earlier.length} messages the day before)`);
+      earlier = [];
+    }
     const voice = via === 'voice';
     const userMsg = save({ id: messageId(at), role: 'user', text: words, at, tz: zone, device: deviceId, turnId, model: key, ...(voice ? { via: 'voice' } : {}) });
     emit({ type: 'user', message: userMsg });
@@ -94,7 +110,8 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
         onEvent: (e) => emit(e),
         content: ({ fresh }) => {
           active = t;
-          const recap = fresh ? recapText(earlier.slice(-RECAP_MESSAGES)) : '';
+          const before = fresh ? lastMarker(store)?.summary || '' : '';
+          const recap = fresh ? [before ? `The day before, in short:\n${before}` : '', recapText(earlier.slice(-RECAP_MESSAGES))].filter(Boolean).join('\n\n') : '';
           let extra = '';
           try { extra = context ? context({ store, tz: zone, now: now(), screen }) : ''; } catch (e) { log(`coach context: ${e.stack || e}`); }
           return turnText({ text: words, now: now(), tz: zone, recap, extra, voice, screen });

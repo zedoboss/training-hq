@@ -97,6 +97,14 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
    * like a typed message (marked as spoken); the coach's events follow on `emit`.
    */
   const waiting = new Map(); // device -> {texts, timer, fire, arm}: a clip held for the rest of what he is saying
+  /** Dictation into the chat box (Tue 10/20): the words only, no voice lock, nothing saved or answered. */
+  async function dictate(bytes) {
+    if (!whisper) throw fail(503, 'speech to text not available');
+    const samples = clipOf(bytes);
+    const raw = await whisper.transcribe(encodeWav(normalise(samples)));
+    return { text: cleanTranscript(raw.text, hint()), ms: raw.ms };
+  }
+
   /** The phone heard him start again (its VAD): hold what was heard until the next clip. */
   function talking(deviceId = null) {
     const w = waiting.get(deviceId || '');
@@ -169,6 +177,7 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     status: () => ({ ...status(), whisper: whisper?.status() || null }),
     utterance,
     talking,
+    dictate,
     warm: () => whisper?.ensure().then(() => true).catch((e) => { log(`whisper: ${e.message}`); return false; }),
     hint,
     enrol,

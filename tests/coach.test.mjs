@@ -125,3 +125,27 @@ test('the chat routes: streamed reply, status, new conversation; a token is need
   server.close();
   await coach.close();
 });
+
+test('a new day is a fresh chat with the day before in short (Tue 10/20)', async () => {
+  const { daySummary } = await import('../server/coach/prompt.mjs');
+  const proc = fakeProcess();
+  clock = Date.UTC(2026, 0, 20, 10, 0);
+  const coach = openCoach({ store, process: proc, now: () => clock, tz: 'UTC' });
+  await coach.send({ text: 'I had eggs' }); clock += 60000;
+  await coach.send({ text: '80 for 8' }); clock += 60000;
+  // Next day, 10:00 AM: the process is stopped, a marker with the summary is saved, and the fresh body carries it.
+  clock = Date.UTC(2026, 0, 21, 10, 0);
+  await coach.send({ text: 'morning' });
+  const marker = store.listRecords(COL).map((r) => r.data).find((m) => m.role === 'marker');
+  assert.equal(marker.text, 'New day');
+  assert.match(marker.summary, /^Tuesday 1\/20: 4 messages\.\nHe said \(latest last\): "I had eggs" · "80 for 8"\nYour last words to him: "Done\."$/);
+  assert.match(proc.bodies.at(-1), /The day before, in short:\nTuesday 1\/20: 4 messages/);
+  assert.doesNotMatch(proc.bodies.at(-1), /He: I had eggs/, 'the raw day-before messages are not replayed');
+  assert.deepEqual(conversation(store).map((m) => m.text), ['morning', 'Done.']);
+  // The same day again: no new marker.
+  clock += 60000;
+  await coach.send({ text: 'again' });
+  assert.equal(store.listRecords(COL).map((r) => r.data).filter((m) => m.role === 'marker').length, 1);
+  assert.equal(daySummary([]), '');
+  await coach.close();
+});

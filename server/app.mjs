@@ -406,6 +406,14 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       if (!res.writableEnded) res.end();
     },
 
+    // Dictation into the chat box (Tue 10/20): the words come back, nothing is sent to the coach.
+    'POST /api/voice/dictate': async (req) => {
+      auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      const bytes = await readRaw(req, MAX_CLIP_BYTES);
+      return voiceCall(() => voice.dictate(bytes));
+    },
+
     // He started talking again while the Mac holds what it heard (Tue 10/20): keep holding for the next clip.
     'POST /api/voice/talking': async (req) => {
       const device = auth(req);

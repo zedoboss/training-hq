@@ -32,3 +32,10 @@
 .coach-send.is-stop::before { content: ''; width: 14px; height: 14px; border-radius: 2px; background: var(--bg); }
 .coach-foot { margin-top: -4px; }
 a.mic-btn { text-decoration: none; }
+/* Tue 10/20: one day at a time, and the dictation mic beside the box. */
+.coach-day { margin-bottom: 8px; }
+.coach-day .hud { cursor: pointer; }
+.coach-mic { flex: 0 0 48px; width: 48px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.coach-mic.is-rec { background: var(--red, #ff5c5c); color: #fff; border-color: transparent; animation: coach-rec 1s ease-in-out infinite; }
+.coach-mic.is-busy { opacity: .5; pointer-events: none; }
+@keyframes coach-rec { 50% { opacity: .55; } }
