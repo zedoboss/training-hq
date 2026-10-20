@@ -536,3 +536,14 @@ test('nudges by talking: how often, waking hours, a pause and resume', async () 
   assert.equal(store.getRecord('settings', 'main').data.notify.nudgePausedUntil, 0);
 });
 
+
+test('his own foods with a pack label: the label counts for kcal and protein, by his name (Tue 10/20)', async () => {
+  store.writeLocal('fuel', 'plan', { kind: 'plan', kcal: 2000, proteinG: 150, foods: [
+    { name: 'Greek yogurt', fdcId: 170894, label: { perGrams: 100, kcal: 55, protein: 8.3 } },
+    { name: 'Chia seeds', fdcId: 170554, label: { perGrams: 15, kcal: 47.6, protein: 3.1 } },
+  ] });
+  const r = await call('log_meal', { items: [{ name: 'Greek yogurt', grams: 225 }, { name: 'Chia seeds', grams: 50 }], time: '02:00' });
+  assert.match(r.text, /Greek yogurt 225 g \(his pack label\), Chia seeds 50 g \(his pack label\); 283 kcal, 29 g protein/);
+  const meal = list('meals').at(-1);
+  assert.deepEqual(meal.before.items.map((x) => [x.name, x.kcal, x.protein, x.source, x.fdcId]), [['Greek yogurt', 124, 18.7, 'label', 170894], ['Chia seeds', 159, 10.3, 'label', 170554]]);
+});

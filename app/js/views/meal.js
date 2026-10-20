@@ -180,10 +180,10 @@ export function editItems(title, items) {
       const list = read().filter((x) => x.name || x.grams || x.kcal);
       result = cleanItems(list.map((x) => {
         if (!db) return x;
-        if (x.fdcId && x.source === 'usda') return withUsda(db, [x], { prefer: mine })[0];
+        if (x.fdcId && (x.source === 'usda' || x.source === 'label')) return withUsda(db, [x], { prefer: mine })[0];
         if (x.fdcId || x.kcal || x.protein || x.source) return x;
         const [y] = withUsda(db, [{ ...x, source: undefined }], { prefer: mine });
-        return y.source === 'usda' ? y : { ...x, source: 'typed' };
+        return y.source === 'usda' || y.source === 'label' ? y : { ...x, source: 'typed' };
       }));
       close();
     });

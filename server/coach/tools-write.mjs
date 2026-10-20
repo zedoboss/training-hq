@@ -370,11 +370,12 @@ function mealItems(s, items) {
   if (noSize.length) return { items: [], unknown: [], noSize };
   const marked = sized.map((x) => (x.kcal != null || x.protein != null ? { ...x, source: 'typed', kcal: x.kcal ?? 0, protein: x.protein ?? 0 } : x));
   const out = cleanItems(db ? withUsda(db, cleanItems(marked), { prefer: mine }) : marked);
-  const unknown = out.filter((x, i) => x.source !== 'usda' && marked[i].kcal == null && marked[i].protein == null);
+  // Found: USDA, or his own pack's label (Tue 10/20).
+  const unknown = out.filter((x, i) => x.source !== 'usda' && x.source !== 'label' && marked[i].kcal == null && marked[i].protein == null);
   return { items: out, unknown, noSize: [] };
 }
 const sizeRefusal = (noSize) => `No grams for ${noSize.map((x) => `"${x.name}"`).join(', ')}: packs and counts work only for his foods that have them (the meals tool lists them). Ask him for the grams. Nothing saved.`;
-const itemText = (x) => `${x.name} ${x.portion ? `${x.portion} (${Math.round(x.grams)} g)` : `${Math.round(x.grams)} g`}${x.source === 'usda' ? '' : x.source === 'typed' ? ' (his numbers)' : ' (estimate)'}`;
+const itemText = (x) => `${x.name} ${x.portion ? `${x.portion} (${Math.round(x.grams)} g)` : `${Math.round(x.grams)} g`}${x.source === 'usda' ? '' : x.source === 'label' ? ' (his pack label)' : x.source === 'typed' ? ' (his numbers)' : ' (estimate)'}`;
 
 const momentOf = (s, date, hm) => (hm ? zonedTime(date || s.today, hm, s.tz) : s.now);
 
