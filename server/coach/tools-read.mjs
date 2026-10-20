@@ -9,7 +9,7 @@ import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js'
 import { targetFor } from '../../app/js/lib/targets.js';
 import { confirmedKg, modeOf, isConfirmed } from '../../app/js/lib/progression.js';
 import { currentBodyweight, healthDays, hoursText, weightSeries, withSleepLog } from '../../app/js/lib/health.js';
-import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText } from '../../app/js/lib/holds.js';
+import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds } from '../../app/js/lib/holds.js';
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
@@ -24,7 +24,7 @@ import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUES
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
-import { addMinutesHm, formatTime } from '../../app/js/lib/time.js';
+import { addMinutesHm, formatTime, hmOf } from '../../app/js/lib/time.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 
@@ -109,7 +109,19 @@ function holdLines(s) {
   const st = s.settings().notify;
   const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today) });
   if (!slots.length) return ['Tendon holds today: none planned.'];
+  // How long a round takes, so the coach never guesses (Tue 10/20 it said "3 minutes"): 3 × 30 s, his rest between
+  // holds, and the timer's GET READY before each.
+  const set = s.settings();
+  const getReadyS = set.holds?.getReadyS ?? 15; const restS = set.rest?.holdS ?? 120;
+  const sec = roundSeconds({ getReadyS, restS });
+  const roundLine = `A round of 3 × 30 s takes ${mmss(sec)} on his hold timer: ${getReadyS} s GET READY before each hold, ${mmss(restS)} rest between holds. Say that length, never a guess.`;
+  // A morning round still open after its time: one now, the evening one at its time, not back to back (brief section 4, example 8).
+  const nowHm = hmOf(new Date(s.now), s.tz);
+  const lateMorning = slots.filter((x) => x.slot === 'morning' && !x.done && !x.skipped && x.time && nowHm >= x.time);
+  const evening = slots.find((x) => x.slot === 'evening' && !x.done && x.time && nowHm < x.time);
   const out = [`Tendon holds today: ${slots.map((x) => `${x.label} ${x.slot === 'after' ? 'after the session' : x.slot === 'rest' ? `rest day (${formatHm(x.time)})` : `${x.slot} ${formatHm(x.time)}`}: ${x.skipped ? 'skipped today (his choice)' : `${x.exercise}${x.also?.length ? ` + ${x.also.join(', ')}` : ''}${x.slot === 'rest' && x.holdIndex === 'other' ? ' (his own hold)' : ''}, ${x.done ? 'DONE' : x.ask ? 'not answered yet' : 'open'}`}`).join('; ')}.`];
+  out.push(roundLine);
+  if (lateMorning.length) out.push(`The morning round${lateMorning.length > 1 ? 's' : ''} (${lateMorning.map((x) => x.label).join(', ')}, due ${formatHm(lateMorning[0].time)}) ${lateMorning.length > 1 ? 'are' : 'is'} late: call it late, not "morning". One round now${evening ? `, the evening one at ${formatHm(evening.time)}` : ' and one later'}; not back to back.`);
   // A2: the rest-day question. He answers; the coach never suggests a hold.
   for (const x of slots.filter((y) => y.slot === 'rest' && y.ask)) {
     const area = areas.find((a) => a.id === x.area);

@@ -129,3 +129,10 @@ test('rest-day hold (A2): asked each rest day; gym, his own hold or skip; the la
   // Training days are untouched.
   assert.equal(holdSlots({ areas, dayKind: 'train', dayType: 'push', restChoices: restChoices(days, '2026-10-30') }).find((y) => y.area === 'shoulder').ask, undefined);
 });
+
+test('a round on the hold timer: every hold with its GET READY, rest between holds', async () => {
+  const { roundSeconds, roundLength } = await import('../app/js/lib/holds.js');
+  assert.equal(roundSeconds(), 375, '3 × (15 + 30) + 2 × 120 = 6:15');
+  assert.equal(roundSeconds({ getReadyS: 0 }), 330, 'his count: 3 × 30 s with 2:00 between = 5:30');
+  assert.equal(roundLength(375), 'about 6 min');
+});

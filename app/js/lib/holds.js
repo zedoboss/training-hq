@@ -160,6 +160,13 @@ export function slotHolds(area, slot, dayType) {
   return [];
 }
 
+/**
+ * How long a round takes on the hold timer: every hold with its GET READY, his rest between holds (Tue 10/20: the
+ * coach guessed "3 minutes" for 3 × 30 s with 15 s get-ready and 2:00 rest, about 6:15).
+ */
+export const roundSeconds = ({ holds = 3, seconds = 30, getReadyS = 15, restS = 120 } = {}) => holds * (getReadyS + seconds) + Math.max(0, holds - 1) * restS;
+export const roundLength = (sec) => `about ${Math.max(1, Math.round(sec / 60))} min`;
+
 /** The answers on a rest day (A2): the gym for the rest-day hold, another hold he names, or skip today. */
 export const REST_CHOICES = [['gym', 'Gym, just for this hold'], ['other', 'Another hold'], ['skip', 'Skip today']];
 

@@ -571,3 +571,12 @@ test('supplement_setup: time, with food, servings, rest-day dose; never adds one
   assert.match((await call('supplement_setup', { supplement: 'zinc', time: '09:00' })).text, /isn't on his list/);
   assert.match((await call('supplement_setup', { supplement: 'powder' })).text, /^Nothing to change/);
 });
+
+test('tendons: the coach gets the real length of a round, and a late morning round is called late', async () => {
+  const early = (await call('tendons')).text;
+  assert.match(early, /A round of 3 × 30 s takes 6:15 on his hold timer: 15 s GET READY before each hold, 2:00 rest between holds/);
+  assert.doesNotMatch(early, /is late/, '3:00 AM: the morning round is not due yet');
+  clock = Date.UTC(2026, 0, 20, 17, 27);
+  const late = (await call('tendons')).text;
+  assert.match(late, /The morning round \(Knees, due 7:30 AM\) is late: call it late, not "morning"\. One round now, the evening one at 7:30 PM; not back to back\./);
+});

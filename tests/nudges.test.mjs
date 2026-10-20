@@ -263,3 +263,15 @@ test('the Mac asks for his after-meal supplements the moment the first meal is l
     assert.equal(sent.filter((m) => m.tag === 'supps-after-meal').length, 1);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('holds an hour past their time say so; a late morning round: one now, the evening one at its time', () => {
+  const reminders = [
+    { id: `holds-morning:${D}`, kind: 'holds', tag: 'holds-morning', at: at(D, '10:30'), due: true, title: 'Morning holds', body: 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.' },
+    { id: `holds-evening:${D}`, kind: 'holds', tag: 'holds-evening', at: at(D, '21:30'), due: true, title: 'Evening holds', body: 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.' },
+  ];
+  const text = (now) => nudgeCandidates({ now, tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' }).find((c) => c.key === 'holds:holds-morning')?.text;
+  assert.equal(text(at(D, '11:00')), 'Morning holds. Knees: Wall Hold. 3 × 30 s each, about 6 min a round.', 'within the hour: as before');
+  assert.equal(text(at(D, '17:27')), 'Morning holds still not done (due 10:30 AM). Knees: Wall Hold. 3 × 30 s each, about 6 min a round. One round now, the evening one at 9:30 PM. Not back to back.');
+  const both = nudgeCandidates({ now: at(D, '23:00'), tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' }).map((c) => c.text);
+  assert.ok(both.includes('Morning holds still not done (due 10:30 AM). Knees: Wall Hold. 3 × 30 s each, about 6 min a round.'), 'evening time passed: no "evening one at"');
+});

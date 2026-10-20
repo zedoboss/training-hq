@@ -25,7 +25,7 @@ test('training day with a time: check-in 30 minutes before, session at its time,
   assert.equal(k.session.title, 'Legs at 4:30 AM');
   assert.equal(k.session.body, 'Tuesday 1/20. Week 3 column. Check-in still open.');
   assert.equal(k['holds-evening'].at, at('2026-01-20', '19:30'));
-  assert.equal(k['holds-evening'].body, 'Knees: Wall Hold. 3 × 30 s each.');
+  assert.equal(k['holds-evening'].body, 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.');
   // Legs not done by the evening: it is still next tomorrow (decision 15), with no time set yet.
   assert.equal(k.evening.body, 'Still open: knees (Gym Hold), knees (Wall Hold). Tomorrow: Legs. No time set yet.');
   assert.equal(k.evening.at, at('2026-01-20', '20:30'));
@@ -57,7 +57,7 @@ test('rest day: shoulder rest-day hold with the morning knee hold; tomorrow with
   const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, days });
   const k = byKind(items);
   assert.equal(k['holds-morning'].title, 'Rest day holds: what today?');
-  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
   assert.match(k.evening.body, /Tomorrow: Pull at 5:00 AM, check-in at 4:30 AM\.$/);
 });
 
@@ -66,11 +66,11 @@ test('rest day (A2): his answer drives the reminder; a skip drops the shoulder f
   const run = (restHolds) => byKind(remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, days: day(restHolds) }));
   let k = run({ shoulder: { choice: 'gym', at: 1 } });
   assert.equal(k['holds-morning'].title, 'Rest day holds');
-  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Raise Hold. 3 × 30 s each.');
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Raise Hold. 3 × 30 s each, about 6 min a round.');
   k = run({ shoulder: { choice: 'other', holdName: 'Band hold', at: 1 } });
-  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Band hold. 3 × 30 s each.');
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Band hold. 3 × 30 s each, about 6 min a round.');
   k = run({ shoulder: { choice: 'skip', at: 1 } });
-  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each.');
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.');
   assert.doesNotMatch(k.evening.body, /shoulder/);
 });
 
@@ -157,7 +157,7 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   const lunch = items.find((i) => i.id === `meal:${date}:1230`);
   assert.equal(lunch.at, at(date, '13:15'));
   assert.equal(lunch.title, 'Lunch time');
-  assert.equal(lunch.body, '1:15 PM, nothing logged since breakfast. Eaten, cooking, or skipping?');
+  assert.equal(lunch.body, '1:15 PM, nothing logged since your 7:40 AM meal. Eaten, cooking, or skipping?');
   assert.equal(lunch.url, `#/fuel/check/${date}/1230`);
   assert.equal(lunch.due, true);
   assert.equal(items.find((i) => i.id === `meal:${date}:0730`).due, false);

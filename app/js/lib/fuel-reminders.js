@@ -1,7 +1,7 @@
 // Step 6 reminders, planned with the others in reminders.js and sent by the Mac (brief section 6, Notifications):
 // meal times with nothing logged ("Eaten, cooking, or skipping?"), the after photo about 25 minutes after a before
 // photo. Supplements and the sauna add theirs here too.
-import { zonedTime, formatHm, addMinutesHm } from './time.js';
+import { zonedTime, formatHm, addMinutesHm, formatTime } from './time.js';
 import { afterPhotoAt } from './meals.js';
 import { checklist, shortName, statusOn, stockStatus, lastsText } from './supplements.js';
 import { addDays } from './rotation.js';
@@ -37,7 +37,9 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
     out.push({
       id: `meal:${date}:${hmId(slot.time)}`, kind: 'meals', at: zonedTime(date, askHm, tz), url: `#/fuel/check/${date}/${hmId(slot.time)}`,
       tag: `meal-${date}-${hmId(slot.time)}`, fixed: false, title: `${slot.name} time`,
-      body: `${formatHm(askHm)}, nothing logged ${before ? `since ${before.name.toLowerCase()}` : 'yet today'}. Eaten, cooking, or skipping?`,
+      // The last meal by its time, not its name (Tue 10/20: "Lunch time ... nothing logged since lunch", his 2:22 PM
+      // meal had been named Lunch before he set his meal times).
+      body: `${formatHm(askHm)}, nothing logged ${before ? `since your ${formatTime(new Date(before.at), tz)} meal` : 'yet today'}. Eaten, cooking, or skipping?`,
       due: !logged && !check,
     });
     // "Cooking": ask again a little later, until a meal is logged.

@@ -151,8 +151,17 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   for (const r of reminders) {
     const a = AGAIN[r.kind];
     if (!a || !r.due || r.at > now || r.at < now - 16 * 3600000) continue;
+    let title = String(r.title || '').replace(/[.:]?\s*$/, '');
+    let tail = '';
+    // Holds an hour or more past their time say so (Tue 10/20, his words: it said "Morning holds" in the afternoon).
+    // A late morning round: one now, the evening one at its time, not back to back (brief section 4, line 8).
+    if (r.kind === 'holds' && now - r.at >= 60 * 60000) {
+      title = `${title} still not done (due ${formatHm(hmOf(new Date(r.at), tz))})`;
+      const evening = r.id.startsWith('holds-morning:') ? reminders.find((x) => x.id === r.id.replace('holds-morning:', 'holds-evening:')) : null;
+      if (evening?.at > now) tail = ` One round now, the evening one at ${formatHm(hmOf(new Date(evening.at), tz))}. Not back to back.`;
+    }
     out.push({ key: `${a[0]}:${r.tag || r.id}`, priority: a[1], gapMin: a[2], url: r.url || '#/', calm: CALM_KINDS.has(r.kind),
-      text: [String(r.title || '').replace(/[.:]?\s*$/, '.'), r.body].filter(Boolean).join(' ') });
+      text: `${[/[?!]$/.test(title) ? title : `${title}.`, r.body].filter(Boolean).join(' ')}${tail}` });
   }
 
   // Food behind the day's pace (wake up to 2 hours before bed).
