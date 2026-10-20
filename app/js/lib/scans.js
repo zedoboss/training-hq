@@ -61,7 +61,8 @@ export function projectRotation({ last, days = {}, from, n }) {
     const date = addDays(from, i);
     const rot = rotationDay({ last: cur, today: date, days });
     out.push({ date, kind: rot.today.kind, dayType: rot.today.dayType });
-    if (rot.today.kind === 'train') cur = { dayType: rot.today.dayType, date };
+    // A day that trains carries the streak on (three in a row -> the next day rests).
+    if (rot.today.kind === 'train') cur = { dayType: rot.today.dayType, date, streak: cur && daysBetween(cur.date, date) === 1 ? (cur.streak || 1) + 1 : 1 };
   }
   return out;
 }

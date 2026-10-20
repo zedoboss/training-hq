@@ -2,7 +2,9 @@
 // Rules (brief decision 15, section 2): the next day type comes from the last completed session, not the calendar.
 // A rest day he adds (going out, or the readiness check moving the session) doesn't change the last completed
 // session, so the same day type is next afterwards and nothing is made up twice. The rotation's own Rest is the day
-// after Legs. Day records live in the synced collection 'days', one per date: {date, rest, sessionTime, readiness}.
+// after Legs, or (Tue 10/20, his words: "I've worked 3 days in a row and did the full split") after three training
+// days in a row, whichever comes first; the day type carries on where it left off. Day records live in the synced
+// collection 'days', one per date: {date, rest, sessionTime, readiness}.
 import { daysBetween, isoDate, hmOf } from './time.js';
 import { activeBridge } from './history.js';
 
@@ -26,16 +28,25 @@ export function addDays(iso, n) {
 /**
  * Last completed rotation session: finished workouts (Training HQ and imported) with a Pull, Push or Legs day type,
  * else the Hevy bridge. Neck and untyped sessions don't move the rotation.
- * @returns {{dayType:string, date:string, sessionId:string|null}|null}
+ * @returns {{dayType:string, date:string, sessionId:string|null, streak:number}|null}  streak: training days in a row
+ *   up to and including that day
  */
 export function lastRotationSession(sessions, rawBridge = null, tz) {
-  const own = sessions.filter((s) => s.status === 'done' && s.kind !== 'holds' && inRotation(s.dayType))
-    .sort((a, b) => b.startedAt - a.startedAt)[0];
+  const mine = sessions.filter((s) => s.status === 'done' && s.kind !== 'holds' && inRotation(s.dayType)).sort((a, b) => b.startedAt - a.startedAt);
+  const own = mine[0];
   const bridge = activeBridge(rawBridge, sessions)?.lastSessions?.find((s) => inRotation(s.dayType));
   const ownIso = own ? isoDate(new Date(own.startedAt), tz) : null;
-  if (own && (!bridge || ownIso >= bridge.date)) return { dayType: own.dayType, date: ownIso, sessionId: own.id };
-  return bridge ? { dayType: bridge.dayType, date: bridge.date, sessionId: null } : null;
+  if (own && (!bridge || ownIso >= bridge.date)) {
+    const dates = new Set(mine.map((s) => isoDate(new Date(s.startedAt), tz)));
+    let streak = 1;
+    while (dates.has(addDays(ownIso, -streak))) streak++;
+    return { dayType: own.dayType, date: ownIso, sessionId: own.id, streak };
+  }
+  return bridge ? { dayType: bridge.dayType, date: bridge.date, sessionId: null, streak: 1 } : null;
 }
+
+/** The rotation's own rest comes after Legs, or after three training days in a row. */
+export const restAfter = (last) => !!last && (last.dayType === 'legs' || (last.streak || 1) >= 3);
 
 const restOf = (days, date) => days?.[date]?.rest || null;
 
@@ -59,15 +70,15 @@ function firstTrainingDate(days, from) {
 export function rotationDay({ last, today, days = {} }) {
   const after = nextDayType(last?.dayType);
   if (last && last.date === today) {
-    // Trained today. After Legs the next day is the rotation's Rest.
-    const from = addDays(today, last.dayType === 'legs' ? 2 : 1);
+    // Trained today. After Legs, or three days in a row, the next day is the rotation's Rest.
+    const from = addDays(today, restAfter(last) ? 2 : 1);
     return { today: { kind: 'done', dayType: last.dayType, reason: null }, next: { dayType: after, date: firstTrainingDate(days, from) }, last };
   }
   const marked = restOf(days, today);
   if (marked) {
     return { today: { kind: 'rest', dayType: null, reason: marked.reason || 'added' }, next: { dayType: after, date: firstTrainingDate(days, addDays(today, 1)) }, last };
   }
-  if (last?.dayType === 'legs' && daysBetween(last.date, today) === 1) {
+  if (restAfter(last) && daysBetween(last.date, today) === 1) {
     return { today: { kind: 'rest', dayType: null, reason: 'rotation' }, next: { dayType: after, date: firstTrainingDate(days, addDays(today, 1)) }, last };
   }
   return { today: { kind: 'train', dayType: after, reason: null }, next: { dayType: after, date: today }, last };
@@ -85,7 +96,7 @@ export function withRest(doc, date, reason, at = Date.now()) {
 
 /** Plain words for a rest day's reason. */
 export const REST_TEXT = {
-  rotation: 'Rest day in the rotation (the day after Legs)',
+  rotation: 'Rest day in the rotation (after Legs, or three days in a row)',
   added: 'Rest day you added',
   moved: 'Session moved to tomorrow (check-in)',
   'rest-holds': 'Rest and tendon holds (check-in)',

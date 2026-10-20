@@ -61,14 +61,14 @@ test('last rotation session: imported and own sessions count, neck and holds rou
     { id: 'a', kind: 'workout', status: 'active', dayType: 'legs', startedAt: at('2026-10-16') },
     done('s3', null, '2026-10-15'),
   ];
-  assert.deepEqual(lastRotationSession(sessions, null, TZ), { dayType: 'push', date: '2026-10-12', sessionId: 'hevy.1' });
+  assert.deepEqual(lastRotationSession(sessions, null, TZ), { dayType: 'push', date: '2026-10-12', sessionId: 'hevy.1', streak: 1 });
   sessions.push(done('s4', 'legs', '2026-10-17'));
   assert.equal(lastRotationSession(sessions, null, TZ).dayType, 'legs');
 });
 
 test('last rotation session: the Hevy bridge until history is imported, own sessions when newer', () => {
   const bridge = { lastSessions: [{ dayType: 'push', date: '2026-10-12' }, { dayType: 'legs', date: '2026-10-10' }] };
-  assert.deepEqual(lastRotationSession([], bridge, TZ), { dayType: 'push', date: '2026-10-12', sessionId: null });
+  assert.deepEqual(lastRotationSession([], bridge, TZ), { dayType: 'push', date: '2026-10-12', sessionId: null, streak: 1 });
   assert.equal(lastRotationSession([done('s', 'legs', '2026-10-13')], bridge, TZ).dayType, 'legs');
   assert.equal(lastRotationSession([done('s', 'legs', '2026-10-10')], bridge, TZ).dayType, 'push');
 });
@@ -88,4 +88,25 @@ test('session time on a day record, and the usual start time for the picker', as
   const ss = ['03:58', '04:31', '05:20', '04:40', '06:10'].map((hm, i) => ({ id: `s${i}`, status: 'done', kind: 'workout', dayType: 'pull', startedAt: Date.parse(`2026-10-0${i + 1}T${hm}:00+07:00`) }));
   assert.equal(usualStart(ss, TZ), '04:40');
   assert.equal(usualStart([], TZ), null);
+});
+
+test('three training days in a row earn the rest day, whatever the order (Tue 10/20)', async () => {
+  const { lastRotationSession, rotationDay, restAfter } = await import('../app/js/lib/rotation.js');
+  const { projectRotation } = await import('../app/js/lib/scans.js');
+  const at = (iso) => Date.parse(`${iso}T04:00:00+07:00`);
+  const s = (id, dayType, iso) => ({ id, status: 'done', kind: 'workout', dayType, startedAt: at(iso) });
+  // Legs Sunday 10/18, Pull Monday 10/19, Push Tuesday 10/20: a full split in three days.
+  const last = lastRotationSession([s('a', 'legs', '2026-10-18'), s('b', 'pull', '2026-10-19'), s('c', 'push', '2026-10-20')], null, 'Asia/Ho_Chi_Minh');
+  assert.deepEqual([last.dayType, last.date, last.streak], ['push', '2026-10-20', 3]);
+  assert.equal(restAfter(last), true);
+  const tue = rotationDay({ last, today: '2026-10-20' });
+  assert.deepEqual([tue.today.kind, tue.next.dayType, tue.next.date], ['done', 'legs', '2026-10-22'], 'rest tomorrow, Legs on Thursday');
+  assert.deepEqual(rotationDay({ last, today: '2026-10-21' }).today, { kind: 'rest', dayType: null, reason: 'rotation' });
+  assert.deepEqual(rotationDay({ last, today: '2026-10-22' }).today, { kind: 'train', dayType: 'legs', reason: null });
+  // Only two in a row after a gap: no rest yet (Pull Monday after a Sunday off, Push Tuesday -> Legs Wednesday).
+  const two = lastRotationSession([s('a', 'legs', '2026-10-17'), s('b', 'pull', '2026-10-19'), s('c', 'push', '2026-10-20')], null, 'Asia/Ho_Chi_Minh');
+  assert.equal(two.streak, 2);
+  assert.deepEqual(rotationDay({ last: two, today: '2026-10-21' }).today, { kind: 'train', dayType: 'legs', reason: null });
+  // Looking ahead carries the streak: from a Push with two in a row, Legs Wednesday then rest Thursday.
+  assert.deepEqual(projectRotation({ last: two, from: '2026-10-21', n: 3 }).map((d) => `${d.date.slice(5)} ${d.kind}`), ['10-21 train', '10-22 rest', '10-23 train']);
 });
