@@ -182,7 +182,7 @@ test('the coach works the app (Tue 10/20): told to start, it starts; screens; th
   assert.match((await call('workout', { action: 'status' })).text, /^No workout in progress/);
   // Settings.
   assert.match((await call('app_settings')).text, /coach\.model = "fast"/);
-  assert.match((await call('app_settings', { setting: 'coach.model', value: 'deep' })).text, /"fast" to "deep"/);
+  assert.equal((await call('app_settings', { setting: 'coach.model', value: 'deep' })).text, 'Coach model: Sonnet 5.5 (medium) to Opus 5.5 (high). His phone has it on the next sync (seconds).');
   assert.equal(store.getRecord('settings', 'main').data.coach.model, 'deep');
   assert.match((await call('app_settings', { setting: 'rest.mainS', value: '200' })).text, /give one of/);
   assert.match((await call('app_settings', { setting: 'notify.holdsMorning', value: '9:15' })).text, /to "09:15"/);
@@ -207,6 +207,27 @@ test('discarding a workout always needs his yes to that question', async () => {
   assert.match((await inTurn('d3')('workout', { action: 'discard' })).text, /^Discarded Legs/);
   assert.equal(list('sessions').find((x) => x.id === session.id).status, 'discarded');
   assert.equal(list('sets').filter((x) => x.sessionId === session.id).length, 0);
+});
+
+test('one yes to the coach\'s own question is enough (Tue 10/20 on his phone: he had to say yes twice)', async () => {
+  const msg = (turnId, role, text, at) => store.writeLocal('coach-messages', `m-${turnId}-${role}`, { id: `m-${turnId}-${role}`, role, turnId, at, text });
+  const inTurn = (turnId) => (name, args = {}) => TOOLS.find((t) => t.name === name).run(args, { ...ctx(), turnId });
+  msg('y1', 'user', 'start legs', clock);
+  await inTurn('y1')('start_session', { dayType: 'legs' });
+  const session = list('sessions').find((x) => x.status === 'active');
+  // "Discard this workout" -> the coach asked in its own words (no tool) -> "Yes" discards.
+  msg('y2', 'user', 'Discard this workout', clock + 1000); msg('y2', 'assistant', 'Discard the Legs you started? Yes or no?', clock + 2000);
+  msg('y3', 'user', 'Yes', clock + 3000);
+  clock += 4000;
+  assert.match((await inTurn('y3')('workout', { action: 'discard' })).text, /^Discarded Legs/);
+  assert.equal(list('sessions').find((x) => x.id === session.id).status, 'discarded');
+  // A yes to something else does not start a workout: the question must be about starting.
+  msg('y4', 'user', 'did I eat enough', clock + 1000); msg('y4', 'assistant', 'No. Want the numbers?', clock + 2000);
+  msg('y5', 'user', 'yes', clock + 3000); clock += 4000;
+  assert.match((await inTurn('y5')('start_session', { dayType: 'legs' })).text, /^Not started/);
+  msg('y6', 'user', 'at the gym', clock + 1000); msg('y6', 'assistant', 'Start Legs now?', clock + 2000);
+  msg('y7', 'user', 'yeah', clock + 3000); clock += 4000;
+  assert.match((await inTurn('y7')('start_session', { dayType: 'legs' })).text, /^Started Legs/);
 });
 
 test('a session started, sets logged by voice-style numbers, the 30% guard and the rest timer', async () => {

@@ -85,17 +85,19 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     out.why = `You're ahead of the ${src} (${table} kg): stay at your last ${last.kg} kg`;
     return out;
   }
+  // Tue 10/20 on his phone: "Plan: 70 kg" with a 68.8 kg target and no word why. The plates decide: say so.
+  const plates = (wanted) => (out.kg != null && Math.abs(out.kg - wanted) >= 0.05 ? `. With your plates: ${out.kg} kg` : '');
   if (plan.capClass === 'main') {
     out.capKg = capOf(last.kg);
     const capped = Math.min(table, out.capKg);
     out.kg = loadable(capped, { barKg, smallestPlate });
     // His words (Tue 10/20): "it should just say what the cap is and how it got to that cap".
     const r1 = (x) => Math.round(x * 10) / 10;
-    out.why = out.capKg < table ? `Cap ${r1(out.capKg)} kg: last time ${last.kg} kg + 30%. ${plan_} says ${table} kg` : `${plan_}: ${table} kg (under the cap: last ${last.kg} kg + 30%)`;
+    out.why = (out.capKg < table ? `Cap ${r1(out.capKg)} kg: last time ${last.kg} kg + 30%. ${plan_} says ${table} kg` : `${plan_}: ${table} kg (under the cap: last ${last.kg} kg + 30%)`) + plates(capped);
     return out;
   }
   out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
-  out.why = `${plan_}: ${table} kg (light work, no cap)`;
+  out.why = `${plan_}: ${table} kg (light work, no cap)${plates(table)}`;
   return out;
 }
 

@@ -5,7 +5,7 @@
 // rest timer, showing a screen) go to it as actions. Nothing here can bend a fixed rule: the 30% guard warns, the
 // sauna ladder and hard stops are untouched, supplements are only what he says he took.
 import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByName, wrote, refuse, k, formatHm } from './shared.mjs';
-import { offered, saidNow, toldToStart } from './tools-app.mjs';
+import { offered, saidNow, toldToStart, confirmedNow } from './tools-app.mjs';
 import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
 import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId } from '../../app/js/lib/session.js';
@@ -189,7 +189,8 @@ async function startSession(a, ctx) {
   // when his very next message answers the offer (the coach's last reply offered this same session), or (Tue 10/20,
   // "If I say 'Go start a new workout push'...") when he told it to start one in so many words.
   const key = routine?.id || 'empty';
-  if (!toldToStart(saidNow(s, ctx)) && !offeredLastTurn(s, ctx, key)) {
+  // Also a yes to "Start Legs now?" when the coach asked it in its own words.
+  if (!toldToStart(saidNow(s, ctx)) && !offeredLastTurn(s, ctx, key) && !confirmedNow(s, ctx, () => true, { question: /\b(start|begin)\b[^?]*\?/i })) {
     const name = routine ? routine.title : 'an empty session';
     return { text: `Not started. Ask him first, in a few words: "Start ${name} now?" Only a yes in his next message starts it: then call start_session again with the same choice. Talking about training ("about to start squats", "at the gym") is not a yes: hype him up and ask.`, summary: `asked first: ${key}` };
   }

@@ -5,7 +5,7 @@
 // and the phone itself (microphone off, newest version, sync). The data tools (sets, meals, supplements, scans, sauna,
 // check-in, reminders, notes) are in tools-write.mjs; together they cover what his screens do.
 import { snapshot, findByName, wrote, refuse, plural } from './shared.mjs';
-import { activeText } from './tools-read.mjs';
+import { activeText, currentExercise } from './tools-read.mjs';
 import { SCREENS, SCREEN_IDS, screenById } from '../../app/js/lib/screens.js';
 import { summarize, elapsedMs } from '../../app/js/lib/session.js';
 import { REST_CHOICES, SOUNDS } from '../../app/js/lib/settings.js';
@@ -38,6 +38,23 @@ export function offered(s, ctx, tool, key) {
   return (last.tools || []).some((t) => t.name === tool && t.summary === `asked first: ${key}`);
 }
 
+const YES = /^\s*(yes|yeah|yep|yup|ya|sure|ok|okay|do it|go|go ahead|confirm|confirmed|correct|right|y)\b/i;
+/**
+ * He answered yes to a question the coach asked in its own words (Tue 10/20 on his phone: "Discard this workout" ->
+ * the coach asked "Yes or no?" without the tool -> "Yes" was refused and he had to say it twice). Counts when his
+ * message now is a yes, the coach's reply before it (within 30 minutes) asked a question, and his message before
+ * that told it to do this (`told`).
+ */
+export function confirmedNow(s, ctx, told, { question = /\?/ } = {}) {
+  if (!ctx.turnId || !YES.test(saidNow(s, ctx))) return false;
+  const before = s.list('coach-messages').filter((m) => m.turnId !== ctx.turnId && m.role !== 'marker').sort((x, y) => x.at - y.at);
+  const reply = before.at(-1); const asked = before.at(-2);
+  return reply?.role === 'assistant' && s.now - reply.at <= OFFER_MS && /\?/.test(reply.text || '') && question.test(reply.text || '') && asked?.role === 'user' && told(asked.text || '');
+}
+const DISCARD = new RegExp(`${LEAD}(?:discard|delete|scrap|cancel|bin|throw away|get rid of|trash)\\b[^.?!]{0,30}?\\b(?:workout|session|training|it|this|that)\\b`, 'i');
+/** He told the coach to discard the workout. */
+export const toldToDiscard = (text) => DISCARD.test(String(text || ''));
+
 // ---- open a screen ---------------------------------------------------------------------------------------------
 
 async function openScreen(a, ctx) {
@@ -49,6 +66,8 @@ async function openScreen(a, ctx) {
     const active = s.active();
     if (!active) return refuse('No workout in progress. Start one with start_session (ask him first unless he told you to start it).');
     url = `${sc.hash}${active.id}`; what = `${sc.label}: ${active.title}`;
+    const cur = sc.id === 'session' ? currentExercise(active, s.setsOf(active.id)) : null;
+    if (cur) ctx.action({ kind: 'focus', sessionId: active.id, exKey: cur.key });
   } else if (sc.needs === 'exercise' || sc.needs === 'routine' || sc.needs === 'supplement') {
     if (!a.name) return refuse(`Which ${sc.needs}?`);
     const items = sc.needs === 'exercise' ? [...s.lib().values()] : sc.needs === 'routine' ? s.list('routines') : s.list('supplements').filter((x) => !x.removedAt);
@@ -84,7 +103,7 @@ async function workout(a, ctx) {
   if (a.action === 'finish') {
     // Unticked sets are dropped when a workout is saved (as on the phone's Finish screen): ask, unless he told you to.
     const key = `finish:${active.id}`;
-    if (!toldToFinish(saidNow(s, ctx)) && !offered(s, ctx, 'workout', key)) {
+    if (!toldToFinish(saidNow(s, ctx)) && !offered(s, ctx, 'workout', key) && !confirmedNow(s, ctx, toldToFinish)) {
       return { text: `Not finished. Ask him first, in a few words: "Finish ${active.title} now? ${ticked.length} of ${sets.length} sets ticked${sets.length > ticked.length ? '; the unticked ones are dropped' : ''}." Only a yes in his next message finishes it: then call workout finish again.`, summary: `asked first: ${key}` };
     }
     const pausedMs = (active.pausedMs || 0) + (active.pausedAt ? s.now - active.pausedAt : 0);
@@ -101,7 +120,7 @@ async function workout(a, ctx) {
   if (a.action === 'discard') {
     // Deletes every set logged in it: always his yes to this exact question first.
     const key = `discard:${active.id}`;
-    if (!offered(s, ctx, 'workout', key)) {
+    if (!offered(s, ctx, 'workout', key) && !confirmedNow(s, ctx, toldToDiscard)) {
       return { text: `Not discarded. Ask him first: "Discard ${active.title}? ${plural(ticked.length, 'logged set')} will be deleted." Only a yes in his next message discards it: then call workout discard again.`, summary: `asked first: ${key}` };
     }
     save({ ...active, status: 'discarded', endedAt: s.now }, sets.map((x) => ({ col: 'sets', id: x.id, data: null, deleted: true })));
@@ -156,6 +175,8 @@ export const SETTINGS = [
   ['notify.recoveryHm', 'hm', null, 'Recovery reminder time'],
   ...KINDS.map((k) => [`notify.kinds.${k}`, 'bool', null, `Notifications for ${k}`]),
 ];
+/** Say the models as he knows them (Tue 10/20: the coach said "deep"). */
+const MODEL_WORDS = { fast: 'Sonnet 5.5 (medium)', deep: 'Opus 5.5 (high)' };
 const SETTING = new Map(SETTINGS.map(([path, kind, choices, label]) => [path, { path, kind, choices, label }]));
 
 /** His value as the setting needs it, or an error text. */
@@ -201,9 +222,11 @@ async function appSettings(a, ctx) {
   const p = parseSetting(def, a.value);
   if (p.error) return refuse(`${def.label}: give ${p.error}.`);
   const before = getPath(s.settings(), def.path);
-  if (before === p.value) return { text: `${def.label} is already ${JSON.stringify(p.value)}.`, summary: 'no change' };
+  const say = (v) => (/model$|Model$/.test(def.path) ? MODEL_WORDS[v] || v : JSON.stringify(v));
+  const name = def.label.replace(/\s*[(:].*$/, '');
+  if (before === p.value) return { text: `${name} is already ${say(p.value)}.`, summary: 'no change' };
   s.store.writeLocal('settings', 'main', { ...setPath(s.one('settings', 'main') || {}, def.path, p.value), id: 'main' });
-  return wrote(`${def.label}: ${JSON.stringify(before)} to ${JSON.stringify(p.value)}. His phone has it on the next sync (seconds).`, `${def.path} = ${JSON.stringify(p.value)}`);
+  return wrote(`${name}: ${say(before)} to ${say(p.value)}. His phone has it on the next sync (seconds).`, `${def.path} = ${JSON.stringify(p.value)}`);
 }
 
 // ---- the phone itself --------------------------------------------------------------------------------------------

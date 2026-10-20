@@ -228,7 +228,7 @@ export function render(view, params = []) {
     const frac = of > 0 ? Math.min(1, Math.max(0, 1 - big / of)) : 0;
     fullEl.className = `timer-full ${v.ready ? 'is-ready' : v.reached ? 'is-done' : 'is-holding'}`;
     fullEl.querySelector('.tf-name').textContent = `${ex?.name || ''}${no ? ` · set ${no}` : ''}`;
-    fullEl.querySelector('.tf-phase').textContent = v.ready ? 'GET READY' : v.reached ? 'DONE' : s?.type === 'hold' ? 'HOLD' : 'GO';
+    fullEl.querySelector('.tf-phase').textContent = v.ready ? 'GET READY' : v.reached ? 'DONE' : s && holdLike(s, ex) ? 'HOLD' : 'GO';
     fullEl.querySelector('.tf-digits').textContent = mmssBig(big);
     fullEl.querySelector('.tf-bar i').style.width = `${(frac * 100).toFixed(1)}%`;
     const stop = fullEl.querySelector('.tf-stop');
@@ -268,6 +268,8 @@ export function render(view, params = []) {
     }
     return null;
   };
+  // A hold set, or any set of a "... Hold" exercise (Tue 10/20: Bench Press Hold (Smith Machine) started with no GET READY).
+  const holdLike = (s, ex) => s.type === 'hold' || /\bhold\b/i.test(ex?.name || '');
   const isTimed = (ex, s) => s.type === 'hold' || setFields(ex.type, s.type).includes('durationS');
   /** Worked out and fetched while he rests, so it plays the moment the rest ends. */
   const planNext = (ex) => {
@@ -379,7 +381,7 @@ export function render(view, params = []) {
       const now = Date.now();
       const targetS = s.durationS ?? prev?.durationS ?? 30;
       // A14: a hold starts with GET READY, then 3, 2, 1; A15: the coach paces it (else sounds mark the same points).
-      const getReadyS = s.type === 'hold' ? prefs().holds.getReadyS ?? 15 : 0;
+      const getReadyS = holdLike(s, ex) ? prefs().holds.getReadyS ?? 15 : 0;
       setTimer = { setId: s.id, startedAt: now, targetS, cued: false, readyUntil: getReadyS ? now + getReadyS * 1000 : 0 };
       storeSetTimer(setTimer);
       const script = holdScript({ getReadyS, holdS: targetS, bank: ctx.bank, ...talk.talkPrefs(), calm: ctx.calm || talk.isCalm(), avoid: new Set(talk.recentLines()) });
