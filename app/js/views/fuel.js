@@ -12,6 +12,7 @@ import { isoDate, formatDay, formatTime, daysBetween, timeAt } from '../lib/time
 import { addDays } from '../lib/rotation.js';
 import { dayTotals, mealTotals, mealState, STATE_SHORT } from '../lib/meals.js';
 import { logMealFromFile, logMealManual, cameraInput } from './meal.js';
+import { photoTime } from '../lib/photos.js';
 import { dayKindOn } from './supps.js';
 import { checklist } from '../lib/supplements.js';
 import { toast } from '../ui/toast.js';
@@ -120,7 +121,7 @@ export function render(view, params) {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    try { location.hash = `#/meal/${await logMealFromFile(f)}`; } catch { toast('That photo could not be read.'); }
+    try { location.hash = `#/meal/${await logMealFromFile(f, { at: await photoTime(f) })}`; } catch { toast('That photo could not be read.'); }
   });
 
   const draw = async () => {

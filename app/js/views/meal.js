@@ -3,7 +3,7 @@
 // go to the Mac with the next sync; the Mac reads them (6.2) and its estimate comes back by sync.
 import { ready, syncNow } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
-import { fileToJpeg, newPhotoId } from '../lib/photos.js';
+import { fileToJpeg, newPhotoId, photoTime } from '../lib/photos.js';
 import { newId } from '../lib/routines.js';
 import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
@@ -46,10 +46,12 @@ export async function logMealManual({ at = Date.now() } = {}) {
 }
 
 /**
- * The camera input. It lives outside the part of the screen that redraws (labels point at it with for=), so a sync
- * or an estimate arriving while the camera is open can't swap it out from under the photo.
+ * The photo input. It lives outside the part of the screen that redraws (labels point at it with for=), so a sync
+ * or an estimate arriving while the camera is open can't swap it out from under the photo. No `capture` (Tue 10/20,
+ * his words: "it only gives me permission to take a new photo, I cannot attach one"): iPhone offers Photo Library,
+ * Take Photo or Choose File. A photo from the library keeps the time it was taken (photoTime).
  */
-export const cameraInput = (id) => `<input type="file" accept="image/*" capture="environment" hidden id="${id}">`;
+export const cameraInput = (id) => `<input type="file" accept="image/*" hidden id="${id}">`;
 
 /** His own foods (fuel plan): suggested first, named his way (USDA ones and label ones such as collagen). */
 async function myFoodsList() {
@@ -218,7 +220,7 @@ export function render(view, [id]) {
     if (!f || !repo) return;
     try {
       const meal = await repo.get('meals', id);
-      const pid = newPhotoId(); const at = Date.now();
+      const pid = newPhotoId(); const at = await photoTime(f);
       await repo.put('meal-photos', pid, { id: pid, mealId: id, kind, dataUrl: await fileToJpeg(f), at });
       const old = meal[kind]?.photoId;
       await repo.put('meals', id, { ...meal, ...(kind === 'before' ? { before: { photoId: pid, at, scaleG: null, items: null, confirmedAt: null }, source: 'photo' } : { after: { photoId: pid, at, scaleG: null, leftovers: null, none: false, confirmedAt: null } }) });
