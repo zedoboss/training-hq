@@ -22,9 +22,10 @@ export const KINDS = [
   ['meals', 'Meal times with nothing logged; the after photo'],
   ['supps', 'Supplements at their times, asked again until answered; running low; weekly planning'],
   ['sauna', 'Sauna: planned days, the overdue alarm backup, the question 15 minutes after'],
-  ['scan', 'Body scan: two evenings before (no alcohol), the evening before with the preparation list, at your session time on the day'],
+  ['scan', 'Body scan: on the day (every training day), or the evenings before when it is every 4 weeks'],
   ['coach', 'Reminders you asked the coach for'],
   ['recovery', 'Recovery: the weekly check-in until the checkup, things to do, photos every few weeks'],
+  ['dishes', 'The dishes: 2 minutes after you log a meal, get up and wash up'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };

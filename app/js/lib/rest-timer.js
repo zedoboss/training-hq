@@ -18,10 +18,10 @@ let state = load();
 const sounds = () => withDefaults(getState().settings).sounds;
 
 /** Plain beeps for the hold timer, at the timer volume. */
-export const beep = (times = 3) => play(`beeps-${Math.min(9, Math.max(1, times))}`, sounds().timerVolume);
+export const beep = (times = 3) => play(`beeps-${Math.min(9, Math.max(1, times))}`, sounds().timerVolume, { alarm: true });
 
-/** The rest-end sound chosen in Settings. */
-export const ring = () => play(sounds().restEnd, sounds().timerVolume);
+/** The rest-end sound chosen in Settings (always: with or without the coach listening, also on silent). */
+export const ring = () => play(sounds().restEnd, sounds().timerVolume, { alarm: true });
 
 const emit = () => { for (const fn of listeners) fn(status()); };
 

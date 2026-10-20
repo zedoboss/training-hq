@@ -6,7 +6,7 @@
 import { voiceSpeech } from './data.js';
 import { audioContext } from './voice-mic.js';
 import { pcm16ToFloat } from './wav.js';
-import { play } from './sounds.js';
+import { play, loudFor } from './sounds.js';
 import { getState } from './store.js';
 import { withDefaults } from './settings.js';
 import { scriptTexts } from './coach-talk.js';
@@ -94,6 +94,8 @@ function stopVoice() {
 }
 
 function playBuffer(run, buf) {
+  // Tue 10/20: with the microphone off, the silent switch muted the coach during his sets.
+  loudFor(buf.duration);
   const ctx = audioContext();
   const src = ctx.createBufferSource();
   src.buffer = buf; src.connect(ctx.destination);
@@ -132,7 +134,9 @@ export function run(script, { t0 = Date.now(), onCue = null } = {}) {
         playBuffer(r, buf);
         recent.add(cue.text);
         if (recent.size > 40) recent.delete(recent.values().next().value);
-      } else if (cue.sound) play(cue.sound, vol());
+      } else if (cue.sound) play(cue.sound, vol(), { alarm: true });
+      // What the coach says shows on screen too (the caption), voice or not: counts excepted.
+      if (cue.text && cue.kind !== 'count' && talkOn()) window.dispatchEvent(new CustomEvent('thq:coach-say', { detail: { text: cue.text } }));
       const how = voice ? 'voice' : cue.sound ? 'sound' : 'none';
       fired.push({ kind: cue.kind, how, text: cue.text || '', at: Date.now(), perf: performance.now(), durMs: voice ? Math.round(buf.duration * 1000) : 0 });
       if (fired.length > 60) fired.shift();

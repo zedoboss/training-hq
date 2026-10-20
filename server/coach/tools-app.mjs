@@ -117,7 +117,7 @@ async function workout(a, ctx) {
 // ---- settings ----------------------------------------------------------------------------------------------------
 
 const MOODS = ['commander', 'hype', 'dark', 'warrior', 'rival'];
-const KINDS = ['readiness', 'session', 'holds', 'supps', 'meals', 'sauna', 'scan', 'recovery', 'coach', 'neck', 'evening'];
+const KINDS = ['readiness', 'session', 'holds', 'supps', 'meals', 'sauna', 'scan', 'recovery', 'coach', 'neck', 'evening', 'dishes'];
 /** What the coach may change, as on the Settings screen: [path, kind, choices or [min, max], what it is]. */
 export const SETTINGS = [
   ['coach.model', 'enum', ['fast', 'deep'], 'Coach model: fast = Sonnet 5.5 medium, deep = Opus 5.5 high (also one tap on Today)'],

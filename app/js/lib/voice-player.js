@@ -1,6 +1,7 @@
 // The coach's voice on the phone (9.6): sentences go to the Mac one by one (the next is fetched while the current one
 // plays), and the audio is played as it streams in. stop() cuts it off at once (barge-in, a tap, leaving the screen).
 import { pcm16ToFloat } from './wav.js';
+import { loudFor } from './sounds.js';
 
 const RATE = 24000;
 /** A sentence whose audio stops coming (the phone changed network, the Mac or ElevenLabs stalled) is dropped after
@@ -70,6 +71,7 @@ export function createPlayer({ context, fetchSpeech, onState = () => {}, stallMs
           buf.copyToChannel(samples, 0);
           const src = ctx.createBufferSource();
           src.buffer = buf; src.connect(ctx.destination);
+          loudFor(buf.duration + 0.5);
           const at = Math.max(endAt, ctx.currentTime + 0.04);
           src.start(at);
           endAt = at + buf.duration;

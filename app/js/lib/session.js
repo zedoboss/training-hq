@@ -247,13 +247,24 @@ export const RPE = [[10, 'nothing left'], [9.5, 'maybe 1 more'], [9, '1 more'], 
  * A14: a hold set starts with GET READY until `readyUntil`; its seconds count from there.
  * @returns {{elapsedS:number, targetS:number, reached:boolean, ready:boolean, text:string}}
  */
+// Tue 10/20, his hold at the gym: "it went past 30, it kept on going and going". A set with a target counts DOWN to 0
+// (leftS) and ends there; one without a target counts up. readyS: GET READY seconds left.
 export function setTimerView({ startedAt, targetS, readyUntil = 0 }, now = Date.now()) {
   const mmss = (x) => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`;
-  if (readyUntil && now < readyUntil) return { elapsedS: 0, targetS, reached: false, ready: true, text: `GET READY ${Math.ceil((readyUntil - now) / 1000)}` };
+  if (readyUntil && now < readyUntil) {
+    const readyS = Math.ceil((readyUntil - now) / 1000);
+    return { elapsedS: 0, targetS, leftS: targetS > 0 ? targetS : null, readyS, reached: false, ready: true, text: `GET READY ${readyS}` };
+  }
   const elapsedS = Math.max(0, Math.floor((now - Math.max(startedAt, readyUntil || 0)) / 1000));
   const reached = targetS > 0 && elapsedS >= targetS;
-  return { elapsedS, targetS, reached, ready: false, text: targetS > 0 ? `${mmss(elapsedS)} / ${mmss(targetS)}` : mmss(elapsedS) };
+  const leftS = targetS > 0 ? Math.max(0, Math.ceil(targetS - (now - Math.max(startedAt, readyUntil || 0)) / 1000)) : null;
+  return { elapsedS, targetS, leftS, readyS: 0, reached, ready: false, text: targetS > 0 ? `${mmss(leftS)} left` : mmss(elapsedS) };
 }
 
-/** Seconds to fill when a set timer is stopped: at least 1, counted from the end of GET READY; null during it. */
-export const setTimerResult = ({ startedAt, readyUntil = 0 }, now = Date.now()) => (readyUntil && now < readyUntil ? null : Math.max(1, Math.round((now - Math.max(startedAt, readyUntil || 0)) / 1000)));
+/** Seconds to fill when a set timer is stopped: at least 1, counted from the end of GET READY, at most the target
+ *  (it ends at 0); null during GET READY. */
+export function setTimerResult({ startedAt, targetS = 0, readyUntil = 0 }, now = Date.now()) {
+  if (readyUntil && now < readyUntil) return null;
+  const s = Math.max(1, Math.round((now - Math.max(startedAt, readyUntil || 0)) / 1000));
+  return targetS > 0 ? Math.min(targetS, s) : s;
+}

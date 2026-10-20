@@ -203,15 +203,54 @@ export function render(view, params = []) {
     return `<div class="set-timer"><button class="btn-ghost small" data-a="timer-start" type="button">Start ${target} s</button></div>`;
   };
 
-  /** Live update of the running set timer; beeps once when the target is reached. */
+  // Tue 10/20, his words: "when I click on start it should open a full screen... nothing else visible... in big font
+  // so I can see the numbers counting down". The running set timer covers the screen: GET READY, then the hold
+  // counting down to 0 in big numbers; at 0 it beeps, says DONE and the set is saved with its target time.
+  let fullEl = null;
+  const mmssBig = (x) => (x >= 60 ? `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}` : String(x));
+  const fullScreen = () => {
+    if (!setTimer) { fullEl?.remove(); fullEl = null; document.body.classList.remove('timer-open'); return; }
+    const s = sets.find((x) => x.id === setTimer.setId);
+    const ex = s && session.exercises.find((e) => e.key === s.exKey);
+    if (!fullEl) {
+      fullEl = document.createElement('div');
+      fullEl.setAttribute('role', 'dialog');
+      fullEl.setAttribute('aria-label', 'Set timer');
+      fullEl.innerHTML = '<div class="tf-name"></div><div class="tf-phase"></div><div class="tf-digits"></div><div class="tf-bar"><i></i></div><button class="btn-primary big tf-stop" type="button"></button>';
+      fullEl.querySelector('.tf-stop').addEventListener('click', () => { if (setTimer) onSetAction(setTimer.setId, 'timer-stop'); });
+      document.body.append(fullEl);
+      document.body.classList.add('timer-open');
+    }
+    const v = setTimerView(setTimer);
+    const no = s ? exSets(s.exKey).indexOf(s) + 1 : 0;
+    const big = v.ready ? v.readyS : v.leftS ?? v.elapsedS;
+    const of = v.ready ? (setTimer.readyUntil - setTimer.startedAt) / 1000 : setTimer.targetS;
+    const frac = of > 0 ? Math.min(1, Math.max(0, 1 - big / of)) : 0;
+    fullEl.className = `timer-full ${v.ready ? 'is-ready' : v.reached ? 'is-done' : 'is-holding'}`;
+    fullEl.querySelector('.tf-name').textContent = `${ex?.name || ''}${no ? ` · set ${no}` : ''}`;
+    fullEl.querySelector('.tf-phase').textContent = v.ready ? 'GET READY' : v.reached ? 'DONE' : s?.type === 'hold' ? 'HOLD' : 'GO';
+    fullEl.querySelector('.tf-digits').textContent = mmssBig(big);
+    fullEl.querySelector('.tf-bar i').style.width = `${(frac * 100).toFixed(1)}%`;
+    const stop = fullEl.querySelector('.tf-stop');
+    stop.textContent = v.ready ? 'Not yet' : 'Stop';
+    stop.hidden = v.reached;
+  };
+
+  /** Live update of the running set timer; at the target it beeps and the set is saved (it ends at 0). */
   const runSetTimer = () => {
     clearInterval(setTimerTick);
     setQuiet('set-timer', !!setTimer && !setTimer.cued);
+    fullScreen();
     if (!setTimer) return;
     setTimerTick = setInterval(() => {
-      if (!setTimer) { clearInterval(setTimerTick); setQuiet('set-timer', false); return; }
+      if (!setTimer) { clearInterval(setTimerTick); setQuiet('set-timer', false); fullScreen(); return; }
       const v = setTimerView(setTimer);
-      if (v.reached && !setTimer.cued) { setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); if (scriptFor !== setTimer.setId) rest.beep(3); setQuiet('set-timer', false); }
+      if (v.reached && !setTimer.cued) {
+        setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); rest.beep(3); setQuiet('set-timer', false);
+        const id = setTimer.setId;
+        setTimeout(() => { if (setTimer?.setId === id) onSetAction(id, 'timer-stop'); }, 1500);
+      }
+      fullScreen();
       const el = view.querySelector(`[data-set="${CSS.escape(setTimer.setId)}"] [data-timer]`);
       if (el) { el.textContent = v.text; el.classList.toggle('c-green', v.reached); el.classList.toggle('c-amber', v.ready); el.classList.toggle('c-cyan', !v.reached && !v.ready); }
     }, 250);
@@ -304,7 +343,7 @@ export function render(view, params = []) {
         <button class="icon-mini" data-a="ex-more" type="button" aria-label="Exercise options">···</button></span></div>
       ${pinned ? `<div class="pinned small">${esc(pinned)}</div>` : ''}
       ${ex.notes ? `<div class="hint">${esc(ex.notes)}</div>` : ''}
-      ${t && (t.kg != null || t.reps) ? `<div class="target">TARGET ${t.bodyweight ? 'BW' : t.added ? `+${showKg(ex, t.kg)} ${unit}` : t.kg != null ? `${t.approx ? '~' : ''}${showKg(ex, t.kg)} ${unit}` : ''}${t.reps ? ` · ${rangeText(t.reps)}` : ''}${t.sets ? ` · ${t.sets} SET${t.sets > 1 ? 'S' : ''}` : ''}${t.why ? ` <span class="c-muted">(${esc(t.why.toUpperCase())}${unit !== 'KG' && /\d/.test(t.why) ? ', IN KG' : ''})</span>` : ''}${t.gated ? ' <span class="c-amber">· ONLY IF FORM IS CONSISTENT ON VIDEO</span>' : ''}</div>` : ''}
+      ${t && (t.kg != null || t.reps) ? `<div class="target">TARGET ${t.bodyweight ? 'BW' : t.added ? `+${showKg(ex, t.kg)} ${unit}` : t.kg != null ? `${t.approx ? '~' : ''}${showKg(ex, t.kg)} ${unit}` : ''}${t.reps ? ` · ${rangeText(t.reps)}` : ''}${t.sets ? ` · ${t.sets} SET${t.sets > 1 ? 'S' : ''}` : ''}${t.gated ? ' <span class="c-amber">· ONLY IF FORM IS CONSISTENT ON VIDEO</span>' : ''}</div>${t.why ? `<div class="target-why">${esc(t.why)}${unit !== 'KG' && /\d/.test(t.why) ? ' (in kg)' : ''}.</div>` : ''}` : ''}
       <div class="set-row set-headrow"><span>SET</span><span>PREVIOUS</span><span>${fields.includes('kg') ? unit : fields.includes('distanceM') ? distUnit().toUpperCase() : ''}</span><span>${fields.includes('reps') ? 'REPS' : fields.includes('durationS') ? 'SEC' : ''}</span><span></span></div>
       ${all.map((s) => setRow(ex, s, all)).join('')}
       <div class="s-ex-foot"><span class="hud c-muted">${per != null ? `${fmtKg(ex.barKg)} BAR + ${fmtKg(per)} KG / SIDE` : ''}</span>
@@ -352,7 +391,7 @@ export function render(view, params = []) {
     }
     if (action === 'timer-stop' || (action === 'tick' && setTimer?.setId === s.id)) {
       const secs = setTimerResult(setTimer);
-      setTimer = null; storeSetTimer(null); clearInterval(setTimerTick); setQuiet('set-timer', false);
+      setTimer = null; storeSetTimer(null); clearInterval(setTimerTick); setQuiet('set-timer', false); fullScreen();
       talkRun?.stop(); scriptFor = null;
       // Stopped during GET READY: nothing was held, nothing is filled.
       if (secs == null) { redrawCard(ex.key); return; }
@@ -519,7 +558,8 @@ export function render(view, params = []) {
       <div class="btn-row three"><button class="btn-ghost" id="s-add" type="button">+ Exercise</button></div>
       <section class="rest-bar" id="rest" hidden aria-label="Rest timer">
         <div class="rest-track"><div class="rest-fill" data-k="fill"></div></div>
-        <div class="rest-row"><div class="rest-time"><span class="hud c-muted" data-k="rlabel">REST</span><b data-k="rleft">0:00</b></div>
+        <span class="hud c-muted rest-label" data-k="rlabel">REST</span>
+        <div class="rest-row"><div class="rest-time"><b data-k="rleft">0:00</b></div>
           <button class="btn-ghost small" data-r="-15" type="button">-15</button><button class="btn-ghost small" data-r="15" type="button">+15</button>
           <button class="btn-primary small" data-r="skip" type="button">Skip</button></div>
       </section>`;
@@ -588,7 +628,8 @@ export function render(view, params = []) {
     bar.hidden = !st;
     if (!st) return;
     bar.querySelector('[data-k="rleft"]').textContent = mmss(st.leftMs);
-    bar.querySelector('[data-k="rlabel"]').textContent = st.label === 'Countdown' ? 'COUNTDOWN' : `REST · ${st.label.toUpperCase().slice(0, 24)}`;
+    // The whole name on its own line (Tue 10/20: "REST · BENCH PRESS (SMITH MACHI" was cut at 24 letters).
+    bar.querySelector('[data-k="rlabel"]').textContent = st.label === 'Countdown' ? 'COUNTDOWN' : `REST · ${st.label.toUpperCase()}`;
     bar.querySelector('[data-k="fill"]').style.width = `${Math.min(100, st.fraction * 100)}%`;
   };
 
@@ -647,6 +688,7 @@ export function render(view, params = []) {
   return () => {
     window.removeEventListener('thq:coach-focus', onFocus);
     clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo(); offTalk();
+    fullEl?.remove(); fullEl = null; document.body.classList.remove('timer-open');
     talk.stop(); talk.setMuted(false);
     document.removeEventListener('visibilitychange', onVis);
     wakeLock?.release?.().catch(() => {});

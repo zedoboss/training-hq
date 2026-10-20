@@ -8,7 +8,8 @@ import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT } from '../app/js/lib/nudges.js';
+import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor } from '../app/js/lib/scans.js';
 import { zonedTime } from '../app/js/lib/time.js';
 
@@ -108,6 +109,10 @@ export function nudgeInputs(store, now, tz) {
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
         || list('body-scans').some((x) => x.date === date && isDone(x)),
       sleepLogged: Boolean(health?.sleep || one('sleep-log', date)),
+      wokeAt: one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
+      workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && isoDate(new Date(x.endedAt), tz) === date).map((x) => x.endedAt)) || null,
+      lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === date && m.at).map((m) => m.at)) || null,
+      morning: n.morning || null,
       eaten: { kcal: eaten.kcal, protein: eaten.protein },
       targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
       steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,
@@ -119,6 +124,43 @@ export function nudgeInputs(store, now, tz) {
       })(),
     },
   };
+}
+
+const DISHES = 'dishes:state';
+
+/**
+ * The dishes after a meal (Tue 10/20): 2 minutes after he logs one, the coach tells him to get up, walk a minute or
+ * two and wash up. Not while a workout or sauna runs (it waits), not outside his waking hours, off with the 'dishes'
+ * notification kind. The first run only notes the meals already there.
+ */
+export async function dishesTick({ store, push, log = () => {}, now, tz }) {
+  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  const date = isoDate(new Date(now), tz);
+  const meals = list('meals').filter((m) => m.date === date);
+  const st = store.getMeta(DISHES);
+  const state = st || { seen: {}, sent: {} };
+  for (const m of meals) {
+    if (!state.seen[m.id]) state.seen[m.id] = now;
+    if (!st) state.sent[m.id] = now; // first run: nothing from before
+  }
+  for (const [id, at] of Object.entries(state.seen)) if (now - at > 2 * 86400000) { delete state.seen[id]; delete state.sent[id]; }
+  const busy = list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active');
+  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now });
+  let out = null;
+  if (due.length) {
+    for (const m of due) state.sent[m.id] = now;
+    const opts = voiceOpts(store);
+    const line = pickLine(opts.bank, 'dishes', { moods: opts.moods, intensity: opts.intensity });
+    const body = `${DISHES_TEXT}${line?.text ? ` ${line.text}` : ''}`;
+    const r = push.list().length ? await push.notify({ title: 'Coach', body, url: '#/fuel', tag: 'dishes' }) : { sent: 0 };
+    sayInTalk(store, { text: body, at: now, tz, kind: 'nudge', ref: `dishes:${due.at(-1).id}` });
+    store.setMeta(LAST, now);
+    log(`dishes after ${due.map((m) => m.name || m.id).join(', ')} (${r.sent} sent)`);
+    out = { key: 'dishes', body };
+  }
+  store.setMeta(DISHES, state);
+  return out;
 }
 
 /** One nudge if it's time and something is open: pushed and written into Talk. Returns what was sent, or null. */
@@ -168,8 +210,9 @@ export function startNotifier({ store, push, log = () => {}, tz = () => phoneZon
         store.setMeta(SENT, sent);
         store.setMeta(LAST, t);
       }
+      const dishes = await dishesTick({ store, push, log, now: t, tz: zone });
       const nudge = await nudgeTick({ store, push, log, now: t, tz: zone });
-      return nudge ? [...items, nudge] : items;
+      return [...items, ...(dishes ? [dishes] : []), ...(nudge ? [nudge] : [])];
     } catch (e) {
       log(`notify error: ${e.stack || e}`);
       return [];

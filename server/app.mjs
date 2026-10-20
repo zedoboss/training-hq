@@ -421,6 +421,16 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       return { whisper: await voice.warm(), ...voice.status() };
     },
 
+    // What the phone's mic chip shows (Tue 10/20): written to the Mac's log, so a chip stuck on SPEAKING can be seen
+    // without iPhone Mirroring (which takes the phone's microphone).
+    'POST /api/voice/state': async (req) => {
+      const device = auth(req);
+      const { phases } = await readJson(req);
+      const list = (Array.isArray(phases) ? phases : []).slice(-20).filter((p) => p && typeof p.phase === 'string' && p.phase.length < 20);
+      if (list.length) log(`voice chip (${String(device.name || device.id).slice(0, 40)}): ${list.map((p) => `${new Date(Number(p.at) || Date.now()).toISOString().slice(11, 19)} ${p.phase}`).join(', ')}`);
+      return { ok: true };
+    },
+
     'POST /api/voice/forget': async (req) => {
       auth(req);
       if (!voice) throw new HttpError(404, 'voice not available');

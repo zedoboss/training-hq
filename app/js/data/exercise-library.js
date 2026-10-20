@@ -14,6 +14,12 @@ const WDist = 'weight_distance';
 const ROWS = [
   // Chest
   ['Bench Press (Barbell)', W, 'chest', 'triceps,shoulders', 'barbell'],
+  ['Bench Press Hold (Smith Machine)', WD, 'chest', 'triceps,shoulders', 'smith'],
+  ['Bench Press Hold (Barbell)', WD, 'chest', 'triceps,shoulders', 'barbell'],
+  ['Bench Press Hold (Dumbbell)', WD, 'chest', 'triceps,shoulders', 'dumbbell'],
+  ['Incline Bench Press Hold (Smith Machine)', WD, 'chest', 'triceps,shoulders', 'smith'],
+  ['Incline Bench Press Hold (Barbell)', WD, 'chest', 'triceps,shoulders', 'barbell'],
+  ['Incline Bench Press Hold (Dumbbell)', WD, 'chest', 'triceps,shoulders', 'dumbbell'],
   ['Bench Press (Dumbbell)', W, 'chest', 'triceps,shoulders', 'dumbbell'],
   ['Bench Press (Smith Machine)', W, 'chest', 'triceps,shoulders', 'smith'],
   ['Incline Bench Press (Barbell)', W, 'chest', 'shoulders,triceps', 'barbell'],
@@ -40,6 +46,9 @@ const ROWS = [
   ['Lateral Raise (Dumbbell)', W, 'shoulders', '', 'dumbbell'],
   ['Lateral Raise (Cable)', W, 'shoulders', '', 'cable'],
   ['Lateral Raise (Machine)', W, 'shoulders', '', 'machine'],
+  // Isometric holds as their own exercises (Tue 10/20, his list): a weight and a time, the full-screen countdown.
+  ['Lateral Raise Hold (Cable)', WD, 'shoulders', '', 'cable'],
+  ['Lateral Raise Hold (Dumbbell)', WD, 'shoulders', '', 'dumbbell'],
   ['Front Raise (Dumbbell)', W, 'shoulders', '', 'dumbbell'],
   ['Rear Delt Reverse Fly (Machine)', W, 'shoulders', 'upper_back', 'machine'],
   ['Rear Delt Reverse Fly (Dumbbell)', W, 'shoulders', 'upper_back', 'dumbbell'],

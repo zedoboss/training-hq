@@ -63,7 +63,7 @@ test('confirmed numbers: latest week up to the one asked; targets use them past 
   assert.equal(weekCell(plan.exercises[0], 6).load.kg, 70);
   const t = targetFor({ plan: plan.exercises[0], week: 6, last: { kg: 70, reps: 8 }, progressKg: 80 });
   assert.equal(t.kg, 80);
-  assert.match(t.why, /week 6 \(confirmed\) 80/);
+  assert.equal(t.why, "Week 6 step (confirmed): 80 kg (under the cap: last 70 kg + 30%)");
   // The 30% cap against the last load still wins.
   assert.equal(targetFor({ plan: plan.exercises[0], week: 6, last: { kg: 50, reps: 8 }, progressKg: 80 }).kg, 65);
 });

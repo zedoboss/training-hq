@@ -22,13 +22,13 @@ test('bench, Sunday 10/18 (week 4): table 70, last 51.3 -> capped at 66.69 -> lo
   assert.equal(t.kg, 66.3);
   assert.deepEqual(t.reps, [6, 8]);
   assert.equal(t.sets, 2);
-  assert.match(t.why, /capped: last 51.3 \+ 30%/);
+  assert.equal(t.why, 'Cap 66.7 kg: last time 51.3 kg + 30%. Plan says 70 kg');
 });
 
 test('ahead of the table: hold at the last load, never go backwards (incline 41.6 vs week 3 table 37.5)', () => {
   const t = targetFor({ plan: incline, week: 3, last: { kg: 41.6, reps: 12, date: '2026-10-12' }, barKg: 11.3 });
   assert.equal(t.kg, 41.6);
-  assert.match(t.why, /ahead of the table/);
+  assert.match(t.why, /^You're ahead of the table \(37\.5 kg\): stay at your last 41\.6 kg$/);
 });
 
 test('light work follows the table without the cap', () => {

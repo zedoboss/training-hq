@@ -86,8 +86,8 @@ test('Calm words, grunts, the GET READY timer, the settings and the coach rules'
   assert.equal(cleanTranscript('Ouch.'), 'Ouch.');
   assert.equal(cleanTranscript('Ugh, stop.'), 'Ugh, stop.');
   const t = { startedAt: 1000, targetS: 30, readyUntil: 16000 };
-  assert.deepEqual(setTimerView(t, 4200), { elapsedS: 0, targetS: 30, reached: false, ready: true, text: 'GET READY 12' });
-  assert.equal(setTimerView(t, 16000 + 12400).text, '0:12 / 0:30');
+  assert.deepEqual(setTimerView(t, 4200), { elapsedS: 0, targetS: 30, leftS: 30, readyS: 12, reached: false, ready: true, text: 'GET READY 12' });
+  assert.equal(setTimerView(t, 16000 + 12400).text, '0:18 left');
   assert.equal(setTimerView(t, 16000 + 30000).reached, true);
   assert.equal(setTimerResult(t, 9000), null, 'stopped during GET READY: nothing held');
   assert.equal(setTimerResult(t, 16000 + 21600), 22, 'only the hold part');

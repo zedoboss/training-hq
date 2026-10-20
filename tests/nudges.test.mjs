@@ -163,3 +163,54 @@ test('sleep he told the coach fills nights Apple Health has none for; Evolt weig
   assert.deepEqual(currentBodyweight({ healthDocs, measurements, now }), { kg: 80.4, at: at(D, '05:10'), from: 'evolt' });
   assert.equal(currentBodyweight({ healthDocs, now }).kg, 79);
 });
+
+test('his morning (Tue 10/20): the routine once after he wakes, the gym window from when he actually woke', () => {
+  const base = { tz: TZ, rot: { today: { kind: 'train', dayType: 'push' } }, wakeHm: '10:00', bedHm: '00:00', sleepLogged: true,
+    morning: { text: 'Banana, bathroom, stretch, sunlight', gymAfterMin: [60, 90] } };
+  // Woke at 9:40 (his sleep log): routine nudge, gym 10:40 to 11:10.
+  let c = nudgeCandidates({ ...base, now: at(D, '09:50'), wokeAt: at(D, '09:40') });
+  const m = c.find((x) => x.key === 'morning');
+  assert.equal(m.text, 'Morning: Banana, bathroom, stretch, sunlight. Gym 10:40 AM to 11:10 AM.');
+  assert.equal(m.gapMin, 18 * 60, 'once a day');
+  assert.match(c.find((x) => x.key === 'session').text, /no time set\. When are you going\? Your plan: 10:40 AM to 11:10 AM\. Evolt first/);
+  // No sleep log yet: from his usual wake time.
+  c = nudgeCandidates({ ...base, now: at(D, '10:20') });
+  assert.match(c.find((x) => x.key === 'morning').text, /Gym 11:00 AM to 11:30 AM\.$/);
+  // Two hours after waking: no routine nudge; a rest day: no gym in it.
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '12:00') }).some((x) => x.key === 'morning'), false);
+  assert.equal(nudgeCandidates({ ...base, rot: { today: { kind: 'rest' } }, now: at(D, '10:10') }).find((x) => x.key === 'morning').text, 'Morning: Banana, bathroom, stretch, sunlight.');
+  // Without a routine set: nothing new.
+  assert.equal(nudgeCandidates({ ...base, morning: null, now: at(D, '10:10') }).some((x) => x.key === 'morning'), false);
+});
+
+test('after the workout (Tue 10/20): 20 minutes of quiet, then the first meal before anything else', () => {
+  const base = { tz: TZ, rot: { today: { kind: 'done', dayType: 'push' } }, wakeHm: '10:00', bedHm: '00:00', session: { started: true, done: true },
+    targets: { kcal: 3000, protein: 240 }, eaten: { kcal: 105, protein: 1 }, suppsUntimed: { total: 8, open: ['Creatine'] }, workoutEndedAt: at(D, '12:30') };
+  assert.deepEqual(nudgeCandidates({ ...base, now: at(D, '12:45') }), [], 'shower time');
+  const c = nudgeCandidates({ ...base, now: at(D, '12:51') });
+  assert.equal(c[0].key, 'meal-after');
+  assert.equal(c[0].text, 'Workout done at 12:30 PM. Time for your first meal: 1 of 240 g protein so far today. Tell me what you eat.');
+  const later = nudgeCandidates({ ...base, now: at(D, '13:40') });
+  assert.ok(later.findIndex((x) => x.key === 'supps-untimed') > later.findIndex((x) => x.key === 'meal-after'), 'supplements after the meal');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '13:10'), lastMealAt: at(D, '13:00') }).some((x) => x.key === 'meal-after'), false, 'ate: done');
+});
+
+test('the dishes (Tue 10/20): 2 minutes after a meal is logged, or after its after photo; once; never for old meals', async () => {
+  const { dishesDue, DISHES_TEXT } = await import('../app/js/lib/nudges.js');
+  const now = at(D, '13:00');
+  const seen = { a: now - 60000, b: now - 3 * 60000, c: now - 10 * 60000, d: now - 30 * 60000, e: now - 3 * 60000 };
+  const meals = [
+    { id: 'a', at: now - 60000, source: 'manual' },                                   // logged 1 min ago: not yet
+    { id: 'b', at: now - 20 * 60000, source: 'manual' },                              // logged 3 min ago: due
+    { id: 'c', at: now - 10 * 60000, source: 'photo', before: { photoId: 'p' } },     // photo before eating, 10 min: eating
+    { id: 'd', at: now - 30 * 60000, source: 'photo', before: { photoId: 'p' } },     // 30 min, no after photo: due
+    { id: 'e', at: now - 5 * 3600000, source: 'manual' },                             // added now for 5 hours ago: never
+  ];
+  assert.deepEqual(dishesDue({ meals, seen, sent: {}, now }).map((m) => m.id), ['d', 'b']);
+  assert.deepEqual(dishesDue({ meals, seen, sent: { b: now, d: now }, now }).map((m) => m.id), [], 'once each');
+  // An after photo: 2 minutes after it.
+  const c2 = { ...meals[2], after: { at: now - 60000 } };
+  assert.deepEqual(dishesDue({ meals: [c2], seen, sent: {}, now }).map((m) => m.id), []);
+  assert.deepEqual(dishesDue({ meals: [c2], seen, sent: {}, now: now + 70000 }).map((m) => m.id), ['c']);
+  assert.match(DISHES_TEXT, /dishes won't clean themselves\. Get up now, walk around for a minute or two/);
+});

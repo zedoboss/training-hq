@@ -382,6 +382,9 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .rest-fill { height: 4px; background: var(--cyan); width: 0; transition: width .25s linear; }
 .rest-row { display: flex; align-items: center; gap: 8px; }
 .rest-time { flex: 1; display: flex; flex-direction: column; }
+.rest-label { line-height: 1.4; overflow-wrap: anywhere; }
+/* Tue 10/20: two quick taps on -15 scrolled the page (iPhone's double-tap gesture). Buttons take taps only. */
+button, .btn-ghost, .btn-primary, .pill { touch-action: manipulation; }
 .rest-time b { font: 600 28px/1.1 var(--mono); color: var(--cyan); }
 .btn-primary.small { height: 40px; font-size: 11px; padding: 0 14px; }
 /* Finish */
@@ -664,3 +667,38 @@ a.card-note.c-amber { color: var(--amber); }
 .bk-steps ol { margin: 4px 0 8px; padding-left: 20px; font-size: 14px; line-height: 1.5; display: flex; flex-direction: column; gap: 6px; }
 .link-hud { border: 0; background: transparent; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .neck-card .chips { margin: 8px 0; }
+
+/* Tue 10/20: a running set timer covers the whole screen (his words: "full screen... nothing else visible... big font
+   so I can see the numbers counting down"). GET READY amber, HOLD cyan, DONE green. */
+.timer-full {
+  position: fixed; inset: 0; z-index: 1000; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  padding: calc(24px + var(--safe-top)) 16px calc(24px + var(--safe-bottom)); text-align: center;
+}
+.tf-name { font: 500 15px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); max-width: 100%; }
+.tf-phase { font: 600 22px/1 var(--mono); letter-spacing: .3em; color: var(--cyan); }
+.tf-digits { font: 600 min(52vw, 46vh)/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--text); letter-spacing: -.02em; }
+.tf-bar { width: min(100%, 420px); height: 8px; border-radius: 4px; background: var(--divider); overflow: hidden; }
+.tf-bar i { display: block; height: 100%; width: 0; background: var(--cyan); transition: width .25s linear; }
+.tf-stop { width: min(100%, 420px); margin-top: 12px; }
+.timer-full.is-ready .tf-phase, .timer-full.is-ready .tf-digits { color: var(--amber); }
+.timer-full.is-ready .tf-bar i { background: var(--amber); }
+.timer-full.is-done .tf-phase, .timer-full.is-done .tf-digits { color: var(--green); }
+.timer-full.is-done .tf-bar i { background: var(--green); }
+body.timer-open { overflow: hidden; }
+
+/* Tue 10/20: the coach's words on screen, at the top under the status bar, never in the way of logging. */
+.coach-caption {
+  position: fixed; left: 12px; right: 12px; top: calc(var(--safe-top) + 8px); z-index: 1100;
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; border-radius: var(--r-s, 10px);
+  background: color-mix(in srgb, var(--surface-2) 94%, transparent); border: 1px solid var(--cyan);
+  box-shadow: 0 8px 24px rgb(0 0 0 / .45); opacity: 0; transform: translateY(-8px); transition: opacity .2s, transform .2s;
+  max-height: 40vh; overflow: hidden;
+}
+.coach-caption.is-on { opacity: 1; transform: none; }
+.coach-caption .cc-text { font-size: 15px; line-height: 1.4; color: var(--text); }
+/* Tue 10/20: the cap in plain words on its own line ("Cap 23.4 kg: last time 18 kg + 30%. Plan says 27.5 kg."). */
+.target-why { font-size: 13px; line-height: 1.4; color: var(--muted); margin-top: 2px; }
+/* Tue 10/20: scrolled, the mic chip and the settings button showed through the iPhone's status bar (time, signal,
+   battery). The status bar area is always solid. */
+body::after { content: ''; position: fixed; top: 0; left: 0; right: 0; height: var(--safe-top); background: var(--bg); z-index: 35; pointer-events: none; }

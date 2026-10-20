@@ -1,12 +1,36 @@
 // Sounds made with Web Audio (no sound files): rest-end choices, the set tick, the record sound.
 // iOS only plays sound after a tap has unlocked audio, so every tap that may lead to a sound calls unlockAudio().
+// Tue 10/20 at the gym, "when it gets to zero nothing, there is no ding": two reasons, both handled here.
+// - iPhone stops the app's audio ('interrupted', or 'suspended') when the screen locks, another app plays or the
+//   microphone changes; a sound scheduled on that stopped clock is never heard. Every sound now restarts it first.
+// - With the coach's microphone off, iPhone's silent switch mutes web audio (with it on, the phone is in a mode that
+//   ignores the switch). Timer sounds (the rest end, the hold's beeps) switch to playback, as the Clock app does.
 let audio = null;
+let mic = false;
 
-export function unlockAudio() {
+function ready() {
   try {
-    audio ||= new (window.AudioContext || window.webkitAudioContext)();
-    if (audio.state === 'suspended') audio.resume();
+    if (!audio || audio.state === 'closed') audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state !== 'running') audio.resume().catch(() => {});
   } catch { /* no audio */ }
+  return audio;
+}
+
+export function unlockAudio() { ready(); }
+
+/** The coach's microphone is open (its audio mode already ignores the silent switch; playback must not override it). */
+export function micActive(on) { mic = !!on; }
+
+let restoreTimer = null;
+/** Heard even with the silent switch on for the next `seconds` (timer sounds, the coach's voice while the mic is off). */
+export function loudFor(seconds) {
+  const s = navigator.audioSession;
+  if (!s || mic) return;
+  try {
+    if (s.type !== 'playback') s.type = 'playback';
+    clearTimeout(restoreTimer);
+    restoreTimer = setTimeout(() => { try { if (!mic) s.type = 'auto'; } catch { /* gone */ } }, (seconds + 1.5) * 1000);
+  } catch { /* not supported */ }
 }
 
 // [start s, frequency Hz, length s, wave, loudness 0-1]
@@ -23,13 +47,27 @@ const PATTERNS = {
   record: [[0, 784, 0.14, 'triangle'], [0.14, 988, 0.14, 'triangle'], [0.28, 1175, 0.14, 'triangle'], [0.42, 1568, 0.5, 'triangle']],
 };
 
-/** Play a sound at a volume of 0-100 ('beeps-2' = two plain beeps, the last one higher). Does nothing until audio has been unlocked by a tap. */
-export function play(id = 'beeps', volume = 80) {
+/**
+ * Play a sound at a volume of 0-100 ('beeps-2' = two plain beeps, the last one higher). Does nothing until audio has
+ * been unlocked by a tap. `alarm`: a timer sound, heard even with the silent switch on.
+ */
+export function play(id = 'beeps', volume = 80, { alarm = false } = {}) {
   if (!audio || !volume) return;
-  const level = Math.min(1, Math.max(0, volume / 100)) * 0.6;
-  const t0 = audio.currentTime + 0.02;
+  const a = ready();
   const n = /^beeps-(\d)$/.exec(id);
   const notes = n ? Array.from({ length: +n[1] }, (_, i) => [i * 0.28, i === +n[1] - 1 ? 1320 : 880, 0.22]) : PATTERNS[id] || PATTERNS.beeps;
+  if (alarm) loudFor(Math.max(...notes.map(([at, , len]) => at + len)));
+  if (a.state === 'running') { schedule(a, notes, volume); return; }
+  // Stopped: play once it runs again (or anyway after a moment, if iPhone never says so).
+  let done = false;
+  const go = () => { if (!done) { done = true; schedule(a, notes, volume); } };
+  a.resume().then(go).catch(go);
+  setTimeout(go, 800);
+}
+
+function schedule(audio, notes, volume) {
+  const level = Math.min(1, Math.max(0, volume / 100)) * 0.6;
+  const t0 = audio.currentTime + 0.02;
   for (const [at, freq, len, wave = 'sine', loud = 1] of notes) {
     const o = audio.createOscillator();
     const g = audio.createGain();

@@ -13,10 +13,13 @@ export const NUDGE_DEFAULTS = { everyMin: 20, wakeHm: '07:00', bedHm: '22:00' };
 export const NUDGE_EVERY = [[15, 'Every 15 minutes'], [20, 'Every 20 minutes'], [30, 'Every 30 minutes'], [0, 'Off']];
 /** Quiet this long after any notification, and after he last wrote to the coach. */
 export const QUIET_AFTER_MIN = 10;
+/** No nudges this long after a workout ends (shower, not hungry yet); then the first meal. */
+export const AFTER_WORKOUT_QUIET_MIN = 20;
 /** Kinds of reminder that speak plainly (no mood line). */
 const CALM_KINDS = new Set(['sauna', 'recovery', 'scan']);
 
 const minOf = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+const addMin = (hm, n) => { const t = (minOf(hm) + Math.round(n / 5) * 5 + 1440) % 1440; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
 const nf = (n) => Math.round(n).toLocaleString('en-US');
 
 /** Inside his waking hours (wake time up to bedtime; works across midnight). */
@@ -71,18 +74,44 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  * @param {{open: string[], total: number}|null} o.suppsUntimed  today's supplements with no time set: names still open
  * @param {string} o.wakeHm
  * @param {string} o.bedHm
+ * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
+ * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
+ * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
+ * @param {number|null} o.lastMealAt      his latest meal today, ms
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
-  eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm }) {
+  eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
+  wokeAt = null, morning = null, workoutEndedAt = null, lastMealAt = null }) {
   const out = [];
+  // After the workout (Tue 10/20, his words: "I'm usually not hungry immediately and I obviously need to take a
+  // shower... wait 20 minutes after my workout is finished and then he should bump me about my first meal"): quiet
+  // for 20 minutes, then the meal comes first, before supplements and the rest.
+  if (workoutEndedAt && now >= workoutEndedAt && now - workoutEndedAt < AFTER_WORKOUT_QUIET_MIN * 60000) return [];
+  if (workoutEndedAt && now - workoutEndedAt < 4 * 3600000 && !(lastMealAt > workoutEndedAt)) {
+    out.push({ key: 'meal-after', priority: 89, gapMin: 30, url: '#/fuel',
+      text: `Workout done at ${formatHm(hmOf(new Date(workoutEndedAt), tz))}. Time for your first meal${targets?.protein ? `: ${nf(eaten.protein)} of ${targets.protein} g protein so far today` : ''}. Tell me what you eat.` });
+  }
   const nowHm = formatHm(hmOf(new Date(now), tz));
   const sinceWake = ((minOf(hmOf(new Date(now), tz)) - minOf(wakeHm)) + 1440) % 1440;
+  // His morning (Tue 10/20): the day runs from when he actually woke (else his usual wake time); the gym comes
+  // gymAfterMin [from, to] minutes after that.
+  const wokeHm = wokeAt ? hmOf(new Date(wokeAt), tz) : wakeHm;
+  const sinceWoke = wokeAt ? Math.round((now - wokeAt) / 60000) : sinceWake;
+  const after = Array.isArray(morning?.gymAfterMin) && morning.gymAfterMin.length === 2 ? morning.gymAfterMin : null;
+  const gymText = after ? `${formatHm(addMin(wokeHm, after[0]))} to ${formatHm(addMin(wokeHm, after[1]))}` : null;
 
   // Sleep: the morning question until he answers (until noon).
   if (!sleepLogged && sinceWake < Math.max(60, minOf('12:00') - minOf(wakeHm))) {
     out.push({ key: 'sleep', priority: 90, gapMin: 40, url: '#/coach',
       text: `How did you sleep? Tell me when you went to bed and when you woke up (your schedule: ${formatHm(bedHm)} to ${formatHm(wakeHm)}).` });
+  }
+
+  // His morning routine, once, in the first 90 minutes after he wakes (Tue 10/20).
+  const train0 = rot?.today?.kind === 'train';
+  if (morning?.text && sinceWoke >= 0 && sinceWoke < 90) {
+    out.push({ key: 'morning', priority: 88, gapMin: 18 * 60, url: '#/today',
+      text: `Morning: ${String(morning.text).replace(/[.\s]+$/, '')}.${train0 && gymText && !session.started ? ` Gym ${gymText}.` : ''}` });
   }
 
   // A body scan planned today (Tue 10/20): the checklist until it's done, ahead of everything else.
@@ -102,7 +131,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       if (now >= at) out.push({ key: 'session', priority: 80, gapMin: 30, url: '#/train', text: `${label} was due at ${formatHm(sessionHm)}. Go now, or tell me the new time. Evolt first.` });
       else if (now >= at - 60 * 60000) out.push({ key: 'session', priority: 70, gapMin: 45, url: '#/train', text: `${label} at ${formatHm(sessionHm)}. Evolt first when you get there, then train.` });
     } else {
-      out.push({ key: 'session', priority: 65, gapMin: 90, url: '#/train', text: `${label} today and no time set. When are you going? Evolt first when you get there.` });
+      out.push({ key: 'session', priority: 65, gapMin: 90, url: '#/train', text: `${label} today and no time set. When are you going?${gymText ? ` Your plan: ${gymText}.` : ''} Evolt first when you get there.` });
     }
   }
   if (gymDay && (session.started || session.done) && !weighedToday) {
@@ -139,6 +168,34 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       text: `Steps: ${nf(steps.steps)} by ${formatHm(hmOf(new Date(steps.asOf), tz))}, goal ${nf(stepGoal)}. Walk 15 minutes.` });
   }
   return out.sort((a, b) => b.priority - a.priority);
+}
+
+// ---- The dishes after a meal (Tue 10/20, his words: "as soon as I finish a meal and I log it, obviously I tend to
+// forget to clean my dishes... I need the coach to send me a notification 2 minutes after I finish and log it...
+// just get up now, walk around for 1 minute, 2 minutes, get your body moving, and then it's going to be easy to clean
+// the dishes") ----
+export const DISHES_AFTER_MIN = 2;
+/** A meal logged from a photo before eating, with no "after" photo: give him this long to eat. */
+export const DISHES_EAT_MIN = 25;
+export const DISHES_TEXT = "You just ate. I know you're full and want to sit, but the dishes won't clean themselves. Get up now, walk around for a minute or two to get moving, then wash them.";
+
+/**
+ * Meals whose dishes reminder is due now: 2 minutes after he logged it (the Mac first saw it), or after its "after"
+ * photo; a meal logged by a photo before eating waits for the after photo or 25 minutes. Only meals eaten in the last
+ * 3 hours (not ones he adds later for earlier), each once.
+ * @param {object} o
+ * @param {Array} o.meals          today's meals
+ * @param {Object<string, number>} o.seen   meal id -> when the Mac first saw it, ms
+ * @param {Object<string, number>} o.sent   meal id -> when its reminder went out
+ * @returns {Array<object>} the meals, oldest first
+ */
+export function dishesDue({ meals = [], seen = {}, sent = {}, now = Date.now() }) {
+  return meals.filter((m) => m?.id && !sent[m.id] && seen[m.id] && (m.at || 0) > now - 3 * 3600000).filter((m) => {
+    const after = m.after?.at || null;
+    const photoBefore = m.source === 'photo' && m.before?.photoId && !after;
+    const from = after ? Math.max(after, seen[m.id]) : seen[m.id] + (photoBefore ? (DISHES_EAT_MIN - DISHES_AFTER_MIN) * 60000 : 0);
+    return now - from >= DISHES_AFTER_MIN * 60000;
+  }).sort((a, b) => (a.at || 0) - (b.at || 0));
 }
 
 /** Whether it's time for a nudge at all. */

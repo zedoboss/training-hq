@@ -64,7 +64,7 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
   // Decision 3 (calf raises) and exercises without a table: the target is the last load.
   if (!cell || /decision 3/.test(rule) || cell.load == null) {
     out.kg = last?.kg ?? null;
-    out.why = last ? `last load (${last.kg})` : 'no table target and no history yet';
+    out.why = last ? `Your last load (${last.kg} kg)` : 'No plan number and no history yet';
     return out;
   }
   if (cell.load.type === 'bodyweight') { out.bodyweight = true; out.why = 'bodyweight'; return out; }
@@ -72,27 +72,30 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
 
   const table = cell.load.kg;
   const src = week > 4 && progressKg != null ? `week ${week} (confirmed)` : 'table';
+  const plan_ = week > 4 && progressKg != null ? `Week ${week} step (confirmed)` : 'Plan';
   out.table = table;
   out.approx = !!cell.load.approx;
   if (!last) {
     out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
-    out.why = gatedNotStarted ? 'week 1: not started yet, form focus' : `${src} (no previous load)`;
+    out.why = gatedNotStarted ? 'Week 1: not started yet, form focus' : `${plan_}: ${table} kg (no previous load)`;
     return out;
   }
   if (last.kg >= table) {
     out.kg = last.kg;
-    out.why = `ahead of the ${src} (${table}): hold at your last ${last.kg}`;
+    out.why = `You're ahead of the ${src} (${table} kg): stay at your last ${last.kg} kg`;
     return out;
   }
   if (plan.capClass === 'main') {
     out.capKg = capOf(last.kg);
     const capped = Math.min(table, out.capKg);
     out.kg = loadable(capped, { barKg, smallestPlate });
-    out.why = out.capKg < table ? `${src} ${table}, capped: last ${last.kg} + 30%` : `${src} ${table} (within 30% of last ${last.kg})`;
+    // His words (Tue 10/20): "it should just say what the cap is and how it got to that cap".
+    const r1 = (x) => Math.round(x * 10) / 10;
+    out.why = out.capKg < table ? `Cap ${r1(out.capKg)} kg: last time ${last.kg} kg + 30%. ${plan_} says ${table} kg` : `${plan_}: ${table} kg (under the cap: last ${last.kg} kg + 30%)`;
     return out;
   }
   out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
-  out.why = `${src} ${table} (light work, no cap)`;
+  out.why = `${plan_}: ${table} kg (light work, no cap)`;
   return out;
 }
 

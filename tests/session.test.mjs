@@ -183,14 +183,17 @@ test('repeat a past session; supersets; rest only after the last exercise of a s
   assert.equal(restAfter(past.exercises, 'c'), true);
 });
 
-test('set timer: counts up, the target is a cue, stopping fills the seconds done', () => {
+test('set timer: counts down to the target and ends there (Tue 10/20); stopping early fills the seconds done', () => {
   const t = { startedAt: 1000, targetS: 30 };
-  assert.deepEqual(setTimerView(t, 1000 + 12400), { elapsedS: 12, targetS: 30, reached: false, ready: false, text: '0:12 / 0:30' });
+  assert.deepEqual(setTimerView(t, 1000 + 12400), { elapsedS: 12, targetS: 30, leftS: 18, readyS: 0, reached: false, ready: false, text: '0:18 left' });
   assert.equal(setTimerView(t, 1000 + 30000).reached, true);
-  assert.equal(setTimerView(t, 1000 + 95000).text, '1:35 / 0:30', 'keeps counting past the target');
-  assert.equal(setTimerView({ startedAt: 0, targetS: 0 }, 61000).text, '1:01');
-  assert.equal(setTimerResult(t, 1000 + 34600), 35);
+  assert.equal(setTimerView(t, 1000 + 30000).leftS, 0);
+  assert.equal(setTimerView(t, 1000 + 95000).leftS, 0, 'never below 0');
+  assert.equal(setTimerView({ startedAt: 0, targetS: 0 }, 61000).text, '1:01', 'no target: counts up');
+  assert.equal(setTimerResult(t, 1000 + 14600), 15);
+  assert.equal(setTimerResult(t, 1000 + 41000), 30, 'never more than the target (no more "41 s")');
   assert.equal(setTimerResult(t, 1000 + 200), 1);
+  assert.equal(setTimerResult({ startedAt: 1000, targetS: 0 }, 1000 + 41000), 41);
 });
 
 test('record banner: a ticked set over the comeback best, not on a first-ever exercise, not twice for the same load', async () => {

@@ -15,7 +15,7 @@ import { withDefaults } from './settings.js';
 import { runAction } from './coach.js';
 import { isQuiet, onQuietEnd, quietFor } from './quiet.js';
 import * as rest from './rest-timer.js';
-import { play } from './sounds.js';
+import { play, micActive } from './sounds.js';
 import * as talk from './talk.js';
 import { callsForCalm } from './coach-talk.js';
 import { updateApp } from './sw-client.js';
@@ -47,7 +47,15 @@ export const snapshot = () => ({ wanted: listening(), used: ls.get(SEEN) === '1'
 export const listening = () => ls.get(KEY) === '1';
 export function onChange(fn) { subs.add(fn); return () => subs.delete(fn); }
 const emit = () => { const s = snapshot(); for (const f of subs) { try { f(s); } catch { /* a screen gone */ } } };
-function setPhase(p) { if (phase !== p) { phase = p; emit(); } }
+function setPhase(p) { if (phase !== p) { phase = p; emit(); report(p); } }
+
+// The chip's changes go to the Mac's log (a second later, together), so it can be followed without iPhone Mirroring.
+let reports = []; let reportTimer = null;
+function report(p) {
+  reports.push({ phase: p, at: Date.now() });
+  clearTimeout(reportTimer);
+  reportTimer = setTimeout(() => { const phases = reports; reports = []; macPost('/api/voice/state', { phases }).catch(() => {}); }, 1500);
+}
 const broadcast = (e) => window.dispatchEvent(new CustomEvent('thq:voice-event', { detail: e }));
 
 /** The silent readout: speech heard but not acted on, and why (for 4 seconds). */
@@ -86,6 +94,8 @@ function afterReply(fn) {
 }
 
 function speak(sentence) {
+  // On screen too, spoken or not (the caption at the top).
+  window.dispatchEvent(new CustomEvent('thq:coach-say', { detail: { text: sentence } }));
   if (!prefs().voice.speak) return;
   // A15 (brief decision 30): the coach talks during sets and holds, so its answers no longer wait for them to end,
   // unless he switched that off (then the old quiet rule holds them back).
@@ -182,9 +192,10 @@ async function openListening() {
         },
         // While the coach talks, its own sound must be louder than usual to count as someone speaking.
         onLevel: () => { const lv = Math.max(player.level, talk.talkLevel()); mic?.vad.setBoost(player.speaking || talk.playing() ? 1 + 4 * lv : 1); },
-        onEnded: () => { mic = null; letSleep(); setPhase(listening() ? 'tap' : 'off'); },
+        onEnded: () => { mic = null; micActive(false); letSleep(); setPhase(listening() ? 'tap' : 'off'); },
       });
       error = null;
+      micActive(true);
       setPhase(player.speaking ? 'speaking' : turnsInFlight ? 'thinking' : 'listening');
       keepAwake();
     } catch (e) {
@@ -200,7 +211,7 @@ async function openListening() {
 
 function closeListening() {
   clearTimeout(bargeTimer);
-  mic?.close(); mic = null;
+  mic?.close(); mic = null; micActive(false);
   letSleep();
 }
 

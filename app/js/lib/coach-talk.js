@@ -30,6 +30,8 @@ const BY_MOMENT = {
   'set-start': ['dark', 'warrior', 'hype', 'rival', 'commander'], 'set-push': ['hype', 'warrior', 'commander'], record: ['rival', 'hype', 'commander'],
   // His notifications through the day (Mon 10/19): the coach bumping him about what is still open.
   nudge: ['hype', 'warrior', 'dark', 'rival', 'commander'],
+  // After a meal (Tue 10/20): get up, move, do the dishes.
+  dishes: ['commander', 'warrior', 'hype', 'dark', 'rival'],
 };
 
 // The plain fallback: Commander and Calm, no flavour.
@@ -38,6 +40,7 @@ export const BASE_BANK = {
     'hold-ready': [[1, 'Get ready.']], 'hold-go': [[1, 'Hold.']], 'hold-push': [[1, 'Keep it still.']], 'hold-mid': [[1, 'Halfway.']],
     'hold-end': [[1, 'Done.']], 'set-start': [[1, 'Control the bottom.']], 'set-push': [[1, 'Controlled.']], record: [[1, 'New best.']],
     nudge: [[1, 'Get it done.']],
+    dishes: [[1, 'Up now. Two minutes of walking, then the sink.']],
   },
   calm: {
     'hold-ready': [[1, 'Get ready. Easy setup.']], 'hold-go': [[1, 'Hold.']], 'hold-push': [[1, 'Breathe. Steady.']],
