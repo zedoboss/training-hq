@@ -26,6 +26,9 @@ const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { retur
 const prefs = () => withDefaults(getState().settings);
 
 let mic = null; let opening = null; let wake = null; let held = 0; let lent = 0;
+// Answers still on their way are dropped after "stop", a mute, a tap or his voice cutting in (Tue 10/20: he turned the
+// mic off and the coach still said "Noted, I'll stop..."): each turn speaks only while this hasn't moved on.
+let speechGen = 0;
 let phase = 'off'; // off | listening | hearing | thinking | speaking | paused | tap | error
 let readout = null; let readoutTimer = null; let error = null; let turnsInFlight = 0;
 let bargeTimer = null; let bargeSent = false; let overCoach = false;
@@ -114,7 +117,8 @@ async function turn(wav, { overCoach: echo = false } = {}) {
   if (!player.speaking) setPhase('thinking');
   const split = sentenceSplitter();
   const gate = replyGate(); let ok = false;
-  const sentence = (s) => { for (const x of gate.sentence(s)) speak(x); };
+  let myGen = speechGen;
+  const sentence = (s) => { if (myGen !== speechGen) return; for (const x of gate.sentence(s)) speak(x); };
   try {
     const st = prefs();
     await voiceUtterance({
@@ -127,8 +131,13 @@ async function turn(wav, { overCoach: echo = false } = {}) {
           ok = true;
           // His voice, confirmed: whatever the coach was saying stops (barge-in), the set or hold talk too (only real
           // words get this far: grunts and breathing are dropped on the Mac). Pain, stop or anything off: Calm.
+          // Earlier answers still coming in are dropped; this turn speaks from here on.
+          speechGen++; myGen = speechGen;
           if (player.speaking) player.stop();
           talk.stop();
+          quietQueue.length = 0;
+          // "Stop", "that's enough": quiet, and nothing goes to the coach (the Mac decided).
+          if (e.hush) { myGen = -1; showReadout('hush', e.score); setPhase(restPhase()); return; }
           if (callsForCalm(e.text)) talk.setCalm();
           quietQueue.length = 0;
           setPhase('thinking');
@@ -140,6 +149,7 @@ async function turn(wav, { overCoach: echo = false } = {}) {
         } else if (e.type === 'done') {
           for (const s of split.flush()) sentence(s);
           const end = gate.end();
+          if (myGen !== speechGen) return;
           for (const x of end.speak) speak(x);
           if (end.tick && st.voice.speak) play('tick', st.sounds.tickVolume);
         } else if (e.type === 'error') {
@@ -243,6 +253,7 @@ export async function start() {
 /** Switch listening off for this device. */
 export function stop() {
   ls.set(KEY, null);
+  speechGen++;
   closeListening();
   player.stop();
   quietQueue.length = 0;
@@ -278,7 +289,7 @@ export function watchNudges(repo) {
 }
 
 /** Stop the coach talking (a tap on the chip while it speaks). */
-export const hush = () => { player.stop(); quietQueue.length = 0; if (phase === 'speaking') setPhase(restPhase()); };
+export const hush = () => { speechGen++; player.stop(); quietQueue.length = 0; if (phase === 'speaking') setPhase(restPhase()); };
 
 /**
  * Dictation into the chat box (Tue 10/20). While he dictates the coach hears nothing. The coach's microphone, if open,
@@ -291,7 +302,7 @@ export async function lendMic(onFrame) {
   if (opening) await opening.catch(() => {});
   const m = mic;
   if (m) { m.pause(); m.tap(onFrame); }
-  player.stop(); talk.stop(); quietQueue.length = 0;
+  speechGen++; player.stop(); talk.stop(); quietQueue.length = 0;
   setPhase(restPhase()); emit();
   let done = false;
   return {

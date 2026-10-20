@@ -10,7 +10,7 @@ import { cleanTranscript } from './whisper.mjs';
 import { decodeWav, encodeWav, resample, normalise, VOICE_RATE } from '../../app/js/lib/wav.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
 
-import { addressed, looksUnfinished, otherVoice, OTHER_VOICE } from './address.mjs';
+import { addressed, looksUnfinished, otherVoice, OTHER_VOICE, isHush, holdFor } from './address.mjs';
 
 export const MAX_CLIP_SEC = 15;
 /** Dictation into the chat box: paragraphs by voice (Tue 10/20, his words), up to 5 minutes. */
@@ -117,6 +117,13 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     return true;
   }
 
+  // How long to hold a clip for more: by what he said (address.mjs holdFor), scaled when tests shorten the holds.
+  const holdOf = (text) => {
+    const ms = holdFor(text);
+    if (holdMs === HOLD_MS && joinMs === JOIN_MS) return ms;
+    return ms >= 3000 ? joinMs : holdMs;
+  };
+
   // When each phone last heard someone else talking (Tue 10/20): alone, he needn't name the coach.
   const others = new Map();
   const live = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
@@ -151,10 +158,18 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
       return null;
     }
     lastHeard = { key, device: deviceId, at: now() };
+    // "Stop", "that's enough": the phone goes quiet; nothing goes to the coach, and what was held for it is dropped.
+    if (isHush(text)) {
+      const held = waiting.get(deviceId || '');
+      if (held) { clearTimeout(held.timer); waiting.delete(deviceId || ''); held.drop?.(); }
+      log(`voice: heard you (${d.score}), stop: the coach goes quiet`);
+      emit({ type: 'heard', ok: true, score: d.score, text, hush: true, ms: now() - t0 });
+      return null;
+    }
     // The rest of a clip that ended unfinished: joins it and goes to the coach with it.
     const w = waiting.get(deviceId || '');
     if (w) {
-      w.texts.push(text); w.arm(looksUnfinished(text) ? joinMs : holdMs);
+      w.texts.push(text); w.arm(holdOf(text));
       log(`voice: heard you (${d.score}), joined to the clip before`);
       emit({ type: 'heard', ok: true, score: d.score, text, joined: true, ms: now() - t0 });
       return null;
@@ -174,13 +189,14 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     if (!coach) throw fail(503, 'coach not available');
     // Hold for the rest of what he is saying: more clips join; "still talking" from the phone holds longer.
     const texts = [text];
-    await new Promise((res) => {
+    const go = await new Promise((res) => {
       const key = deviceId || '';
-      const entry = { texts, timer: null, fire: () => { clearTimeout(entry.timer); waiting.delete(key); res(); } };
+      const entry = { texts, timer: null, fire: () => { clearTimeout(entry.timer); waiting.delete(key); res(true); }, drop: () => res(false) };
       entry.arm = (ms) => { clearTimeout(entry.timer); entry.timer = setTimeout(entry.fire, ms); };
-      entry.arm(looksUnfinished(text) ? joinMs : holdMs);
+      entry.arm(holdOf(text));
       waiting.set(key, entry);
     });
+    if (!go) { log('voice: dropped what was held (he said stop)'); return null; }
     const said = texts.join(' ');
     if (texts.length > 1) log(`voice: ${texts.length} clips as one message`);
     return coach.send({ text: said, model, deviceId, tz, via: 'voice', screen, emit });

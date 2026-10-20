@@ -91,6 +91,36 @@ export function otherVoice({ reason, score, speechSec, lastCoachAt = 0, now = Da
     && !(lastCoachAt && now - lastCoachAt < OTHER_VOICE.afterCoachMs);
 }
 
+// "Stop", "that's enough", "shut up": he wants the coach quiet, not an answer (Tue 10/20: "you can stop, that's
+// enough" went to the coach, which answered "Noted, I'll stop. Do you also want the notifications paused?").
+const HUSH_CORE = /\b(stop|enough|shut up|quiet|be quiet|silence|hush|zip it|stfu)\b/i;
+const HUSH_WORDS = new Set(['ok', 'okay', 'okay,', 'alright', 'all', 'right', 'stop', 'stop.', 'enough', "that's", 'thats', 'that', 'is', 'it', 'shut', 'up', 'quiet',
+  'be', 'please', 'you', 'can', 'now', 'just', 'coach', 'jarvis', 'talking', 'speaking', 'silence', 'hush', 'zip', 'stfu', 'fine', 'got', 'i', 'yeah', 'yes',
+  'thanks', 'thank', 'bro', 'man', 'dude', 'chill', 'good', 'already', 'cool', 'the', 'please,', 'fuck', 'fucking', 'damn', 'no', 'nah', 'wait', 'hold', 'on', 'there']);
+export const isHush = (t) => {
+  const raw = String(t || '');
+  if (!HUSH_CORE.test(raw)) return false;
+  const w = raw.toLowerCase().replace(/[’']/g, "'").split(/[^\p{L}']+/u).filter(Boolean);
+  return w.length > 0 && w.length <= 10 && w.every((x) => HUSH_WORDS.has(x));
+};
+
+/**
+ * How long the Mac waits after a clip before the coach answers (Tue 10/20: a fixed 2 s was slow for "Yo coach" and
+ * still cut him off while he listed what he ate). Quick: a question, a command, numbers, a few words. Telling: food
+ * and meals, a list, a sentence left open. Anything else in between. His voice starting again holds longer (talking).
+ */
+export const HOLDS = { quick: 500, between: 1200, telling: 3000 };
+const TELLING = /\b(ate|eat|eaten|eating|had|meal|meals|breakfast|lunch|dinner|snack|cooked|grams?|packs?|eggs?|rice|beef|yogurt|almonds|banana|broccoli|chia|and then|also|plus)\b/i;
+export function holdFor(text) {
+  const t = String(text || '').trim();
+  const words = t.split(/\s+/).filter(Boolean).length;
+  if (looksUnfinished(t)) return HOLDS.telling;
+  if (/\?\s*$/.test(t)) return HOLDS.quick;
+  if (TELLING.test(t)) return HOLDS.telling;
+  if (NUMBERS.test(t) || COMMAND.test(t) || words <= 4) return HOLDS.quick;
+  return HOLDS.between;
+}
+
 /** He trailed off mid-thought ("I woke up before 10, so...", "and", a comma): more is probably coming in the next clip. */
 export function looksUnfinished(text) {
   const t = String(text || '').trim();

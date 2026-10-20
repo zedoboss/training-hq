@@ -65,3 +65,15 @@ test('someone else near him: a clip the voice lock rejected, clearly not him, a 
   assert.equal(otherVoice({ ...base, lastCoachAt: now - 20000 }), false, 'the coach just spoke: its own voice from his speaker');
   assert.equal(otherVoice({ ...base, lastCoachAt: now - 60000 }), true);
 });
+
+test('how long the Mac waits for more (Tue 10/20): quick for questions and commands, longer while he tells it something', async () => {
+  const { holdFor, HOLDS, isHush } = await import('../server/voice/address.mjs');
+  for (const t of ['Yo coach', "What's next?", '80 for 8', 'Start the timer', 'Next exercise', 'What did I eat today?']) assert.equal(holdFor(t), HOLDS.quick, t);
+  for (const t of ['Yo, I just finished my meal 10 minutes ago. My last meal.', 'And you know it, 500 grams of beef uncooked.', 'I had eggs and', 'For my last meal I cooked rice'])
+    assert.equal(holdFor(t), HOLDS.telling, t);
+  assert.equal(holdFor('Yeah, I just took the collagen, so please tick that.'), HOLDS.between);
+  for (const t of ['Okay, okay, you can stop, that\'s enough', 'Stop.', 'Shut up', 'OK that\'s enough coach', 'Be quiet please', 'Alright, stop talking'])
+    assert.equal(isHush(t), true, t);
+  for (const t of ['Stop the timer', 'Stop nudging me for an hour', 'Stop the workout', "That's enough protein for today?", 'I had enough'])
+    assert.equal(isHush(t), false, t);
+});
