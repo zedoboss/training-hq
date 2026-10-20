@@ -315,3 +315,31 @@ test('the coach waits while he is still talking (Tue 10/20): clips join, "still 
     assert.equal(voice.talking('phone'), false, 'nothing held');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('dictation (Tue 10/20): the whole clip goes to Whisper in one full-length request, minutes long, not cut at 15 s', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-voice-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  const calls = [];
+  const whisper = { transcribe: async (wav, prompt, opts) => { calls.push({ sec: (wav.length - 44) / 2 / 16000, opts }); return { text: 'Yo, I just finished my last meal. One pack of beef and 450 grams of rice.', ms: 5 }; }, status: () => ({ running: true }), ensure: async () => {} };
+  const voice = openVoice({ store, dataDir: dir, engine: fakeEngine(), whisper });
+  try {
+    const long = new Float32Array(16000 * 75).map((_, i) => 0.3 * Math.sin(i / 7));
+    const r = await voice.dictate(encodeWav(long));
+    assert.equal(calls.length, 1);
+    assert.equal(Math.round(calls[0].sec), 75, 'all 75 s reach Whisper');
+    assert.deepEqual(calls[0].opts, { full: true }, 'full length: not the 10 s command setting');
+    assert.equal(r.text, 'Yo, I just finished my last meal. One pack of beef and 450 grams of rice.');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Whisper: a full-length request asks the server for the whole clip (audio_ctx 0); a command keeps the fast setting', async () => {
+  const { openWhisper } = await import('../server/voice/whisper.mjs');
+  const forms = [];
+  const fetchFn = async (url, o = {}) => { if (o.body) forms.push(o.body); return { ok: true, status: 200, json: async () => ({ text: 'ok' }) }; };
+  const w = openWhisper({ model: '/x.bin', fetchFn, spawn: () => ({ on() {}, kill() {}, stderr: { on() {} } }) });
+  await w.transcribe(new Uint8Array(44), '', { full: true }).catch(() => {});
+  await w.transcribe(new Uint8Array(44)).catch(() => {});
+  assert.equal(forms[0]?.get('audio_ctx'), '0');
+  assert.equal(forms[1]?.get('audio_ctx'), null);
+  w.stop();
+});

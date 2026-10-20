@@ -92,23 +92,26 @@ export function openWhisper({ bin = DEFAULT_BIN, model = DEFAULT_MODEL, port = D
     return starting;
   }
 
-  async function transcribeRaw(wav, prompt = '') {
+  async function transcribeRaw(wav, prompt = '', { full = false } = {}) {
     const form = new FormData();
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'clip.wav');
     form.append('response_format', 'json');
     form.append('temperature', '0');
     if (prompt) form.append('prompt', prompt);
-    const res = await fetchFn(`${base}/inference`, { method: 'POST', body: form, signal: AbortSignal.timeout(30000) });
+    // full: the whole clip, however long (dictation). The server's -ac 512 hears about 10 s, fast for commands; long
+    // speech was cut there (Tue 10/20). audio_ctx 0 per request reads all of it in Whisper's own 30 s windows.
+    if (full) form.append('audio_ctx', '0');
+    const res = await fetchFn(`${base}/inference`, { method: 'POST', body: form, signal: AbortSignal.timeout(full ? 240000 : 30000) });
     if (!res.ok) throw new Error(`Whisper answered ${res.status}`);
     const j = await res.json();
     return String(j.text ?? '').trim();
   }
 
   /** The words in a 16 kHz WAV clip (raw, before cleaning). */
-  async function transcribe(wav, prompt = '') {
+  async function transcribe(wav, prompt = '', opts = {}) {
     await ensure();
     const t = Date.now();
-    const text = await transcribeRaw(wav, prompt);
+    const text = await transcribeRaw(wav, prompt, opts);
     touch();
     lastError = null;
     return { text, ms: Date.now() - t };

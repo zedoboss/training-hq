@@ -13,6 +13,8 @@ import { withDefaults } from '../../app/js/lib/settings.js';
 import { addressed, looksUnfinished, otherVoice, OTHER_VOICE } from './address.mjs';
 
 export const MAX_CLIP_SEC = 15;
+/** Dictation into the chat box: paragraphs by voice (Tue 10/20, his words), up to 5 minutes. */
+export const DICTATE_MAX_SEC = 300;
 // Tue 10/20: he paused mid-answer ("I woke up slightly before 10:00, so..." then "I went to bed around 12"), the phone
 // sent two clips, and the coach answered the first half and asked again for what came in the second. A clip that ends
 // unfinished now waits this long for the next one from the same phone, and the two go to the coach as one message.
@@ -46,12 +48,12 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
   const strictness = () => withDefaults(one('settings', 'main')).voice?.strictness || DEFAULT_STRICTNESS;
 
   /** A WAV from the phone as 16 kHz floats. */
-  function clipOf(bytes) {
+  function clipOf(bytes, maxSec = MAX_CLIP_SEC) {
     let wav;
     try { wav = decodeWav(bytes); } catch (e) { throw fail(400, e.message); }
     const s = resample(wav.samples, wav.sampleRate, VOICE_RATE);
     if (s.length < VOICE_RATE * 0.2) throw fail(400, 'clip too short');
-    return s.length > VOICE_RATE * MAX_CLIP_SEC ? s.subarray(0, VOICE_RATE * MAX_CLIP_SEC) : s;
+    return s.length > VOICE_RATE * maxSec ? s.subarray(0, VOICE_RATE * maxSec) : s;
   }
 
   const status = () => ({ engine: engine.status(), ...print.summary(strictness()) });
@@ -100,9 +102,11 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
   /** Dictation into the chat box (Tue 10/20): the words only, no voice lock, nothing saved or answered. */
   async function dictate(bytes) {
     if (!whisper) throw fail(503, 'speech to text not available');
-    const samples = clipOf(bytes);
-    const raw = await whisper.transcribe(encodeWav(normalise(samples)));
-    return { text: cleanTranscript(raw.text, hint()), ms: raw.ms };
+    // The whole clip in one request (Tue 10/20: everything after about 10 s was lost).
+    const samples = clipOf(bytes, DICTATE_MAX_SEC);
+    const raw = await whisper.transcribe(encodeWav(normalise(samples)), '', { full: true });
+    log(`voice: dictation ${Math.round(samples.length / VOICE_RATE)} s, ${raw.ms} ms to text`);
+    return { text: cleanTranscript(raw.text, hint()).replace(/\s+/g, ' ').trim(), ms: raw.ms };
   }
 
   /** The phone heard him start again (its VAD): hold what was heard until the next clip. */

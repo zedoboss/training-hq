@@ -7,7 +7,8 @@ import { encodeWav } from './wav.js';
 import { macSendRaw } from './data.js';
 import { hold } from './voice.js';
 
-const MAX_SEC = 90;
+// Paragraphs by voice (Tue 10/20): up to 5 minutes; the Mac reads it in pieces.
+const MAX_SEC = 300;
 
 /** @returns {{stop: () => Promise<string>, cancel: () => void}} */
 export async function startDictation() {
@@ -25,7 +26,7 @@ export async function startDictation() {
       const all = new Float32Array(n); let o = 0;
       for (const c of chunks) { all.set(c, o); o += c.length; }
       if (n < 16000 * 0.4) return '';
-      const r = await macSendRaw('/api/voice/dictate', encodeWav(all), 'audio/wav', 60000);
+      const r = await macSendRaw('/api/voice/dictate', encodeWav(all), 'audio/wav', 180000);
       return String(r.text || '').trim();
     },
   };

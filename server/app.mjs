@@ -17,6 +17,8 @@ const MIME = {
 const MAX_BODY = 20 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 40 * 1024 * 1024;
 const MAX_CLIP_BYTES = 2 * 1024 * 1024;
+// Dictation: up to 5 minutes of 16 kHz 16-bit audio (about 9.6 MB) plus room for a higher phone rate.
+const MAX_DICTATE_BYTES = 24 * 1024 * 1024;
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -410,7 +412,7 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
     'POST /api/voice/dictate': async (req) => {
       auth(req);
       if (!voice) throw new HttpError(404, 'voice not available');
-      const bytes = await readRaw(req, MAX_CLIP_BYTES);
+      const bytes = await readRaw(req, MAX_DICTATE_BYTES);
       return voiceCall(() => voice.dictate(bytes));
     },
 
