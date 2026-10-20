@@ -114,6 +114,11 @@ export const dayColour = (mark) => (mark?.workouts.length ? (mark.workouts[0].da
 /** One set in words: "W 20 kg × 10", "42.5 kg × 12", "H 30 kg · 30 s", "BW × 8", "+5 kg × 6". */
 export function setText(set, exType = 'weight_reps') {
   const tag = SET_TYPES[set.type]?.short;
+  return `${tag ? `${tag} ` : ''}${setValueText(set, exType)}`;
+}
+
+/** The set's values without its type letter: "56.3 kg × 8", a hold "31.3 kg × 30 s". */
+export function setValueText(set, exType = 'weight_reps') {
   const parts = [];
   const added = exType === 'weighted_bodyweight';
   const assisted = exType === 'assisted_bodyweight';
@@ -122,15 +127,16 @@ export function setText(set, exType = 'weight_reps') {
   if (set.distanceM != null) parts.push(set.distanceM >= 1000 ? `${fmtKg(set.distanceM / 1000)} km` : `${fmtKg(set.distanceM)} m`);
   let text = parts.join(' · ');
   if (set.reps != null) text = text ? `${text} × ${set.reps}` : `${set.reps} reps`;
-  if (set.durationS != null) text = text ? `${text} · ${set.durationS} s` : `${set.durationS} s`;
+  // Weight held for a time reads like weight for reps (Tue 10/20, his words: "holds as kg × seconds").
+  if (set.durationS != null) text = text ? `${text}${set.reps == null && set.kg != null ? ' ×' : ' ·'} ${set.durationS} s` : `${set.durationS} s`;
   if (set.type === 'hold' && set.durationS == null && set.importedAs) text = `${text ? `${text} ` : ''}(logged as "${set.importedAs}")`;
   if (set.rpe != null) text += ` @${set.rpe}`;
   if (set.depth?.lowDeg != null) text += ` · depth ${Math.round(set.depth.lowDeg)}°`; // Squat Depth filled it (5.3)
-  return `${tag ? `${tag} ` : ''}${text || '-'}`;
+  return text || '-';
 }
 
 /**
- * A day's sessions in full, set by set: [{session, source, exercises: [{name, sets: [text]}], sets, volume}].
+ * A day's sessions in full, set by set: [{session, source, exercises: [{name, sets: [text]}], sets, working, holds}].
  * Only ticked sets, in logged order.
  */
 export function dayDetail(mark, sessionsById, setsBySession) {
@@ -142,6 +148,8 @@ export function dayDetail(mark, sessionsById, setsBySession) {
       name: ex.name, importedName: ex.importedName ?? null, note: ex.notes || '',
       sets: ss.filter((x) => x.exKey === ex.key).map((x) => setText(x, ex.type)),
     })).filter((e) => e.sets.length);
-    return { session: s, source: sourceOf(s), exercises, sets: ss.length };
+    // Counted like the History list and the workout detail: working sets (no warm-ups), holds apart.
+    const holds = ss.filter((x) => x.type === 'hold').length;
+    return { session: s, source: sourceOf(s), exercises, sets: ss.length, working: ss.filter((x) => x.type !== 'hold' && x.type !== 'warmup').length, holds };
   });
 }

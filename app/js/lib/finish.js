@@ -2,6 +2,9 @@
 import { heaviestOf } from './history.js';
 import { isoDate } from './time.js';
 import { newId, newKey } from './routines.js';
+import { sessionPoints, setRecordKinds } from './records.js';
+import { setValueText } from './calendar.js';
+import { SET_TYPES } from './exercise-types.js';
 
 /** The comeback's first day: the earliest first session in the programme data (synced from the Mac), or null. */
 export const comebackStartOf = (meta) => Object.entries(meta?.firstSessions || {})
@@ -32,6 +35,71 @@ export function sessionBests(session, sets, history, { comebackStart = null, ful
     }
   }
   return out;
+}
+
+/**
+ * Records held by this session's sets (workout detail, Tue 10/20): for each record kind an exercise type has (Weight,
+ * 1RM, Volume for weight × reps; Reps, Time, Pace for the others), the set that beat every session before this one.
+ * Same scope as sessionBests: since the comeback started, or all-time with the full history imported; a session from
+ * before the comeback only gets all-time records, and an exercise's first-ever session none. Exercises listed twice
+ * in a session (his bench, then the bench holds) count together. Warm-ups and holds never hold a record.
+ * @returns {Map<string, Array<{key:string, label:string, allTime:boolean}>>} set id -> its records
+ */
+export function sessionSetRecords(session, sets, history, { comebackStart = null, fullHistory = false, tz } = {}) {
+  const out = new Map();
+  const day = isoDate(new Date(session.startedAt), tz);
+  const inComeback = !comebackStart || day >= comebackStart;
+  const byName = new Map();
+  for (const ex of session.exercises) {
+    const mine = sets.filter((s) => s.exKey === ex.key && s.done);
+    if (!byName.has(ex.name)) byName.set(ex.name, { type: ex.type, sets: [] });
+    byName.get(ex.name).sets.push(...mine);
+  }
+  for (const [name, { type, sets: mine }] of byName) {
+    const [now] = sessionPoints([{ date: day, sets: mine.sort((a, b) => a.order - b.order), bodyweightKg: session.bodyweightKg ?? null }], type);
+    if (!now) continue;
+    const past = sessionPoints(history.all(name).filter((e) => e.sessionId !== session.id && (e.at != null ? e.at < session.startedAt : e.date < day)), type);
+    const pastComeback = past.filter(since(comebackStart));
+    for (const { key, label, setKey, better } of setRecordKinds(type)) {
+      const v = now[key];
+      if (v == null || (better === 'max' && v <= 0) || !now[setKey]?.id) continue;
+      const beatsAll = (list) => list.some((p) => p[key] != null) && list.every((p) => p[key] == null || (better === 'min' ? v < p[key] : v > p[key]));
+      const allTime = fullHistory && beatsAll(past);
+      if (!allTime && !(inComeback && beatsAll(pastComeback))) continue;
+      const id = now[setKey].id;
+      if (!out.has(id)) out.set(id, []);
+      out.get(id).push({ key, label, allTime });
+    }
+  }
+  return out;
+}
+
+/**
+ * The workout detail (Tue 10/20, like Hevy's): every exercise in the session's order with its note and every ticked
+ * set in the order logged. Set labels follow the logging screen: working sets numbered, W, D and F in place of the
+ * number; holds numbered on their own (H1, H2, H3). Exercises with nothing ticked are listed apart as skipped.
+ * records: from sessionSetRecords.
+ * @returns {{exercises: Array<{key, exerciseId, name, importedName, notes, type, holdsOnly:boolean,
+ *   rows: Array<{id, type, label, text, note, records}>}>, skipped: string[], holds: number}}
+ */
+export function workoutDetail(session, sets, records = new Map()) {
+  const done = sets.filter((s) => s.done).sort((a, b) => a.order - b.order);
+  const exercises = []; const skipped = [];
+  let holds = 0;
+  for (const ex of session.exercises || []) {
+    const mine = done.filter((s) => s.exKey === ex.key);
+    if (!mine.length) { skipped.push(ex.name); continue; }
+    let working = 0; let held = 0;
+    const rows = mine.map((s) => {
+      if (s.type === 'hold') held++;
+      else if (s.type !== 'warmup') working++;
+      const label = s.type === 'hold' ? `H${held}` : s.type === 'normal' || !SET_TYPES[s.type] ? String(working) : SET_TYPES[s.type].short;
+      return { id: s.id, type: s.type, label, text: setValueText(s, ex.type), note: s.note || '', records: records.get(s.id) || [] };
+    });
+    holds += held;
+    exercises.push({ key: ex.key, exerciseId: ex.exerciseId ?? null, name: ex.name, importedName: ex.importedName ?? null, notes: ex.notes || '', type: ex.type, holdsOnly: held === mine.length, rows });
+  }
+  return { exercises, skipped, holds };
 }
 
 /**

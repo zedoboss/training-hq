@@ -83,7 +83,7 @@ test('sets in words', () => {
   assert.equal(setText({ type: 'normal', kg: 42.5, reps: 12 }), '42.5 kg × 12');
   assert.equal(setText({ type: 'warmup', kg: 20, reps: 10 }), 'W 20 kg × 10');
   assert.equal(setText({ type: 'dropset', kg: 9, reps: 12, rpe: 9 }), 'D 9 kg × 12 @9');
-  assert.equal(setText({ type: 'hold', kg: 30, durationS: 30 }, 'weight_reps'), 'H 30 kg · 30 s');
+  assert.equal(setText({ type: 'hold', kg: 30, durationS: 30 }, 'weight_reps'), 'H 30 kg × 30 s');
   assert.equal(setText({ type: 'hold', kg: 100, reps: null, durationS: null, importedAs: 'x 1' }), 'H 100 kg (logged as "x 1")');
   assert.equal(setText({ type: 'normal', kg: 0, reps: 8 }, 'weighted_bodyweight'), 'BW × 8');
   assert.equal(setText({ type: 'normal', kg: 5, reps: 6 }, 'weighted_bodyweight'), '+5 kg × 6');
@@ -116,6 +116,7 @@ test('a day in full: each session with its ticked sets by exercise', () => {
     ['Leg Extension (Machine)', ['H 100 kg (logged as "x 1")']],
   ]);
   assert.equal(d[0].sets, 3);
+  assert.deepEqual([d[0].working, d[0].holds], [1, 1], 'counted like History: working sets, holds apart');
   assert.deepEqual(d[1].exercises[0].sets, ['H 31 s']);
   assert.deepEqual(dayDetail(undefined, new Map(), new Map()), []);
 });

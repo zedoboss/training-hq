@@ -22,7 +22,7 @@ export function sessionRows({ sessions = [], sets = [], tz } = {}) {
       const exs = (s.exercises || []).filter((e) => done.has(e.key));
       return {
         id: s.id, title: s.title, dayType: s.dayType ?? null, source: sourceOf(s), startedAt: s.startedAt, tz: s.tz ?? null,
-        date: isoDate(new Date(s.startedAt), zoneOf(s, tz)), durationMs: s.endedAt ? elapsedMs(s) : null, sets: sum.done, volume: sum.volume,
+        date: isoDate(new Date(s.startedAt), zoneOf(s, tz)), durationMs: s.endedAt ? elapsedMs(s) : null, sets: sum.done, holds: ss.filter((x) => x.done && x.type === 'hold').length, volume: sum.volume,
         exercises: [...new Set(exs.map((e) => e.name))], also: [...new Set(exs.map((e) => e.importedName).filter(Boolean))],
       };
     });

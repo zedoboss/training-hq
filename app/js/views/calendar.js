@@ -136,13 +136,13 @@ function dayPanel(day, marks, ctx, today) {
   return `<section class="day-panel" aria-live="polite">
     <div class="section-label">${esc(longDay(day))}</div>
     ${detail.length || extra.length ? (!m?.workouts.length && day < today ? '<p class="hint">Rest day.</p>' : '') : `<p class="hint">${day > today ? 'Nothing planned here yet.' : day === today ? 'Nothing logged yet today.' : 'Rest day. Nothing logged.'}</p>`}
-    ${detail.map(({ session: s, source, exercises, sets }) => {
+    ${detail.map(({ session: s, source, exercises, working, holds: held }) => {
       const holds = s.kind === 'holds';
       const c = holds ? 'holds' : (s.dayType || 'other');
       const mins = s.endedAt ? Math.round(elapsedMs(s) / 60000) : null;
       return `<article class="card day-sess">
         <div class="day-sess-head"><i class="dot t-${c}"></i><b>${esc(s.title)}</b><span class="tag">${esc((SOURCE_LABEL[source] || source).toUpperCase())}</span></div>
-        <div class="hint">${esc(s.endedAt ? formatTime(new Date(s.startedAt), zoneOf(s)) : timeAt(s.startedAt, s))}${s.endedAt ? ` - ${esc(timeAt(s.endedAt, s))}` : ''}${mins != null ? ` · ${mins} min` : ''} · ${plural(sets, 'set')}</div>
+        <div class="hint">${esc(s.endedAt ? formatTime(new Date(s.startedAt), zoneOf(s)) : timeAt(s.startedAt, s))}${s.endedAt ? ` - ${esc(timeAt(s.endedAt, s))}` : ''}${mins != null ? ` · ${mins} min` : ''} · ${holds ? plural(held, 'hold') : `${plural(working, 'set')}${held ? ` + ${plural(held, 'hold')}` : ''}`}</div>
         ${exercises.map((e) => `<div class="day-ex"><div class="day-ex-name">${esc(e.name)}${e.importedName ? ` <span class="c-faint">(${esc(e.importedName)} in ${esc(SOURCE_LABEL[source] || source)})</span>` : ''}</div>
           <div class="day-sets">${e.sets.map((t) => `<span>${esc(t)}</span>`).join('')}</div></div>`).join('')}
         ${s.note ? `<p class="hint">Note: ${esc(s.note)}</p>` : ''}

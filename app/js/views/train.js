@@ -8,7 +8,8 @@ import { buildHistory } from '../lib/history.js';
 import { ACTION_TEXT } from '../lib/readiness.js';
 import { NECK_PLACES, placeLabel, neckAsk, answerNeck, neckToday, neckTodayText, neckDoneOn } from '../lib/neck.js';
 import { comebackStartOf } from '../lib/finish.js';
-import { isoDate, formatDay, formatHm, addMinutesHm } from '../lib/time.js';
+import { isoDate, formatDay, formatHm, addMinutesHm, timeAt } from '../lib/time.js';
+import { elapsedMs } from '../lib/session.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { actionSheet, promptText, confirmSheet, promptTime } from '../ui/sheet.js';
@@ -60,6 +61,8 @@ export function render(view) {
     const headline = t.kind === 'train' ? `Today · ${LABEL[next]}` : t.kind === 'done' ? `Today · ${LABEL[t.dayType]} done` : 'Today · Rest';
     const nextLine = t.kind === 'train' ? '' : `Next: ${LABEL[next]}, ${day(rot.next.date)}`;
     const undoable = t.kind === 'rest' && t.reason !== 'rotation';
+    // Today's finished workouts open their detail, every set (Tue 10/20).
+    const doneToday = sessions.filter((s) => s.status === 'done' && s.kind !== 'holds' && s.startedAt && isoDate(new Date(s.startedAt)) === today).sort((a, b) => a.startedAt - b.startedAt);
     const rd = days[today]?.readiness || null;
     // Neck (decision 14): asked weekly until it has a place; on its day, a link to start it.
     const neck = await repo.get('schedule', 'neck');
@@ -83,6 +86,7 @@ export function render(view) {
       <section class="card next-card" data-today="${esc(t.kind)}">
         <div class="hud c-muted next-top"><span>ROTATION</span><span>${last ? `LAST ${esc(LABEL[last.dayType]).toUpperCase()} · ${esc(day(last.date)).toUpperCase()}` : ''}</span></div>
         <div class="next-title"><span>${esc(headline)}</span>${wk && t.kind === 'train' ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
+        ${doneToday.map((s) => `<a class="card-note done-today" href="#/finish/${esc(s.id)}">${esc(s.title)} done · ${esc(timeAt(s.startedAt, s))}${s.endedAt ? ` · ${Math.round(elapsedMs(s) / 60000)} min` : ''} · Open ›</a>`).join('')}
         ${t.kind === 'rest' ? `<p class="hint c-text rest-why">${esc(REST_TEXT[t.reason] || REST_TEXT.added)}. Tendon holds as planned.</p>` : ''}
         ${nextLine ? `<p class="hint next-line">${esc(nextLine)}${wk ? ` · week ${wk} column` : ''}</p>` : ''}
         ${t.kind === 'train' ? (rd && rd.dayType === next

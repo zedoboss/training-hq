@@ -18,7 +18,7 @@ const mins = (ms) => (ms == null ? '' : `${Math.round(ms / 60000)} min`);
 function row(r) {
   return `<li><a class="lib-row hist-row" href="#/finish/${esc(r.id)}/h">
     <span class="hist-title"><i class="dot t-${esc(r.dayType || 'other')}"></i><span class="lib-name">${esc(r.title)}</span></span>
-    <span class="lib-meta">${esc(fullDateAt(r.startedAt, r))} · ${esc(timeAt(r.startedAt, r))}${r.durationMs != null ? ` · ${mins(r.durationMs)}` : ''} · ${r.sets} set${r.sets === 1 ? '' : 's'} · ${r.volume.toLocaleString('en-US')} kg</span>
+    <span class="lib-meta">${esc(fullDateAt(r.startedAt, r))} · ${esc(timeAt(r.startedAt, r))}${r.durationMs != null ? ` · ${mins(r.durationMs)}` : ''} · ${r.sets} set${r.sets === 1 ? '' : 's'}${r.holds ? ` + ${r.holds} hold${r.holds === 1 ? '' : 's'}` : ''} · ${r.volume.toLocaleString('en-US')} kg</span>
     ${r.hits ? `<span class="hist-hits">${r.hits.map((h) => esc(h)).join(' · ')}</span>` : ''}
     <span class="tag">${esc((SOURCE_LABEL[r.source] || r.source).toUpperCase())}</span>
   </a></li>`;

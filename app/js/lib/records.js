@@ -52,13 +52,15 @@ export function sessionPoints(entries, type = 'weight_reps') {
     if (!sets.length) continue;
     const p = { date: e.date, at: e.at ?? null, sessionId: e.sessionId ?? null, source: e.source, title: e.title ?? '' };
     let volume = 0; let reps = 0; let time = 0; let dist = 0;
+    // Compared unrounded, so an identical later set never takes the record from the first one.
+    let bestEst = null; let bestSv = null;
     for (const s of sets) {
       const kg = s.kg ?? null;
       if (kg != null && (p.heaviest == null || kg > p.heaviest || (kg === p.heaviest && (s.reps ?? 0) > (p.heaviestSet.reps ?? 0)))) { p.heaviest = kg; p.heaviestSet = s; }
       const est = kg != null && s.reps ? e1rm(kg, s.reps) : null;
-      if (est != null && (p.e1rm == null || est > p.e1rm)) { p.e1rm = r1(est); p.e1rmSet = s; }
+      if (est != null && (bestEst == null || est > bestEst + 1e-9)) { bestEst = est; p.e1rm = r1(est); p.e1rmSet = s; }
       const sv = kg != null && s.reps ? kg * s.reps : null;
-      if (sv != null && (p.bestSet == null || sv > p.bestSet)) { p.bestSet = r1(sv); p.bestSetSet = s; }
+      if (sv != null && (bestSv == null || sv > bestSv + 1e-9)) { bestSv = sv; p.bestSet = r1(sv); p.bestSetSet = s; }
       if (s.reps != null && (p.mostReps == null || s.reps > p.mostReps)) { p.mostReps = s.reps; p.mostRepsSet = s; }
       if (s.durationS != null && (p.longest == null || s.durationS > p.longest)) { p.longest = s.durationS; p.longestSet = s; }
       if (s.distanceM != null && s.durationS > 0 && s.distanceM > 0) {
@@ -117,6 +119,13 @@ export function records(points, type = 'weight_reps') {
   }
   return out;
 }
+
+// The records a single set can hold, with the short name its badge shows on the workout detail (Hevy's Weight, 1RM,
+// Volume): the RECORDS rows that have a set behind them.
+const SET_LABEL = { heaviest: 'Weight', e1rm: '1RM', bestSet: 'Volume', mostReps: 'Reps', longest: 'Time', pace: 'Pace' };
+/** [{key, label, setKey, better}] for an exercise type. */
+export const setRecordKinds = (type) => RECORDS[family(type)].filter(([, , setKey]) => setKey)
+  .map(([key, , setKey, better = 'max']) => ({ key, label: SET_LABEL[key], setKey, better }));
 
 /**
  * Best weight for each rep count (P37): [{reps, kg, date, sessionId, source}], 1 rep first, by the exact reps

@@ -1,12 +1,13 @@
-// FINISH (#/finish/<id>): save an active session, then its summary: time, volume, sets, bests,
-// tendon hold prompt, "update routine?", save as routine, delete.
+// FINISH (#/finish/<id>): save an active session, then the workout detail: its summary (time, volume, sets, bests,
+// tendon hold prompt, "update routine?"), then every exercise with its note and every set, records marked on the set
+// that made them (Tue 10/20, like Hevy's Workout Detail); photos, save as routine, delete.
 import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { ready } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { summarize, elapsedMs, copySession } from '../lib/session.js';
 import { fileToJpeg, newPhotoId } from '../lib/photos.js';
-import { sessionBests, structureChanged, routineFromSession, previousSame, comebackStartOf } from '../lib/finish.js';
+import { sessionBests, sessionSetRecords, workoutDetail, structureChanged, routineFromSession, previousSame, comebackStartOf } from '../lib/finish.js';
 import { dayMarks, workoutDates, weekStreak, SOURCE_LABEL, sourceOf } from '../lib/calendar.js';
 import { changePct } from '../lib/stats.js';
 import { isoDate, formatDate, formatDay, formatTime, timeAt, dayAt, zoneOf } from '../lib/time.js';
@@ -21,6 +22,24 @@ import { withDefaults } from '../lib/settings.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const localInput = (ms) => { const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+
+// One exercise of the workout detail: its name (opens its history), note, and every set numbered like the logging
+// screen, records marked on the set.
+function exerciseCard(e, lib) {
+  const ex = e.exerciseId ? lib.get(e.exerciseId) : null;
+  const name = ex ? `<a href="#/exercise/${esc(encodeURIComponent(e.exerciseId))}">${esc(e.name)}</a>` : `<span>${esc(e.name)}</span>`;
+  return `<article class="card wd-ex">
+    <div class="wd-name">${name}${e.holdsOnly ? '<span class="tag tag-hold">HOLD</span>' : ''}</div>
+    ${e.importedName ? `<span class="hint c-faint">Logged as ${esc(e.importedName)}</span>` : ''}
+    ${e.notes ? `<p class="wd-note">${esc(e.notes)}</p>` : ''}
+    <div class="wd-cols"><span>SET</span><span>${e.holdsOnly ? 'KG × TIME' : 'KG × REPS'}</span></div>
+    <ol class="wd-sets">${e.rows.map((r) => `<li class="wd-set type-${esc(r.type)}">
+      <span class="wd-no">${esc(r.label)}</span>
+      <span class="wd-val">${esc(r.text)}${r.records.length ? `<span class="wd-recs">${r.records.map((x) => `<span class="wd-rec">★ ${esc(x.label.toUpperCase())}${x.allTime ? ' · ALL-TIME' : ''}</span>`).join('')}</span>` : ''}
+        ${r.note ? `<span class="wd-set-note">${esc(r.note)}</span>` : ''}</span>
+    </li>`).join('')}</ol>
+  </article>`;
+}
 
 export function render(view, params = []) {
   const id = params[0];
@@ -110,7 +129,10 @@ export function render(view, params = []) {
       && day === isoDate(new Date()) && !neckDoneOn(sessions, day, (ms) => isoDate(new Date(ms)));
     const changed = structureChanged(session, done, routine);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
-    void lib;
+    const detail = workoutDetail(session, all, sessionSetRecords(session, done, history, { fullHistory, comebackStart }));
+    const recs = detail.exercises.flatMap((e) => e.rows.flatMap((r) => r.records));
+    const recCount = recs.length;
+    const allTimeRecs = recs.some((r) => r.allTime);
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="${back || '#/train'}">${back ? 'Back' : 'Train'}</a>
         <span class="hud c-muted">${esc(dayAt(session.startedAt, session).toUpperCase())} · ${esc(formatTime(new Date(session.startedAt), zoneOf(session)))} - ${esc(timeAt(session.endedAt, session).toUpperCase())}</span></div>
@@ -118,7 +140,7 @@ export function render(view, params = []) {
       <section class="stat-row">
         <div class="card stat"><span class="hud c-muted">TIME</span><b>${Math.round(elapsedMs(session) / 60000)} min</b></div>
         <div class="card stat"><span class="hud c-muted">VOLUME</span><b>${sum.volume.toLocaleString('en-US')}</b></div>
-        <div class="card stat"><span class="hud c-muted">SETS</span><b>${sum.done}</b></div>
+        <div class="card stat"><span class="hud c-muted">SETS</span><b>${sum.done}</b>${detail.holds ? `<span class="hud stat-sub">+ ${detail.holds} HOLD${detail.holds === 1 ? '' : 'S'}</span>` : ''}</div>
       </section>
       <p class="hint">Streak: ${streak} week${streak === 1 ? '' : 's'}${prev ? ` · Volume ${pct == null ? 'not comparable' : `${pct > 0 ? '▲' : pct < 0 ? '▼' : '='} ${Math.abs(pct)}%`} vs the last ${esc(prev.title)} (${esc(formatDate(new Date(prev.startedAt)))}, ${prevVol.toLocaleString('en-US')} kg)` : ''}</p>
       <section class="card pad-card">
@@ -132,6 +154,12 @@ export function render(view, params = []) {
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
       ${session.gym ? `<p class="hint">Gym: ${esc(session.gym)}</p>` : ''}
       ${session.note ? `<p class="hint">Note: ${esc(session.note)}</p>` : ''}
+      <section class="wd" id="workout" aria-label="Exercises and sets">
+        <div class="wd-head"><span class="section-label">Workout · ${detail.exercises.length} exercise${detail.exercises.length === 1 ? '' : 's'}</span><a class="pill" href="#/session/${esc(id)}/edit">Edit</a></div>
+        ${recCount ? `<p class="hint"><span class="c-amber">★</span> ${recCount} record${recCount === 1 ? '' : 's'}, each on the set that made it: ${inComeback ? 'best since the comeback started' : 'best ever at the time, Hevy and Strong included'}.${inComeback && allTimeRecs ? ' ALL-TIME: best ever, Hevy and Strong included.' : ''}</p>` : ''}
+        ${detail.exercises.map((e) => exerciseCard(e, lib)).join('') || '<p class="hint">No sets were logged.</p>'}
+        ${detail.skipped.length ? `<p class="hint">Not done: ${esc(detail.skipped.join(', '))}.</p>` : ''}
+      </section>
       <section class="card pad-card"><div class="hud c-muted">PHOTOS</div><div class="photo-grid" id="photos"></div>
         <label class="btn-ghost center file-btn">Add photos<input type="file" accept="image/*" multiple hidden id="photo-in"></label></section>
       <div class="btn-row"><a class="btn-ghost center" href="#/session/${esc(id)}/edit">Edit session</a><button class="btn-ghost" id="repeat" type="button">Repeat session</button></div>

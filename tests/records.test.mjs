@@ -119,3 +119,41 @@ test('the comeback start comes from the programme data, not the code', async () 
   assert.equal(comebackStartOf(null), null);
   assert.equal(comebackStartOf({ firstSessions: { source: 'x' } }), null);
 });
+
+test('workout detail: every exercise in order, sets numbered like the logging screen, holds as kg × s, records on the set', async () => {
+  const { workoutDetail, sessionSetRecords } = await import('../app/js/lib/finish.js');
+  const { buildHistory } = await import('../app/js/lib/history.js');
+  const at = (iso) => Date.parse(`${iso}T05:00:00+07:00`);
+  const ex = (key, name, notes = '') => ({ key, exerciseId: name.toLowerCase().replace(/\W+/g, '-'), name, type: 'weight_reps', notes });
+  const last = { id: 'p1', status: 'done', kind: 'workout', title: 'Push', startedAt: at('2026-03-10'), endedAt: at('2026-03-10') + 3600000, exercises: [ex('b', 'Bench'), ex('l', 'Lateral Raise')] };
+  const today = { id: 'p2', status: 'done', kind: 'workout', title: 'Push', startedAt: at('2026-03-17'), endedAt: at('2026-03-17') + 5400000,
+    exercises: [ex('b', 'Bench'), ex('l', 'Lateral Raise', 'drop on the last set'), ex('s', 'Shrug'), ex('h', 'Bench', 'hold'), ex('c', 'Lateral Raise (Cable)')] };
+  const set = (id, sessionId, exKey, order, o) => ({ id, sessionId, exKey, order, done: true, type: 'normal', ...o });
+  const sets = [
+    set('a1', 'p1', 'b', 0, { kg: 60, reps: 8 }), set('a2', 'p1', 'l', 1, { kg: 6, reps: 12 }),
+    set('w', 'p2', 'b', 0, { type: 'warmup', kg: 40, reps: 10 }), set('b1', 'p2', 'b', 1, { kg: 65, reps: 8 }), set('b2', 'p2', 'b', 2, { kg: 65, reps: 8 }),
+    set('l1', 'p2', 'l', 3, { kg: 8, reps: 12 }), set('ld', 'p2', 'l', 4, { type: 'dropset', kg: 4, reps: 12 }), set('l2', 'p2', 'l', 4.01, { kg: 8, reps: 12, note: 'slow' }),
+    set('h1', 'p2', 'h', 6, { type: 'hold', kg: 40, reps: null, durationS: 30 }), set('h2', 'p2', 'h', 7, { type: 'hold', kg: 40, reps: null, durationS: 30 }),
+    set('c1', 'p2', 'c', 8, { type: 'hold', kg: 7, durationS: 30 }), set('x', 'p2', 'c', 9, { type: 'hold', kg: 7, durationS: 30, done: false }),
+  ];
+  const mine = sets.filter((s) => s.sessionId === 'p2');
+  const recs = sessionSetRecords(today, mine.filter((s) => s.done), buildHistory({ sessions: [last, today], sets }), { comebackStart: '2026-03-01', tz: 'Asia/Bangkok' });
+  const d = workoutDetail(today, mine, recs);
+  assert.deepEqual(d.exercises.map((e) => e.name), ['Bench', 'Lateral Raise', 'Bench', 'Lateral Raise (Cable)'], 'session order; the second bench (the holds) stays where he did it');
+  assert.deepEqual(d.skipped, ['Shrug']);
+  assert.equal(d.holds, 3, 'the unticked hold is not counted');
+  const rows = (i) => d.exercises[i].rows.map((r) => [r.label, r.text, r.records.map((x) => x.label).join('+')]);
+  assert.deepEqual(rows(0), [['W', '40 kg × 10', ''], ['1', '65 kg × 8', 'Weight+1RM+Volume'], ['2', '65 kg × 8', '']], 'records go to the first set that made them; never a warm-up');
+  assert.deepEqual(rows(1), [['1', '8 kg × 12', 'Weight+1RM+Volume'], ['D', '4 kg × 12', ''], ['3', '8 kg × 12', '']], 'drop sets take a number slot, as on the logging screen');
+  assert.equal(d.exercises[1].notes, 'drop on the last set');
+  assert.equal(d.exercises[1].rows[2].note, 'slow');
+  assert.deepEqual(rows(2), [['H1', '40 kg × 30 s', ''], ['H2', '40 kg × 30 s', '']], 'holds: kg × seconds, numbered on their own, no records');
+  assert.equal(d.exercises[2].holdsOnly, true);
+  assert.equal(d.exercises[0].holdsOnly, false);
+  assert.deepEqual(rows(3), [['H1', '7 kg × 30 s', '']], 'first-ever session of an exercise holds no records');
+  assert.ok(recs.get('b1').every((r) => !r.allTime), 'no all-time claim without the full history');
+  const full = sessionSetRecords(today, mine.filter((s) => s.done), buildHistory({ sessions: [last, today], sets }), { comebackStart: '2026-03-01', fullHistory: true, tz: 'Asia/Bangkok' });
+  assert.ok(full.get('b1').every((r) => r.allTime));
+  const before = sessionSetRecords(last, sets.filter((s) => s.sessionId === 'p1'), buildHistory({ sessions: [last, today], sets }), { comebackStart: '2026-03-01' });
+  assert.equal(before.size, 0, 'the first session has nothing to beat; the later one does not count');
+});
