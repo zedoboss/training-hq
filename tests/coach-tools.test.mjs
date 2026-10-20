@@ -288,10 +288,12 @@ test('schedule: a session time, a rest day and its undo follow the rotation rule
   assert.match(later.text, /Wednesday 1\/21 at 4:30 AM.*today has passed, so this is for tomorrow/);
 });
 
-test('body scan: confirm the proposed date (never today), record the safety notice and results', async () => {
+test('body scan: confirm the proposed date (today too, with the checklist; never a past day), record the safety notice and results', async () => {
   // Today's Legs is open: the proposal is a day he trains either way, and says which workout each way.
   assert.match((await call('body_scans')).text, /No date confirmed\. Proposed: Friday 1\/23 \(a training day either way: Pull if today's Legs moves to tomorrow, Push if he does it today\)/);
-  assert.match((await call('body_scan', { action: 'confirm_date', date: '2026-01-20' })).text, /Pick a day after today/);
+  assert.match((await call('body_scan', { action: 'confirm_date', date: '2026-01-19' })).text, /Pick today or a later day/);
+  const t = await call('body_scan', { action: 'confirm_date', date: '2026-01-20' });
+  assert.match(t.text, /^Body scan confirmed for today, Tuesday 1\/20\. Go through this with him now .*Nothing eaten before the scan; Normal water intake.*Bathroom first; Barefoot\. If he ate something, water only until about 2 to 3 hours after it/);
   const c = await call('body_scan', { action: 'confirm_date' });
   assert.match(c.text, /^Body scan confirmed for [A-Z][a-z]+day \d+\/\d+/);
   assert.ok(store.getRecord('scan-plan', 'main').data.next.date > '2026-01-20');

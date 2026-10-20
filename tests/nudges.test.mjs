@@ -66,6 +66,13 @@ test('nudges: the morning sleep question, the session and the Evolt, food behind
   assert.equal(nudgeCandidates({ ...base, rot: null, now: at(D, '16:00'), stepGoal: 8000, steps, eaten: { kcal: 3000, protein: 230 } }).length, 0);
 });
 
+test('nudges: a body scan planned today comes first, with the on-the-day checklist', () => {
+  const c = nudgeCandidates({ tz: TZ, now: at(D, '09:30'), rot: { today: { kind: 'train', dayType: 'push' } }, wakeHm: '09:00', bedHm: '00:00',
+    scanToday: { items: ['Nothing eaten before the scan', 'Bathroom first', 'Barefoot'] } });
+  assert.equal(c[0].key, 'scan');
+  assert.equal(c[0].text, 'Body scan today, before you train: Nothing eaten before the scan; Bathroom first; Barefoot. Then tell me the numbers.');
+});
+
 test('nudges: supplements with no time set, once the morning is over', () => {
   const suppsUntimed = { total: 8, open: ['Vitamin C', 'D3 + K2', 'Omega-3', 'Creatine', 'Magnesium', 'Carnitine'] };
   const base = { tz: TZ, rot: null, wakeHm: '04:40', bedHm: '18:00', eaten: { kcal: 3000, protein: 230 }, targets: { kcal: 3174, protein: 242.5 } };

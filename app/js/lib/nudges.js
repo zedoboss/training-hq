@@ -67,13 +67,14 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  * @param {{kcal: number, protein: number}|null} o.targets
  * @param {{steps: number, asOf: number}|null} o.steps   today's steps from Apple Health and when they were read
  * @param {number|null} o.stepGoal
+ * @param {{items: string[]}|null} o.scanToday  a body scan planned for today and not done: the on-the-day checklist
  * @param {{open: string[], total: number}|null} o.suppsUntimed  today's supplements with no time set: names still open
  * @param {string} o.wakeHm
  * @param {string} o.bedHm
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
-  eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm }) {
+  eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm }) {
   const out = [];
   const nowHm = formatHm(hmOf(new Date(now), tz));
   const sinceWake = ((minOf(hmOf(new Date(now), tz)) - minOf(wakeHm)) + 1440) % 1440;
@@ -82,6 +83,12 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   if (!sleepLogged && sinceWake < Math.max(60, minOf('12:00') - minOf(wakeHm))) {
     out.push({ key: 'sleep', priority: 90, gapMin: 40, url: '#/coach',
       text: `How did you sleep? Tell me when you went to bed and when you woke up (your schedule: ${formatHm(bedHm)} to ${formatHm(wakeHm)}).` });
+  }
+
+  // A body scan planned today (Tue 10/20): the checklist until it's done, ahead of everything else.
+  if (scanToday) {
+    out.push({ key: 'scan', priority: 92, gapMin: 30, url: '#/body/scan',
+      text: `Body scan today, before you train: ${scanToday.items.join('; ')}. Then tell me the numbers.` });
   }
 
   // Today's session, and the Evolt before it.

@@ -49,8 +49,13 @@ export function render(view) {
       const latest = nr.lifts.flatMap((l) => l.recent.map((r) => r.date)).sort().pop();
       if (nr.ready && modes?.[next]?.notYet !== latest) suggestNormal = { latest, n: nr.need };
     }
+    // Each routine card's "last": his newest session of that day type, imported ones included (Tue 10/20: the cards
+    // still showed the history bridge's dates after his Hevy and Strong history came in), else the bridge.
     const lastByRoutine = new Map();
-    for (const s of bridge?.lastSessions || []) if (s.dayType && !lastByRoutine.has(s.dayType)) lastByRoutine.set(s.dayType, s.date);
+    for (const s of sessions.filter((x) => x.dayType && x.startedAt && x.kind !== 'holds' && x.status !== 'discarded' && x.status !== 'active').sort((a, b) => b.startedAt - a.startedAt)) {
+      if (!lastByRoutine.has(s.dayType)) lastByRoutine.set(s.dayType, isoDate(new Date(s.startedAt)));
+    }
+    for (const s of bridge?.lastSessions || []) if (s.dayType && (!lastByRoutine.has(s.dayType) || lastByRoutine.get(s.dayType) < s.date)) lastByRoutine.set(s.dayType, s.date);
     const t = rot.today;
     const headline = t.kind === 'train' ? `Today · ${LABEL[next]}` : t.kind === 'done' ? `Today · ${LABEL[t.dayType]} done` : 'Today · Rest';
     const nextLine = t.kind === 'train' ? '' : `Next: ${LABEL[next]}, ${day(rot.next.date)}`;

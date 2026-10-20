@@ -9,6 +9,8 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt } from '../app/js/lib/nudges.js';
+import { protocolOf, isDone } from '../app/js/lib/scans.js';
+import { zonedTime } from '../app/js/lib/time.js';
 
 const SENT = 'notify:sent';
 
@@ -32,11 +34,23 @@ function recoveryFrom(one, list) {
   return { recoveryPlan, recoveryState: one('recovery', 'state'), notes: list('coach-notes'), photos: list('body-photos').map((p) => ({ date: p.date, pose: p.pose, dataUrl: Boolean(p.dataUrl) })) };
 }
 
+// Tue 10/20: a 7:30 AM holds reminder woke him (he gets up at 9 now). These kinds wait for his wake time; the sauna
+// alarm, reminders he set with the coach, and the check-in and session reminders at a time he chose never move.
+const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'evening', 'neck', 'recovery', 'scan']);
+
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */
 export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
   const st = stateFrom(store, tz);
   const today = isoDate(new Date(now), tz);
-  return [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }));
+  const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  const awake = (at) => awakeAt(at, tz, n.wakeHm, n.bedHm);
+  const toWake = (at) => {
+    const d = isoDate(new Date(at), tz);
+    const w = zonedTime(d, n.wakeHm, tz);
+    return w > at ? w : zonedTime(addDays(d, 1), n.wakeHm, tz);
+  };
+  return [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }))
+    .map((i) => (WAIT_FOR_WAKE.has(i.kind) && !awake(i.at) ? { ...i, at: toWake(i.at) } : i));
 }
 
 /**
@@ -97,6 +111,11 @@ export function nudgeInputs(store, now, tz) {
       targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
       steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,
       stepGoal: withDefaults(one('settings', 'main')).body.stepGoal,
+      scanToday: (() => {
+        const sp = one('scan-plan', 'main');
+        if (sp?.next?.date !== date || list('body-scans').some((x) => x.date === date && isDone(x))) return null;
+        return { items: protocolOf(sp).filter((i) => i.when === 'day').map((i) => i.text.replace(/\.$/, '')) };
+      })(),
     },
   };
 }

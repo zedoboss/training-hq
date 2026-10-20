@@ -492,8 +492,13 @@ async function bodyScan(a, ctx) {
   const st = scanStatus({ plan, scans: s.list('body-scans'), today: s.today, last: s.last(), days: s.days() });
   if (a.action === 'confirm_date') {
     const date = a.date || st.proposal.date;
-    if (date <= s.today) return refuse(`Pick a day after today (${dayText(s.today, s.today)}): the evening before he gets the preparation list.`);
+    if (date < s.today) return refuse(`Pick today or a later day.`);
     savePlan(confirmDate(plan, date, { proposedDate: st.proposal.date, at: s.now }));
+    // Tue 10/20: he wanted his scan today. No evening-before list then: give him the on-the-day checklist now.
+    if (date === s.today) {
+      const day = protocolOf(plan).filter((i) => i.when === 'day').map((i) => i.text.replace(/\.$/, '')).join('; ');
+      return wrote(`Body scan confirmed for today, ${dayText(date, s.today)}. Go through this with him now (the app also nudges him until it's done): ${day}. If he ate something, water only until about 2 to 3 hours after it, and record it with the results (fasted: false). Scan before the workout; then save the numbers with record_results.`, 'scan today');
+    }
     return wrote(`Body scan confirmed for ${dayText(date, s.today)}${date !== st.proposal.date ? ` (the app had proposed ${dayText(st.proposal.date, s.today)})` : ''}: first thing at the gym, before the workout. Reminders two evenings before, the evening before with the list, and at his session time.`, `scan ${date}`);
   }
   if (a.action === 'cancel_date') {
