@@ -55,7 +55,7 @@ export function coachReminder(item, opts = {}) {
 }
 
 // Which planned reminders are nudged again while still open: [key prefix, priority, minutes between nudges].
-const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals: ['meals', 55, 45], supps: ['supps', 60, 45], recovery: ['recovery', 40, 120] };
+const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals: ['meals', 55, 30], supps: ['supps', 60, 45], recovery: ['recovery', 40, 120] };
 
 /**
  * Everything worth a nudge right now, most important first.
@@ -152,16 +152,22 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     const a = AGAIN[r.kind];
     if (!a || !r.due || r.at > now || r.at < now - 16 * 3600000) continue;
     let title = String(r.title || '').replace(/[.:]?\s*$/, '');
+    let body = r.body;
     let tail = '';
     // Holds an hour or more past their time say so (Tue 10/20, his words: it said "Morning holds" in the afternoon).
     // A late morning round: one now, the evening one at its time, not back to back (brief section 4, line 8).
+    // A meal past the latest he set (Tue 10/20): say it's late, with both times.
+    if (r.kind === 'meals' && r.latestAt && now > r.latestAt) {
+      title = `${r.name} is late: due ${formatHm(hmOf(new Date(r.at), tz))}, ${formatHm(hmOf(new Date(r.latestAt), tz))} was the latest`;
+      body = 'Nothing logged. Eaten, cooking, or skipping?';
+    }
     if (r.kind === 'holds' && now - r.at >= 60 * 60000) {
       title = `${title} still not done (due ${formatHm(hmOf(new Date(r.at), tz))})`;
       const evening = r.id.startsWith('holds-morning:') ? reminders.find((x) => x.id === r.id.replace('holds-morning:', 'holds-evening:')) : null;
       if (evening?.at > now) tail = ` One round now, the evening one at ${formatHm(hmOf(new Date(evening.at), tz))}. Not back to back.`;
     }
     out.push({ key: `${a[0]}:${r.tag || r.id}`, priority: a[1], gapMin: a[2], url: r.url || '#/', calm: CALM_KINDS.has(r.kind),
-      text: `${[/[?!]$/.test(title) ? title : `${title}.`, r.body].filter(Boolean).join(' ')}${tail}` });
+      text: `${[/[?!]$/.test(title) ? title : `${title}.`, body].filter(Boolean).join(' ')}${tail}` });
   }
 
   // Food behind the day's pace (wake up to 2 hours before bed).

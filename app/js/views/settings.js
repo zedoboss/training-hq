@@ -134,7 +134,7 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('Meal photos are read by', 'Claude on your Mac. Sonnet answers in about 5 seconds; Opus takes longer and looks harder.', '')}
       ${seg('fuel.visionModel', [['fast', 'Sonnet 5.5 · fast'], ['deep', 'Opus 5.5 · careful']], st.fuel.visionModel)}
-      ${opt('Usual meal times', st.fuel.mealTimes?.length ? st.fuel.mealTimes.map((t) => `${esc(t.name)} ${formatHm(t.time)}`).join(' · ') : 'None set: no meal-time reminders', '<button class="btn-ghost small" id="meal-times" type="button">Change</button>')}
+      ${opt('Usual meal times', st.fuel.mealTimes?.length ? st.fuel.mealTimes.map((t) => `${esc(t.name)} ${formatHm(t.time)}${t.latest ? ` (latest ${formatHm(t.latest)})` : ''}`).join(' · ') : 'None set: no meal-time reminders', '<button class="btn-ghost small" id="meal-times" type="button">Change</button>')}
     </div>
     <div class="section-label">Body</div>
     <div class="card opt-list">

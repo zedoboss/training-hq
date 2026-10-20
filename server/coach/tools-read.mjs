@@ -18,7 +18,7 @@ import { amountsLine } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
-import { lowAnswered } from '../../app/js/lib/fuel-reminders.js';
+import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN, proposeSaunaDays, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
@@ -151,6 +151,13 @@ function foodLine(s) {
   return `Food today: ${t.kcal.toLocaleString('en-US')} kcal of ${plan.kcal ? plan.kcal.toLocaleString('en-US') : '?'}, ${t.protein} g protein of ${plan.proteinG ?? '?'} g (${plural(t.meals, 'meal')}${t.estimated ? `, ${t.estimated} still estimates` : ''}${t.unread ? `, ${t.unread} being read` : ''}).`;
 }
 
+/** His meal times (Tue 10/20): the coach guides him by them: when to cook, when to eat, the latest. */
+export function mealTimesLine(s) {
+  const times = mealTimesOf(s.settings().fuel?.mealTimes);
+  if (!times.length) return 'Meal times: none set (Settings > Fuel).';
+  return `His meal times, every day: ${times.map((t) => `${t.name} ${formatHm(t.time)}${t.latest ? ` (${formatHm(t.latest)} at the latest)` : ''}${t.cookMin ? `, start cooking ${formatHm(addMinutesHm(t.time, -t.cookMin))}` : ''}`).join('; ')}. Guide him by these: when to cook, when to eat, and say it plainly when one is late.`;
+}
+
 function scanLine(s) {
   const st = scanStatus({ plan: s.one('scan-plan', 'main') || {}, scans: s.list('body-scans'), today: s.today, last: s.last(), days: s.days() });
   if (st.next) return `Body scan: ${st.cadence === 'training' ? 'every training day; ' : ''}next ${dayText(st.next.date, s.today)}${st.next.date === s.today ? ' (TODAY, first thing at the gym)' : ''}${st.cadence === 'training' ? '' : ', confirmed'}.`;
@@ -164,7 +171,7 @@ export function todayText(s) {
   if (arrived) lines.push(`At the gym since ${timeText(arrived, s.tz)} (his iPhone arrival automation).`);
   const active = s.active();
   if (active) lines.push(activeText(s, active));
-  lines.push(...holdLines(s), suppLine(s), foodLine(s), scanLine(s));
+  lines.push(...holdLines(s), suppLine(s), foodLine(s), mealTimesLine(s), scanLine(s));
   const neck = s.one('schedule', 'neck');
   if (s.list('routines').some((r) => r.dayType === 'neck')) {
     if (neck?.planned) {
@@ -447,6 +454,7 @@ export function mealsText(s, { date = null }) {
     lines.push(`- ${m.name} ${timeText(m.at, s.tz)} [id ${m.id}] (${STATE_SHORT[mealState(m, est, s.now)] || mealState(m, est, s.now)}${b.estimated && b.items ? ', estimate' : ''}): ${eaten ? eaten.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') || 'nothing' : 'being read'}${mt.known ? `; ${mt.kcal} kcal, ${mt.protein} g protein` : ''}${m.note ? `; note: ${m.note}` : ''}`);
   }
   if (!meals.length) lines.push('No meals logged.');
+  lines.push(mealTimesLine(s));
   if (plan.foods?.length) lines.push(`His planned day (his diet analysis): ${plan.foods.map((f) => `${f.name} ${f.perDay || `${f.gramsPerDay} g`}`).join('; ')}.`);
   const amounts = amountsLine(plan);
   if (amounts) lines.push(`No kitchen scale: he goes by packs and counts: ${amounts}.`);

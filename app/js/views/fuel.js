@@ -31,14 +31,19 @@ export function editMealTimes() {
   return new Promise((resolve) => {
     let rows = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes).map((t) => ({ ...t }));
     const { el, close } = overlay(`<form class="sheet-form meal-edit"><div class="hud c-muted sheet-title">YOUR USUAL MEAL TIMES</div>
-      <p class="hint">When one passes with nothing logged, the app asks: eaten, cooking, or skipping? None set: no meal-time reminders.</p>
+      <p class="hint">When one passes with nothing logged, the app asks: eaten, cooking, or skipping? With a latest time it asks at the meal time and says when it's late; with cook minutes it tells you when to start cooking. None set: no meal-time reminders.</p>
       <div class="me-rows"></div><button class="btn-ghost" type="button" data-add>+ Add a meal time</button>
       <div class="btn-row"><button class="btn-ghost" type="button" data-cancel>Cancel</button><button class="btn-primary" type="submit">Save</button></div></form>`, () => resolve());
     const box = el.querySelector('.me-rows');
-    const read = () => [...box.querySelectorAll('.mt-row')].map((r) => ({ name: r.querySelector('[data-f=name]').value.trim(), time: r.querySelector('[data-f=time]').value }));
+    const read = () => [...box.querySelectorAll('.mt-row')].map((r) => ({
+      name: r.querySelector('[data-f=name]').value.trim(), time: r.querySelector('[data-f=time]').value,
+      latest: r.querySelector('[data-f=latest]').value || null, cookMin: Number(r.querySelector('[data-f=cook]').value) || null,
+    }));
     const draw = () => {
       box.innerHTML = rows.map((t, i) => `<div class="mt-row" data-i="${i}"><input class="input" data-f="name" value="${esc(t.name)}" maxlength="30" aria-label="Meal name">
-        <input class="input" type="time" data-f="time" value="${esc(t.time)}" aria-label="Time"><button class="icon-mini" type="button" data-del aria-label="Remove">✕</button></div>`).join('') || '<p class="hint">None yet.</p>';
+        <input class="input" type="time" data-f="time" value="${esc(t.time)}" aria-label="Time"><button class="icon-mini" type="button" data-del aria-label="Remove">✕</button>
+        <label class="mt-sub">Latest<input class="input" type="time" data-f="latest" value="${esc(t.latest || '')}" aria-label="Latest time for ${esc(t.name)}"></label>
+        <label class="mt-sub">Cook<input class="input" inputmode="numeric" data-f="cook" value="${t.cookMin ? esc(t.cookMin) : ''}" placeholder="min" aria-label="Minutes to cook ${esc(t.name)}"></label></div>`).join('') || '<p class="hint">None yet.</p>';
       box.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { rows = read(); rows.splice(Number(b.closest('.mt-row').dataset.i), 1); draw(); }));
     };
     draw();
@@ -48,8 +53,9 @@ export function editMealTimes() {
       e.preventDefault();
       const clean = mealTimesOf(read());
       if (clean.length !== read().length) { toast('Each meal time needs a name and a time.'); return; }
-      await saveSettings({ fuel: { mealTimes: clean } });
-      toast(clean.length ? `Meal times saved: ${clean.map((t) => `${t.name} ${formatHm(t.time)}`).join(', ')}.` : 'No meal times: no meal-time reminders.');
+      if (read().some((t) => t.latest && t.latest <= t.time)) { toast('A latest time has to be after the meal time.'); return; }
+      await saveSettings({ fuel: { mealTimes: clean.map(({ name, time, latest, cookMin }) => ({ name, time, ...(latest ? { latest } : {}), ...(cookMin ? { cookMin } : {}) })) } });
+      toast(clean.length ? `Meal times saved: ${clean.map((t) => `${t.name} ${formatHm(t.time)}${t.latest ? ` (latest ${formatHm(t.latest)})` : ''}`).join(', ')}.` : 'No meal times: no meal-time reminders.');
       close();
     });
   });

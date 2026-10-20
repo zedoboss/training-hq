@@ -37,7 +37,7 @@ function recoveryFrom(one, list) {
 
 // Tue 10/20: a 7:30 AM holds reminder woke him (he gets up at 9 now). These kinds wait for his wake time; the sauna
 // alarm, reminders he set with the coach, and the check-in and session reminders at a time he chose never move.
-const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'evening', 'neck', 'recovery', 'scan']);
+const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'cook', 'evening', 'neck', 'recovery', 'scan']);
 
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */
 export function plan(store, now = Date.now(), tz = deviceTimeZone()) {

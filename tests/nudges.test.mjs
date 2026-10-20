@@ -275,3 +275,11 @@ test('holds an hour past their time say so; a late morning round: one now, the e
   const both = nudgeCandidates({ now: at(D, '23:00'), tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' }).map((c) => c.text);
   assert.ok(both.includes('Morning holds still not done (due 10:30 AM). Knees: Wall Hold. 3 × 30 s each, about 6 min a round.'), 'evening time passed: no "evening one at"');
 });
+
+test('a meal past the latest he set says it is late, with both times', () => {
+  const reminders = [{ id: `meal:${D}:1230`, kind: 'meals', tag: 'meal-1230', at: at(D, '12:30'), latestAt: at(D, '14:00'), name: 'First meal', due: true,
+    title: 'First meal time', body: '12:30 PM, nothing logged yet today. 2:00 PM at the latest. Eaten, cooking, or skipping?' }];
+  const text = (now) => nudgeCandidates({ now, tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' }).find((c) => c.key.startsWith('meals:'))?.text;
+  assert.equal(text(at(D, '13:00')), 'First meal time. 12:30 PM, nothing logged yet today. 2:00 PM at the latest. Eaten, cooking, or skipping?');
+  assert.equal(text(at(D, '14:10')), 'First meal is late: due 12:30 PM, 2:00 PM was the latest. Nothing logged. Eaten, cooking, or skipping?');
+});

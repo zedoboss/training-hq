@@ -262,3 +262,25 @@ test('a discarded session does not count as trained: the day keeps its check-in 
   const st2 = reminderState({ sessions: [{ id: 'y', kind: 'workout', status: 'active', startedAt: at('2026-01-20', '05:00') }], days: [] }, TZ);
   assert.equal(st2.trainedDates.has('2026-01-20'), true);
 });
+
+test('meals with a latest time and cook minutes (Tue 10/20): cook reminder, asked at the meal time, the latest named', async () => {
+  const { mealReminders, mealTimesOf } = await import('../app/js/lib/fuel-reminders.js');
+  const date = '2026-01-21';
+  const mealTimes = [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
+  const items = mealReminders({ date, tz: base.tz, meals: [], mealTimes });
+  const id = (x) => items.find((i) => i.id === x);
+  const cook = id(`meal-cook:${date}:1230`);
+  assert.equal(cook.kind, 'cook');
+  assert.equal(cook.at, at(date, '12:00'));
+  assert.equal(cook.title, 'Start cooking: first meal at 12:30 PM');
+  assert.equal(cook.body, '30 minutes to get it on the plate; 2:00 PM at the latest.');
+  const ask = id(`meal:${date}:1230`);
+  assert.equal(ask.at, at(date, '12:30'), 'asked at the meal time, not 45 minutes later');
+  assert.equal(ask.body, '12:30 PM, nothing logged yet today. 2:00 PM at the latest. Eaten, cooking, or skipping?');
+  assert.equal(ask.latestAt, at(date, '14:00'));
+  assert.equal(id(`meal-cook:${date}:1630`).at, at(date, '16:00'));
+  const eaten = mealReminders({ date, tz: base.tz, meals: [{ id: 'm', date, at: at(date, '12:20'), name: 'First meal' }], mealTimes });
+  assert.equal(eaten.find((i) => i.id === `meal-cook:${date}:1230`).due, false, 'eaten: no cook reminder');
+  assert.equal(eaten.find((i) => i.id === `meal:${date}:1230`).due, false);
+  assert.deepEqual(mealTimesOf([{ name: 'X', time: '12:00', latest: '11:00' }])[0].latest, null, 'a latest before the meal time is ignored');
+});
