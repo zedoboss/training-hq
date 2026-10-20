@@ -25,7 +25,7 @@ const SEEN = 'thq.voice.used';
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private mode */ } } };
 const prefs = () => withDefaults(getState().settings);
 
-let mic = null; let opening = null; let wake = null; let held = 0;
+let mic = null; let opening = null; let wake = null; let held = 0; let lent = 0;
 let phase = 'off'; // off | listening | hearing | thinking | speaking | paused | tap | error
 let readout = null; let readoutTimer = null; let error = null; let turnsInFlight = 0;
 let bargeTimer = null; let bargeSent = false; let overCoach = false;
@@ -35,7 +35,7 @@ const subs = new Set();
 // The chip after the coach stops talking. Tue 10/20: it used to change only while the microphone was open, so a
 // reply or nudge spoken while the mic was off, dropped or being reopened left SPEAKING on for good, and a tap
 // (hush) couldn't clear it either.
-const restPhase = () => (mic ? (turnsInFlight ? 'thinking' : 'listening') : held ? (listening() ? 'paused' : 'off') : listening() ? 'tap' : 'off');
+const restPhase = () => (lent ? (listening() ? 'paused' : 'off') : mic ? (turnsInFlight ? 'thinking' : 'listening') : held ? (listening() ? 'paused' : 'off') : listening() ? 'tap' : 'off');
 const player = createPlayer({
   context: audioContext,
   fetchSpeech: voiceSpeech,
@@ -101,6 +101,8 @@ function speak(sentence) {
   // unless he switched that off (then the old quiet rule holds them back).
   // A16: never while the squat camera runs a set (the depth ding must stay clear): it waits until the set is over.
   if (isQuiet() && (prefs().coach.talk.during === false || quietFor('squat'))) { quietQueue.push(sentence); return; }
+  // He is dictating: the answer waits until he taps stop.
+  if (lent) { quietQueue.push(sentence); return; }
   talk.stop();
   player.say(sentence);
 }
@@ -181,7 +183,7 @@ let micFailedAt = 0;
 const mayRetry = () => Date.now() - micFailedAt >= MIC_RETRY_MS;
 
 async function openListening() {
-  if (mic || held || opening) return opening;
+  if (mic || held || lent || opening) return opening;
   opening = (async () => {
     try {
       mic = await micSession({
@@ -200,8 +202,11 @@ async function openListening() {
         onEnded: () => { mic = null; micActive(false); letSleep(); setPhase(listening() ? 'tap' : 'off'); },
       });
       error = null;
+      // Tue 10/20: a screen took the microphone while this one was still opening: it must not come back on behind it.
+      if (held) { closeListening(); setPhase(restPhase()); return; }
+      if (lent) mic.pause();
       micActive(true);
-      setPhase(player.speaking ? 'speaking' : turnsInFlight ? 'thinking' : 'listening');
+      setPhase(lent ? restPhase() : player.speaking ? 'speaking' : turnsInFlight ? 'thinking' : 'listening');
       keepAwake();
     } catch (e) {
       mic = null;
@@ -275,11 +280,41 @@ export function watchNudges(repo) {
 /** Stop the coach talking (a tap on the chip while it speaks). */
 export const hush = () => { player.stop(); quietQueue.length = 0; if (phase === 'speaking') setPhase(restPhase()); };
 
+/**
+ * Dictation into the chat box (Tue 10/20). While he dictates the coach hears nothing. The coach's microphone, if open,
+ * stays open and hands its sound to dictation: closing it and opening a second one at once often fails on iPhone, and
+ * then the coach got his words in pieces while the box stayed empty. Otherwise dictation opens its own (own: true).
+ * @returns {Promise<{own: boolean, release: () => void}>}
+ */
+export async function lendMic(onFrame) {
+  lent++;
+  if (opening) await opening.catch(() => {});
+  const m = mic;
+  if (m) { m.pause(); m.tap(onFrame); }
+  player.stop(); talk.stop(); quietQueue.length = 0;
+  setPhase(restPhase()); emit();
+  let done = false;
+  return {
+    own: !m,
+    release() {
+      if (done) return;
+      done = true;
+      m?.tap(null);
+      lent = Math.max(0, lent - 1);
+      if (lent) return;
+      if (m && m === mic) m.resume();
+      else if (listening() && !held) openListening().catch(() => {});
+      if (!isQuiet()) while (quietQueue.length) player.say(quietQueue.shift());
+      setPhase(player.speaking ? 'speaking' : restPhase()); emit();
+    },
+  };
+}
+
 /** Calibration and the test screen use the microphone themselves: listening pauses meanwhile. */
 export function hold(on) {
   held = Math.max(0, held + (on ? 1 : -1));
   if (held) { closeListening(); player.stop(); setPhase(listening() ? 'paused' : 'off'); }
-  else if (listening()) openListening().catch(() => {});
+  else if (listening() && !lent) openListening().catch(() => {});
 }
 
 // Only while the app is open and on screen: the microphone closes when it hides and opens again when it's back

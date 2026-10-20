@@ -13,18 +13,21 @@ import { encodeWav } from './wav.js';
  */
 export async function micSession({ onClip, onLevel = () => {}, onEvent = () => {}, onEnded = () => {}, vad: vadOpts = {} }) {
   let paused = false;
+  let tap = null; // dictation borrowing this microphone's sound (Tue 10/20)
   const vad = createVad(vadOpts, (e) => {
     if (paused) return;
     if (e.type === 'end') onClip(encodeWav(e.samples), e);
     else onEvent(e);
   });
-  const mic = await openMic({ onFrame: (f) => { const level = vad.push(f); onLevel(level, vad.threshold); }, onEnded });
+  const mic = await openMic({ onFrame: (f) => { tap?.(f); const level = vad.push(f); onLevel(level, vad.threshold); }, onEnded });
   return {
     vad,
     /** Paused: speech is still followed (so the room level stays right) but no clips are handed out. */
     pause() { paused = true; vad.reset(); },
     resume() { vad.reset(); paused = false; },
     get paused() { return paused; },
+    /** Hand every frame to fn as well (null stops): dictation takes the sound from the microphone already open. */
+    tap(fn) { tap = fn || null; },
     close() { mic.close(); },
   };
 }

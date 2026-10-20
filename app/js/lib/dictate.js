@@ -5,20 +5,26 @@
 import { openMic } from './voice-mic.js';
 import { encodeWav } from './wav.js';
 import { macSendRaw } from './data.js';
-import { hold } from './voice.js';
+import { lendMic } from './voice.js';
 
-// Paragraphs by voice (Tue 10/20): up to 5 minutes; the Mac reads it in pieces.
+// Paragraphs by voice (Tue 10/20): up to 5 minutes; the Mac reads it in one go.
 const MAX_SEC = 300;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** @returns {{stop: () => Promise<string>, cancel: () => void}} */
 export async function startDictation() {
   const chunks = []; let n = 0; let done = false;
-  hold(true);
-  let mic;
-  try {
-    mic = await openMic({ onFrame: (f) => { if (n < MAX_SEC * 16000) { chunks.push(Float32Array.from(f)); n += f.length; } } });
-  } catch (e) { hold(false); throw e; }
-  const close = () => { if (done) return; done = true; try { mic.close(); } catch { /* gone */ } hold(false); };
+  const onFrame = (f) => { if (!done && n < MAX_SEC * 16000) { chunks.push(Float32Array.from(f)); n += f.length; } };
+  // The coach's microphone if it is open (the coach hears nothing meanwhile); else one of its own, tried twice.
+  const lease = await lendMic(onFrame);
+  let own = null;
+  if (lease.own) {
+    try { own = await openMic({ onFrame }); } catch {
+      await sleep(400);
+      try { own = await openMic({ onFrame }); } catch (e) { lease.release(); throw e; }
+    }
+  }
+  const close = () => { if (done) return; done = true; try { own?.close(); } catch { /* gone */ } lease.release(); };
   return {
     cancel: close,
     async stop() {
