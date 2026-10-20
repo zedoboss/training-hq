@@ -13,6 +13,8 @@ export const NUDGE_DEFAULTS = { everyMin: 20, wakeHm: '07:00', bedHm: '22:00' };
 export const NUDGE_EVERY = [[15, 'Every 15 minutes'], [20, 'Every 20 minutes'], [30, 'Every 30 minutes'], [0, 'Off']];
 /** Quiet this long after any notification, and after he last wrote to the coach. */
 export const QUIET_AFTER_MIN = 10;
+/** Apple Health data older than this gets a nudge to open the app (the export runs when the app opens). */
+export const STALE_HEALTH_H = 6;
 /** No nudges this long after a workout ends (shower, not hungry yet); then the first meal. */
 export const AFTER_WORKOUT_QUIET_MIN = 20;
 /** Kinds of reminder that speak plainly (no mood line). */
@@ -76,13 +78,14 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  * @param {string} o.bedHm
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
  * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
+ * @param {number|null} [o.healthAt]  when Apple Health last reached the Mac (the newest file), ms; null = never; left out = don't say
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, lastMealAt = null }) {
+  wokeAt = null, morning = null, workoutEndedAt = null, lastMealAt = null, healthAt = undefined }) {
   const out = [];
   // After the workout (Tue 10/20, his words: "I'm usually not hungry immediately and I obviously need to take a
   // shower... wait 20 minutes after my workout is finished and then he should bump me about my first meal"): quiet
@@ -160,6 +163,13 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       out.push({ key: 'food', priority: 55, gapMin: 60, url: '#/fuel',
         text: `Food: ${nf(eaten.kcal)} of ${nf(targets.kcal)} kcal and ${nf(eaten.protein)} of ${targets.protein} g protein at ${nowHm}. You should be near ${nf(Math.round(expect / 50) * 50)} kcal by now. Eat.` });
     }
+  }
+
+  // Apple Health hasn't reached the Mac for hours (Tue 10/20, his steps missing): opening the app runs the export
+  // (his Shortcuts automation), so one tap on this is the fix. Low priority, rarely.
+  if (healthAt !== undefined && sinceWake >= 60 && (!healthAt || now - healthAt > STALE_HEALTH_H * 3600000)) {
+    out.push({ key: 'health', priority: 25, gapMin: 240, url: '#/today', calm: true,
+      text: `Steps and sleep: ${healthAt ? `last update ${formatHm(hmOf(new Date(healthAt), tz))}${isoDate(new Date(healthAt), tz) !== isoDate(new Date(now), tz) ? ' yesterday' : ''}` : 'nothing from Apple Health yet'}. Open the app once and they refresh.` });
   }
 
   // Steps behind, only from fresh Apple Health numbers (read in the last 3 hours).

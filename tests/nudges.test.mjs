@@ -214,3 +214,14 @@ test('the dishes (Tue 10/20): 2 minutes after a meal is logged, or after its aft
   assert.deepEqual(dishesDue({ meals: [c2], seen, sent: {}, now: now + 70000 }).map((m) => m.id), ['c']);
   assert.match(DISHES_TEXT, /dishes won't clean themselves\. Get up now, walk around for a minute or two/);
 });
+
+test('Apple Health stale for 6 hours: one calm nudge to open the app (Tue 10/20)', () => {
+  const base = { tz: TZ, rot: { today: { kind: 'rest' } }, wakeHm: '10:00', bedHm: '00:00', sleepLogged: true };
+  const c = nudgeCandidates({ ...base, now: at(D, '15:00'), healthAt: at('2026-01-19', '19:30') });
+  const h = c.find((x) => x.key === 'health');
+  assert.equal(h.text, 'Steps and sleep: last update 7:30 PM yesterday. Open the app once and they refresh.');
+  assert.equal(h.calm, true);
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '15:00'), healthAt: at(D, '12:00') }).some((x) => x.key === 'health'), false, 'fresh');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '10:30'), healthAt: null }).some((x) => x.key === 'health'), false, 'not in the first hour');
+  assert.match(nudgeCandidates({ ...base, now: at(D, '12:00'), healthAt: null }).find((x) => x.key === 'health').text, /nothing from Apple Health yet/);
+});

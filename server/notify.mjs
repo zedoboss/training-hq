@@ -116,6 +116,7 @@ export function nudgeInputs(store, now, tz) {
       eaten: { kcal: eaten.kcal, protein: eaten.protein },
       targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
       steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,
+      healthAt: Math.max(0, ...list('health').map((d) => d?.fileAt || 0)) || null,
       stepGoal: withDefaults(one('settings', 'main')).body.stepGoal,
       scanToday: (() => {
         const sp = planFor(one('scan-plan', 'main') || {}, { scans: list('body-scans'), today: date, last: st.last, days: st.days || {} });
