@@ -8,7 +8,8 @@ import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
+import { walkDue, withAsk, usualWalkHm } from '../app/js/lib/walks.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor } from '../app/js/lib/scans.js';
 import { zonedTime } from '../app/js/lib/time.js';
@@ -120,7 +121,8 @@ export function nudgeInputs(store, now, tz) {
       targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
       steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,
       healthAt: Math.max(0, ...list('health').map((d) => d?.fileAt || 0)) || null,
-      stepGoal: withDefaults(one('settings', 'main')).body.stepGoal,
+      // The walk coach asks about steps now (walkTick); the nudges' own steps line only when walks are off.
+      stepGoal: n.kinds?.walk === false ? withDefaults(one('settings', 'main')).body.stepGoal : null,
       scanToday: (() => {
         const sp = planFor(one('scan-plan', 'main') || {}, { scans: list('body-scans'), today: date, last: st.last, days: st.days || {} });
         if (sp?.next?.date !== date || list('body-scans').some((x) => x.date === date && isDone(x))) return null;
@@ -186,6 +188,33 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   return out;
 }
 
+/**
+ * The walk coach (Tue 10/20, his words: "bump me throughout the day... to get me to get those 8K steps... If I don't
+ * respond within 5 minutes, it should bump me again and ask... When are you going for a walk?"). Its own timing (lib/
+ * walks.js), not the nudges' 20 minutes; quiet while a workout or the sauna runs, 20 minutes after a workout, while
+ * nudges are paused, within 2 minutes of another notification or of his last message. Returns what was sent, or null.
+ */
+export async function walkTick({ store, push, log = () => {}, now, tz }) {
+  const inp = nudgeInputs(store, now, tz);
+  if (inp.n.kinds?.walk === false || now < (inp.n.nudgePausedUntil || 0)) return null;
+  const a = inp.args;
+  if (a.workoutEndedAt && now >= a.workoutEndedAt && now - a.workoutEndedAt < AFTER_WORKOUT_QUIET_MIN * 60000) return null;
+  if (now - (store.getMeta(LAST) || 0) < 2 * 60000 || now - (inp.lastUserAt || 0) < 60000) return null;
+  const date = isoDate(new Date(now), tz);
+  const docs = store.listRecords('walks').map((r) => r.data).filter(Boolean);
+  const doc = docs.find((d) => d.date === date) || null;
+  const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
+  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }) });
+  if (!due) return null;
+  const v = coachVoice(due.text, voiceOpts(store));
+  const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };
+  sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `walk:${due.kind}` });
+  store.writeLocal('walks', date, withAsk(doc, date, due.kind, now));
+  store.setMeta(LAST, now);
+  log(`walk ${due.kind}: ${v.body.slice(0, 80)} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
+  return { key: `walk:${due.kind}`, body: v.body };
+}
+
 /** One nudge if it's time and something is open: pushed and written into Talk. Returns what was sent, or null. */
 export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
@@ -234,8 +263,10 @@ export function startNotifier({ store, push, log = () => {}, tz = () => phoneZon
         store.setMeta(LAST, t);
       }
       const dishes = await dishesTick({ store, push, log, now: t, tz: zone });
-      const nudge = await nudgeTick({ store, push, log, now: t, tz: zone });
-      return [...items, ...(dishes ? [dishes] : []), ...(nudge ? [nudge] : [])];
+      const walk = await walkTick({ store, push, log, now: t, tz: zone });
+      // One coach notification a minute: a walk question that just went out holds the other nudges.
+      const nudge = walk ? null : await nudgeTick({ store, push, log, now: t, tz: zone });
+      return [...items, ...(dishes ? [dishes] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : [])];
     } catch (e) {
       log(`notify error: ${e.stack || e}`);
       return [];

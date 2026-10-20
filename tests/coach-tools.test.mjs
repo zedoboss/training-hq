@@ -584,3 +584,21 @@ test('tendons: the coach gets the real length of a round, and a late morning rou
   const late = (await call('tendons')).text;
   assert.match(late, /The morning round \(Knees, due 7:30 AM\) is late: call it late, not "morning"\. One round now, the evening one at 7:30 PM; not back to back\./);
 });
+
+test('walk (Tue 10/20): "in an hour" sets the time and says it back; going, done, not now', async () => {
+  const plan = await call('walk', { action: 'plan', inMinutes: 60, said: "I'll go in an hour" });
+  assert.match(plan.text, /^Walk set for 4:00 AM\. No walk questions until then; .*Tell him so: "Okay, I'll message you at 4:00 AM\."/);
+  let w = list('walks')[0];
+  assert.equal(w.plan.at, NOW + 3600000);
+  assert.equal(w.plan.said, "I'll go in an hour");
+  await call('walk', { action: 'going' });
+  w = list('walks')[0];
+  assert.equal(w.plan, null);
+  assert.equal(w.going.at, NOW);
+  await call('walk', { action: 'done', minutes: 35 });
+  w = list('walks')[0];
+  assert.deepEqual([w.going, w.walks[0].minutes], [null, 35]);
+  const skip = await call('walk', { action: 'skip', reason: 'raining', askAgainInMinutes: 90 });
+  assert.match(skip.text, /^Not now \(raining\): asked again at 4:30 AM\./);
+  assert.match((await call('walk', { action: 'plan' })).text, /needs inMinutes or a time/, 'a plan needs a time');
+});

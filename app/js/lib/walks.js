@@ -1,0 +1,157 @@
+// The walk coach (Tue 10/20, his words: "its goal is to get me to go on a walk, to get me to get those 8K steps a day...
+// If I don't respond within 5 minutes, it should bump me again and ask me... When are you going for a walk? Tell me so
+// I can schedule it and not keep bumping you... If I tell it 'I'll go in an hour', he can say 'Okay, I'll message you
+// in an hour'"). One record per day (collection 'walks', id = the date): what was asked and when, his plan, a walk
+// in progress, walks done, skips. The Mac asks (server/notify.mjs walkTick); the coach records his answers (tool
+// 'walk'). Pure, shared by the Mac and the phone.
+import { formatHm, hmOf, isoDate, zonedTime } from './time.js';
+
+/** Defaults, all in minutes. Claude's choices for his "very often" (Tue 10/20); Settings > Coach can change them later. */
+export const WALK = {
+  followMin: 5,       // no answer to a question this long: ask for a time
+  nagMin: 15,         // still nothing: ask again this often
+  againMin: 30,       // he answered without a time or a walk: ask again after this long
+  afterWalkMin: 90,   // a walk done: the next ask waits this long (the step count catches up)
+  backMin: 40,        // out walking: "back?" after this long
+  startAfterWakeMin: 60, // the first ask of the day, after he wakes
+  stopBeforeBedMin: 60,  // no asks in the last hour before bed
+  skipMin: 60,        // "not now" with no time: ask again after this long
+  freshMs: 3 * 3600000, // a step count older than this is not trusted for "steps to go"
+  stepsPerMin: 100,   // an estimate: about 100 steps a minute walking (Claude's estimate)
+};
+
+export const emptyWalk = (date) => ({ id: date, date, asks: [], answeredAt: null, plan: null, going: null, walks: [], skips: [], goalAt: null });
+
+const minOf = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return h * 60 + m; };
+const nf = (n) => Math.round(n).toLocaleString('en-US');
+const lastOf = (a) => a[a.length - 1] || null;
+
+/** Steps in words: "6,223 of 8,000 steps as of 8:15 PM: 1,777 to go, about 18 minutes of walking." */
+export function stepsText({ steps, goal, now, tz }) {
+  if (!goal) return '';
+  const fresh = steps?.steps != null && steps.asOf && now - steps.asOf <= WALK.freshMs;
+  if (!fresh) return `No step count from your phone since ${steps?.asOf ? formatHm(hmOf(new Date(steps.asOf), tz)) : 'this morning'} (opening the app sends it). Goal ${nf(goal)}.`;
+  const left = Math.max(0, goal - steps.steps);
+  return `${nf(steps.steps)} of ${nf(goal)} steps as of ${formatHm(hmOf(new Date(steps.asOf), tz))}: ${nf(left)} to go, about ${Math.max(5, Math.ceil(left / WALK.stepsPerMin / 5) * 5)} minutes of walking.`;
+}
+
+/** The hour he usually walks, from the last two weeks of plans and walks (memory), as "HH:00", or null. */
+export function usualWalkHm(docs = [], { today, tz } = {}) {
+  const from = isoDate(new Date(Date.parse(`${today}T12:00:00Z`) - 14 * 86400000), 'UTC');
+  const hours = new Map();
+  for (const d of docs) {
+    if (!d?.date || d.date >= today || d.date < from) continue;
+    const at = d.walks?.[0]?.at ?? d.going?.at ?? d.plan?.at;
+    if (!at) continue;
+    const h = hmOf(new Date(at), tz).slice(0, 2);
+    hours.set(h, (hours.get(h) || 0) + 1);
+  }
+  const best = [...hours.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] >= 2 ? `${best[0]}:00` : null;
+}
+
+/**
+ * What to say now, or null. Asks only in his waking hours (from an hour after he wakes to an hour before bed), never
+ * while a workout or the sauna runs, and stops for the day once the goal is met.
+ * @param {object} o
+ * @param {object|null} o.doc        today's walk record
+ * @param {{steps:number, asOf:number}|null} o.steps  today's steps (Apple Health) and when they were read
+ * @param {number} o.goal            his daily step goal
+ * @param {number} o.lastUserAt      when he last wrote or spoke to the coach
+ * @param {string|null} [o.usualHm]  his usual walk hour (usualWalkHm)
+ * @returns {{kind: 'ask'|'follow'|'nag'|'plan'|'plan-follow'|'back'|'goal', text: string}|null}
+ */
+export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, cfg = WALK }) {
+  const d = doc || emptyWalk(isoDate(new Date(now), tz));
+  if (goal && steps?.steps != null && steps.steps >= goal) {
+    return d.goalAt ? null : { kind: 'goal', text: `${nf(steps.steps)} steps: today's ${nf(goal)} is done. Walks are off until tomorrow.` };
+  }
+  if (d.goalAt) return null;
+  const nowMin = minOf(hmOf(new Date(now), tz));
+  const wake = minOf(wakeHm); let bed = minOf(bedHm); if (bed <= wake) bed += 1440;
+  const at = nowMin < wake && bed > 1440 ? nowMin + 1440 : nowMin;
+  if (at < wake + cfg.startAfterWakeMin || at > bed - cfg.stopBeforeBedMin) return null;
+  if (busy) return null;
+  const st = stepsText({ steps, goal, now, tz });
+  const last = lastOf(d.asks);
+  const heardSince = (t) => (d.answeredAt || 0) > t || (lastUserAt || 0) > t;
+  // Out walking: one "back?" after a while.
+  if (d.going) {
+    if (now - d.going.at >= cfg.backMin * 60000 && !d.asks.some((a) => a.kind === 'back' && a.at > d.going.at)) {
+      return { kind: 'back', text: 'Back from the walk? How many minutes did you go?' };
+    }
+    return null;
+  }
+  const walked = lastOf(d.walks);
+  if (walked && now - walked.at < cfg.afterWalkMin * 60000) return null;
+  const skip = lastOf(d.skips);
+  if (skip?.until && now < skip.until) return null;
+  // He gave a time: quiet until then, then "walk time", then the same follow-ups.
+  if (d.plan) {
+    if (now < d.plan.at) return null;
+    const asked = d.asks.filter((a) => a.at >= d.plan.at);
+    const planTime = formatHm(hmOf(new Date(d.plan.at), tz));
+    if (!asked.length) return { kind: 'plan', text: `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Go now. ${st}` };
+    const l = lastOf(asked);
+    if (heardSince(l.at)) return now - Math.max(d.answeredAt || 0, lastUserAt || 0) >= cfg.againMin * 60000 ? { kind: 'nag', text: `Walk: you said ${planTime}. Out yet? Going now, or a new time? ${st}` } : null;
+    if (l.kind === 'plan' && now - l.at >= cfg.followMin * 60000) return { kind: 'plan-follow', text: `You said ${planTime} for your walk. Out yet? Going now, or a new time?` };
+    if (now - l.at >= cfg.nagMin * 60000) return { kind: 'nag', text: `Still not out for the walk you set for ${planTime}. Going now, or a new time? ${st}` };
+    return null;
+  }
+  const since = Math.max(last?.at || 0, skip?.at || 0, walked?.at || 0);
+  if (!last || (skip && skip.at > last.at)) {
+    return { kind: 'ask', text: `Walk: ${st} Go out for a walk now.${usualHm ? ` You usually go around ${formatHm(usualHm)}.` : ''} When are you going?` };
+  }
+  if (heardSince(last.at)) {
+    return now - Math.max(d.answeredAt || 0, lastUserAt || 0, since) >= cfg.againMin * 60000 ? { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` } : null;
+  }
+  if ((last.kind === 'ask' || last.kind === 'plan') && now - last.at >= cfg.followMin * 60000) {
+    return { kind: 'follow', text: 'No answer on the walk. When are you going? Tell me a time and I leave you alone until then.' };
+  }
+  if (now - last.at >= cfg.nagMin * 60000) return { kind: 'nag', text: `Still no time for your walk. When are you going? One time, and I stop asking. ${st}` };
+  return null;
+}
+
+/** The record with one more question asked. */
+export const withAsk = (doc, date, kind, at) => ({ ...(doc || emptyWalk(date)), asks: [...(doc?.asks || []), { at, kind }].slice(-60), ...(kind === 'goal' ? { goalAt: at } : {}) });
+
+/**
+ * His answer, recorded by the coach (tool 'walk').
+ * plan: {at, said}; going; done: {minutes, steps}; skip: {reason, until}; clear: forget the plan.
+ */
+export function withAnswer(doc, date, a, now) {
+  const d = { ...(doc || emptyWalk(date)), answeredAt: now };
+  if (a.action === 'plan') return { ...d, plan: { at: a.at, said: a.said || null, setAt: now }, going: null };
+  if (a.action === 'going') return { ...d, going: { at: now }, plan: null };
+  if (a.action === 'done') return { ...d, going: null, plan: null, walks: [...d.walks, { at: now, minutes: a.minutes ?? null, steps: a.steps ?? null }] };
+  if (a.action === 'skip') return { ...d, plan: null, skips: [...d.skips, { at: now, reason: a.reason || '', until: a.until ?? now + WALK.skipMin * 60000 }] };
+  if (a.action === 'clear') return { ...d, plan: null };
+  return d;
+}
+
+/** Today in one line for the coach, and the last week as memory. */
+export function walkLines(docs = [], { today, now, tz, steps = null, goal = 8000, usualHm = null } = {}) {
+  const t = (ms) => formatHm(hmOf(new Date(ms), tz));
+  const d = docs.find((x) => x?.date === today) || emptyWalk(today);
+  const last = lastOf(d.asks);
+  const parts = [stepsText({ steps, goal, now, tz }).replace(/\.$/, '')];
+  if (d.goalAt) parts.push('goal met today');
+  else if (d.going) parts.push(`out walking since ${t(d.going.at)}`);
+  else if (d.plan) parts.push(`he said he'd go at ${t(d.plan.at)}${d.plan.said ? ` ("${d.plan.said}")` : ''}`);
+  else if (last && !((d.answeredAt || 0) > last.at)) parts.push(`asked at ${t(last.at)}, no answer yet: get a time from him`);
+  for (const w of d.walks) parts.push(`walked at ${t(w.at)}${w.minutes ? ` for ${w.minutes} min` : ''}`);
+  for (const s of d.skips) parts.push(`skipped at ${t(s.at)}${s.reason ? ` (${s.reason})` : ''}`);
+  const week = docs.filter((x) => x?.date && x.date < today).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7)
+    .map((x) => `${x.date.slice(5)}: ${[x.plan ? `planned ${t(x.plan.at)}` : '', ...x.walks.map((w) => `walked ${t(w.at)}${w.minutes ? ` ${w.minutes} min` : ''}`), ...x.skips.map((s) => `skipped${s.reason ? ` (${s.reason})` : ''}`), x.goalAt ? 'goal met' : ''].filter(Boolean).join(', ') || 'asked, no walk'}`);
+  return [`Walk today: ${parts.join('; ')}.${usualHm ? ` He usually walks around ${formatHm(usualHm)}.` : ''}`, ...(week.length ? [`Walks, last days: ${week.join('; ')}.`] : [])];
+}
+
+/** "in 60 minutes" or "18:30" to a time today (tomorrow if that clock time has passed). */
+export function planAt({ inMinutes = null, time = null, now, tz }) {
+  if (inMinutes) return now + Math.round(inMinutes) * 60000;
+  if (!/^\d{2}:\d{2}$/.test(time || '')) return null;
+  const today = isoDate(new Date(now), tz);
+  let at = zonedTime(today, time, tz);
+  if (at <= now) at = zonedTime(isoDate(new Date(now + 86400000), tz), time, tz);
+  return at;
+}

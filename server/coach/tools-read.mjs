@@ -19,6 +19,7 @@ import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/m
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
+import { walkLines, usualWalkHm } from '../../app/js/lib/walks.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN, proposeSaunaDays, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
@@ -152,6 +153,16 @@ function foodLine(s) {
 }
 
 /** His meal times (Tue 10/20): the coach guides him by them: when to cook, when to eat, the latest. */
+/** The walk coach's state (Tue 10/20): today in one line, and the last days as memory (week: true). */
+export function walkTextLines(s, { week = false } = {}) {
+  if (s.settings().notify?.kinds?.walk === false) return [];
+  const docs = s.list('walks');
+  const health = s.one('health', s.today);
+  const steps = health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null;
+  const lines = walkLines(docs, { today: s.today, now: s.now, tz: s.tz, steps, goal: s.settings().body?.stepGoal || 8000, usualHm: usualWalkHm(docs, { today: s.today, tz: s.tz }) });
+  return week ? lines : lines.slice(0, 1);
+}
+
 export function mealTimesLine(s) {
   const times = mealTimesOf(s.settings().fuel?.mealTimes);
   if (!times.length) return 'Meal times: none set (Settings > Fuel).';
@@ -171,7 +182,8 @@ export function todayText(s) {
   if (arrived) lines.push(`At the gym since ${timeText(arrived, s.tz)} (his iPhone arrival automation).`);
   const active = s.active();
   if (active) lines.push(activeText(s, active));
-  lines.push(...holdLines(s), suppLine(s), foodLine(s), mealTimesLine(s), scanLine(s));
+  lines.push(...walkTextLines(s));
+  lines.push(...holdLines(s), suppLine(s), foodLine(s), mealTimesLine(s), ...walkTextLines(s, { week: true }), scanLine(s));
   const neck = s.one('schedule', 'neck');
   if (s.list('routines').some((r) => r.dayType === 'neck')) {
     if (neck?.planned) {

@@ -26,6 +26,7 @@ export const KINDS = [
   ['coach', 'Reminders you asked the coach for'],
   ['recovery', 'Recovery: the weekly check-in until the checkup, things to do, photos every few weeks'],
   ['dishes', 'The dishes: 2 minutes after you log a meal, get up and wash up'],
+  ['walk', 'Walks: asked through the day until your step goal is done; no answer in 5 minutes, it asks when you\'ll go'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };

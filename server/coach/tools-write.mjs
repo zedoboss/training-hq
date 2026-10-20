@@ -22,6 +22,7 @@ import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone, hmOf } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
+import { withAnswer, planAt } from '../../app/js/lib/walks.js';
 import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods.js';
 import { foodsDb, myFoods } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
@@ -595,6 +596,38 @@ async function setReminder(a, ctx) {
   return wrote(`Reminder set for ${when}: "${a.text}". It comes to his phone as a notification from Coach, and shows in Talk [id ${id}].`, a.inMinutes ? `in ${Math.round(a.inMinutes)} min` : `${dayText(date, s.today)} ${formatHm(hm)}`);
 }
 
+/** His answer to a walk question (Tue 10/20): a time, going now, done, or not now. */
+async function walkAnswer(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const date = s.today;
+  const doc = s.one('walks', date);
+  const t = (ms) => timeText(ms, s.tz);
+  if (a.action === 'plan') {
+    const at = planAt({ inMinutes: a.inMinutes, time: a.time, now: s.now, tz: s.tz });
+    if (!at) return refuse('A walk plan needs inMinutes or a time (HH:MM). If he was vague, pick one yourself and say it.');
+    put(s, 'walks', date, withAnswer(doc, date, { action: 'plan', at, said: a.said ? String(a.said).slice(0, 80) : null }, s.now));
+    return wrote(`Walk set for ${t(at)}. No walk questions until then; at ${t(at)} he gets "walk time". Tell him so: "Okay, I'll message you at ${t(at)}."`, `walk at ${t(at)}`);
+  }
+  if (a.action === 'going') {
+    put(s, 'walks', date, withAnswer(doc, date, { action: 'going' }, s.now));
+    return wrote(`Out walking since ${t(s.now)}. One "back?" in about 40 minutes.`, 'walking');
+  }
+  if (a.action === 'done') {
+    put(s, 'walks', date, withAnswer(doc, date, { action: 'done', minutes: num(a.minutes) ?? null, steps: num(a.steps) ?? null }, s.now));
+    return wrote(`Walk logged at ${t(s.now)}${a.minutes ? `, ${a.minutes} minutes` : ''}. The step count catches up when his phone sends Health data (opening the app does it).`, 'walk done');
+  }
+  if (a.action === 'skip') {
+    const until = s.now + Math.round(num(a.askAgainInMinutes) ?? 60) * 60000;
+    put(s, 'walks', date, withAnswer(doc, date, { action: 'skip', reason: a.reason ? String(a.reason).slice(0, 120) : '', until }, s.now));
+    return wrote(`Not now${a.reason ? ` (${a.reason})` : ''}: asked again at ${t(until)}.`, `walk later, ${t(until)}`);
+  }
+  if (a.action === 'clear') {
+    put(s, 'walks', date, withAnswer(doc, date, { action: 'clear' }, s.now));
+    return wrote('Walk time cleared: the questions start again.', 'walk time cleared');
+  }
+  return refuse('Which walk answer: plan, going, done, skip or clear?');
+}
+
 async function writeNote(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
   if (a.remove) {
@@ -894,6 +927,7 @@ export const WRITE_TOOLS = [
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
   write('body_scan', 'Body scan', "How often he scans (every: 'training' = every training day, 'monthly' = every 4 weeks on a confirmed date); confirm the next scan date (monthly only; default: the app's proposal) or cancel it; change one preparation checklist line in his words (line: its id from body_scans, or none to add one; text; when: 'before' or 'day'); record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['every', 'checklist_line', 'confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, every: { type: 'string', enum: ['training', 'monthly'] }, line: { type: 'string' }, when: { type: 'string', enum: ['before', 'day'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
   write('set_reminder', 'Set a reminder', "A notification to his phone from Coach, for anything in his life, not only training (\"throw out the trash in 10 minutes\"). Give inMinutes for 'in N minutes/hours', or time (HH:MM, 24-hour: today, or tomorrow if passed) with an optional date. When he gives a range or a vague time ('10 to 15 minutes', 'in a bit', 'after dinner', 'tonight'), decide one yourself: he wants you to (the middle of a range; 'in a bit' = 15 minutes) and say the exact time back. Or cancel one by id.", obj({ time: HM, inMinutes: { type: 'integer', minimum: 1, maximum: 2880 }, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
+  write('walk', 'Walk', "His answer to a walk question (the app asks him to walk through the day until his step goal, and asks again 5 minutes after no answer). plan: when he'll go (inMinutes for 'in an hour', or time HH:MM; said = his words); vague ('later', 'after dinner', 'in a bit'): pick a time yourself and say it. going: he is out now. done: he walked (minutes, steps if he says). skip: not now, with his reason and when to ask again (askAgainInMinutes, default 60). clear: forget the time. Always say the time back: 'Okay, I'll message you at 6:10 PM.'", obj({ action: { type: 'string', enum: ['plan', 'going', 'done', 'skip', 'clear'] }, inMinutes: { type: 'integer', minimum: 1, maximum: 1440 }, time: HM, said: { type: 'string' }, minutes: { type: 'integer', minimum: 1, maximum: 600 }, steps: { type: 'integer', minimum: 0, maximum: 100000 }, reason: { type: 'string' }, askAgainInMinutes: { type: 'integer', minimum: 5, maximum: 720 } }, ['action']), walkAnswer),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
   write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
