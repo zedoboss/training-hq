@@ -181,7 +181,8 @@ function wirePrefs(box) {
   const preview = (path) => {
     const s = st().sounds;
     unlockAudio();
-    if (path === 'sounds.timerVolume' || path === 'sounds.restEnd') play(s.restEnd, s.timerVolume);
+    // As the real rest end plays it: heard with the silent switch on (Tue 10/20).
+    if (path === 'sounds.timerVolume' || path === 'sounds.restEnd') play(s.restEnd, s.timerVolume, { alarm: true });
     if (path === 'sounds.tickVolume') play('tick', s.tickVolume);
     if (path === 'sounds.recordVolume') play('record', s.recordVolume);
   };
