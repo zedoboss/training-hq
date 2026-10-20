@@ -31,10 +31,14 @@ let bargeTimer = null; let bargeSent = false; let overCoach = false;
 const quietQueue = [];
 const subs = new Set();
 
+// The chip after the coach stops talking. Tue 10/20: it used to change only while the microphone was open, so a
+// reply or nudge spoken while the mic was off, dropped or being reopened left SPEAKING on for good, and a tap
+// (hush) couldn't clear it either.
+const restPhase = () => (mic ? (turnsInFlight ? 'thinking' : 'listening') : held ? (listening() ? 'paused' : 'off') : listening() ? 'tap' : 'off');
 const player = createPlayer({
   context: audioContext,
   fetchSpeech: voiceSpeech,
-  onState: (speaking) => { if (speaking) setPhase('speaking'); else if (mic) setPhase(turnsInFlight ? 'thinking' : 'listening'); },
+  onState: (speaking) => setPhase(speaking ? 'speaking' : restPhase()),
 });
 
 /** What the header chip and the Voice screen show. */
@@ -124,7 +128,7 @@ async function turn(wav, { overCoach: echo = false } = {}) {
   } finally {
     turnsInFlight--;
     if (ok) syncNow().catch(() => {});
-    if (mic && !player.speaking) setPhase(turnsInFlight ? 'thinking' : 'listening');
+    if (!player.speaking) setPhase(restPhase());
     emit();
   }
 }
@@ -240,7 +244,7 @@ export function watchNudges(repo) {
 }
 
 /** Stop the coach talking (a tap on the chip while it speaks). */
-export const hush = () => { player.stop(); quietQueue.length = 0; };
+export const hush = () => { player.stop(); quietQueue.length = 0; if (phase === 'speaking') setPhase(restPhase()); };
 
 /** Calibration and the test screen use the microphone themselves: listening pauses meanwhile. */
 export function hold(on) {

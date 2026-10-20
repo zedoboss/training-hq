@@ -3,6 +3,11 @@
 import { pcm16ToFloat } from './wav.js';
 
 const RATE = 24000;
+/** A sentence whose audio stops coming (the phone changed network, the Mac or ElevenLabs stalled) is dropped after
+ * this long without a byte, so the player never waits forever (Tue 10/20: the chip stuck on SPEAKING). The first
+ * byte may take longer: the Mac waits up to 20 s for ElevenLabs, then its own voice answers. */
+export const STALL_MS = 8000;
+export const FIRST_BYTE_MS = 25000;
 
 /**
  * @param {object} o
@@ -10,7 +15,7 @@ const RATE = 24000;
  * @param {(text: string, signal: AbortSignal) => Promise<Response>} o.fetchSpeech  POST /api/voice/speak
  * @param {(speaking: boolean) => void} [o.onState]
  */
-export function createPlayer({ context, fetchSpeech, onState = () => {} }) {
+export function createPlayer({ context, fetchSpeech, onState = () => {}, stallMs = STALL_MS, firstByteMs = FIRST_BYTE_MS }) {
   let items = []; // {text, ctrl, chunks: Uint8Array[], done, wake}
   let playing = false; let gen = 0; let sources = new Set(); let endAt = 0; let level = 0; let engine = null;
 
@@ -35,6 +40,15 @@ export function createPlayer({ context, fetchSpeech, onState = () => {} }) {
     playing = true;
     const my = gen;
     onState(true);
+    try { while (my === gen && items.length) await play(my); } catch { /* a broken audio context: drop what was queued rather than stay "speaking" */ }
+    // Whatever happened, a run that is still the current one always ends: SPEAKING never outlives the sound.
+    if (my === gen) {
+      for (const it of items) it.ctrl.abort();
+      items = []; playing = false; level = 0; onState(false);
+    }
+  }
+
+  async function play(my) {
     const ctx = context();
     let carry = null; // a trailing odd byte between chunks
     while (items.length && my === gen) {
@@ -64,8 +78,10 @@ export function createPlayer({ context, fetchSpeech, onState = () => {} }) {
           continue;
         }
         if (item.done) break;
-        await new Promise((r) => { item.wake = r; });
+        // Wait for more audio, but not forever: a stalled sentence is given up and the next one plays.
+        const got = await new Promise((r) => { item.wake = () => r(true); setTimeout(() => r(false), item.chunks.length ? stallMs : firstByteMs); });
         item.wake = null;
+        if (!got && !item.done && i >= item.chunks.length) { item.ctrl.abort(); break; }
       }
       carry = null;
       if (my !== gen) break;
@@ -75,12 +91,14 @@ export function createPlayer({ context, fetchSpeech, onState = () => {} }) {
     // the microphone made a fresh audio context mid-sentence, the new clock started at 0 and the chip stayed on
     // SPEAKING for minutes). A closed context (resetAudio closes the old one) ends the wait at once.
     // A stopped clock (iPhone paused the audio) doesn't move: give up after 3 s of it.
+    // And never longer than the sound left plus a little: a clock that runs slow can't hold it either.
     let stoppedSince = 0;
-    while (my === gen && ctx.state !== 'closed' && ctx.currentTime < endAt) {
+    const latest = Date.now() + Math.max(0, endAt - ctx.currentTime) * 1000 + 1500;
+    // A sentence queued meanwhile goes straight on (it is scheduled after this one).
+    while (my === gen && !items.length && ctx.state !== 'closed' && ctx.currentTime < endAt && Date.now() < latest) {
       if (ctx.state !== 'running') { stoppedSince ||= Date.now(); if (Date.now() - stoppedSince > 3000) break; } else stoppedSince = 0;
       await new Promise((r) => setTimeout(r, 60));
     }
-    if (my === gen) { playing = false; level = 0; onState(false); }
   }
 
   return {
