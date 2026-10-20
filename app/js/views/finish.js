@@ -2,7 +2,7 @@
 // tendon hold prompt, "update routine?"), then every exercise with its note and every set, records marked on the set
 // that made them (Tue 10/20, like Hevy's Workout Detail); photos, save as routine, delete.
 import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
-import { ready } from '../lib/data.js';
+import { ready, syncNow } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { summarize, elapsedMs, copySession } from '../lib/session.js';
@@ -51,7 +51,8 @@ export function render(view, params = []) {
 
   const draw = async () => {
     const daily = await dailyWeightsOf(repo);
-    const stored = await repo.get('sessions', id);
+    let stored = await repo.get('sessions', id);
+    if (!stored) { await syncNow().catch(() => {}); stored = await repo.get('sessions', id); }
     if (!stored) { view.innerHTML = '<h1 class="view-title">Session not found</h1>'; return; }
     const [session] = withBodyweights([stored], daily);
     const all = (await repo.list('sets')).filter((s) => s.sessionId === id);

@@ -53,7 +53,14 @@ export function todayCounts(messages = [], date, dayOf) {
  */
 export function runAction(a, deps) {
   switch (a?.kind) {
-    case 'go': { const url = safeHash(a.url); if (!url || !deps.go) return false; deps.go(url); return true; }
+    case 'go': {
+      const url = safeHash(a.url); if (!url || !deps.go) return false;
+      // Tue 10/20: the coach started Push and opened it before the phone had the new session ("Session not found").
+      // Pull from the Mac first (at most 4 s), then open.
+      if (!deps.pull) { deps.go(url); return true; }
+      Promise.race([deps.pull(), new Promise((r) => setTimeout(r, 4000))]).catch(() => {}).finally(() => deps.go(url));
+      return true;
+    }
     case 'mic-off': if (!deps.micOff) return false; deps.micOff(); return true;
     case 'reload': if (!deps.reload) return false; deps.reload(); return true;
     case 'rest': if (a.seconds > 0) { deps.rest.start(a.seconds, a.label || 'Rest'); return true; } return false;

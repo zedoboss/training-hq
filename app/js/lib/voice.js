@@ -80,6 +80,7 @@ function letSleep() { try { wake?.release(); } catch { /* gone */ } wake = null;
 const deps = {
   rest,
   sync: () => { syncNow().catch(() => {}); },
+  pull: () => syncNow(),
   focus: (a) => {
     try { sessionStorage.setItem('thq.coach.focus', JSON.stringify({ ...a, at: Date.now() })); } catch { /* private mode */ }
     window.dispatchEvent(new CustomEvent('thq:coach-focus', { detail: a }));

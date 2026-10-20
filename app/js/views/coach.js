@@ -32,6 +32,7 @@ let afterDone = [];
 const deps = {
   rest,
   sync: () => { syncNow(); },
+  pull: () => syncNow(),
   focus: (a) => {
     // Kept for a few minutes, so the session screen opens on that exercise when he goes back to it.
     try { sessionStorage.setItem('thq.coach.focus', JSON.stringify({ ...a, at: Date.now() })); } catch { /* private mode */ }

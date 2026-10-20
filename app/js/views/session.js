@@ -1,7 +1,7 @@
 // SESSION: start (#/session/start/<routineId|empty>) and log (#/session/<id>).
 import { setQuiet } from '../lib/quiet.js';
 import { currentBodyweight } from '../lib/health.js';
-import { ready } from '../lib/data.js';
+import { ready, syncNow } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory } from '../lib/history.js';
 import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
@@ -645,6 +645,8 @@ export function render(view, params = []) {
   ready.then(async (r) => {
     repo = r;
     session = await repo.get('sessions', id);
+    // Just started on the Mac (the coach) or opened from a notification: pull from the Mac and look again first.
+    if (!session) { view.innerHTML = '<p class="view-sub">Loading…</p>'; await syncNow().catch(() => {}); session = await repo.get('sessions', id); }
     if (!session) { view.innerHTML = '<h1 class="view-title">Session not found</h1><p class="hint"><a href="#/train">Back to Train</a></p>'; return; }
     if (session.status !== 'active' && !(editing && session.status === 'done')) { location.replace(`#/finish/${id}`); return; }
     sets = (await repo.list('sets')).filter((s) => s.sessionId === id);

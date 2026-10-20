@@ -204,6 +204,8 @@ async function startSession(a, ctx) {
     bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter,
   });
   s.store.writeLocalMany([...sets.map((x) => ({ col: 'sets', id: x.id, data: x })), { col: 'sessions', id: session.id, data: zoned(s, 'sessions', session.id, session) }]);
+  // The phone pulls the new session before it opens it (Tue 10/20: "Session not found").
+  ctx.action({ kind: 'sync' });
   ctx.action({ kind: 'go', url: `#/session/${session.id}`, label: 'Open the session' });
   const first = session.exercises.find((e) => sets.some((x) => x.exKey === e.key));
   const rot = s.rotation();
