@@ -22,14 +22,23 @@ export function unlockAudio() { ready(); }
 export function micActive(on) { mic = !!on; }
 
 let restoreTimer = null;
+// Microphones opening or open (listening, dictation, calibration). Tue 10/20, his screen recording: every tap gave the
+// orange mic dot, then "No sound from the microphone": a playback switch (or its timer back to 'auto') could land in
+// the seconds the microphone takes to start and leave it recording silence. While any is opening or open, nothing
+// here touches the audio mode.
+let mics = 0;
+export function micOpening(delta) {
+  mics = Math.max(0, mics + delta);
+  if (mics) { clearTimeout(restoreTimer); restoreTimer = null; }
+}
 /** Heard even with the silent switch on for the next `seconds` (timer sounds, the coach's voice while the mic is off). */
 export function loudFor(seconds) {
   const s = navigator.audioSession;
-  if (!s || mic) return;
+  if (!s || mic || mics) return;
   try {
     if (s.type !== 'playback') s.type = 'playback';
     clearTimeout(restoreTimer);
-    restoreTimer = setTimeout(() => { try { if (!mic) s.type = 'auto'; } catch { /* gone */ } }, (seconds + 1.5) * 1000);
+    restoreTimer = setTimeout(() => { try { if (!mic && !mics) s.type = 'auto'; } catch { /* gone */ } }, (seconds + 1.5) * 1000);
   } catch { /* not supported */ }
 }
 

@@ -2,6 +2,8 @@
 // 16 kHz frames to a callback. One audio context is shared with the coach's voice, so echo cancellation knows what
 // the speaker is playing. Works only while the app is open and on screen (iPhone rule).
 
+import { micOpening } from './sounds.js';
+
 let ctx = null;
 
 /** The app's audio context for voice (made on a tap, so iPhone lets it play). */
@@ -45,6 +47,13 @@ export async function openMic({ onFrame, onEnded = () => {} }) {
 
 async function openMicOnce({ onFrame, onEnded }) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('No microphone access in this browser.');
+  micOpening(1);
+  let released = false;
+  const release = () => { if (!released) { released = true; micOpening(-1); } };
+  try { return await openMicHeld({ onFrame, onEnded, release }); } catch (e) { release(); throw e; }
+}
+
+async function openMicHeld({ onFrame, onEnded, release }) {
   // iPhone: record and play at the same time, through the speaker (Safari's audio session, where it exists).
   try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch { /* older Safari */ }
   let stream;
@@ -64,7 +73,7 @@ async function openMicOnce({ onFrame, onEnded }) {
   let gotFrame = false;
   node.port.onmessage = (e) => { gotFrame = true; onFrame(e.data); };
   const track = stream.getAudioTracks()[0];
-  const ended = () => onEnded();
+  const ended = () => { release(); onEnded(); };
   track?.addEventListener('ended', ended);
   let closed = false;
   const mic = {
@@ -72,6 +81,7 @@ async function openMicOnce({ onFrame, onEnded }) {
     close() {
       if (closed) return;
       closed = true;
+      release();
       track?.removeEventListener('ended', ended);
       node.port.onmessage = null;
       try { src.disconnect(); node.disconnect(); mute.disconnect(); } catch { /* already gone */ }
