@@ -13,7 +13,7 @@ test('addDays crosses months and years', () => {
 });
 
 test('next day type comes from the last completed session, not the calendar (decision 15)', () => {
-  const last = { dayType: 'push', date: '2026-10-12' };
+  const last = { dayType: 'push', date: '2026-10-12', streak: 2 };
   // Days without a session don't move it on: Legs is still next a week later.
   assert.deepEqual(rotationDay({ last, today: '2026-10-13' }).today, { kind: 'train', dayType: 'legs', reason: null });
   assert.deepEqual(rotationDay({ last, today: '2026-10-19' }).today, { kind: 'train', dayType: 'legs', reason: null });
@@ -21,7 +21,7 @@ test('next day type comes from the last completed session, not the calendar (dec
 });
 
 test('the day after Legs is the rotation rest day; then Pull', () => {
-  const last = { dayType: 'legs', date: '2026-10-17' };
+  const last = { dayType: 'legs', date: '2026-10-17', streak: 3 };
   const sun = rotationDay({ last, today: '2026-10-18' });
   assert.deepEqual(sun.today, { kind: 'rest', dayType: null, reason: 'rotation' });
   assert.deepEqual(sun.next, { dayType: 'pull', date: '2026-10-19' });
@@ -34,7 +34,7 @@ test('trained today: done, and the next session is tomorrow (or after the rest d
   const pull = rotationDay({ last: { dayType: 'pull', date: '2026-10-19' }, today: '2026-10-19' });
   assert.deepEqual(pull.today, { kind: 'done', dayType: 'pull', reason: null });
   assert.deepEqual(pull.next, { dayType: 'push', date: '2026-10-20' });
-  const legs = rotationDay({ last: { dayType: 'legs', date: '2026-10-21' }, today: '2026-10-21' });
+  const legs = rotationDay({ last: { dayType: 'legs', date: '2026-10-21', streak: 3 }, today: '2026-10-21' });
   assert.deepEqual(legs.next, { dayType: 'pull', date: '2026-10-23' });
 });
 
@@ -67,7 +67,7 @@ test('last rotation session: imported and own sessions count, neck and holds rou
 });
 
 test('last rotation session: the Hevy bridge until history is imported, own sessions when newer', () => {
-  const bridge = { lastSessions: [{ dayType: 'push', date: '2026-10-12' }, { dayType: 'legs', date: '2026-10-10' }] };
+  const bridge = { lastSessions: [{ dayType: 'push', date: '2026-10-12', streak: 2 }, { dayType: 'legs', date: '2026-10-10', streak: 3 }] };
   assert.deepEqual(lastRotationSession([], bridge, TZ), { dayType: 'push', date: '2026-10-12', sessionId: null, streak: 1 });
   assert.equal(lastRotationSession([done('s', 'legs', '2026-10-13')], bridge, TZ).dayType, 'legs');
   assert.equal(lastRotationSession([done('s', 'legs', '2026-10-10')], bridge, TZ).dayType, 'push');

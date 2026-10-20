@@ -107,7 +107,8 @@ export function nextTrainingScan({ scans = [], today, last, days = {} }) {
   let ahead = projectRotationEitherWay({ last, days, from: today, n: 9 });
   // Scanned today: he is at the gym, so today's session happens today.
   if (ahead[0]?.kind === 'train' && scans.some((x) => x.date === today && isDone(x))) {
-    ahead = projectRotation({ last: { dayType: ahead[0].dayType, date: today }, days, from: today, n: 9 });
+    const streak = last && daysBetween(last.date, today) === 1 ? (last.streak || 1) + 1 : 1;
+    ahead = projectRotation({ last: { dayType: ahead[0].dayType, date: today, streak }, days, from: today, n: 9 });
   }
   const trains = (p) => p.kind === 'train' && (!p.maybe || (p.ifDone.kind === 'train' && p.ifMoved.kind === 'train'));
   return ahead.find((p) => trains(p) && !scans.some((x) => x.date === p.date && isDone(x)))?.date || null;

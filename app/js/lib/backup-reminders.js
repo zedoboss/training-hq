@@ -2,6 +2,7 @@
 // and check-in times, tendon holds, supplement times) go into the iPhone's own Reminders through a
 // Shortcut, or into Calendar as a file. They then ring with no Mac and no connection.
 import { remindersFor } from './reminders.js';
+import { daysBetween } from './time.js';
 import { rotationDay, addDays } from './rotation.js';
 import { formatDay, formatHm, isoDate, hmOf } from './time.js';
 
@@ -19,7 +20,8 @@ export function fixedReminders(state, from, n = 7, now = Date.now()) {
     const date = addDays(from, i);
     out.push(...remindersFor({ ...state, last, date }).filter((r) => r.fixed && r.at > now && (i > 0 || r.due)));
     const rot = rotationDay({ last, today: date, days: state.days });
-    if (rot.today.kind === 'train') last = { dayType: rot.today.dayType, date };
+    // A day that trains carries the streak on (three in a row -> the next day rests).
+    if (rot.today.kind === 'train') last = { dayType: rot.today.dayType, date, streak: last && daysBetween(last.date, date) === 1 ? (last.streak || 1) + 1 : 1 };
     else if (rot.today.kind === 'done') last = rot.last;
   }
   return out.sort((a, b) => a.at - b.at);

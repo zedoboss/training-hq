@@ -13,7 +13,7 @@ const state = (o = {}) => ({ tz: TZ, areas, rounds: {}, settings: null, meta: nu
 test('the next days: the rotation moves on as planned; only fixed reminders, only future ones', () => {
   const days = { '2026-01-21': { date: '2026-01-21', sessionTime: '04:30' } };
   // Legs today (not done yet), so: Tue 1/20 Legs, Wed 1/21 rest, Thu 1/22 Pull, Fri 1/23 Push.
-  const items = fixedReminders(state({ last: { dayType: 'push', date: '2026-01-18' }, days }), '2026-01-20', 4, at('2026-01-20', '12:00'));
+  const items = fixedReminders(state({ last: { dayType: 'push', date: '2026-01-19', streak: 2 }, days }), '2026-01-20', 4, at('2026-01-20', '12:00'));
   const ids = items.map((i) => i.id);
   assert.deepEqual(ids, [
     'holds-evening:2026-01-20',
@@ -27,7 +27,7 @@ test('the next days: the rotation moves on as planned; only fixed reminders, onl
 
 test('session and check-in times go in when set; today\'s done ones stay out', () => {
   const days = { '2026-01-20': { date: '2026-01-20', sessionTime: '04:30' }, '2026-01-22': { date: '2026-01-22', sessionTime: '05:00' } };
-  const items = fixedReminders(state({ last: { dayType: 'push', date: '2026-01-18' }, days, rounds: { knees: { '2026-01-20': 2 } } }), '2026-01-20', 3, at('2026-01-20', '03:00'));
+  const items = fixedReminders(state({ last: { dayType: 'push', date: '2026-01-19', streak: 2 }, days, rounds: { knees: { '2026-01-20': 2 } } }), '2026-01-20', 3, at('2026-01-20', '03:00'));
   assert.deepEqual(items.map((i) => i.id), [
     'readiness:2026-01-20', 'session:2026-01-20',
     'holds-morning:2026-01-21', 'holds-evening:2026-01-21',

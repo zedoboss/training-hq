@@ -15,7 +15,7 @@ const byKind = (items) => Object.fromEntries(items.map((i) => [i.id.split(':')[0
 
 test('training day with a time: check-in 30 minutes before, session at its time, holds, evening round-up', () => {
   const days = { '2026-01-20': { date: '2026-01-20', sessionTime: '04:30' } };
-  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'push', date: '2026-01-18' }, days });
+  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'push', date: '2026-01-18', streak: 2 }, days });
   const k = byKind(items);
   assert.deepEqual(items.map((i) => i.id.split(':')[0]), ['readiness', 'session', 'holds-evening', 'evening']);
   assert.equal(k.readiness.at, at('2026-01-20', '04:00'));
@@ -33,14 +33,14 @@ test('training day with a time: check-in 30 minutes before, session at its time,
 
 test('done things switch reminders off: check-in in, session started, holds logged', () => {
   const days = { '2026-01-20': { date: '2026-01-20', sessionTime: '04:30', readiness: { action: 'train' } } };
-  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'push', date: '2026-01-18' }, days, trainedDates: new Set(['2026-01-20']), rounds: { knees: { '2026-01-20': 2 } } });
+  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'push', date: '2026-01-18', streak: 2 }, days, trainedDates: new Set(['2026-01-20']), rounds: { knees: { '2026-01-20': 2 } } });
   const k = byKind(items);
   assert.equal(k.readiness.due, false);
   assert.equal(k.session.due, false);
   assert.equal(k['holds-evening'].due, false);
   assert.equal(k.evening.body, 'Tomorrow: Legs. No time set yet.'); // the session is still running, nothing is open
   // Once Legs is finished today: no session reminders, and tomorrow is the rotation's rest day.
-  const done = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-20' }, days, rounds: { knees: { '2026-01-20': 2 } } });
+  const done = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-20', streak: 3 }, days, rounds: { knees: { '2026-01-20': 2 } } });
   assert.deepEqual(done.map((i) => i.id.split(':')[0]), ['holds-evening']);
 });
 
@@ -54,7 +54,7 @@ test('no time set: no check-in or session reminder; the evening nudges for tomor
 
 test('rest day: shoulder rest-day hold with the morning knee hold; tomorrow with its time', () => {
   const days = { '2026-01-21': { date: '2026-01-21', sessionTime: '05:00' } };
-  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19' }, days });
+  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, days });
   const k = byKind(items);
   assert.equal(k['holds-morning'].title, 'Rest day holds: what today?');
   assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
@@ -63,7 +63,7 @@ test('rest day: shoulder rest-day hold with the morning knee hold; tomorrow with
 
 test('rest day (A2): his answer drives the reminder; a skip drops the shoulder from it and from the evening list', () => {
   const day = (restHolds) => ({ '2026-01-20': { date: '2026-01-20', restHolds } });
-  const run = (restHolds) => byKind(remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19' }, days: day(restHolds) }));
+  const run = (restHolds) => byKind(remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, days: day(restHolds) }));
   let k = run({ shoulder: { choice: 'gym', at: 1 } });
   assert.equal(k['holds-morning'].title, 'Rest day holds');
   assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Raise Hold. 3 × 30 s each.');
@@ -77,7 +77,7 @@ test('rest day (A2): his answer drives the reminder; a skip drops the shoulder f
 test('settings: kinds switched off, own times', () => {
   const days = { '2026-01-20': { date: '2026-01-20', sessionTime: '04:30' } };
   const settings = { notify: { kinds: { session: false, evening: false }, readinessMin: 45, holdsEvening: '21:00' } };
-  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'push', date: '2026-01-18' }, days, settings });
+  const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'push', date: '2026-01-18', streak: 2 }, days, settings });
   assert.deepEqual(items.map((i) => i.id.split(':')[0]), ['readiness', 'holds-evening']);
   assert.equal(items[0].at, at('2026-01-20', '03:45'));
   assert.equal(items[1].at, at('2026-01-20', '21:00'));
@@ -184,7 +184,7 @@ test('supplements (6.6): at his times, again every 45 minutes until answered, op
   const date = '2026-01-20';
   const s = (id, extra) => ({ id, name: id, short: id, dose: '5 g', time: '07:00', days: { type: 'daily' }, history: [{ on: '2026-01-01', status: 'active' }], order: 0, ...extra });
   const supplements = [s('creatine', { order: 0 }), s('vitamin C', { dose: '1,000 mg', order: 1 }), s('magnesium', { time: '21:00', dose: '375 mg', doseRest: '750 mg' }), s('collagen', { time: null })];
-  let items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19' }, supplements });
+  let items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, supplements });
   const sup = items.filter((i) => i.kind === 'supps');
   assert.deepEqual(sup.map((i) => i.id), [`supps:${date}:0700`, `supps-again:${date}:0700:1`, `supps-again:${date}:0700:2`, `supps-again:${date}:0700:3`,
     `supps:${date}:2100`, `supps-again:${date}:2100:1`, `supps-again:${date}:2100:2`, `supps-again:${date}:2100:3`]);
@@ -201,11 +201,11 @@ test('supplements (6.6): at his times, again every 45 minutes until answered, op
   assert.equal(evening.url, '#/holds');
   // Answered: no more asking; skipped counts as answered.
   const log = [logEntry({ supp: supplements[0], date, dayKind: 'rest', status: 'taken', at: 1 }), logEntry({ supp: supplements[1], date, dayKind: 'rest', status: 'skipped', reason: 'ran out', at: 1 })];
-  items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19' }, supplements, suppLog: log });
+  items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, supplements, suppLog: log });
   assert.equal(items.filter((i) => i.id.startsWith(`supps-again:${date}:0700`)).every((i) => !i.due), true);
   assert.equal(items.find((i) => i.id === `supps-again:${date}:2100:1`).due, true);
   // Switched off in Settings: none, and nothing in the evening round-up.
-  items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19' }, supplements, settings: { notify: { kinds: { supps: false } } } });
+  items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, supplements, settings: { notify: { kinds: { supps: false } } } });
   assert.equal(items.filter((i) => i.kind === 'supps').length, 0);
   assert.doesNotMatch(items.find((i) => i.kind === 'evening')?.body || '', /Supplements/);
 });

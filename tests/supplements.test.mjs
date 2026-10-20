@@ -95,11 +95,13 @@ test('calendar marks: taken of scheduled, skips with reasons', () => {
 test('dayKindFrom: the rotation for today and later, what happened for past days', async () => {
   const { dayKindFrom } = await import('../app/js/lib/supplements.js');
   const legs = { id: 'a', kind: 'workout', dayType: 'legs', status: 'done', startedAt: Date.UTC(2026, 0, 19, 4) };
-  const base = { sessions: [legs], days: [], today: '2026-01-20', tz: 'UTC' };
-  assert.equal(dayKindFrom({ ...base, date: '2026-01-20' }), 'rest', 'the day after Legs');
+  const pull = { id: 'b', kind: 'workout', dayType: 'pull', status: 'done', startedAt: Date.UTC(2026, 0, 17, 4) };
+  const push = { id: 'c', kind: 'workout', dayType: 'push', status: 'done', startedAt: Date.UTC(2026, 0, 18, 4) };
+  const base = { sessions: [pull, push, legs], days: [], today: '2026-01-20', tz: 'UTC' };
+  assert.equal(dayKindFrom({ ...base, date: '2026-01-20' }), 'rest', 'the day after three in a row');
   assert.equal(dayKindFrom({ ...base, date: '2026-01-21' }), 'train');
   assert.equal(dayKindFrom({ ...base, date: '2026-01-19' }), 'train', 'a workout was logged');
-  assert.equal(dayKindFrom({ ...base, date: '2026-01-18' }), 'rest');
+  assert.equal(dayKindFrom({ ...base, date: '2026-01-16' }), 'rest', 'a past day with no workout');
 });
 
 test('supplements taken after the first meal are their own group (Tue 10/20)', async () => {

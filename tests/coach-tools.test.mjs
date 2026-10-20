@@ -29,11 +29,11 @@ function seed() {
     { key: 'e2', exerciseId: 'leg-extension-machine', name: 'Leg Extension (Machine)', plan: { routine: 'legs-gbi', name: 'Leg Extension (Machine)' }, sets: [] },
   ] });
   w('settings', 'equipment', { bars: [{ id: 'smith', equipment: 'smith', kg: 15 }], plates: [20, 10, 5, 2.5, 1.25], extraPlates: [] });
-  // History: Legs Tuesday 1/13, Pull 1/15, Push 1/17, so today (1/20) is Legs, week 3.
+  // History: Legs Tuesday 1/13, Pull 1/18, Push 1/19, so today (1/20) is Legs (the third day in a row), week 3.
   const sess = (id, dayType, iso, exercises) => w('sessions', id, { id, kind: 'workout', title: dayType[0].toUpperCase() + dayType.slice(1), dayType, startedAt: at(iso), endedAt: at(iso, 4), pausedMs: 0, status: 'done', source: 'training-hq', exercises });
   sess('s-legs', 'legs', '2026-01-13', [{ key: 'a', name: 'Squat (Smith Machine)', exerciseId: 'squat-smith-machine', type: 'weight_reps' }, { key: 'b', name: 'Leg Extension (Machine)', exerciseId: 'leg-extension-machine', type: 'weight_reps' }]);
-  sess('s-pull', 'pull', '2026-01-15', []);
-  sess('s-push', 'push', '2026-01-17', []);
+  sess('s-pull', 'pull', '2026-01-18', []);
+  sess('s-push', 'push', '2026-01-19', []);
   const set = (id, exKey, kg, reps, order) => w('sets', id, { id, sessionId: 's-legs', exKey, order, type: 'normal', kg, reps, done: true, doneAt: at('2026-01-13') + order });
   set('x1', 'a', 40, 10, 0); set('x2', 'a', 40, 10, 1); set('x3', 'b', 30, 12, 2);
   w('supplements', 'supp.powder', { id: 'supp.powder', kind: 'supplement', name: 'Test powder', short: 'powder', dose: '5 g', days: { type: 'daily' }, status: 'active', order: 1, stock: { servings: 3, countedAt: at('2026-01-19') } });
@@ -81,7 +81,7 @@ test('helpers: names as he says them, loads with the bar, days with weekday', ()
 test('today and the context line say the day type, week column and what is open', async () => {
   const r = await call('today');
   assert.match(r.text, /^Today: Legs \(week 3 column\), not done yet\./);
-  assert.match(r.text, /Last rotation session: Push, Saturday 1\/17\./);
+  assert.match(r.text, /Last rotation session: Push, Monday 1\/19\./);
   assert.match(r.text, /Supplements today: 0 of 2 taken; open: powder, caps\./);
   assert.match(contextLine({ store, tz: TZ, now: NOW }), /^Today: Legs \(week 3 column\)/);
 });
@@ -375,7 +375,7 @@ test('schedule: a session time, a rest day and its undo follow the rotation rule
 
 test('body scan: confirm the proposed date (today too, with the checklist; never a past day), record the safety notice and results', async () => {
   // Today's Legs is open: the proposal is a day he trains either way, and says which workout each way.
-  assert.match((await call('body_scans')).text, /No date confirmed\. Proposed: Friday 1\/23 \(a training day either way: Pull if today's Legs moves to tomorrow, Push if he does it today\)/);
+  assert.match((await call('body_scans')).text, /No date confirmed\. Proposed: Thursday 1\/22 \(a Pull day\), the first scan/);
   assert.match((await call('body_scan', { action: 'confirm_date', date: '2026-01-19' })).text, /Pick today or a later day/);
   const t = await call('body_scan', { action: 'confirm_date', date: '2026-01-20' });
   assert.match(t.text, /^Body scan confirmed for today, Tuesday 1\/20\. Go through this with him now .*Nothing eaten before the scan; Normal water intake.*Bathroom first; Barefoot\. If he ate something the checklist doesn't allow, record it/);
@@ -430,7 +430,7 @@ test('today projects the coming days from the rotation (dates never worked out b
   assert.match(r.text, /Coming up, if each planned session happens on its day: Wednesday 1\/21 rest; Thursday 1\/22 Pull \(week 4\); Friday 1\/23 Push \(week 4\)/);
   // Today's Legs isn't done: if it doesn't happen today it carries over, so tomorrow isn't stated as fact
   // (phone test Sun 10/18, 11:48 PM: the coach called Monday a rest day while Legs was still open).
-  assert.match(r.text, /If today's Legs is NOT done today, it carries over: Wednesday 1\/21 Legs \(week \d+\); Thursday 1\/22 rest; Friday 1\/23 Pull/);
+  assert.match(r.text, /If today's Legs is NOT done today, it carries over: Wednesday 1\/21 Legs \(week \d+\); Thursday 1\/22 Pull \(week \d+\); Friday 1\/23 Push/);
   assert.match(r.text, /don't state tomorrow's day as fact/);
 });
 
@@ -471,7 +471,7 @@ test('log_meal by packs and counts (A7): his foods sized from his packs; unknown
 test('sauna_plan (A9): proposes from the rotation with his checklist and no fasting; plans what he agrees to', async () => {
   // Today (Tue 1/20) is Legs, not done yet: Wed 1/21 is the rest day after Legs if he trains today, Legs if it moves.
   const p = await call('sauna_plan', { action: 'propose' });
-  assert.match(p.text, /^Proposal \(not planned yet; he decides\): Wednesday 1\/21 at 5:00 PM \(after Legs, or rest day, never before lifting\); Thursday 1\/22 at 5:00 PM \(rest day, or after Pull, never before lifting\)/);
+  assert.match(p.text, /^Proposal \(not planned yet; he decides\): Wednesday 1\/21 at 5:00 PM \(after Legs, or rest day, never before lifting\); Saturday 1\/24 at 5:00 PM \(rest day, or after Legs, never before lifting\)/);
   assert.match(p.text, /"X, or Y" means X if it moves to tomorrow, Y if he does it today/);
   assert.match((await call('sauna')).text, /The app would propose .*Wednesday 1\/21 5:00 PM \(after Legs, or rest day\).*Y if he does it today/);
   assert.match(p.text, /I've eaten and drunk water in the last few hours/);

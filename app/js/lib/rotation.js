@@ -1,10 +1,10 @@
 // Rotation (step 4): where today sits in Pull, Push, Legs, Rest.
 // Rules (brief decision 15, section 2): the next day type comes from the last completed session, not the calendar.
 // A rest day he adds (going out, or the readiness check moving the session) doesn't change the last completed
-// session, so the same day type is next afterwards and nothing is made up twice. The rotation's own Rest is the day
-// after Legs, or (Tue 10/20, his words: "I've worked 3 days in a row and did the full split") after three training
-// days in a row, whichever comes first; the day type carries on where it left off. Day records live in the synced
-// collection 'days', one per date: {date, rest, sessionTime, readiness}.
+// session, so the same day type is next afterwards and nothing is made up twice. The rotation's own Rest comes after
+// three training days in a row (Tue 10/20, his words: "3 then 1 rest"), whatever the day types were; the day type
+// carries on where it left off. Day records live in the synced collection 'days', one per date: {date, rest,
+// sessionTime, readiness}.
 import { daysBetween, isoDate, hmOf } from './time.js';
 import { activeBridge } from './history.js';
 
@@ -45,8 +45,8 @@ export function lastRotationSession(sessions, rawBridge = null, tz) {
   return bridge ? { dayType: bridge.dayType, date: bridge.date, sessionId: null, streak: 1 } : null;
 }
 
-/** The rotation's own rest comes after Legs, or after three training days in a row. */
-export const restAfter = (last) => !!last && (last.dayType === 'legs' || (last.streak || 1) >= 3);
+/** The rotation's own rest comes after three training days in a row (3 on, 1 off). */
+export const restAfter = (last) => !!last && (last.streak || 1) >= 3;
 
 const restOf = (days, date) => days?.[date]?.rest || null;
 
@@ -70,7 +70,7 @@ function firstTrainingDate(days, from) {
 export function rotationDay({ last, today, days = {} }) {
   const after = nextDayType(last?.dayType);
   if (last && last.date === today) {
-    // Trained today. After Legs, or three days in a row, the next day is the rotation's Rest.
+    // Trained today. After three days in a row the next day is the rotation's Rest.
     const from = addDays(today, restAfter(last) ? 2 : 1);
     return { today: { kind: 'done', dayType: last.dayType, reason: null }, next: { dayType: after, date: firstTrainingDate(days, from) }, last };
   }
@@ -96,7 +96,7 @@ export function withRest(doc, date, reason, at = Date.now()) {
 
 /** Plain words for a rest day's reason. */
 export const REST_TEXT = {
-  rotation: 'Rest day in the rotation (after Legs, or three days in a row)',
+  rotation: 'Rest day in the rotation (three days on, one off)',
   added: 'Rest day you added',
   moved: 'Session moved to tomorrow (check-in)',
   'rest-holds': 'Rest and tendon holds (check-in)',

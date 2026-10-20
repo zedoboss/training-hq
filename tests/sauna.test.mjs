@@ -179,14 +179,14 @@ test('sauna days while today\'s session is open: a day that is rest only if he t
   const { projectRotationEitherWay, expectedEitherWay, projectRotation } = await import('../app/js/lib/scans.js');
   const { LABEL } = await import('../app/js/lib/rotation.js');
   // Sunday 10/18 is Legs and not done yet: Monday is rest only if he trains today, Legs if it moves.
-  const last = { dayType: 'push', date: '2026-10-17' };
+  const last = { dayType: 'push', date: '2026-10-17', streak: 2 };
   const today = '2026-10-18';
   const rot = projectRotationEitherWay({ last, days: {}, from: today, n: 8 });
   assert.deepEqual(rot[0], { date: today, kind: 'train', dayType: 'legs' });
   assert.deepEqual(rot[1], { date: '2026-10-19', kind: 'train', dayType: 'legs', maybe: true, ifDone: { kind: 'rest', dayType: null }, ifMoved: { kind: 'train', dayType: 'legs' } });
   const p = proposeSaunaDays({ rotation: rot, today });
   assert.deepEqual(p.items.map((x) => [x.date, x.kind, proposalDayText(x, LABEL)]), [
-    ['2026-10-19', 'after-training', 'after Legs, or rest day'], ['2026-10-20', 'after-training', 'rest day, or after Pull'],
+    ['2026-10-19', 'after-training', 'after Legs, or rest day'], ['2026-10-22', 'after-training', 'rest day, or after Legs'],
   ]);
   // Never before lifting either way: Monday's evening session rules Monday out.
   const p2 = proposeSaunaDays({ rotation: rot, today, days: { '2026-10-19': { sessionTime: '18:00' } } });
@@ -194,7 +194,7 @@ test('sauna days while today\'s session is open: a day that is rest only if he t
   const exp = expectedEitherWay({ last, days: {}, today, date: '2026-10-19' });
   assert.match(planSaunaDay({}, { date: '2026-10-19', time: '17:00' }, { today, kind: exp.kind, sessionTime: '18:00' }).error, /Never before lifting/);
   // Done today (or a rest day today): the plain projection, no maybe days.
-  const done = { dayType: 'legs', date: today };
+  const done = { dayType: 'legs', date: today, streak: 3 };
   assert.deepEqual(projectRotationEitherWay({ last: done, days: {}, from: today, n: 8 }), projectRotation({ last: done, days: {}, from: today, n: 8 }));
   assert.equal(proposalDayText(proposeSaunaDays({ rotation: projectRotationEitherWay({ last: done, days: {}, from: today, n: 8 }), today }).items[0], LABEL), 'rest day');
 });

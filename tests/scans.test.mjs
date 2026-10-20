@@ -11,7 +11,7 @@ const TZ = 'Asia/Ho_Chi_Minh';
 const at = (iso, hm) => Date.parse(`${iso}T${hm}:00+07:00`);
 // Tuesday 1/20/2026: Push was done Monday 1/19, so today is Legs and Wednesday 1/21 is the rotation's rest day.
 const today = '2026-01-20';
-const last = { dayType: 'push', date: '2026-01-19' };
+const last = { dayType: 'push', date: '2026-01-19', streak: 2 };
 const done = (date) => ({ id: `scan.${date}`, date, status: 'done' });
 
 test('the rotation ahead assumes each planned session happens', () => {
@@ -23,15 +23,15 @@ test('the rotation ahead assumes each planned session happens', () => {
 });
 
 test('first scan: the next training day from tomorrow (tomorrow is the rotation rest day here)', () => {
-  // Today's Legs is not done yet: Wednesday is rest if he trains today, Legs if it moves; Thursday is Pull or rest.
-  // The scan goes on the first day he is at the gym either way: Friday (Pull if Legs moves, Push if done today).
+  // Today's Legs (the third day in a row) is not done yet: Wednesday is rest if he trains today, Legs if it moves;
+  // Thursday is Pull either way (3 on, 1 off), so the scan goes on Thursday.
   const p = proposeNext({ scans: [], today, last, days: {} });
-  assert.deepEqual(p, { date: '2026-01-23', dayType: null, either: { ifMoved: 'pull', ifDone: 'push' }, base: '2026-01-21', shifted: true, baseMaybe: true, open: 'legs', lastDate: null });
+  assert.deepEqual(p, { date: '2026-01-22', dayType: 'pull', either: null, base: '2026-01-21', shifted: true, baseMaybe: true, open: 'legs', lastDate: null });
   // Legs done today: Wednesday is the rest day for sure, Thursday Pull.
-  const d = proposeNext({ scans: [], today, last: { dayType: 'legs', date: today }, days: {} });
+  const d = proposeNext({ scans: [], today, last: { dayType: 'legs', date: today, streak: 3 }, days: {} });
   assert.deepEqual(d, { date: '2026-01-22', dayType: 'pull', either: null, base: '2026-01-21', shifted: true, baseMaybe: false, open: null, lastDate: null });
   // Tomorrow a training day: tomorrow.
-  const p2 = proposeNext({ scans: [], today: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20' }, days: {} });
+  const p2 = proposeNext({ scans: [], today: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20', streak: 3 }, days: {} });
   assert.equal(p2.date, '2026-01-22');
   assert.equal(p2.shifted, false);
 });
@@ -41,13 +41,13 @@ test('next scan: 4 weeks after the last, the same weekday; a rest day moves it t
   assert.equal(lastDone(scans).date, '2026-01-22');
   const l = { dayType: 'pull', date: '2026-01-22' };
   // Friday 1/23, Push done: Thursday 2/19 is Pull.
-  const pushed = { dayType: 'push', date: '2026-01-23' };
+  const pushed = { dayType: 'push', date: '2026-01-23', streak: 2 };
   const p = proposeNext({ scans, today: '2026-01-23', last: pushed, days: {} });
   assert.equal(EVERY_DAYS, 28);
   assert.deepEqual(p, { date: '2026-02-19', dayType: 'pull', either: null, base: '2026-02-19', shifted: false, baseMaybe: false, open: null, lastDate: '2026-01-22' });
-  // Push not done yet: 2/19 is Pull, or the rest day if Push moves, so Friday 2/20 (Pull if Push moves, Push if done today).
+  // Push not done yet: 2/19 is Pull either way (the week's rest days fall the same whichever way today goes).
   const open = proposeNext({ scans, today: '2026-01-23', last: l, days: {} });
-  assert.deepEqual([open.date, open.either, open.baseMaybe, open.open], ['2026-02-20', { ifMoved: 'pull', ifDone: 'push' }, true, 'push']);
+  assert.deepEqual([open.date, open.either, open.baseMaybe, open.open], ['2026-02-19', null, false, 'push']);
   // He adds a rest day on Thursday 2/19: Friday 2/20 (Pull moves with it).
   const days = { '2026-02-19': { date: '2026-02-19', rest: { reason: 'added' } } };
   const p2 = proposeNext({ scans, today: '2026-01-23', last: pushed, days });
@@ -55,7 +55,7 @@ test('next scan: 4 weeks after the last, the same weekday; a rest day moves it t
   assert.equal(p2.dayType, 'pull');
   assert.equal(p2.shifted, true);
   // Overdue (no scan for 6 weeks): never before tomorrow.
-  const p3 = proposeNext({ scans, today: '2026-03-05', last: { dayType: 'legs', date: '2026-03-05' }, days: {} });
+  const p3 = proposeNext({ scans, today: '2026-03-05', last: { dayType: 'legs', date: '2026-03-05', streak: 3 }, days: {} });
   assert.equal(p3.date, '2026-03-07'); // Legs done Thursday 3/5, Friday the rotation's rest day
 });
 
@@ -74,12 +74,12 @@ test('status: confirmed, missed, a rest day on the confirmed date, the prep reco
   st = scanStatus({ plan, scans: [], today, last, days });
   assert.deepEqual(st.onRest, { to: '2026-01-23', dayType: 'pull' });
   // The date passed with no results: missed, and a new proposal.
-  st = scanStatus({ plan, scans: [prep], today: '2026-01-24', last: { dayType: 'legs', date: '2026-01-24' }, days: {} });
+  st = scanStatus({ plan, scans: [prep], today: '2026-01-24', last: { dayType: 'legs', date: '2026-01-24', streak: 3 }, days: {} });
   assert.equal(st.next, null);
   assert.equal(st.missed, '2026-01-22');
   assert.equal(st.proposal.date, '2026-01-26'); // Sunday 1/25 is the rest day after Legs
   // Results on that date: nothing missed; the next proposal is 4 weeks on.
-  st = scanStatus({ plan, scans: [done('2026-01-22')], today: '2026-01-24', last: { dayType: 'push', date: '2026-01-23' }, days: {} });
+  st = scanStatus({ plan, scans: [done('2026-01-22')], today: '2026-01-24', last: { dayType: 'push', date: '2026-01-23', streak: 2 }, days: {} });
   assert.equal(st.missed, null);
   assert.equal(st.proposal.base, '2026-02-19');
   // Moved and cancelled are logged.
@@ -150,9 +150,9 @@ test('reminders: two evenings before (alcohol), the evening before (the list), a
 test('scan reminders join the day plan (kind scan, can be switched off) and the backup Reminders', () => {
   const plan = confirmDate({}, '2026-01-22', { proposedDate: '2026-01-22' });
   const dayDocs = { '2026-01-22': { date: '2026-01-22', sessionTime: '04:30' } };
-  const items = remindersFor({ tz: TZ, date: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20' }, days: dayDocs, scanPlan: plan });
+  const items = remindersFor({ tz: TZ, date: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20', streak: 3 }, days: dayDocs, scanPlan: plan });
   assert.ok(items.some((i) => i.id === 'scan-eve:2026-01-22' && i.kind === 'scan'));
-  const off = remindersFor({ tz: TZ, date: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20' }, days: dayDocs, scanPlan: plan, settings: { notify: { kinds: { scan: false } } } });
+  const off = remindersFor({ tz: TZ, date: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20', streak: 3 }, days: dayDocs, scanPlan: plan, settings: { notify: { kinds: { scan: false } } } });
   assert.ok(!off.some((i) => i.kind === 'scan'));
   const state = { tz: TZ, last, days: dayDocs, areas: [], rounds: {}, scanPlan: plan, scans: [] };
   const fixed = fixedReminders(state, today, 3, at(today, '00:00'));
@@ -176,7 +176,7 @@ test('every training day (Tue 10/20): the next training day without a scan; no d
   assert.equal(nextTrainingScan({ today, last, days: {} }), today);
   assert.equal(nextTrainingScan({ today, last, days: {}, scans: [done(today)] }), '2026-01-22');
   // Trained today already: too late for today's scan.
-  assert.equal(nextTrainingScan({ today, last: { dayType: 'legs', date: today }, days: {} }), '2026-01-22');
+  assert.equal(nextTrainingScan({ today, last: { dayType: 'legs', date: today, streak: 3 }, days: {} }), '2026-01-22');
   assert.equal(planFor(plan, { today, last, days: {} }).next.date, today);
   assert.equal(planFor({ next: { date: '2026-03-01' } }, { today, last }).next.date, '2026-03-01');
   const st = scanStatus({ plan, scans: [], today, last, days: {} });
@@ -185,11 +185,11 @@ test('every training day (Tue 10/20): the next training day without a scan; no d
   assert.equal(scanStatus({ plan: { cadence: 'training', next: { date: '2026-01-10' } }, scans: [], today, last }).missed, null);
   // Reminders: only the morning one and the gym one, from his session time.
   const days = { '2026-01-22': { date: '2026-01-22', sessionTime: '04:30' } };
-  const p22 = planFor(plan, { today: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20' }, days });
+  const p22 = planFor(plan, { today: '2026-01-21', last: { dayType: 'legs', date: '2026-01-20', streak: 3 }, days });
   assert.equal(p22.next.date, '2026-01-22');
   assert.deepEqual(scanReminders({ date: '2026-01-21', tz: TZ, plan: p22, days }), []);
   assert.deepEqual(scanReminders({ date: '2026-01-22', tz: TZ, plan: p22, days }).map((r) => r.id.split(':')[0]), ['scan-morning', 'scan-arrive']);
-  const items = remindersFor({ tz: TZ, date: '2026-01-22', last: { dayType: 'legs', date: '2026-01-20' }, days, scanPlan: plan });
+  const items = remindersFor({ tz: TZ, date: '2026-01-22', last: { dayType: 'legs', date: '2026-01-20', streak: 3 }, days, scanPlan: plan });
   assert.deepEqual(items.filter((i) => i.kind === 'scan').map((i) => i.id), ['scan-morning:2026-01-22', 'scan-arrive:2026-01-22']);
   // At the gym: scan first unless one is saved today.
   assert.equal(arrivalMessage({ plan, date: '2026-01-21' }).title, 'Body scan first');
