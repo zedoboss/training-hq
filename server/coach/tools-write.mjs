@@ -20,7 +20,7 @@ import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/l
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol, measurementFromScan } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
-import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
+import { zonedTime, addMinutesHm, LOGGED_COLS, withZone, hmOf } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
 import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods.js';
 import { foodsDb, myFoods } from '../foods.mjs';
@@ -575,14 +575,24 @@ async function setReminder(a, ctx) {
     put(s, 'coach-reminders', r.id, { ...r, cancelledAt: s.now });
     return wrote(`Cancelled the reminder for ${dayText(s.date(r.at), s.today)}, ${timeText(r.at, s.tz)}: ${r.text}`, 'reminder cancelled');
   }
-  if (!a.time || !a.text) return refuse('A reminder needs a time and what to say.');
-  let date = a.date || s.today;
-  let at = zonedTime(date, a.time, s.tz);
-  if (!a.date && at <= s.now) { date = addDays(s.today, 1); at = zonedTime(date, a.time, s.tz); }
+  if ((!a.time && !a.inMinutes) || !a.text) return refuse('A reminder needs a time (or minutes from now) and what to say.');
+  let date; let at; let hm;
+  if (a.inMinutes) {
+    // "In 10 minutes" (Tue 10/20: "throw out the trash... in 10 to 15 minutes"): exact, from now.
+    at = s.now + Math.round(a.inMinutes) * 60000;
+    date = s.date(at);
+    hm = hmOf(new Date(at), s.tz);
+  } else {
+    date = a.date || s.today;
+    at = zonedTime(date, a.time, s.tz);
+    if (!a.date && at <= s.now) { date = addDays(s.today, 1); at = zonedTime(date, a.time, s.tz); }
+    hm = a.time;
+  }
   if (at <= s.now) return refuse('That time has passed.');
   const id = newId('rem');
-  put(s, 'coach-reminders', id, { id, at, date, hm: a.time, text: String(a.text).slice(0, 200), createdAt: s.now, by: 'coach' });
-  return wrote(`Reminder set for ${dayText(date, s.today)}, ${formatHm(a.time)}: "${a.text}". It comes as a notification from the Mac (when notifications are on) [id ${id}].`, `${dayText(date, s.today)} ${formatHm(a.time)}`);
+  put(s, 'coach-reminders', id, { id, at, date, hm, text: String(a.text).slice(0, 200), createdAt: s.now, by: 'coach' });
+  const when = a.inMinutes ? `${timeText(at, s.tz)} (in ${plural(Math.round(a.inMinutes), 'minute')})` : `${dayText(date, s.today)}, ${formatHm(hm)}`;
+  return wrote(`Reminder set for ${when}: "${a.text}". It comes to his phone as a notification from Coach, and shows in Talk [id ${id}].`, a.inMinutes ? `in ${Math.round(a.inMinutes)} min` : `${dayText(date, s.today)} ${formatHm(hm)}`);
 }
 
 async function writeNote(a, ctx) {
@@ -883,7 +893,7 @@ export const WRITE_TOOLS = [
   write('supplement_setup', 'Set up a supplement', "Set up one of his supplements the way he says (what he'd enter on its page): time of day (24-hour HH:MM, or '' for no set time), with food or not, servings left in the pack, a different rest-day dose. Only what he asks for; it never adds or removes a supplement. afterMeal true = he takes it right after his first meal (the app asks the moment that meal is logged).", obj({ supplement: { type: 'string' }, time: { type: 'string', pattern: '^(([01]\\d|2[0-3]):[0-5]\\d)?$' }, withFood: { type: 'string', enum: ['with', 'without', 'either'] }, servings: { type: 'number', minimum: 0 }, doseRest: { type: 'string' }, afterMeal: { type: 'boolean' } }, ['supplement']), supplementSetup),
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
   write('body_scan', 'Body scan', "How often he scans (every: 'training' = every training day, 'monthly' = every 4 weeks on a confirmed date); confirm the next scan date (monthly only; default: the app's proposal) or cancel it; change one preparation checklist line in his words (line: its id from body_scans, or none to add one; text; when: 'before' or 'day'); record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['every', 'checklist_line', 'confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, every: { type: 'string', enum: ['training', 'monthly'] }, line: { type: 'string' }, when: { type: 'string', enum: ['before', 'day'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
-  write('set_reminder', 'Set a reminder', 'A notification to his phone at a time (today, or tomorrow if the time has passed, or a date), or cancel one by id.', obj({ time: HM, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
+  write('set_reminder', 'Set a reminder', "A notification to his phone from Coach, for anything in his life, not only training (\"throw out the trash in 10 minutes\"). Give inMinutes for 'in N minutes/hours', or time (HH:MM, 24-hour: today, or tomorrow if passed) with an optional date. When he gives a range or a vague time ('10 to 15 minutes', 'in a bit', 'after dinner', 'tonight'), decide one yourself: he wants you to (the middle of a range; 'in a bit' = 15 minutes) and say the exact time back. Or cancel one by id.", obj({ time: HM, inMinutes: { type: 'integer', minimum: 1, maximum: 2880 }, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
   write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),

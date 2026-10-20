@@ -349,10 +349,14 @@ test('reminders the coach sets reach the reminder planner (kind coach) and can b
   const rem = list('coach-reminders')[0];
   const plan = () => remindersFor({ ...reminderState({ coachReminders: list('coach-reminders') }, TZ), date: '2026-01-20' }).filter((x) => x.kind === 'coach');
   assert.deepEqual(plan().map((x) => [x.title, x.body, x.due, x.url]), [['Reminder', 'Knee holds', true, '#/coach']]);
+  const soon = await call('set_reminder', { inMinutes: 12, text: 'Throw out the trash' });
+  assert.match(soon.text, /^Reminder set for 3:12 AM \(in 12 minutes\): "Throw out the trash"/, 'minutes from now, exact');
+  assert.equal(list('coach-reminders').find((x) => x.text === 'Throw out the trash').at, NOW + 12 * 60000);
+  assert.ok(plan().some((x) => x.body === 'Throw out the trash' && x.at === NOW + 12 * 60000));
   const past = await call('set_reminder', { time: '02:00', text: 'Tomorrow then' });
   assert.match(past.text, /Wednesday 1\/21, 2:00 AM/, 'a time already passed today means tomorrow');
   await call('set_reminder', { cancel: rem.id });
-  assert.equal(plan()[0].due, false);
+  assert.equal(plan().find((x) => x.body === 'Knee holds').due, false);
   const note = await call('write_note', { text: 'Ask about the left knee', topic: 'knees' });
   assert.equal(note.wrote, true);
   assert.match((await call('notes')).text, /\[knees\] \[id note-[^\]]+\]: Ask about the left knee/);
