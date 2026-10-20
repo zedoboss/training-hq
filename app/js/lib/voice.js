@@ -187,7 +187,12 @@ async function openListening() {
       mic = await micSession({
         onClip: (wav) => { clearTimeout(bargeTimer); turn(wav, { overCoach }); overCoach = false; },
         onEvent: (e) => {
-          if (e.type === 'start') { overCoach = player.speaking || talk.playing(); if (player.speaking) bargeCheck(); else if (!turnsInFlight && !overCoach) setPhase('hearing'); }
+          if (e.type === 'start') {
+            overCoach = player.speaking || talk.playing();
+            // Tue 10/20: he started again while the Mac holds his last clip: tell it, so the coach waits for the rest.
+            if (turnsInFlight && !overCoach) macPost('/api/voice/talking').catch(() => {});
+            if (player.speaking) bargeCheck(); else if (!turnsInFlight && !overCoach) setPhase('hearing');
+          }
           else if (e.type === 'noise' && phase === 'hearing') setPhase('listening');
         },
         // While the coach talks, its own sound must be louder than usual to count as someone speaking.

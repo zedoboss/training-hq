@@ -406,6 +406,13 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       if (!res.writableEnded) res.end();
     },
 
+    // He started talking again while the Mac holds what it heard (Tue 10/20): keep holding for the next clip.
+    'POST /api/voice/talking': async (req) => {
+      const device = auth(req);
+      if (!voice) throw new HttpError(404, 'voice not available');
+      return { held: voice.talking(device.id) };
+    },
+
     // Barge-in: is the voice talking over the coach his? Only the voice lock, nothing transcribed or kept.
     'POST /api/voice/barge': async (req) => {
       auth(req);

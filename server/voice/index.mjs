@@ -16,7 +16,15 @@ export const MAX_CLIP_SEC = 15;
 // Tue 10/20: he paused mid-answer ("I woke up slightly before 10:00, so..." then "I went to bed around 12"), the phone
 // sent two clips, and the coach answered the first half and asked again for what came in the second. A clip that ends
 // unfinished now waits this long for the next one from the same phone, and the two go to the coach as one message.
-export const JOIN_MS = 1800;
+/**
+ * Tue 10/20, his words: "I kept talking... I wasn't finished... it started talking back to me, so it kind of cut me
+ * off." Every clip is held this long before it goes to the coach; a clip ending mid-thought longer; and the phone
+ * says "still talking" the moment he resumes (its VAD), which holds until the next clip arrives. Later clips join.
+ */
+export const HOLD_MS = 2000;
+export const JOIN_MS = 3000;
+/** After "still talking", the next clip must arrive within this long, or what was heard goes as it is. */
+export const TALKING_HOLD_MS = 8000;
 /** The same words from two devices within this time are one utterance (the phone and the Mac both listening). */
 export const DUPLICATE_MS = 5000;
 const HINT = '80 for 8. 62.5 for 10. Next exercise. Start the timer. Add 15 seconds. Skip the rest. Smith machine.';
@@ -31,7 +39,7 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
  * @param {ReturnType<import('./whisper.mjs').openWhisper>} [o.whisper]
  * @param {ReturnType<import('../coach/index.mjs').openCoach>} [o.coach]
  */
-export function openVoice({ store, dataDir, engine, whisper = null, coach = null, log = () => {}, now = () => Date.now() }) {
+export function openVoice({ store, dataDir, engine, whisper = null, coach = null, log = () => {}, now = () => Date.now(), holdMs = HOLD_MS, joinMs = JOIN_MS, talkingHoldMs = TALKING_HOLD_MS }) {
   let lastHeard = null; // {text, device, at}: to drop the same words heard by a second device
   const print = openVoiceprint(join(dataDir, 'voice'));
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
@@ -88,7 +96,14 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
    * nothing is transcribed, saved or answered, and the audio is gone when this returns. His words go to the coach
    * like a typed message (marked as spoken); the coach's events follow on `emit`.
    */
-  const waiting = new Map(); // device -> {texts, timer, fire}: a clip that ended unfinished, waiting for the rest
+  const waiting = new Map(); // device -> {texts, timer, fire, arm}: a clip held for the rest of what he is saying
+  /** The phone heard him start again (its VAD): hold what was heard until the next clip. */
+  function talking(deviceId = null) {
+    const w = waiting.get(deviceId || '');
+    if (!w) return false;
+    w.arm(talkingHoldMs);
+    return true;
+  }
 
   async function utterance({ bytes, deviceId = null, model = 'fast', tz = null, screen = null, emit = () => {} }) {
     const t0 = now();
@@ -118,7 +133,7 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     // The rest of a clip that ended unfinished: joins it and goes to the coach with it.
     const w = waiting.get(deviceId || '');
     if (w) {
-      w.texts.push(text); clearTimeout(w.timer); w.timer = setTimeout(w.fire, JOIN_MS);
+      w.texts.push(text); w.arm(looksUnfinished(text) ? joinMs : holdMs);
       log(`voice: heard you (${d.score}), joined to the clip before`);
       emit({ type: 'heard', ok: true, score: d.score, text, joined: true, ms: now() - t0 });
       return null;
@@ -136,22 +151,24 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     log(`voice: heard you (${d.score}, ${to.why}), ${raw.ms} ms to text, ${now() - t0} ms in all`);
     emit({ type: 'heard', ok: true, score: d.score, text, ms: now() - t0 });
     if (!coach) throw fail(503, 'coach not available');
-    let said = text;
-    if (looksUnfinished(text)) {
-      const texts = [text];
-      await new Promise((res) => {
-        const entry = { texts, fire: () => { waiting.delete(deviceId || ''); res(); } };
-        entry.timer = setTimeout(entry.fire, JOIN_MS);
-        waiting.set(deviceId || '', entry);
-      });
-      said = texts.join(' ');
-    }
+    // Hold for the rest of what he is saying: more clips join; "still talking" from the phone holds longer.
+    const texts = [text];
+    await new Promise((res) => {
+      const key = deviceId || '';
+      const entry = { texts, timer: null, fire: () => { clearTimeout(entry.timer); waiting.delete(key); res(); } };
+      entry.arm = (ms) => { clearTimeout(entry.timer); entry.timer = setTimeout(entry.fire, ms); };
+      entry.arm(looksUnfinished(text) ? joinMs : holdMs);
+      waiting.set(key, entry);
+    });
+    const said = texts.join(' ');
+    if (texts.length > 1) log(`voice: ${texts.length} clips as one message`);
     return coach.send({ text: said, model, deviceId, tz, via: 'voice', screen, emit });
   }
 
   return {
     status: () => ({ ...status(), whisper: whisper?.status() || null }),
     utterance,
+    talking,
     warm: () => whisper?.ensure().then(() => true).catch((e) => { log(`whisper: ${e.message}`); return false; }),
     hint,
     enrol,

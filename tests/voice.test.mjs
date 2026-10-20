@@ -197,7 +197,7 @@ test('utterance: refused clips stop at "heard"; his words go to the coach as spo
   let whisperText = '80 for 8.';
   const whisper = { transcribe: async () => ({ text: whisperText, ms: 5 }), status: () => ({ running: true }), ensure: async () => {} };
   store.writeLocal('supplements', 's1', { name: 'Creatine monohydrate' });
-  const voice = openVoice({ store, dataDir: dir, engine: fakeEngine(), whisper, coach, now: () => clock });
+  const voice = openVoice({ store, dataDir: dir, engine: fakeEngine(), whisper, coach, now: () => clock, holdMs: 20, joinMs: 30, talkingHoldMs: 60 });
   try {
     const run = async (o, dev = 'phone') => { const ev = []; await voice.utterance({ bytes: encodeWav(clip(o)), deviceId: dev, emit: (e) => ev.push(e) }); return ev; };
     // Not calibrated yet: never acted on.
@@ -278,4 +278,40 @@ test('the coach voice: ElevenLabs with the private key, the Mac voice without on
     assert.equal(r.engine, 'mac');
     assert.match(tts.status().error, /401/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the coach waits while he is still talking (Tue 10/20): clips join, "still talking" holds for the next one', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { openVoice } = await import('../server/voice/index.mjs');
+  const { encodeWav } = await import('../app/js/lib/wav.js');
+  const { ROUND_MIN } = await import('../server/voice/voiceprint.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-hold-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  const sent = [];
+  const coach = { send: async (o) => { sent.push(o.text); o.emit({ type: 'done', message: { role: 'assistant', text: 'Ok.' } }); return { text: 'Ok.' }; } };
+  const texts = ['Jarvis I woke up at ten and', 'then I had a banana.', 'Jarvis what is next?'];
+  let i = 0;
+  const whisper = { transcribe: async () => ({ text: texts[i++], ms: 5 }), status: () => ({ running: true }), ensure: async () => {} };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const voice = openVoice({ store, dataDir: dir, engine: fakeEngine(), whisper, coach, now: () => Date.now(), holdMs: 80, joinMs: 120, talkingHoldMs: 400 });
+  try {
+    for (let k = 0; k < ROUND_MIN; k++) voice.enrol({ bytes: encodeWav(clip({ who: 1 })), condition: 'home' });
+    const run = (dev = 'phone') => voice.utterance({ bytes: encodeWav(clip({ who: 1 })), deviceId: dev, emit: () => {} });
+    // Clip 1 ends mid-thought and is held; he starts again (the phone says so) and the hold stretches; clip 2 joins.
+    const p1 = run();
+    await sleep(60);
+    assert.equal(voice.talking('phone'), true);
+    await sleep(200); // past the join time: still held, because he was talking
+    assert.equal(sent.length, 0);
+    const p2 = run();
+    await Promise.all([p1, p2]);
+    assert.deepEqual(sent, ['Jarvis I woke up at ten and then I had a banana.']);
+    // A clip with nothing after it goes on its own after the hold.
+    await run();
+    assert.deepEqual(sent.at(-1), 'Jarvis what is next?');
+    assert.equal(voice.talking('phone'), false, 'nothing held');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
