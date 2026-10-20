@@ -395,6 +395,19 @@ export function withResults(rec, { date, at, metrics, conditions, photos = [], s
 /** A usual metric's value on a scan, or null. */
 export const metricValue = (scan, key) => scan?.metrics?.find((m) => m.key === key && m.value != null)?.value ?? null;
 
+/**
+ * The day's weigh-in from a scan with results (Tue 10/20: his Evolt scan was saved with 75.1 kg, yet Body, his
+ * bodyweight for pull-ups and the coach still had no weigh-in). The measurement record of that day, with the scan's
+ * weight, body fat and lean mass; null when the scan has no weight.
+ */
+export function measurementFromScan(scan, existing = null, now = Date.now()) {
+  const kg = metricValue(scan, 'weightKg');
+  if (kg == null || !scan?.date) return null;
+  const fat = metricValue(scan, 'fatPercent'); const lean = metricValue(scan, 'leanMassKg');
+  return { ...(existing || { id: `measure.${scan.date}`, date: scan.date, source: 'evolt', at: scan.at || now }), weightKg: kg,
+    ...(fat != null ? { fatPercent: fat } : {}), ...(lean != null ? { leanMassKg: lean } : {}), source: 'evolt', updatedAt: now };
+}
+
 /** Calendar markers: one per scan with results. */
 export function scanMarks(scans = []) {
   return scans.filter(isDone).map((s) => {

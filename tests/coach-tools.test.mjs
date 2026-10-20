@@ -547,3 +547,27 @@ test('his own foods with a pack label: the label counts for kcal and protein, by
   const meal = list('meals').at(-1);
   assert.deepEqual(meal.before.items.map((x) => [x.name, x.kcal, x.protein, x.source, x.fdcId]), [['Greek yogurt', 124, 18.7, 'label', 170894], ['Chia seeds', 159, 10.3, 'label', 170554]]);
 });
+
+test('a scan with results is the day\'s weigh-in; the context knows; the meal on his screen is in the context (Tue 10/20)', async () => {
+  const r = await call('body_scan', { action: 'record_results', metrics: [{ label: 'Weight', value: 75.1, unit: 'kg' }, { label: 'Body fat', value: 14.9, unit: '%' }, { label: 'Lean body mass', value: 63.9, unit: 'kg' }], time: '11:30' });
+  assert.match(r.text, /^Saved the scan/);
+  const m = store.getRecord('measurements', 'measure.2026-01-20').data;
+  assert.deepEqual([m.weightKg, m.fatPercent, m.leanMassKg, m.source], [75.1, 14.9, 63.9, 'evolt']);
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /Today: weigh-in logged/);
+  // The meal he is looking at.
+  await call('log_meal', { items: [{ name: 'Rice', grams: 200, usda: 'Rice, white, long-grain, regular, unenriched, cooked without salt' }], time: '02:30', name: 'Test lunch' });
+  const meal = list('meals').find((x) => x.name === 'Test lunch');
+  const ctx1 = contextLine({ store, tz: TZ, now: clock, screen: `#/meal/${meal.id}` });
+  assert.match(ctx1, new RegExp(`The meal on his screen: Test lunch \\(2:30 AM, Tuesday 1/20\\) \\[id ${meal.id}\\]: Rice 200 g; \\d+ kcal, [\\d.]+ g protein; confirmed\\. What he says about the plate corrects it`));
+  assert.doesNotMatch(contextLine({ store, tz: TZ, now: clock, screen: '#/today' }), /The meal on his screen/);
+});
+
+test('supplement_setup: time, with food, servings, rest-day dose; never adds one (Tue 10/20)', async () => {
+  assert.match((await call('supplement_setup', { supplement: 'powder', time: '11:00', withFood: 'with', servings: 40 })).text, /^Test powder: time 11:00 AM, with food, 40 servings left\./);
+  const p = store.getRecord('supplements', 'supp.powder').data;
+  assert.deepEqual([p.time, p.withFood, p.stock.servings], ['11:00', 'with', 40]);
+  assert.match((await call('supplement_setup', { supplement: 'powder', time: '' })).text, /no set time/);
+  assert.equal(store.getRecord('supplements', 'supp.powder').data.time, null);
+  assert.match((await call('supplement_setup', { supplement: 'zinc', time: '09:00' })).text, /isn't on his list/);
+  assert.match((await call('supplement_setup', { supplement: 'powder' })).text, /^Nothing to change/);
+});

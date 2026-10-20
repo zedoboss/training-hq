@@ -305,9 +305,9 @@ export function render(view, [id]) {
           : `<label class="meal-tile is-empty file-btn" for="m-before">${CAMERA}<span class="hud">BEFORE</span></label>`}
         ${after ? `<button class="meal-tile has-photo" type="button" data-photo="after"><img src="${after.dataUrl}" alt="After photo"><span class="hud c-green">AFTER · ${esc(timeAt(meal.after.at, meal).toUpperCase())}</span></button>`
           : meal.after?.none ? '<div class="meal-tile is-none"><span class="hud c-green">AFTER</span><span>Ate it all</span><button class="link-btn" type="button" id="m-undo-none">Undo</button></div>'
-            : `<label class="meal-tile is-empty file-btn" for="m-after">${CAMERA}<span class="hud">AFTER</span><span class="hint">I'll ask at ${esc(askAt)}</span></label>`}
+            : `<label class="meal-tile is-empty file-btn" for="m-after">${CAMERA}<span class="hud">AFTER</span><span class="hint">${Date.now() >= afterPhotoAt(meal) ? 'Leftovers? Add the photo' : `I'll ask at ${esc(askAt)}`}</span></label>`}
       </div>
-      ${!meal.after && meal.before?.photoId ? '<button class="btn-ghost" id="m-none" type="button">Ate it all: no after photo</button>' : ''}`}
+      ${!meal.after && meal.before?.photoId && state !== 'after' ? '<button class="btn-ghost" id="m-none" type="button">Ate it all: no after photo</button>' : ''}`}
       ${statusLine ? `<p class="hint ${offline || state.startsWith('failed') ? 'c-amber' : ''}" id="m-status">${esc(statusLine)}</p>` : ''}
       ${meal.before?.photoId && scaleG != null ? `<label class="card meal-scale"><span><span class="hud c-muted">SCALE READING</span><span class="hint">${scaleG != null ? 'Read from the photo. Tap to correct.' : estB ? 'No scale seen in the photo. Type it if you weighed it.' : 'Read from the photo when the Mac has it.'}</span></span>
         <span class="meal-scale-in"><input class="input" id="m-scale" inputmode="decimal" value="${scaleG ?? ''}" aria-label="Grams on the scale"><span class="c-muted">g</span></span></label>` : ''}
@@ -323,7 +323,8 @@ export function render(view, [id]) {
         <p class="hint">The after photo subtracts what's left on the plate.</p>
       </section>
       <div class="meal-actions">
-        <button class="btn-primary meal-ok" id="m-ok" type="button" ${state === 'confirm' || state === 'confirm-after' ? '' : 'disabled'}>LOOKS RIGHT</button>
+        ${state === 'confirm' || state === 'confirm-after' ? '<button class="btn-primary meal-ok" id="m-ok" type="button">LOOKS RIGHT</button>'
+          : state === 'after' ? '<button class="btn-primary meal-ok" id="m-all" type="button">ATE IT ALL</button>' : ''}
         <button class="btn-ghost" id="m-fix" type="button">FIX</button>
         <button class="mic-round" id="m-mic" type="button" aria-label="Tell the coach by voice">${MIC}</button>
       </div>
@@ -360,7 +361,10 @@ export function render(view, [id]) {
       save({ before: { ...meal.before, scaleG: val, ...(val && items.length ? { items: nextItems, confirmedAt: meal.before.confirmedAt || null, edited: true } : {}) } });
       if (val && items.length && b.estimated) toast(`Items scaled to ${n0(val)} g. Tap Looks right to confirm.`);
     });
-    $('#m-ok').onclick = async () => {
+    // Tue 10/20, his words: "there should be a button there where I can click 'Finished everything, no need for a
+    // photo'". Once the estimate is confirmed, that is the main button (LOOKS RIGHT used to sit there greyed out).
+    if ($('#m-all')) $('#m-all').onclick = () => save({ after: { photoId: null, at: Date.now(), none: true, leftovers: [], confirmedAt: Date.now() } });
+    if ($('#m-ok')) $('#m-ok').onclick = async () => {
       const now = Date.now();
       if (state === 'confirm') {
         const keep = meal.before.edited ? cleanItems(meal.before.items) : items;

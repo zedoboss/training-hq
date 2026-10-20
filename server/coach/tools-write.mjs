@@ -18,7 +18,7 @@ import { measureIdFor } from '../../app/js/lib/body.js';
 import { newId } from '../../app/js/lib/routines.js';
 import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
-import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol } from '../../app/js/lib/scans.js';
+import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol, measurementFromScan } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
@@ -419,6 +419,22 @@ async function correctMeal(a, ctx) {
 
 // ---- supplements --------------------------------------------------------------------------------------------------
 
+/** Tue 10/20 ("he should be able to do everything inside the app"): one supplement set up the way he says: its time,
+ * with food or not, servings left, a different rest-day dose. Never adds or removes one (his rule). */
+async function supplementSetup(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const { item: supp, ambiguous } = findSupp(s, a.supplement);
+  if (!supp) return refuse(ambiguous.length ? `Which one: ${ambiguous.join(' or ')}?` : `"${a.supplement}" isn't on his list.`);
+  const next = { ...supp }; const said = [];
+  if (a.time !== undefined) { next.time = a.time || null; said.push(a.time ? `time ${formatHm(a.time)}` : 'no set time'); }
+  if (a.withFood) { next.withFood = a.withFood; said.push(a.withFood === 'either' ? 'with or without food' : `${a.withFood} food`); }
+  if (a.servings != null) { next.stock = { servings: Number(a.servings), countedAt: s.now }; said.push(`${a.servings} servings left`); }
+  if (a.doseRest !== undefined) { next.doseRest = a.doseRest || null; said.push(a.doseRest ? `rest days: ${a.doseRest}` : 'same dose on rest days'); }
+  if (!said.length) return refuse('Nothing to change: give a time, with food or not, servings left, or a rest-day dose.');
+  put(s, 'supplements', supp.id, next);
+  return wrote(`${supp.name}: ${said.join(', ')}. Its reminders follow from the next tick of the clock.`, `${supp.short || supp.name} set up`);
+}
+
 function findSupp(s, name) {
   const supps = s.list('supplements').filter((x) => statusOn(x, s.today) !== 'removed');
   return findByName(supps, name, (x) => x.name, (x) => [x.short, x.id.replace(/^supp\./, '')]);
@@ -539,7 +555,10 @@ async function bodyScan(a, ctx) {
     const base = conditionsFrom(rec, items);
     const conditions = { ...base, fasted: a.fasted ?? base.fasted, trainedBefore: a.trainedBefore ?? base.trainedBefore, unusual: String(a.unusual || '').slice(0, 300) };
     const hm = a.time || s.days()[date]?.sessionTime || '05:00';
-    put(s, 'body-scans', scanId(date), withResults(rec, { date, at: zonedTime(date, hm, s.tz), metrics, conditions, photos: rec?.photos || [], source: 'coach', note: rec?.note || '' }, s.now));
+    const saved = withResults(rec, { date, at: zonedTime(date, hm, s.tz), metrics, conditions, photos: rec?.photos || [], source: 'coach', note: rec?.note || '' }, s.now);
+    put(s, 'body-scans', scanId(date), saved);
+    const m = measurementFromScan(saved, s.one('measurements', measureIdFor(date, s.list('measurements'))), s.now);
+    if (m) put(s, 'measurements', m.id, m);
     return wrote(`Saved the scan of ${dayText(date, s.today)} at ${formatHm(hm)}: ${metrics.map((m) => `${m.label} ${m.text}${m.unit ? ` ${m.unit}` : ''}`).join('; ')}. He can check or fix them on the Body scan screen.`, `scan ${date}: ${metrics.length} numbers`);
   }
   return refuse('action is confirm_date, cancel_date, safety_read, staff_said or record_results.');
@@ -860,6 +879,7 @@ export const WRITE_TOOLS = [
   write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now.', obj({ items: ITEMS, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default from the time' }, time: HM, date: ISO, note: { type: 'string' } }, ['items']), logMeal),
   write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
   write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
+  write('supplement_setup', 'Set up a supplement', "Set up one of his supplements the way he says (what he'd enter on its page): time of day (24-hour HH:MM, or '' for no set time), with food or not, servings left in the pack, a different rest-day dose. Only what he asks for; it never adds or removes a supplement.", obj({ supplement: { type: 'string' }, time: { type: 'string', pattern: '^(([01]\\d|2[0-3]):[0-5]\\d)?$' }, withFood: { type: 'string', enum: ['with', 'without', 'either'] }, servings: { type: 'number', minimum: 0 }, doseRest: { type: 'string' } }, ['supplement']), supplementSetup),
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
   write('body_scan', 'Body scan', "How often he scans (every: 'training' = every training day, 'monthly' = every 4 weeks on a confirmed date); confirm the next scan date (monthly only; default: the app's proposal) or cancel it; change one preparation checklist line in his words (line: its id from body_scans, or none to add one; text; when: 'before' or 'day'); record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['every', 'checklist_line', 'confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, every: { type: 'string', enum: ['training', 'monthly'] }, line: { type: 'string' }, when: { type: 'string', enum: ['before', 'day'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
   write('set_reminder', 'Set a reminder', 'A notification to his phone at a time (today, or tomorrow if the time has passed, or a date), or cancel one by id.', obj({ time: HM, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),

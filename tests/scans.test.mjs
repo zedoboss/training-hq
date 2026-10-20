@@ -301,3 +301,12 @@ test('the arrival link (A10): only its secret works; the day is noted; the scan 
     await assert.rejects(a.arrive(k), /wrong link/);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a scan with results gives the day\'s weigh-in (Tue 10/20)', async () => {
+  const { measurementFromScan, withResults } = await import('../app/js/lib/scans.js');
+  const scan = withResults(null, { date: '2026-01-22', at: 5000, metrics: [{ label: 'Weight', value: 75.1, unit: 'kg' }, { label: 'Lean body mass', value: 63.9, unit: 'kg' }], conditions: {}, source: 'manual' }, 9000);
+  assert.deepEqual(measurementFromScan(scan, null, 9000), { id: 'measure.2026-01-22', date: '2026-01-22', source: 'evolt', at: 5000, weightKg: 75.1, leanMassKg: 63.9, updatedAt: 9000 });
+  const kept = measurementFromScan(scan, { id: 'measure.2026-01-22', date: '2026-01-22', waistCm: 80, source: 'scale', at: 100 }, 9000);
+  assert.deepEqual([kept.waistCm, kept.weightKg, kept.source, kept.at], [80, 75.1, 'evolt', 100]);
+  assert.equal(measurementFromScan(withResults(null, { date: '2026-01-22', at: 5000, metrics: [{ label: 'BMI', value: 22, unit: '' }], conditions: {}, source: 'manual' })), null);
+});

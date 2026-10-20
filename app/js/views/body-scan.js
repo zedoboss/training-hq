@@ -15,7 +15,7 @@ import { formatDay, formatDate, formatHm, formatTime, isoDate, deviceTimeZone, h
 import { addDays, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import {
   EVERY_DAYS, PROTOCOL, WHEN, SAFETY_TEXT, SAFETY_ASK, STAFF_QUESTIONS, protocolOf, scanStatus, confirmDate, cancelDate,
-  withTick, unticked, withProtocol, scanReminders, expectedEitherWay, scanId, CADENCE,
+  withTick, unticked, withProtocol, scanReminders, expectedEitherWay, scanId, CADENCE, measurementFromScan,
   METRICS, keyFor, cleanMetrics, mergeReads, conditionsFrom, withResults, metricValue, isDone, conditionNotes,
   metricsAvailable, scanSeries, latestChange,
 } from '../lib/scans.js';
@@ -481,7 +481,12 @@ function results(view, date) {
       if (!/^\d{2}:\d{2}$/.test(hm)) { toast('Set the time of the scan.'); return; }
       const cur = await repo.get('body-scans', scanId(date));
       const conditions = { fasted: cond.fasted ?? null, trainedBefore: cond.trainedBefore ?? null, unusual: cond.unusual || '', unticked: unticked(cur, items).map((i) => i.id) };
-      await repo.put('body-scans', scanId(date), { ...withResults(cur, { date, at: zonedTime(date, hm), metrics, conditions, photos: mine.map((p) => p.id), source: fromPdf ? 'pdf' : fromReads && mine.length ? 'photo' : cur?.source === 'pdf' ? 'pdf' : 'manual', note: cur?.note }), pdfPending: false });
+      const saved = { ...withResults(cur, { date, at: zonedTime(date, hm), metrics, conditions, photos: mine.map((p) => p.id), source: fromPdf ? 'pdf' : fromReads && mine.length ? 'photo' : cur?.source === 'pdf' ? 'pdf' : 'manual', note: cur?.note }), pdfPending: false };
+      await repo.put('body-scans', scanId(date), saved);
+      // The scan's weight is the day's weigh-in (Body, bodyweight, the coach).
+      const measures = await repo.list('measurements');
+      const m = measurementFromScan(saved, measures.find((x) => x.date === date) || null);
+      if (m) await repo.put('measurements', m.id, m);
       syncNow();
       toast(`Scan saved: ${metrics.length} numbers.`);
       location.hash = '#/body/scan';

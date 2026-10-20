@@ -36,6 +36,10 @@ export function promptText({ kind, meal, plan, before = [] }) {
   if (plan?.foods?.length) lines.push(`Foods he often eats (use these names when they match): ${plan.foods.map((f) => (f.fdcId ? `${f.name} [fdcId ${f.fdcId}]` : f.name)).join('; ')}.`);
   const amounts = amountsLine(plan);
   if (amounts) lines.push(`His packs, counts and usual amounts (no kitchen scale): ${amounts}.`);
+  // Tue 10/20: his eggs and beef are cooked in butter that the photo can't show.
+  for (const f of (plan?.foods || []).filter((x) => x.cooks && Object.keys(x.cooks).length)) {
+    lines.push(`He cooks ${Object.entries(f.cooks).map(([food, g]) => `${food} in about ${g} g of ${f.name}`).join(' and ')}: when the photo shows them, add a "${f.name}" item with those grams (it is not visible).`);
+  }
   if (kind === 'after') lines.push(`On the plate before:\n${before.map((x, i) => `${i}. ${x.name}: ${x.grams} g`).join('\n')}`);
   lines.push(kind === 'after' ? 'This is the after photo.' : 'This is the before photo.');
   if (meal.hint) lines.push(`His note about this meal. It overrides the photo and the list of usual foods: name the items and amounts the way he says.\n${meal.hint}`);

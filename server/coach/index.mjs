@@ -96,7 +96,7 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
           active = t;
           const recap = fresh ? recapText(earlier.slice(-RECAP_MESSAGES)) : '';
           let extra = '';
-          try { extra = context ? context({ store, tz: zone, now: now() }) : ''; } catch (e) { log(`coach context: ${e.stack || e}`); }
+          try { extra = context ? context({ store, tz: zone, now: now(), screen }) : ''; } catch (e) { log(`coach context: ${e.stack || e}`); }
           return turnText({ text: words, now: now(), tz: zone, recap, extra, voice, screen });
         },
       });

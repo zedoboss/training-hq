@@ -13,7 +13,7 @@ import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoic
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
-import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks } from '../../app/js/lib/meals.js';
+import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks, itemTotals } from '../../app/js/lib/meals.js';
 import { amountsLine } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
@@ -169,9 +169,17 @@ export function todayText(s) {
 }
 
 /** The context block of every message: the rotation and the session in progress (short; the 'today' tool has the rest). */
-export function contextLine({ store, tz, now }) {
+export function contextLine({ store, tz, now, screen = null }) {
   const s = snapshot(store, { tz, now });
   const lines = [...rotationLines(s).slice(0, 3), comingUp(s, 6)];
+  // Tue 10/20: the meal he is looking at, so "10 eggs, not 5" corrects it without a lookup first.
+  const mealId = /^#\/meal\/([\w.-]+)/.exec(screen || '')?.[1];
+  const meal = mealId && s.one('meals', mealId);
+  if (meal) {
+    const items = meal.before?.items || [];
+    const t = itemTotals(items);
+    lines.push(`The meal on his screen: ${meal.name} (${timeText(meal.at, s.tz)}, ${dayText(meal.date, s.today)}) [id ${meal.id}]: ${items.length ? items.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') : 'no items yet'}; ${t.kcal} kcal, ${t.protein} g protein${meal.after?.none ? '; he ate it all' : meal.after?.photoId ? '; after photo taken' : ''}${meal.before?.confirmedAt ? '; confirmed' : '; not confirmed yet'}. What he says about the plate corrects it: correct_meal with this id and every item as it should be.`);
+  }
   const active = s.active();
   if (active) lines.push(activeText(s, active));
   lines.push(moodLine(s));
@@ -186,7 +194,8 @@ function noticeLines(s) {
   const recent = s.list('coach-messages').filter((m) => (m.kind === 'nudge' || m.kind === 'reminder') && s.now - (m.at || 0) <= 3 * 3600000)
     .sort((a, b) => b.at - a.at).slice(0, 4);
   const health = s.one('health', s.today);
-  const weighed = s.list('measurements').some((m) => m.date === s.today && m.weightKg != null) || Boolean(health?.weights?.length);
+  const weighed = s.list('measurements').some((m) => m.date === s.today && m.weightKg != null) || Boolean(health?.weights?.length)
+    || s.list('body-scans').some((x) => x.date === s.today && isDone(x));
   const slept = Boolean(health?.sleep || s.one('sleep-log', s.today));
   return [
     recent.length ? `Your notifications to him in the last 3 hours, newest first (he may be answering one): ${recent.map((m) => `${formatTime(new Date(m.at), s.tz)} "${m.text}"`).join('; ')}.` : '',
