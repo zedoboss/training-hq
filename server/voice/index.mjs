@@ -90,7 +90,7 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
    */
   const waiting = new Map(); // device -> {texts, timer, fire}: a clip that ended unfinished, waiting for the rest
 
-  async function utterance({ bytes, deviceId = null, model = 'fast', tz = null, emit = () => {} }) {
+  async function utterance({ bytes, deviceId = null, model = 'fast', tz = null, screen = null, emit = () => {} }) {
     const t0 = now();
     const c = check(bytes);
     const d = c.decision;
@@ -146,7 +146,7 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
       });
       said = texts.join(' ');
     }
-    return coach.send({ text: said, model, deviceId, tz, via: 'voice', emit });
+    return coach.send({ text: said, model, deviceId, tz, via: 'voice', screen, emit });
   }
 
   return {

@@ -97,6 +97,16 @@ export async function reloadAppFiles() {
   location.reload();
 }
 
+/** The coach asked for the newest version (Tue 10/20): a downloaded update is applied, else the files are fetched again. */
+export async function updateApp() {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.update().catch(() => {});
+    if (reg?.waiting) { reg.waiting.postMessage('skipWaiting'); return; }
+  } catch { /* fall through */ }
+  await reloadAppFiles();
+}
+
 /** The running app's version (from its stored file list), or "offline"/"dev". */
 export async function appVersion() {
   try {

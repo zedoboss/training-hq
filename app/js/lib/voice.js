@@ -18,6 +18,7 @@ import * as rest from './rest-timer.js';
 import { play } from './sounds.js';
 import * as talk from './talk.js';
 import { callsForCalm } from './coach-talk.js';
+import { updateApp } from './sw-client.js';
 
 const KEY = 'thq.voice.listen';
 const SEEN = 'thq.voice.used';
@@ -63,7 +64,8 @@ async function keepAwake() {
 }
 function letSleep() { try { wake?.release(); } catch { /* gone */ } wake = null; }
 
-// Things the coach asked this device to do (the same as on the Talk screen).
+// Things the coach asked this device to do (the same as on the Talk screen). Tue 10/20: it works the app too:
+// opens screens, switches the microphone off (after it has said so), loads the newest version.
 const deps = {
   rest,
   sync: () => { syncNow().catch(() => {}); },
@@ -71,7 +73,17 @@ const deps = {
     try { sessionStorage.setItem('thq.coach.focus', JSON.stringify({ ...a, at: Date.now() })); } catch { /* private mode */ }
     window.dispatchEvent(new CustomEvent('thq:coach-focus', { detail: a }));
   },
+  go: (url) => { if (location.hash !== url) location.hash = url; },
+  micOff: () => afterReply(() => stop()),
+  reload: () => afterReply(() => updateApp()),
 };
+
+/** Once the coach has finished talking (at most 20 s), so its answer is heard first. */
+function afterReply(fn) {
+  const t0 = Date.now();
+  const tick = () => { if ((player.speaking || turnsInFlight) && Date.now() - t0 < 20000) setTimeout(tick, 300); else fn(); };
+  setTimeout(tick, 600);
+}
 
 function speak(sentence) {
   if (!prefs().voice.speak) return;
@@ -94,7 +106,7 @@ async function turn(wav, { overCoach: echo = false } = {}) {
   try {
     const st = prefs();
     await voiceUtterance({
-      wav, model: st.coach.model, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      wav, model: st.coach.model, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, screen: location.hash,
       onEvent: (e) => {
         broadcast(e);
         if (e.type === 'heard') {
@@ -111,7 +123,8 @@ async function turn(wav, { overCoach: echo = false } = {}) {
         } else if (e.type === 'text') {
           for (const s of split.push(e.delta)) sentence(s);
         } else if (e.type === 'action') {
-          runAction(e.action, deps);
+          // Spoken turns have no buttons: a screen the coach opened ('open') is shown at once.
+          runAction(e.action?.kind === 'open' ? { ...e.action, kind: 'go' } : e.action, deps);
         } else if (e.type === 'done') {
           for (const s of split.flush()) sentence(s);
           const end = gate.end();

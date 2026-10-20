@@ -75,7 +75,7 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
    * Send one message and wait for the reply. emit receives: {type:'user', message}, {type:'text', delta},
    * {type:'tool-start', name}, {type:'tool', tool}, {type:'action', action}, {type:'done', message}.
    */
-  async function send({ text, model = 'fast', deviceId = null, tz: tzIn = null, via = 'text', emit = () => {} }) {
+  async function send({ text, model = 'fast', deviceId = null, tz: tzIn = null, via = 'text', screen = null, emit = () => {} }) {
     const words = String(text ?? '').trim().slice(0, MAX_TEXT);
     if (!words) throw new Error('Nothing to send.');
     const key = MODELS[model] ? model : 'fast';
@@ -97,7 +97,7 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
           const recap = fresh ? recapText(earlier.slice(-RECAP_MESSAGES)) : '';
           let extra = '';
           try { extra = context ? context({ store, tz: zone, now: now() }) : ''; } catch (e) { log(`coach context: ${e.stack || e}`); }
-          return turnText({ text: words, now: now(), tz: zone, recap, extra, voice });
+          return turnText({ text: words, now: now(), tz: zone, recap, extra, voice, screen });
         },
       });
       reply = { role: 'assistant', text: res.text || '(no answer)', model: key, ms: res.ms, ...(voice ? { via: 'voice' } : {}) };

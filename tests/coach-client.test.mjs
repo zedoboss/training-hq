@@ -44,3 +44,22 @@ test('today counts, tool labels, safe text', () => {
   assert.equal(textHtml('2 * 3 = 6 **'), '2 * 3 = 6 **');
   assert.equal(MODEL_LABEL.fast, 'SONNET 5.5 · MEDIUM');
 });
+
+test('the coach works the app (Tue 10/20): screens, the microphone, an update; only the app\'s own links', async () => {
+  const { screenOf, safeHash, SCREENS } = await import('../app/js/lib/screens.js');
+  const done = [];
+  const deps = { go: (u) => done.push(['go', u]), micOff: () => done.push(['mic-off']), reload: () => done.push(['reload']) };
+  assert.equal(runAction({ kind: 'go', url: '#/coach' }, deps), true);
+  assert.equal(runAction({ kind: 'go', url: 'https://example.com' }, deps), false);
+  assert.equal(runAction({ kind: 'go', url: '#/../x' }, deps), false);
+  assert.equal(runAction({ kind: 'mic-off' }, deps), true);
+  assert.equal(runAction({ kind: 'reload' }, deps), true);
+  assert.equal(runAction({ kind: 'go', url: '#/coach' }, {}), false, 'a device without the dep does nothing');
+  assert.deepEqual(done, [['go', '#/coach'], ['mic-off'], ['reload']]);
+  assert.equal(safeHash('javascript:alert(1)'), null);
+  assert.equal(screenOf('#/session/abc').id, 'session');
+  assert.equal(screenOf('#/body/scan/r/2026-10-20').id, 'body_scan_results');
+  assert.equal(screenOf('#/supps/plan').id, 'supplements_plan');
+  assert.equal(screenOf('#/').id, 'today');
+  assert.equal(new Set(SCREENS.map((s) => s.id)).size, SCREENS.length);
+});

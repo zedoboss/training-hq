@@ -6,6 +6,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { MAX_DEMO_BYTES } from './demos.mjs';
 import { validZone } from '../app/js/lib/time.js';
+import { safeHash } from '../app/js/lib/screens.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -309,7 +310,7 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
     'POST /api/coach/send': async (req, url, res) => {
       const device = auth(req);
       if (!coach) throw new HttpError(404, 'coach not available');
-      const { text, model, tz } = await readJson(req);
+      const { text, model, tz, screen } = await readJson(req);
       if (!String(text ?? '').trim()) throw new HttpError(400, 'nothing to send');
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
       let open = true;
@@ -317,7 +318,7 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const emit = (e) => { if (open && !res.writableEnded) res.write(`${JSON.stringify(e)}\n`); };
       const ping = setInterval(() => emit({ type: 'ping' }), 10000);
       try {
-        await coach.send({ text, model, tz: typeof tz === 'string' && tz.length < 64 && validZone(tz) ? tz : null, deviceId: device.id, emit });
+        await coach.send({ text, model, tz: typeof tz === 'string' && tz.length < 64 && validZone(tz) ? tz : null, screen: safeHash(screen), deviceId: device.id, emit });
       } catch (e) {
         emit({ type: 'error', error: e.message });
       } finally {
@@ -379,7 +380,7 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const emit = (e) => { if (open && !res.writableEnded) res.write(`${JSON.stringify(e)}\n`); };
       const ping = setInterval(() => emit({ type: 'ping' }), 10000);
       try {
-        await voice.utterance({ bytes, deviceId: device.id, model, tz: tz && tz.length < 64 && validZone(tz) ? tz : null, emit });
+        await voice.utterance({ bytes, deviceId: device.id, model, tz: tz && tz.length < 64 && validZone(tz) ? tz : null, screen: safeHash(url.searchParams.get('screen')), emit });
       } catch (e) {
         if (!e.status) log(`voice utterance: ${e.stack || e}`);
         emit({ type: 'error', error: e.message });

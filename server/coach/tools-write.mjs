@@ -5,6 +5,7 @@
 // rest timer, showing a screen) go to it as actions. Nothing here can bend a fixed rule: the 30% guard warns, the
 // sauna ladder and hard stops are untouched, supplements are only what he says he took.
 import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByName, wrote, refuse, k, formatHm } from './shared.mjs';
+import { offered, saidNow, toldToStart } from './tools-app.mjs';
 import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
 import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId } from '../../app/js/lib/session.js';
@@ -162,16 +163,10 @@ async function correctSet(a, ctx) {
   return wrote(`${ex.name} set ${n} of ${session.title} is now ${valuesText(ex, next)}${next.done ? '' : ' (not ticked)'} (was ${valuesText(ex, set)}).${guard ? `\n${guard}` : ''}`, `${ex.name} set ${n}: ${valuesText(ex, next)}`);
 }
 
-const OFFER_MS = 30 * 60 * 1000;
 
 /** True when the coach's last reply before this turn offered this session (start_session "asked first") and his
  * message now is the next one, within 30 minutes. */
-function offeredLastTurn(s, ctx, key) {
-  const before = s.list('coach-messages').filter((m) => m.turnId !== ctx.turnId && m.role !== 'marker').sort((x, y) => x.at - y.at);
-  const last = before.at(-1);
-  if (!ctx.turnId || last?.role !== 'assistant' || s.now - last.at > OFFER_MS) return false;
-  return (last.tools || []).some((t) => t.name === 'start_session' && t.summary === `asked first: ${key}`);
-}
+const offeredLastTurn = (s, ctx, key) => offered(s, ctx, 'start_session', key);
 
 async function startSession(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
@@ -191,9 +186,10 @@ async function startSession(a, ctx) {
     if (!routine) return refuse(`No routine for ${LABEL[type] || type}.`);
   }
   // His rule (Mon 10/19): the coach asks before it starts a session. A first call never starts one; it starts only
-  // when his very next message answers the offer (the coach's last reply offered this same session).
+  // when his very next message answers the offer (the coach's last reply offered this same session), or (Tue 10/20,
+  // "If I say 'Go start a new workout push'...") when he told it to start one in so many words.
   const key = routine?.id || 'empty';
-  if (!offeredLastTurn(s, ctx, key)) {
+  if (!toldToStart(saidNow(s, ctx)) && !offeredLastTurn(s, ctx, key)) {
     const name = routine ? routine.title : 'an empty session';
     return { text: `Not started. Ask him first, in a few words: "Start ${name} now?" Only a yes in his next message starts it: then call start_session again with the same choice. Talking about training ("about to start squats", "at the gym") is not a yes: hype him up and ask.`, summary: `asked first: ${key}` };
   }
@@ -206,7 +202,7 @@ async function startSession(a, ctx) {
     bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter,
   });
   s.store.writeLocalMany([...sets.map((x) => ({ col: 'sets', id: x.id, data: x })), { col: 'sessions', id: session.id, data: zoned(s, 'sessions', session.id, session) }]);
-  ctx.action({ kind: 'open', url: `#/session/${session.id}`, label: 'Open the session' });
+  ctx.action({ kind: 'go', url: `#/session/${session.id}`, label: 'Open the session' });
   const first = session.exercises.find((e) => sets.some((x) => x.exKey === e.key));
   const rot = s.rotation();
   const notes = [];
@@ -854,7 +850,7 @@ export const WRITE_TOOLS = [
   write('log_weight', 'Weight', "His weigh-in, usually the Evolt at the gym before training (his rule: an Evolt every gym day, and you remind him): kg exactly as shown, and body fat % or lean mass kg if he reads them out. One entry per day (another one that day replaces the numbers). Shows on Body's weight tile and chart.", obj({ kg: { type: 'number', minimum: 30, maximum: 300 }, bodyFatPct: { type: 'number', minimum: 2, maximum: 60 }, leanMassKg: { type: 'number', minimum: 20, maximum: 200 }, date: ISO, note: { type: 'string' } }, ['kg']), logWeight),
   write('log_sleep', 'Sleep', "Last night's sleep as he tells it (no watch, so you ask each morning): bed and wake times, 24-hour; date = the morning he woke up (default today); awakeMin when he says he lay awake; quality 1-5 only if he gives one. Shows on Body as last night.", obj({ bed: HM, wake: HM, date: ISO, awakeMin: { type: 'integer', minimum: 0, maximum: 600 }, quality: { type: 'integer', minimum: 1, maximum: 5 }, note: { type: 'string' } }, ['bed', 'wake']), logSleep),
   write('nudges', 'Nudges', "The notifications you send him through the day: how often (everyMin 15, 20 or 30; 0 = off), his waking hours (wakeHm, bedHm; none outside them), a pause in minutes when he says stop for a while or he's going to bed early (pauseMin), or resume. With nothing set, says the current settings.", obj({ everyMin: { type: 'integer', enum: [0, 15, 20, 30] }, wakeHm: HM, bedHm: HM, pauseMin: { type: 'integer', minimum: 5, maximum: 1440 }, resume: { type: 'boolean' } }), nudgeSettings),
-  write('start_session', 'Start a session', "Start a workout exactly like Train > Start: today's targets, the check-in's lighter targets, warm-ups. Default: the next session in the rotation; or a day type, a routine name, or empty. Asks first (his rule): the first call never starts it and gives you the question to ask him; call again with the same choice only after his yes in his next message. Refuses while another session is in progress. Opens it on his phone.", obj({ dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] }, routine: { type: 'string' }, empty: { type: 'boolean' } }), startSession),
+  write('start_session', 'Start a session', "Start a workout exactly like Train > Start: today's targets, the check-in's lighter targets, warm-ups. Default: the next session in the rotation; or a day type, a routine name, or empty. When he told you to start one ('start Push', 'go start a new workout', 'Jarvis, start legs'), it starts at once and opens on his phone. Otherwise it asks first (his rule): that call doesn't start it and gives you the question to ask him; call again with the same choice only after his yes in his next message. Refuses while another session is in progress. Opens it on his phone.", obj({ dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] }, routine: { type: 'string' }, empty: { type: 'boolean' } }), startSession),
   write('log_set', 'Log a set', 'Tick the next set of the session in progress with what he did ("80 for 8" = kg 80, reps 8). kg is the TOTAL including the bar as he says it; for weighted pull-ups the added kg (0 = bodyweight). Missing values come from the target or last time. Default exercise: the one he is on. Returns the 30% cap warning and records if any, starts his rest timer, and names the next set.', obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600, description: 'for holds and timed sets' }, type: SET_TYPE, set: { type: 'integer', minimum: 1, description: 'set number, if he names one' }, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' } }), logSet),
   write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),
   write('next_exercise', 'Next exercise', 'Move his phone to the next exercise with sets left and say its next set.', obj(), nextExercise),

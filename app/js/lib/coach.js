@@ -1,6 +1,8 @@
 // The coach chat on the phone and in the Mac's browser (8.5). The conversation is the synced 'coach-messages'
 // collection (written by the Mac); a reply also arrives as a stream of events while it is written. Pure helpers here;
-// the screen is views/coach.js. Actions are what only this device can do for the coach: its rest timer, a sync.
+// the screen is views/coach.js. Actions are what only this device can do for the coach: its rest timer, a sync,
+// opening a screen, the microphone, an app update.
+import { safeHash } from './screens.js';
 
 export const MODEL_LABEL = { fast: 'SONNET 5.5 · MEDIUM', deep: 'OPUS 5.5 · HIGH' };
 
@@ -45,10 +47,15 @@ export function todayCounts(messages = [], date, dayOf) {
 
 /**
  * Run what the coach asked this device to do. `deps` holds the rest timer, the sync and the focus event, so this
- * stays testable. Returns true when it was done here; 'open' actions are shown as buttons instead.
+ * stays testable. Returns true when it was done here; 'open' actions are shown as buttons instead (in Talk; spoken
+ * turns go there at once). Tue 10/20, the coach works the app: 'go' opens a screen, 'mic-off' stops listening on
+ * this phone, 'reload' loads the newest version of the app.
  */
 export function runAction(a, deps) {
   switch (a?.kind) {
+    case 'go': { const url = safeHash(a.url); if (!url || !deps.go) return false; deps.go(url); return true; }
+    case 'mic-off': if (!deps.micOff) return false; deps.micOff(); return true;
+    case 'reload': if (!deps.reload) return false; deps.reload(); return true;
     case 'rest': if (a.seconds > 0) { deps.rest.start(a.seconds, a.label || 'Rest'); return true; } return false;
     case 'rest-add': deps.rest.adjust(Number(a.seconds) || 0); return true;
     case 'rest-skip': deps.rest.clear(); return true;

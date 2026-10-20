@@ -233,14 +233,14 @@ export async function uploadHealth(text, name) {
 
 // The coach (step 8) runs on the Mac. A message goes there and the reply streams back as JSON lines: the words as
 // they are written, the tools used, actions for this device. The whole conversation also syncs ('coach-messages').
-export async function coachSend({ text, model, tz, onEvent, signal }) {
+export async function coachSend({ text, model, tz, screen, onEvent, signal }) {
   await ready;
   const url = await repo.getMeta('macUrl');
   const token = await repo.getMeta('token');
   if (!url || !token) throw new Error('Pair with your Mac first (Settings).');
   let res;
   try {
-    res = await fetch(`${url}/api/coach/send`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text, model, tz }) });
+    res = await fetch(`${url}/api/coach/send`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text, model, tz, screen }) });
   } catch (e) {
     if (e?.name === 'AbortError') throw e;
     setState({ mac: { reachable: false } });
@@ -267,14 +267,14 @@ export async function coachSend({ text, model, tz, onEvent, signal }) {
 
 // Voice (step 9). A stretch of speech goes to the Mac; the answer streams back like a typed message's, after a first
 // {type:'heard'} line (the voice lock's verdict). The coach's voice comes back as raw audio, one sentence at a time.
-export async function voiceUtterance({ wav, model, tz, onEvent, signal }) {
+export async function voiceUtterance({ wav, model, tz, screen, onEvent, signal }) {
   await ready;
   const url = await repo.getMeta('macUrl');
   const token = await repo.getMeta('token');
   if (!url || !token) throw new Error('Pair with your Mac first (Settings).');
   let res;
   try {
-    res = await fetch(`${url}/api/voice/utterance?model=${encodeURIComponent(model || 'fast')}&tz=${encodeURIComponent(tz || '')}`, { method: 'POST', signal, headers: { 'content-type': 'audio/wav', authorization: `Bearer ${token}` }, body: wav });
+    res = await fetch(`${url}/api/voice/utterance?model=${encodeURIComponent(model || 'fast')}&tz=${encodeURIComponent(tz || '')}&screen=${encodeURIComponent(screen || '')}`, { method: 'POST', signal, headers: { 'content-type': 'audio/wav', authorization: `Bearer ${token}` }, body: wav });
   } catch (e) {
     if (e?.name === 'AbortError') throw e;
     setState({ mac: { reachable: false } });

@@ -11,6 +11,8 @@ import * as rest from '../lib/rest-timer.js';
 import { conversationOf, MODEL_LABEL, toolLabel, runAction, textHtml } from '../lib/coach.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
+import { stop as voiceStop } from '../lib/voice.js';
+import { updateApp } from '../lib/sw-client.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DRAFT = 'thq.coach.draft';
@@ -20,7 +22,10 @@ const modelOf = () => withDefaults(getState().settings).coach.model;
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const SEND = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2.5-6.5z"/></svg>';
 
-/** Actions the coach asked this device for (its rest timer, a sync, moving the session screen to an exercise). */
+/** Actions the coach asked this device for (its rest timer, a sync, moving the session screen to an exercise).
+ * Tue 10/20, the coach works the app: a screen it opens, the microphone off or an app update happen once its answer
+ * is complete, so he reads it first. */
+let afterDone = [];
 const deps = {
   rest,
   sync: () => { syncNow(); },
@@ -29,7 +34,11 @@ const deps = {
     try { sessionStorage.setItem('thq.coach.focus', JSON.stringify({ ...a, at: Date.now() })); } catch { /* private mode */ }
     window.dispatchEvent(new CustomEvent('thq:coach-focus', { detail: a }));
   },
+  go: (url) => afterDone.push(() => { if (location.hash !== url) location.hash = url; }),
+  micOff: () => afterDone.push(() => voiceStop()),
+  reload: () => afterDone.push(() => updateApp()),
 };
+const runAfterDone = () => { const fns = afterDone; afterDone = []; setTimeout(() => fns.forEach((f) => f()), 700); };
 
 function msgHtml(m, { live = false } = {}) {
   const who = m.role === 'user' ? (m.via === 'voice' ? 'YOU · VOICE' : 'YOU') : 'COACH';
@@ -113,8 +122,9 @@ function renderChat(view) {
     live.push(userTemp);
     draw();
     try {
+      afterDone = [];
       await coachSend({
-        text, model, tz: tz(), signal: ctrl.signal,
+        text, model, tz: tz(), screen: location.hash, signal: ctrl.signal,
         onEvent: (e) => {
           if (gone) return;
           if (e.type === 'user') { live = live.filter((m) => m !== userTemp); live.push(e.message); pendingLive.at = e.message.at + 1; draw(); setState('THINKING…'); }
@@ -122,7 +132,7 @@ function renderChat(view) {
           else if (e.type === 'tool-start') setState(`USING ${String(e.name || '').toUpperCase().replace(/_/g, ' ')}…`);
           else if (e.type === 'tool') { pendingLive.tools.push(e.tool); updateLive(); setState('THINKING…'); }
           else if (e.type === 'action') { pendingLive.actions.push(e.action); runAction(e.action, deps); if (e.action.kind === 'open') updateLive(); }
-          else if (e.type === 'done') { live.push(e.message); pendingLive = null; draw(); }
+          else if (e.type === 'done') { live.push(e.message); pendingLive = null; draw(); runAfterDone(); }
           else if (e.type === 'error') { pendingLive = { ...pendingLive, text: e.error, error: true }; updateLive(); }
         },
       });

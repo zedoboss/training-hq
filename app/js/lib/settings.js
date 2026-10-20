@@ -50,7 +50,7 @@ export const DEFAULT_SETTINGS = {
   // Step 7: a daily step goal of his own for the Body chart and the core's steps ring (none until he sets one).
   // Step 7: which Claude reads body scan result photos on the Mac (Opus 5.5 high by default: every number counts).
   body: { stepGoal: null, scanModel: 'deep' },
-  // Step 8: the coach's Claude ('fast' Sonnet 5.5 at low effort, the default; 'deep' Opus 5.5 at high effort).
+  // Step 8: the coach's Claude ('fast' Sonnet 5.5 at medium effort, the default; 'deep' Opus 5.5 at high effort).
   // A15 (brief decision 30): the coach's moods (Calm is always on: it takes over whenever a safety rule applies), how
   // hard it pushes (1-5), and whether it talks during sets and holds, and how often ('often' | 'steady' | 'once').
   // A16: rep calls ("two more") on squat sets with the camera: off until an iPhone test shows the ding is untouched;

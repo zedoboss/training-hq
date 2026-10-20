@@ -3,6 +3,8 @@
 // phone's screens do and send the phone what only it can do (its rest timer, a screen to open).
 import { READ_TOOLS, contextLine } from './tools-read.mjs';
 import { WRITE_TOOLS } from './tools-write.mjs';
+import { APP_TOOLS } from './tools-app.mjs';
 
-export const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS];
+// APP_TOOLS (Tue 10/20): the coach works the app itself: screens, the workout in progress, settings, the phone.
+export const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...APP_TOOLS];
 export { contextLine };

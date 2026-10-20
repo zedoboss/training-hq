@@ -145,6 +145,70 @@ test('the coach asks before it starts a session (his rule, Mon 10/19)', async ()
   for (const t of ['t1', 't2', 't3']) for (const r of ['user', 'assistant']) store.writeLocal('coach-messages', `m-${t}-${r}`, null, { deleted: true });
 });
 
+test('the coach works the app (Tue 10/20): told to start, it starts; screens; the workout; settings; the phone', async () => {
+  const said = (turnId, text) => store.writeLocal('coach-messages', `m-${turnId}-user`, { id: `m-${turnId}-user`, role: 'user', turnId, at: clock, text });
+  const inTurn = (turnId) => (name, args = {}) => TOOLS.find((t) => t.name === name).run(args, { ...ctx(), turnId });
+  // "Go start a new workout push": started at once, open on his phone.
+  said('c1', 'Go start a new workout legs');
+  const st = await inTurn('c1')('start_session', { dayType: 'legs' });
+  assert.match(st.text, /^Started Legs/);
+  const session = list('sessions').find((x) => x.status === 'active');
+  assert.deepEqual(actions.at(-1), { kind: 'go', url: `#/session/${session.id}`, label: 'Open the session' });
+  // Any screen; the ones that need something find it.
+  assert.match((await call('open_screen', { screen: 'talk' })).text, /^Opened on his phone: Talk/);
+  assert.deepEqual(actions.at(-1), { kind: 'go', url: '#/coach', label: 'Talk (the chat with the coach)' });
+  await call('open_screen', { screen: 'session' }); assert.equal(actions.at(-1).url, `#/session/${session.id}`);
+  await call('open_screen', { screen: 'supplement', name: 'powder' }); assert.equal(actions.at(-1).url, '#/supp/supp.powder');
+  await call('open_screen', { screen: 'routine', name: 'legs' }); assert.equal(actions.at(-1).url, '#/routine/legs-gbi');
+  await call('open_screen', { screen: 'exercise', name: 'leg extension' }); assert.match(actions.at(-1).url, /^#\/exercise\/[\w-]+$/);
+  await call('open_screen', { screen: 'body_scan_results' }); assert.equal(actions.at(-1).url, '#/body/scan/r/2026-01-20');
+  assert.match((await call('open_screen', { screen: 'nope' })).text, /^No screen called "nope"/);
+  // The clock.
+  clock += 60000;
+  assert.match((await call('workout', { action: 'pause' })).text, /clock paused/);
+  clock += 120000;
+  assert.match((await call('workout', { action: 'resume' })).text, /clock running again/);
+  assert.equal(list('sessions').find((x) => x.id === session.id).pausedMs, 120000);
+  await call('log_set', { kg: 40, reps: 10 });
+  // Finish: asked when he only hints at it, done when he says so; unticked sets dropped, the summary opens.
+  said('c2', "I think I'm done");
+  assert.match((await inTurn('c2')('workout', { action: 'finish' })).text, /^Not finished\. Ask him first.*"Finish Legs now\? 1 of \d+ sets ticked; the unticked ones are dropped\."/);
+  said('c3', 'Jarvis, finish the workout');
+  const fin = await inTurn('c3')('workout', { action: 'finish' });
+  assert.match(fin.text, /^Saved Legs: 0:0\d, 1 set, 400 kg volume; \d+ unticked sets dropped\./);
+  assert.equal(list('sessions').find((x) => x.id === session.id).status, 'done');
+  assert.equal(list('sets').filter((x) => x.sessionId === session.id).length, 1);
+  assert.deepEqual(actions.slice(-2), [{ kind: 'rest-skip' }, { kind: 'go', url: `#/finish/${session.id}`, label: 'The workout summary' }]);
+  assert.match((await call('workout', { action: 'status' })).text, /^No workout in progress/);
+  // Settings.
+  assert.match((await call('app_settings')).text, /coach\.model = "fast"/);
+  assert.match((await call('app_settings', { setting: 'coach.model', value: 'deep' })).text, /"fast" to "deep"/);
+  assert.equal(store.getRecord('settings', 'main').data.coach.model, 'deep');
+  assert.match((await call('app_settings', { setting: 'rest.mainS', value: '200' })).text, /give one of/);
+  assert.match((await call('app_settings', { setting: 'notify.holdsMorning', value: '9:15' })).text, /to "09:15"/);
+  assert.match((await call('app_settings', { setting: 'voice.speak', value: 'off' })).text, /true to false/);
+  // The phone.
+  await call('phone', { action: 'mic_off' }); assert.deepEqual(actions.at(-1), { kind: 'mic-off' });
+  await call('phone', { action: 'reload' }); assert.deepEqual(actions.at(-1), { kind: 'reload' });
+});
+
+test('discarding a workout always needs his yes to that question', async () => {
+  const said = (turnId, text) => store.writeLocal('coach-messages', `m-${turnId}-user`, { id: `m-${turnId}-user`, role: 'user', turnId, at: clock, text });
+  const inTurn = (turnId) => (name, args = {}) => TOOLS.find((t) => t.name === name).run(args, { ...ctx(), turnId });
+  said('d1', 'start legs');
+  await inTurn('d1')('start_session', { dayType: 'legs' });
+  const session = list('sessions').find((x) => x.status === 'active');
+  said('d2', 'Discard the session');
+  const ask = await inTurn('d2')('workout', { action: 'discard' });
+  assert.match(ask.text, /^Not discarded\. Ask him first: "Discard Legs\? 0 logged sets will be deleted\."/);
+  store.writeLocal('coach-messages', 'm-d2-assistant', { id: 'm-d2-assistant', role: 'assistant', turnId: 'd2', at: clock + 1, text: 'Discard Legs?', tools: [{ name: 'workout', summary: ask.summary }] });
+  clock += 5000;
+  said('d3', 'yes');
+  assert.match((await inTurn('d3')('workout', { action: 'discard' })).text, /^Discarded Legs/);
+  assert.equal(list('sessions').find((x) => x.id === session.id).status, 'discarded');
+  assert.equal(list('sets').filter((x) => x.sessionId === session.id).length, 0);
+});
+
 test('a session started, sets logged by voice-style numbers, the 30% guard and the rest timer', async () => {
   // He said yes to the coach's offer in his next message (see the test above).
   store.writeLocal('coach-messages', 'm-o1-user', { id: 'm-o1-user', role: 'user', turnId: 'o1', at: clock - 2000, text: 'about to start squats' });
@@ -159,7 +223,7 @@ test('a session started, sets logged by voice-style numbers, the 30% guard and t
   const session = list('sessions').find((s) => s.status === 'active');
   assert.equal(session.tz, TZ, 'a session started by the coach carries the zone of the phone he talks from (A3)');
   assert.ok(session);
-  assert.deepEqual(actions.at(-1), { kind: 'open', url: `#/session/${session.id}`, label: 'Open the session' });
+  assert.deepEqual(actions.at(-1), { kind: 'go', url: `#/session/${session.id}`, label: 'Open the session' });
   assert.match((await call('start_session')).text, /Session in progress: Legs/, 'one session at a time');
 
   clock += 60000;
