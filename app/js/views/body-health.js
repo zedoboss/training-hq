@@ -10,6 +10,7 @@ import { confirmSheet } from '../ui/sheet.js';
 
 export const SHORTCUT_NAME = 'Training HQ Health';
 export const runShortcutUrl = (name = SHORTCUT_NAME) => `shortcuts://run-shortcut?name=${encodeURIComponent(name)}`;
+const openShortcutUrl = (name = SHORTCUT_NAME) => `shortcuts://open-shortcut?name=${encodeURIComponent(name)}`;
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const when = (ms) => `${formatDay(new Date(ms))}, ${formatTime(new Date(ms))}`;
 const shortDay = (iso, year = false) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}${year ? `/${iso.slice(0, 4)}` : ''}`;
@@ -75,7 +76,7 @@ export function render(view) {
       <p class="hint c-text">Through iCloud alone a file can take over an hour (Wednesday 10/21: made 8:46 PM, on the Mac 10:04 PM). One more step in the Shortcut sends it to your Mac in seconds, over Tailscale.</p>
       <ol class="hk-steps">
         <li>Tap <b>Copy the link</b> below.</li>
-        <li>Shortcuts &gt; <b>${SHORTCUT_NAME}</b> (tap <b>•••</b> on it). At the very bottom, after Save File, add <b>Get Contents of URL</b>. Tap <b>URL</b> and paste.</li>
+        <li><a href="${openShortcutUrl()}">Open the Shortcut</a> (or Shortcuts &gt; <b>${SHORTCUT_NAME}</b> &gt; <b>•••</b>). At the very bottom, after Save File, add <b>Get Contents of URL</b> (Web). Tap <b>URL</b> and paste.</li>
         <li>Tap the <b>&gt;</b> arrow: Method <b>POST</b>. Request Body <b>File</b>. Tap <b>File</b> and pick the big <b>Text</b> (the one Save File saves).</li>
         <li>Tap <b>Done</b>, then <b>▶</b> to run it once. The card above says "sent straight from the Shortcut".</li>
       </ol>
