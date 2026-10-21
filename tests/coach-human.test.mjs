@@ -48,9 +48,9 @@ test('initiatives: neck planned and skipped, holds behind, the table a draft, sa
   const sessions = [{ id: 'p1', dayType: 'push', status: 'done', startedAt: at('11:30', '2026-03-17') }];
   const areas = [{ kind: 'area', id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Wall Hold', where: 'home' }] }];
   const items = openItems({ today: D, sessions, neck: { planned: true, place: 'after-push', on: '2026-03-15' }, areas, readiness: { status: 'draft' }, scanPlan: { safety: null }, dayOf });
-  assert.deepEqual(items.map((i) => i.key), ['holds-knees', 'neck', 'readiness', 'sauna', 'scan-safety']);
+  assert.deepEqual(items.map((i) => i.key), ['phase-knees', 'neck', 'readiness', 'sauna', 'scan-safety']);
   assert.match(items.find((i) => i.key === 'neck').facts, /puts it after push\. Never done yet\. Push days without it: 2026-03-17\./);
-  assert.match(items[0].facts, /0 rounds in the last 7 days/);
+  assert.match(items[0].facts, /set to the heal phase \(3 holds twice a day, his note\), but he has done NO knees holds in the last 10 days, so healing never really started\. Ask how the knees feel now\. If the pain is gone on its own: his note's next step is 3-4 times a week/);
   assert.equal(openItems({ today: D, sessions: [...sessions, { id: 'n1', dayType: 'neck', status: 'done', startedAt: at('12:30', '2026-03-17') }], neck: { planned: true, place: 'after-push', on: '2026-03-15' }, dayOf }).some((i) => i.key === 'neck'), false, 'neck done: nothing to raise');
   assert.equal(openItems({ today: D, saunaPlan: { askAfter: '2026-03-25' }, dayOf }).some((i) => i.key === 'sauna'), false, '"not this week" holds');
   assert.match(initiativePrompt(items[1]), /^\[From the app, not from him\.[\s\S]*Reply exactly SKIP only when he already answered this topic/);
@@ -84,4 +84,16 @@ test('initiative tick: the coach writes it, pushed and in Talk; one per 3 hours;
     assert.equal(await tick('18:30'), null, 'the coach may decide not to');
     assert.equal(sent.length, 1);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('tendon cycle (Wed 10/21): heal with holds done for a week asks if the pain is gone; fix for 8 weeks asks about maintenance', () => {
+  const dayOf = (ms) => new Date(ms + 7 * 3600000).toISOString().slice(0, 10);
+  const area = (o) => ({ kind: 'area', id: 'knees', label: 'Knees', holds: [{ exercise: 'Wall Hold', where: 'home' }], ...o });
+  const hold = (d) => ({ id: `h${d}`, kind: 'holds', area: 'knees', status: 'done', startedAt: at('19:00', d) });
+  const sessions = ['2026-03-08', '2026-03-10', '2026-03-12', '2026-03-15', '2026-03-17'].map(hold);
+  const it = openItems({ today: D, sessions, areas: [area({ phase: 'heal' })], dayOf }).find((i) => i.key === 'phase-knees');
+  if (it) assert.match(it.facts, /heal phase \(twice a day\) running since 2026-03-08/);
+  const fix = openItems({ today: D, areas: [area({ phase: 'fix', phaseSince: '2026-01-15' })], dayOf }).find((i) => i.key === 'phase-knees');
+  assert.match(fix.facts, /fix phase \(3-4x a week\) since 2026-01-15, 8 weeks now/);
+  assert.equal(openItems({ today: D, areas: [area({ phase: 'fix', phaseSince: '2026-03-01' })], dayOf }).some((i) => i.key === 'phase-knees'), false);
 });

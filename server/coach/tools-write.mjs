@@ -21,7 +21,7 @@ import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checkli
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol, measurementFromScan } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText, doctorDue } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone, hmOf } from '../../app/js/lib/time.js';
-import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
+import { restAskAreas, withRestChoice, restChoiceText, PHASE_TEXT } from '../../app/js/lib/holds.js';
 import { withAnswer, planAt } from '../../app/js/lib/walks.js';
 import { fastingOn, withFast } from '../../app/js/lib/fast.js';
 import { answerNeck, placeLabel, NECK_PLACES, withHomeNotes, bottleFor, HOME_HOW } from '../../app/js/lib/neck.js';
@@ -603,6 +603,27 @@ async function setReminder(a, ctx) {
   return wrote(`Reminder set for ${when}: "${a.text}". It comes to his phone as a notification from Coach, and shows in Talk [id ${id}].`, a.inMinutes ? `in ${Math.round(a.inMinutes)} min` : `${dayText(date, s.today)} ${formatHm(hm)}`);
 }
 
+/**
+ * A tendon area's phase, from his answer (Wed 10/21: "make it smarter"), along his Tendons note: heal = 3 holds twice a
+ * day while it hurts; fix = 3-4x a week for 4-8 weeks; maintenance = after a workout or one day a week; none.
+ * Weekly phases need a day for every hold: one with no day of its own (the knees' wall squat at home) goes on rest
+ * days, so knees in fix are the leg extension hold after Legs plus the wall squat on rest days (about 3.5 a week).
+ */
+async function tendonPhase(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const areas = s.list('tendons').filter((x) => x.kind === 'area');
+  const q = String(a.area || '').toLowerCase();
+  const area = areas.find((x) => x.id === q) || areas.find((x) => x.label.toLowerCase().includes(q) || q.includes(x.id));
+  if (!area) return refuse(`Which area: ${areas.map((x) => x.label).join(', ')}?`);
+  if (!['heal', 'fix', 'maintenance', 'none'].includes(a.phase)) return refuse('Phase: heal, fix, maintenance or none.');
+  const days = (h) => /\bafter (Pull|Push|Legs)\b|\brest days?\b/i.test([...(h.timing || []), h.when || ''].join(' | '));
+  const holds = a.phase === 'heal' ? area.holds : (area.holds || []).map((h) => (days(h) ? h : { ...h, timing: ['rest days'], when: null, whenBefore: h.when ?? null }));
+  const log = [...(area.phaseLog || []), { date: s.today, from: area.phase, to: a.phase, reason: a.reason ? String(a.reason).slice(0, 200) : '', ...(num(a.pain) !== undefined ? { pain: num(a.pain) } : {}) }].slice(-30);
+  put(s, 'tendons', `area.${area.id}`, { ...area, phase: a.phase, phaseSince: s.today, holds, phaseLog: log });
+  const plan = a.phase === 'fix' ? ` Holds: ${holds.map((h) => `${h.exercise} ${[...(h.timing || [])].join(', ') || h.when || ''}`.trim()).join('; ')}.` : '';
+  return wrote(`${area.label}: ${PHASE_TEXT[a.phase]}, from ${dayText(s.today, s.today)}.${plan} The hold reminders follow it from now on.`, `${area.label} ${a.phase}`);
+}
+
 /** Where his neck routine goes (Wed 10/21: the coach helps him fit it in): a place in the rotation, or not yet. */
 async function neckPlan(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
@@ -1010,6 +1031,7 @@ export const WRITE_TOOLS = [
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
   write('body_scan', 'Body scan', "How often he scans (every: 'training' = every training day, 'monthly' = every 4 weeks on a confirmed date); confirm the next scan date (monthly only; default: the app's proposal) or cancel it; change one preparation checklist line in his words (line: its id from body_scans, or none to add one; text; when: 'before' or 'day'); record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['every', 'checklist_line', 'confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, every: { type: 'string', enum: ['training', 'monthly'] }, line: { type: 'string' }, when: { type: 'string', enum: ['before', 'day'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
   write('set_reminder', 'Set a reminder', "A notification to his phone from Coach, for anything in his life, not only training (\"throw out the trash in 10 minutes\"). Give inMinutes for 'in N minutes/hours', or time (HH:MM, 24-hour: today, or tomorrow if passed) with an optional date. When he gives a range or a vague time ('10 to 15 minutes', 'in a bit', 'after dinner', 'tonight'), decide one yourself: he wants you to (the middle of a range; 'in a bit' = 15 minutes) and say the exact time back. Or cancel one by id.", obj({ time: HM, inMinutes: { type: 'integer', minimum: 1, maximum: 2880 }, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
+  write('tendon_phase', 'Tendon phase', "Move a tendon area (knees, shoulder, wrist...) to another phase of his Tendons note, only on his answer: heal = 3 holds twice a day while it hurts (pain can go in a week or two); fix = 3-4 times a week for at least 4-8 weeks, to fix it for good; maintenance = 5-10 minutes after a workout or one day a week; none. Ask how it feels first; pain = his 0-10 if he says. No other rehab advice.", obj({ area: { type: 'string' }, phase: { type: 'string', enum: ['heal', 'fix', 'maintenance', 'none'] }, pain: { type: 'number', minimum: 0, maximum: 10 }, reason: { type: 'string' } }, ['area', 'phase']), tendonPhase),
   write('neck_plan', 'Neck in the rotation', "Where his Neck routine goes: after-pull, after-push, after-legs or rest-day (Train offers it on those days), not-yet (asked again in a week), or off; and where he does it: gym or home (ask his preference). At home he has NO plates: the load is a water bottle filled by volume (1 ml = 1 g; 0.9 kg = 1 L bottle filled to 900 ml), on a folded towel; ask what else he has at home (homeGear). Only what he chooses; you may suggest a better fit once, with the reason (e.g. after a gym session the plates are right there; on a rest day home saves a trip).", obj({ place: { type: 'string', enum: [...NECK_PLACES.map(([k]) => k), 'not-yet', 'off'] }, where: { type: 'string', enum: ['gym', 'home'] }, homeGear: { type: 'string', description: 'what he has at home for it, his words' }, reason: { type: 'string' } }, ['place']), neckPlan),
   write('fast', 'Fasting day', "He says he's fasting (today by default, or a date): record it so the app stops cooking, meal-time, food and supplement prompts that day and skips today's open supplements ('fasting'); end when he breaks it (a meal logged also ends it). Acknowledge in one line. Never argue his fast or count his kcal against him; no lecture.", obj({ action: { type: 'string', enum: ['start', 'end'] }, date: ISO, said: { type: 'string' } }, ['action']), fastDay),
   write('hold_off', 'Hold off', "When he tells you to leave something alone for a while ('no sauna this week', 'busy until 3', 'stop the walk questions today', 'no food reminders tonight'): the app's reminders and nudges for those areas stay quiet until then. Areas: food, supps, walk, holds, sauna, scan, training, sleep, recovery, health, evening, all. Until: forMinutes, untilTime (HH:MM, today or tomorrow), or untilDate (through that whole day). His reason in his words. cancel: an id to lift it. Safety alarms and reminders he asked for always come.", obj({ areas: { type: 'array', items: { type: 'string', enum: AREA_NAMES } }, forMinutes: { type: 'integer', minimum: 5, maximum: 20160 }, untilTime: HM, untilDate: ISO, reason: { type: 'string' }, cancel: { type: 'string' } }), holdOff),

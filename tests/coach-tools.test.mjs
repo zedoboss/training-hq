@@ -623,3 +623,12 @@ test('human coach (Wed 10/21): fast, hold_off, neck_plan, sauna later and the do
   assert.match((await call('sauna_plan', { action: 'doctor', answer: 'not-yet' })).text, /^Recorded his answer to the doctor question: not-yet\./);
   assert.equal(list('sauna-plan')[0].doctor[0].context, 'first');
 });
+
+test('tendon_phase (Wed 10/21): knees from heal to fix on his answer; the wall squat gets rest days, the cycle is logged', async () => {
+  store.writeLocal('tendons', 'area.knees', { kind: 'area', id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Leg Extension (Machine)', timing: ['after Legs'], where: 'gym' }, { exercise: 'Toes Wall Squat Hold', when: 'the second session on Legs days; both sessions on every other day', where: 'home' }] });
+  const r = await call('tendon_phase', { area: 'knees', phase: 'fix', pain: 0, reason: 'random pain gone' });
+  assert.match(r.text, /^Knees: Fix phase: 3-4 times a week for 4-8 weeks, from Tuesday 1\/20\. Holds: Leg Extension \(Machine\) after Legs; Toes Wall Squat Hold rest days\./);
+  const k = store.getRecord('tendons', 'area.knees').data;
+  assert.deepEqual([k.phase, k.phaseSince, k.phaseLog.at(-1).from, k.phaseLog.at(-1).pain], ['fix', '2026-01-20', 'heal', 0]);
+  assert.match((await call('tendon_phase', { area: 'elbows', phase: 'fix' })).text, /^Which area/);
+});
