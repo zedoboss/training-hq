@@ -1,10 +1,12 @@
 // BODY > Apple Health (#/body/health, 7.1): how the iPhone Shortcut gets steps, sleep, weight and workouts to the Mac
 // (brief section 7: the Shortcut saves a file to iCloud Drive, an automation runs it morning and evening, the Mac reads
 // the folder), what arrived last, and buttons to run the Shortcut now, ask the Mac to look, or send a file by hand.
-import { ready, scanHealth, uploadHealth } from '../lib/data.js';
+// Wed 10/21: iCloud brought a file to the Mac 78 minutes late, so the Shortcut also sends it straight to the Mac.
+import { ready, scanHealth, uploadHealth, healthLink } from '../lib/data.js';
 import { getState, subscribe } from '../lib/store.js';
 import { formatDay, formatTime } from '../lib/time.js';
 import { toast } from '../ui/toast.js';
+import { confirmSheet } from '../ui/sheet.js';
 
 export const SHORTCUT_NAME = 'Training HQ Health';
 export const runShortcutUrl = (name = SHORTCUT_NAME) => `shortcuts://run-shortcut?name=${encodeURIComponent(name)}`;
@@ -20,6 +22,8 @@ export const LINES = {
   workout: '{"type":"workout","activity":"TYPE","start":"START","end":"END","duration":"DURATION","kcal":"ENERGY","distance":"DISTANCE","source":"SOURCE"}',
   export: '{"type":"export","at":"NOW"}',
 };
+
+const FROM = { phone: 'sent from this phone', shortcut: 'sent straight from the Shortcut', folder: 'through iCloud' };
 
 const codeLine = (key) => `<div class="hk-code"><code>${esc(LINES[key])}</code><button class="btn-ghost small" type="button" data-copy="${key}">Copy</button></div>`;
 
@@ -38,7 +42,8 @@ function steps() {
       <li><b>One file.</b> After the last repeat add one more <b>Text</b>. First line: paste this and replace NOW with <b>Current Date</b> (Date Format ISO 8601):${codeLine('export')}
         Then, each on its own line below it, the <b>Repeat Results</b> of each repeat (steps, sleep, weight, workouts).</li>
       <li>Add <b>Save File</b>: save that Text to <b>Shortcuts</b>. Turn off <b>Ask Where to Save</b>. Subpath: <code>Training HQ/health.json</code>. Turn on <b>Overwrite If File Exists</b>.</li>
-      <li>Tap <b>▶</b> to run it once. Allow Health access for Steps, Sleep, Weight and Workouts, and allow saving to iCloud Drive. Within about 5 minutes the card above says what the Mac read.</li>
+      <li>Last, add <b>Get Contents of URL</b> as in <b>Send it straight to the Mac</b> above.</li>
+      <li>Tap <b>▶</b> to run it once. Allow Health access for Steps, Sleep, Weight and Workouts, and allow saving to iCloud Drive. Within a few seconds the card above says what the Mac read.</li>
     </ol>
     <div class="section-label">Run it by itself, twice a day</div>
     <ol class="hk-steps">
@@ -57,7 +62,7 @@ export function render(view) {
   view.innerHTML = `
     <div class="lib-head"><a class="pill" href="#/body">Back</a></div>
     <h1 class="view-title">Apple Health</h1>
-    <p class="view-sub">Steps, sleep, weight and workouts come from a Shortcut on your iPhone. It saves a file to iCloud Drive; your Mac reads it and the numbers arrive here.</p>
+    <p class="view-sub">Steps, sleep, weight and workouts come from a Shortcut on your iPhone. It sends a file straight to your Mac (a few seconds, mobile data too) and keeps a copy in iCloud Drive as the backup; the numbers arrive here.</p>
     <section class="card pad-card" id="hk-status"><p class="hint">Loading…</p></section>
     <div class="hk-actions">
       <a class="btn-primary center" id="hk-run" href="${runShortcutUrl()}">Update now</a>
@@ -65,6 +70,20 @@ export function render(view) {
     </div>
     <label class="link-btn file-btn" for="hk-file">Send a Health file by hand instead</label>
     <input id="hk-file" type="file" accept=".json,.jsonl,.txt,application/json,text/plain" hidden>
+    <div class="section-label">Send it straight to the Mac (once, 2 minutes)</div>
+    <section class="card pad-card hk-guide" id="hk-direct">
+      <p class="hint c-text">Through iCloud alone a file can take over an hour (Wednesday 10/21: made 8:46 PM, on the Mac 10:04 PM). One more step in the Shortcut sends it to your Mac in seconds, over Tailscale.</p>
+      <ol class="hk-steps">
+        <li>Tap <b>Copy the link</b> below.</li>
+        <li>Shortcuts &gt; <b>${SHORTCUT_NAME}</b> (tap <b>•••</b> on it). At the very bottom, after Save File, add <b>Get Contents of URL</b>. Tap <b>URL</b> and paste.</li>
+        <li>Tap the <b>&gt;</b> arrow: Method <b>POST</b>. Request Body <b>File</b>. Tap <b>File</b> and pick the big <b>Text</b> (the one Save File saves).</li>
+        <li>Tap <b>Done</b>, then <b>▶</b> to run it once. The card above says "sent straight from the Shortcut".</li>
+      </ol>
+      <div class="btn-row"><button class="btn-ghost" type="button" id="hk-link-copy">Copy the link</button></div>
+      <div class="hk-code" id="hk-link-show" hidden><code></code></div>
+      <p class="hint" id="hk-link-out">The link only lets the Shortcut send Health numbers. New link makes the old one stop working. If Tailscale is off on the phone this step fails with a message; the iCloud copy is already saved, so nothing is lost.</p>
+      <button class="link-btn" type="button" id="hk-link-new">New link</button>
+    </section>
     <div class="section-label">Make the Shortcut (once, about 10 minutes)</div>
     <section class="card pad-card hk-guide">${steps()}</section>`;
 
@@ -85,13 +104,14 @@ export function render(view) {
       if (l) {
         const types = Object.entries(l.types || {}).map(([k, v]) => `${k} ${v}`).join(' · ');
         lines.push(`<dl class="kv hk-kv">
-          <dt>Last file</dt><dd>${esc(l.name)}${l.from === 'phone' ? ' (sent from this phone)' : ''}</dd>
+          <dt>Last file</dt><dd>${esc(l.name)}${FROM[l.from] ? ` (${FROM[l.from]})` : ''}</dd>
           <dt>Made</dt><dd>${esc(when(l.at))}</dd>
           <dt>Read by the Mac</dt><dd>${esc(when(l.readAt))}</dd>
           <dt>Samples</dt><dd>${l.samples}${types ? ` <span class="c-faint">(${esc(types)})</span>` : ''}</dd>
           ${l.range ? `<dt>Days</dt><dd>${shortDay(l.range[0], l.range[0].slice(0, 4) !== l.range[1].slice(0, 4))} to ${shortDay(l.range[1], l.range[0].slice(0, 4) !== l.range[1].slice(0, 4))} · ${l.changed} updated</dd>` : ''}
           ${l.bad ? `<dt>Not read</dt><dd class="c-amber">${l.bad} line${l.bad === 1 ? '' : 's'}</dd>` : ''}</dl>`);
         if (l.bad && !l.samples) lines.push('<p class="hint c-amber">Nothing in the file could be read. Check that each Text line is pasted exactly, with the variables inside the quote marks.</p>');
+        if (l.from === 'folder') lines.push('<p class="hint c-amber">This one came through iCloud, which can take over an hour. Set up <b>Send it straight to the Mac</b> below.</p>');
       }
     }
     lines.push(`<p class="hint">${docs.length ? `${docs.length} day${docs.length === 1 ? '' : 's'} of Health data on this phone.` : 'No Health days on this phone yet.'}</p>`);
@@ -111,7 +131,7 @@ export function render(view) {
       if (!alive) return;
       try { const out = await scanHealth(); if (out.last && Date.now() - out.last.readAt < 70000) { toast(`The Mac read ${out.last.samples} samples.`); return; } } catch (e) { toast(e.message); return; }
     }
-    toast('No new file on the Mac yet. iCloud can take a few minutes; it is read as soon as it arrives.');
+    toast('No new file on the Mac yet. Without "Send it straight to the Mac" it waits for iCloud (up to an hour).');
   };
   document.addEventListener('visibilitychange', back);
   view.querySelector('#hk-scan').addEventListener('click', async (e) => {
@@ -124,6 +144,20 @@ export function render(view) {
     e.target.value = '';
     if (!f) return;
     try { const out = await uploadHealth(await f.text(), f.name); toast(`The Mac read ${out.samples} samples from ${f.name}.`); } catch (err) { toast(err.message); }
+  });
+  const linkOut = (t) => { view.querySelector('#hk-link-out').textContent = t; };
+  // Copy the link; where the clipboard is refused, show it to select and copy by hand.
+  const copyLink = async (renew, done) => {
+    let link;
+    try { link = await healthLink({ renew }); } catch (e) { linkOut(e.message || 'Could not get the link. Try again with the Mac connected.'); return; }
+    const show = view.querySelector('#hk-link-show');
+    try { await navigator.clipboard.writeText(link); show.hidden = true; linkOut(done); }
+    catch { show.querySelector('code').textContent = link; show.hidden = false; linkOut('Copy did not work here: select the link above and copy it.'); }
+  };
+  view.querySelector('#hk-link-copy').addEventListener('click', () => copyLink(false, 'Copied. Paste it into Get Contents of URL in the Shortcut.'));
+  view.querySelector('#hk-link-new').addEventListener('click', async () => {
+    if (!(await confirmSheet('Make a new link? The Shortcut stops sending straight to the Mac until you paste the new one.', { ok: 'New link' }))) return;
+    copyLink(true, 'New link copied. Paste it into the Shortcut.');
   });
   view.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(LINES[b.dataset.copy]); toast('Copied. Paste it into the Text action.'); } catch { toast('Copy did not work here: select the line and copy it.'); }

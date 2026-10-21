@@ -3,9 +3,13 @@
 // or changed, and stores one 'health' record per date (<YYYY-MM-DD>) that reaches the phone by sync. The Mac only
 // reads that folder: it never changes or deletes his files. A file picked on the phone can be sent here too
 // (POST /api/apple-health/upload), for when the folder can't be read. What happened is kept in 'health-meta/status'.
+// Wed 10/21: iCloud brought a file made at 8:46 PM to the Mac at 10:04 PM, while he was out walking. So the Shortcut
+// also sends its file straight here over Tailscale (POST /api/apple-health/push, its own private link: seconds, also
+// on mobile data); the iCloud copy stays as the backup and only adds when it arrives late.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { linkSecret } from './link-secret.mjs';
 import { parseHealthFile, healthDays, mergeDay } from '../app/js/lib/health.js';
 
 /** iCloud Drive > Shortcuts > Training HQ, as the Mac sees it. */
@@ -20,6 +24,7 @@ const FILE_RE = /\.(json|jsonl|txt)$/i;
  */
 export function openHealth({ store, dir, tz = Intl.DateTimeFormat().resolvedOptions().timeZone, log = () => {}, now = () => Date.now() }) {
   const seen = () => store.getMeta('health:files') || {};
+  const secret = linkSecret(store, 'health:secret');
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
 
   function setStatus(patch) {
@@ -75,7 +80,10 @@ export function openHealth({ store, dir, tz = Intl.DateTimeFormat().resolvedOpti
       known[f.name] = { key: f.key, readAt: now() };
     }
     if (todo.length) store.setMeta('health:files', known);
-    return setStatus({ folder: dir, folderFound: true, files: names.length, error, ...(last ? { last } : {}) });
+    // The status shows the newest export: the iCloud copy of a file the Shortcut already sent doesn't replace it.
+    const shown = one('health-meta', 'status')?.last;
+    const newer = last && !(shown?.at >= last.at);
+    return setStatus({ folder: dir, folderFound: true, files: names.length, error, ...(newer ? { last } : {}) });
   }
 
   /** A file sent from the phone (picked in the Files app). */
@@ -85,7 +93,17 @@ export function openHealth({ store, dir, tz = Intl.DateTimeFormat().resolvedOpti
     return last;
   }
 
-  return { scan, upload, importText, dir };
+  /** The Shortcut's own link (the phone adds the Mac address it already uses). */
+  const link = ({ renew = false } = {}) => ({ path: `/api/apple-health/push?k=${secret.get(renew)}` });
+
+  /** The Shortcut sent its file straight here. `check` first (403 on a wrong link), then `receive` the text. */
+  function receive(text) {
+    const last = importText(text, { name: 'health.txt', from: 'shortcut' });
+    if (last.samples) setStatus({ last });
+    return last;
+  }
+
+  return { scan, upload, importText, link, check: (k) => secret.check(k), receive, dir };
 }
 
 function countTypes(samples) {

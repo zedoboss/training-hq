@@ -224,6 +224,49 @@ test('an older file arriving late only adds; a phone upload goes through the sam
   assert.equal(store.getRecord('health-meta', 'status').data.last.name, 'morning.json');
 });
 
+test('the Shortcut sends its file straight to the Mac; the late iCloud copy only adds (Wed 10/21)', async () => {
+  const { createApp } = await import('../server/app.mjs');
+  const folder = join(dir, 'Training HQ');
+  mkdirSync(folder);
+  const h = openHealth({ store, dir: folder, tz: TZ, now: () => clock });
+  const server = createApp({ store, appDir: dir, health: h });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const { path } = h.link();
+    assert.equal(h.link().path, path, 'the same link until renewed');
+    const send = (p, body) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'text/plain' }, body });
+    // The morning file came through iCloud.
+    writeFileSync(join(folder, 'health.txt'), fileText());
+    utimesSync(join(folder, 'health.txt'), new Date(), new Date(at('2026-10-18', '07:30')));
+    h.scan();
+    // Evening, out walking: the Shortcut sends straight to the Mac.
+    const evening = fileText().replace(iso('2026-10-18', '07:30'), iso('2026-10-18', '21:30')).replace('"8000"', '"12500"');
+    assert.equal((await send(path.replace(/k=.*/, 'k=nope'), evening)).status, 403);
+    assert.equal((await send('/api/apple-health/push', evening)).status, 403);
+    assert.equal(day('2026-10-18').steps, 8000, 'a wrong link changes nothing');
+    const res = await send(path, evening);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, samples: 9, changed: 1 });
+    assert.equal(day('2026-10-18').steps, 12500);
+    let st = store.getRecord('health-meta', 'status').data.last;
+    assert.deepEqual([st.from, st.at], ['shortcut', at('2026-10-18', '21:30')]);
+    // An hour later iCloud brings the same file to the folder: nothing changes and the status keeps the Shortcut's send.
+    writeFileSync(join(folder, 'health.txt'), evening);
+    utimesSync(join(folder, 'health.txt'), new Date(), new Date(at('2026-10-18', '21:30')));
+    h.scan();
+    assert.equal(day('2026-10-18').steps, 12500);
+    st = store.getRecord('health-meta', 'status').data.last;
+    assert.equal(st.from, 'shortcut');
+    assert.equal((await send(path, '')).status, 400, 'an empty body is refused');
+    // A paired phone gets the link; a new link stops the old one.
+    assert.equal((await fetch(`${base}/api/apple-health/link`, { method: 'POST' })).status, 401);
+    const renewed = h.link({ renew: true }).path;
+    assert.notEqual(renewed, path);
+    assert.equal((await send(path, evening)).status, 403);
+  } finally { server.close(); }
+});
+
 test('the days are counted in his time zone, whatever zone the tests run in', () => {
   const docs = healthDays(parseHealthFile(line({ type: 'steps', value: '10', start: '2026-10-17T23:30:00Z' }), TZ).samples, TZ);
   assert.equal(docs[0].date, isoDate(new Date('2026-10-17T23:30:00Z'), TZ));

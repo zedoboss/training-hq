@@ -361,6 +361,12 @@ export async function arriveLink({ renew = false } = {}) {
   return (await repo.getMeta('macUrl')) + out.path;
 }
 
+/** The Health Shortcut's link: it sends its file straight to the Mac (Wed 10/21: through iCloud alone it took 78 min). */
+export async function healthLink({ renew = false } = {}) {
+  const out = await postJson('/api/apple-health/link', { renew }, 30000);
+  return (await repo.getMeta('macUrl')) + out.path;
+}
+
 /** Call the link the way the Shortcut will (a test from the app). */
 export async function arriveTest(link) {
   let res;

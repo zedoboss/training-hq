@@ -256,6 +256,22 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       return out;
     },
 
+    // The Health Shortcut sends its file straight here: the link for it (paired devices only), and the call itself
+    // (the link's own secret; no device token: the Shortcut has none).
+    'POST /api/apple-health/link': async (req) => {
+      auth(req);
+      if (!health) throw new HttpError(404, 'Apple Health not available');
+      const { renew } = await readJson(req);
+      return health.link({ renew: !!renew });
+    },
+    'POST /api/apple-health/push': async (req, url) => {
+      if (!health) throw new HttpError(404, 'Apple Health not available');
+      try { health.check(url.searchParams.get('k')); } catch (e) { throw new HttpError(e.status || 500, e.message); }
+      const out = health.receive((await readRaw(req, MAX_IMPORT_BYTES)).toString('utf8'));
+      if (!out.samples) throw new HttpError(400, out.bad ? `Nothing in the file could be read (${out.bad} lines).` : 'The file was empty.');
+      return { ok: true, samples: out.samples, changed: out.changed };
+    },
+
     // Web push (step 4). The public key is the Mac's VAPID key: the phone subscribes with it.
     'GET /api/push/key': async (req) => {
       auth(req);
