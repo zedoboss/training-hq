@@ -19,7 +19,7 @@ import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/m
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
-import { walkLines, usualWalkHm } from '../../app/js/lib/walks.js';
+import { walkLines, usualWalkHm, hourRisk, weatherWords, safeWindowsText } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
 import { activeHolds } from '../../app/js/lib/holdoffs.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
@@ -27,7 +27,7 @@ import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUES
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
-import { addMinutesHm, formatTime, hmOf } from '../../app/js/lib/time.js';
+import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 
@@ -162,7 +162,15 @@ export function walkTextLines(s, { week = false } = {}) {
   const health = s.one('health', s.today);
   const steps = health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null;
   const lines = walkLines(docs, { today: s.today, now: s.now, tz: s.tz, steps, goal: s.settings().body?.stepGoal || 8000, usualHm: usualWalkHm(docs, { today: s.today, tz: s.tz }) });
-  return week ? lines : lines.slice(0, 1);
+  // Wed 10/21: UV and heat (Open-Meteo, his area), so walks are planned in safe weather only.
+  const w = s.store.getMeta?.('weather');
+  const nowH = (w?.hours || []).find((h) => h.at <= s.now && s.now < h.at + 3600000);
+  if (nowH) {
+    const end = zonedTime(addDays(s.today, 1), '00:00', s.tz);
+    const windows = safeWindowsText(w, s.now, end, s.tz);
+    lines.splice(1, 0, `Walking weather (${w.label || 'his area'}, Open-Meteo): now ${weatherWords(nowH)}: ${{ safe: 'fine to walk', caution: 'only with shade and water, and only if nothing safer is left today', never: 'NOT safe to walk' }[hourRisk(nowH)] || 'unknown'}. Safe windows left today (UV under 3, feels 33°C or less): ${windows || 'none'}. Never suggest a walk at UV 6+ or feels 36°C+; plan it in a safe window.`);
+  }
+  return week ? lines : lines.slice(0, nowH ? 2 : 1);
 }
 
 export function mealTimesLine(s) {

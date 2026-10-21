@@ -67,3 +67,30 @@ test('walks: memory: his usual walk hour and the last days for the coach', () =>
   assert.equal(lines[0], 'Walk today: 3,000 of 8,000 steps as of 2:00 PM: 5,000 to go, about 50 minutes of walking; he said he\'d go at 5:00 PM ("at 5"). He usually walks around 5:00 PM.');
   assert.match(lines[1], /^Walks, last days: 03-16: walked 5:20 PM 30 min; 03-15: walked 6:10 PM 30 min; 03-14: walked 5:20 PM 30 min\.$/);
 });
+
+test('walks and the weather (Wed 10/21): never "go now" in strong sun or heat; the coach plans it for the next safe hour', async () => {
+  const { hourRisk, nextWalkTime, safeWindowsText } = await import('../app/js/lib/walks.js');
+  const hour = (hm, uv, feels, rain = 10) => ({ at: at(hm), uv, feels, rain });
+  const weather = { hours: [hour('12:00', 8.4, 38.6), hour('13:00', 8, 38.9), hour('14:00', 6.5, 39), hour('15:00', 5.1, 38), hour('16:00', 2.9, 33), hour('17:00', 1, 31, 53), hour('18:00', 0, 30.5, 75), hour('19:00', 0, 31.5, 65), hour('20:00', 0, 31.5), hour('21:00', 0, 32.1), hour('22:00', 0, 32), hour('23:00', 0, 31.9)] };
+  assert.deepEqual(['12:00', '15:00', '16:00', '17:00'].map((h) => hourRisk(weather.hours.find((x) => x.at === at(h)))), ['never', 'never', 'safe', 'safe']);
+  assert.equal(hourRisk({ uv: 4, feels: 34 }), 'caution');
+  assert.equal(nextWalkTime(weather, at('12:30'), at('23:00')).at, at('16:00'));
+  assert.equal(safeWindowsText(weather, at('12:30'), at('23:00'), TZ), '4:00 PM-11:00 PM (UV 2.9 at most, feels 31-33°C)');
+  let doc = null;
+  const due = (hm, o = {}) => walkDue({ ...base, now: at(hm), doc, steps: steps(3000, '12:00'), weather, ...o });
+  const p = due('12:30');
+  assert.equal(p.kind, 'planned');
+  assert.equal(p.planAt, at('16:00'));
+  assert.match(p.text, /^Walk: too hot or bright now \(UV 8\.4, feels 39°C\)\. I planned it for 4:00 PM, when it's UV 2\.9, feels 33°C\./);
+  doc = withAnswer(withAsk(null, D, 'planned', at('12:30')), D, { action: 'plan', at: p.planAt, said: 'planned by the coach' }, at('12:30'));
+  assert.equal(due('13:00'), null, 'quiet until then');
+  assert.equal(due('16:00').kind, 'plan');
+  assert.match(due('16:00').text, /Go now\./);
+  // His own time lands in the heat: moved once to the next good hour.
+  let mine = withAnswer(withAsk(null, D, 'ask', at('11:00')), D, { action: 'plan', at: at('13:00'), said: 'at 1' }, at('11:05'));
+  const m = walkDue({ ...base, now: at('13:00'), doc: mine, steps: steps(3000, '12:00'), weather });
+  assert.equal(m.kind, 'moved');
+  assert.match(m.text, /^It's UV 8, feels 39°C now: not a walk to do\. I moved your walk to 4:00 PM/);
+  // No weather known: as before.
+  assert.equal(walkDue({ ...base, now: at('12:30'), doc: null, steps: steps(3000, '12:00') }).kind, 'ask');
+});

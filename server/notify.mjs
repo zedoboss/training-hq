@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
-import { walkDue, withAsk, usualWalkHm } from '../app/js/lib/walks.js';
+import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
@@ -210,12 +210,14 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const docs = store.listRecords('walks').map((r) => r.data).filter(Boolean);
   const doc = docs.find((d) => d.date === date) || null;
   const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
-  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting });
+  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather') });
   if (!due) return null;
   const v = coachVoice(due.text, voiceOpts(store));
   const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };
   sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `walk:${due.kind}` });
-  store.writeLocal('walks', date, withAsk(doc, date, due.kind, now));
+  // Too hot or bright: the coach planned (or moved) the walk itself; quiet until then.
+  const asked = withAsk(doc, date, due.kind, now);
+  store.writeLocal('walks', date, due.planAt ? withAnswer(asked, date, { action: 'plan', at: due.planAt, said: 'planned by the coach for cooler weather' }, now) : asked);
   store.setMeta(LAST, now);
   log(`walk ${due.kind}: ${v.body.slice(0, 80)} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
   return { key: `walk:${due.kind}`, body: v.body };

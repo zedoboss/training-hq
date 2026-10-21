@@ -11,6 +11,7 @@ import { openImportInbox } from './import-inbox.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
 import { startNotifier, phoneZone } from './notify.mjs';
+import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
 import { openEvoltImport } from './evolt-import.mjs';
 import { openMealVision } from './meal-vision.mjs';
@@ -52,6 +53,10 @@ setInterval(scanInbox, 60000).unref();
 
 // Web push (step 4): the Mac's VAPID keys live in config/vapid.json (made the first time, never in git).
 const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subject: config.pushSubject || DEFAULT_SUBJECT, log });
+// UV and heat for planning walks (Wed 10/21): Open-Meteo, about once an hour (server/weather.mjs).
+const weather = openWeather({ configDir: p.configDir, store, log });
+weather.refresh().catch(() => {});
+setInterval(() => { weather.refresh().catch(() => {}); }, 15 * 60000).unref();
 
 // Reminders (step 4): checked once a minute, sent as push notifications.
 // The coach is made further down; the notifier asks for it when it needs it (coach initiatives).

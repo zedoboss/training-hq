@@ -20,6 +20,40 @@ export const WALK = {
   stepsPerMin: 100,   // an estimate: about 100 steps a minute walking (Claude's estimate)
 };
 
+// Heat and sun (Wed 10/21, his words: "check the UV index. He shouldn't recommend it when it's hot outside, when it's
+// dangerous"). Claude's thresholds from common UV and heat guidance (not medical advice): safe = UV under 3 and it
+// feels 33°C or less; never = UV 6 or more, or it feels 36°C or more; in between only when nothing safe is left today.
+// Rain of 70% or more is avoided when another hour is free.
+export const HEAT = { uvSafe: 3, uvNever: 6, feelsSafe: 33, feelsNever: 36, rainAvoid: 70 };
+const HOUR = 3600000;
+/** 'safe' | 'caution' | 'never' for one forecast hour. */
+export function hourRisk(h) {
+  if (!h || h.uv == null || h.feels == null) return 'unknown';
+  if (h.uv >= HEAT.uvNever || h.feels >= HEAT.feelsNever) return 'never';
+  if (h.uv < HEAT.uvSafe && h.feels <= HEAT.feelsSafe) return 'safe';
+  return 'caution';
+}
+const hourAt = (weather, at) => (weather?.hours || []).find((h) => h.at <= at && at < h.at + HOUR) || null;
+export const weatherWords = (h) => (h ? `UV ${Math.round(h.uv * 10) / 10}, feels ${Math.round(h.feels)}°C${h.rain != null && h.rain >= 40 ? `, rain ${h.rain}%` : ''}` : '');
+/**
+ * The next good time to walk from `from` until `until`: the first safe hour (a dry one if there is one), else the
+ * first caution hour. The current hour counts if it is good (then `from` itself). Null when there is none.
+ */
+export function nextWalkTime(weather, from, until) {
+  const hours = (weather?.hours || []).filter((h) => h.at + HOUR > from && h.at < until);
+  const pick = (ok) => hours.find((h) => ok(h));
+  const h = pick((x) => hourRisk(x) === 'safe' && (x.rain ?? 0) < HEAT.rainAvoid) || pick((x) => hourRisk(x) === 'safe') || pick((x) => hourRisk(x) === 'caution');
+  return h ? { at: Math.max(h.at, from), h, risk: hourRisk(h) } : null;
+}
+/** Safe stretches from `from` until `until`, as "5:00 PM-midnight (UV 1, feels 31°C)". */
+export function safeWindowsText(weather, from, until, tz) {
+  const hours = (weather?.hours || []).filter((h) => h.at + HOUR > from && h.at < until && hourRisk(h) === 'safe');
+  const runs = [];
+  for (const h of hours) { const r = runs.at(-1); if (r && r.end === h.at) { r.end = h.at + HOUR; r.hs.push(h); } else runs.push({ start: Math.max(h.at, from), end: h.at + HOUR, hs: [h] }); }
+  const t = (ms) => formatHm(hmOf(new Date(ms), tz));
+  return runs.map((r) => `${t(r.start)}-${t(Math.min(r.end, until))} (UV ${Math.round(Math.max(...r.hs.map((x) => x.uv)) * 10) / 10} at most, feels ${Math.round(Math.min(...r.hs.map((x) => x.feels)))}-${Math.round(Math.max(...r.hs.map((x) => x.feels)))}°C)`).join(', ');
+}
+
 export const emptyWalk = (date) => ({ id: date, date, asks: [], answeredAt: null, plan: null, going: null, walks: [], skips: [], goalAt: null });
 
 const minOf = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return h * 60 + m; };
@@ -61,7 +95,7 @@ export function usualWalkHm(docs = [], { today, tz } = {}) {
  * @param {string|null} [o.usualHm]  his usual walk hour (usualWalkHm)
  * @returns {{kind: 'ask'|'follow'|'nag'|'plan'|'plan-follow'|'back'|'goal', text: string}|null}
  */
-export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, cfg = WALK }) {
+export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, weather = null, cfg = WALK }) {
   const d = doc || emptyWalk(isoDate(new Date(now), tz));
   if (goal && steps?.steps != null && steps.steps >= goal) {
     return d.goalAt ? null : { kind: 'goal', text: `${nf(steps.steps)} steps: today's ${nf(goal)} is done. Walks are off until tomorrow.` };
@@ -74,6 +108,13 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   if (busy) return null;
   const st = stepsText({ steps, goal, now, tz });
   const last = lastOf(d.asks);
+  // Weather: when the hour isn't good for walking, plan (or move) the walk to the next good time instead of "go now".
+  const endMs = now + (bed - cfg.stopBeforeBedMin - at) * 60000;
+  const nowH = hourAt(weather, now);
+  const risk = hourRisk(nowH);
+  const better = weather ? nextWalkTime(weather, now, endMs) : null;
+  const badNow = weather && (risk === 'never' || (risk === 'caution' && better && better.risk === 'safe' && better.at > now));
+  const t = (ms) => formatHm(hmOf(new Date(ms), tz));
   const heardSince = (t) => (d.answeredAt || 0) > t || (lastUserAt || 0) > t;
   // Out walking: one "back?" after a while.
   if (d.going) {
@@ -89,6 +130,10 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   // He gave a time: quiet until then, then "walk time", then the same follow-ups.
   if (d.plan) {
     if (now < d.plan.at) return null;
+    // His time came but it's too hot or bright now: move it to the next good time, once per plan.
+    if (badNow && better && better.at > now && !d.asks.some((a) => a.kind === 'moved' && a.at >= d.plan.setAt)) {
+      return { kind: 'moved', planAt: better.at, text: `It's ${weatherWords(nowH)} now: not a walk to do. I moved your walk to ${t(better.at)} (${weatherWords(better.h)}). Say if you want to go anyway.` };
+    }
     const asked = d.asks.filter((a) => a.at >= d.plan.at);
     const planTime = formatHm(hmOf(new Date(d.plan.at), tz));
     if (!asked.length) return { kind: 'plan', text: `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Go now. ${st}` };
@@ -99,8 +144,14 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     return null;
   }
   const since = Math.max(last?.at || 0, skip?.at || 0, walked?.at || 0);
+  // No time set and it isn't good walking weather now: the coach plans it (his words: "he can schedule them").
+  if (badNow) {
+    if (better && better.at > now) return { kind: 'planned', planAt: better.at, text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: too hot or bright now (${weatherWords(nowH)}). I planned it for ${t(better.at)}, when it's ${weatherWords(better.h)}. ${st} Tell me if another time suits you.` };
+    if (!d.asks.some((a) => a.kind === 'no-window')) return { kind: 'no-window', text: `No safe walking weather left today (now ${weatherWords(nowH)}). Steps can wait for a cooler hour: early morning or after sunset.` };
+    return null;
+  }
   if (!last || (skip && skip.at > last.at)) {
-    return { kind: 'ask', text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${st} Go out for a walk now.${usualHm ? ` You usually go around ${formatHm(usualHm)}.` : ''} When are you going?` };
+    return { kind: 'ask', text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${st} Go out for a walk now${nowH ? ` (${weatherWords(nowH)}${risk === 'caution' ? ': shade and water' : ''})` : ''}.${usualHm ? ` You usually go around ${formatHm(usualHm)}.` : ''} When are you going?` };
   }
   if (heardSince(last.at)) {
     return now - Math.max(d.answeredAt || 0, lastUserAt || 0, since) >= cfg.againMin * 60000 ? { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` } : null;
