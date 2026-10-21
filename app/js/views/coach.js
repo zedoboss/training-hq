@@ -258,7 +258,7 @@ function renderNotes(view) {
       const [notes, rems] = await Promise.all([repo.list('coach-notes'), repo.list('coach-reminders')]);
       if (gone) return;
       const now = Date.now();
-      const upcoming = rems.filter((r) => !r.cancelledAt && r.at > now - 3600000).sort((a, b) => a.at - b.at);
+      const upcoming = rems.filter((r) => !r.cancelledAt && (r.trigger ? !r.firedAt : r.at > now - 3600000)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
       const sorted = notes.sort((a, b) => b.at - a.at);
       view.innerHTML = `
         <div class="lib-head"><a class="pill" href="#/coach">Talk</a></div>
@@ -266,7 +266,7 @@ function renderNotes(view) {
         <p class="hint">What the coach wrote down for you, and the reminders it set. Ask it to note something, or to remind you at a time.</p>
         <div class="section-label">Reminders · ${upcoming.length}</div>
         <section class="card supp-group">${upcoming.map((r) => `<div class="supp-item" data-rem="${esc(r.id)}"><div class="supp-main"><b>${esc(r.text)}</b>
-          <span class="hint">${esc(formatDay(new Date(r.at)))}, ${esc(formatTime(new Date(r.at)))}</span></div><span class="supp-btns"><button class="btn-ghost small" type="button" data-cancel>Cancel</button></span></div>`).join('')
+          <span class="hint">${r.trigger ? `When you start your workout log, ${esc(formatDay(new Date(`${r.date}T12:00:00Z`), 'UTC'))} or later` : `${esc(formatDay(new Date(r.at)))}, ${esc(formatTime(new Date(r.at)))}`}</span></div><span class="supp-btns"><button class="btn-ghost small" type="button" data-cancel>Cancel</button></span></div>`).join('')
           || '<p class="hint pad">None set.</p>'}</section>
         <div class="section-label">Notes · ${sorted.length}</div>
         <section class="card supp-group">${sorted.map((n) => `<div class="supp-item" data-note="${esc(n.id)}"><div class="supp-main"><b>${textHtml(n.text)}</b>

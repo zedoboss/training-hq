@@ -362,6 +362,35 @@ test('reminders the coach sets reach the reminder planner (kind coach) and can b
   assert.match((await call('notes')).text, /\[knees\] \[id note-[^\]]+\]: Ask about the left knee/);
 });
 
+test('a reminder for when he starts his workout log fires a minute in, with what Apple Health sent (Wed 10/21)', async () => {
+  const { startNotifier } = await import('../server/notify.mjs');
+  const { openHealth } = await import('../server/health.mjs');
+  const r = await call('set_reminder', { trigger: 'session-start', date: '2026-01-21', facts: 'health', text: 'Are your steps counted properly?' });
+  assert.match(r.text, /when he starts his workout log on Wednesday 1\/21 or later, a minute in/);
+  assert.match((await call('notes')).text, /when he starts his workout log, Wednesday 1\/21 or later \[id rem/);
+  // Overnight the Shortcut sends straight to the Mac twice.
+  const h = openHealth({ store, dir: null, tz: TZ, now: () => clock });
+  const file = (steps) => [JSON.stringify({ type: 'export', at: new Date(clock).toISOString() }), JSON.stringify({ type: 'steps', value: String(steps), start: '2026-01-21T00:10:00Z', end: new Date(clock).toISOString() })].join('\n');
+  clock = Date.UTC(2026, 0, 21, 1, 0); h.receive(file(900));
+  clock = Date.UTC(2026, 0, 21, 2, 30); h.receive(file(1500));
+  const sent = [];
+  const n = startNotifier({ store, push: { list: () => [1], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } }, tz: TZ, now: () => clock, everyMs: 1e9 });
+  n.stop();
+  const coachItems = async () => (await n.tick()).filter((i) => i.kind === 'coach');
+  clock = Date.UTC(2026, 0, 21, 3, 0);
+  assert.deepEqual(await coachItems(), [], 'nothing before he starts');
+  // He starts Legs at 3:05 AM; a minute later the coach asks, with the facts.
+  store.writeLocal('sessions', 's-new', { id: 's-new', kind: 'workout', dayType: 'legs', startedAt: Date.UTC(2026, 0, 21, 3, 5), status: 'active', exercises: [] });
+  clock = Date.UTC(2026, 0, 21, 3, 6);
+  assert.equal((await coachItems()).length, 1);
+  const msg = sent.find((m) => /steps counted/.test(m.body));
+  assert.match(msg.body, /Are your steps counted properly\? Since Tuesday 1\/20, 3:00 AM your phone sent Health straight to the Mac 2 times, last at 2:30 AM\. Steps today on the Mac: 1,500\./);
+  assert.ok(list('coach-reminders')[0].firedAt, 'marked as gone out');
+  assert.doesNotMatch((await call('notes')).text, /Reminders set/);
+  clock += 60000;
+  assert.deepEqual(await coachItems(), [], 'once');
+});
+
 test('schedule: a session time, a rest day and its undo follow the rotation rules', async () => {
   const r = await call('schedule', { action: 'set_time', time: '04:30' });
   assert.match(r.text, /^Legs Tuesday 1\/20 at 4:30 AM; check-in 4:00 AM\./);

@@ -11,6 +11,11 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { linkSecret } from './link-secret.mjs';
 import { parseHealthFile, healthDays, mergeDay } from '../app/js/lib/health.js';
+import { formatDay, formatTime, isoDate } from '../app/js/lib/time.js';
+
+// Every file that reached the Mac with samples, {at, from}, newest last (Wed 10/21: so the coach can say how often the
+// Shortcut really sent). Server-only meta; the last 300 are kept (a few days of app-open runs).
+const SENDS = 'health:sends';
 
 /** iCloud Drive > Shortcuts > Training HQ, as the Mac sees it. */
 export const defaultHealthDir = () => join(homedir(), 'Library', 'Mobile Documents', 'iCloud~is~workflow~my~workflows', 'Documents', 'Training HQ');
@@ -49,6 +54,7 @@ export function openHealth({ store, dir, tz = Intl.DateTimeFormat().resolvedOpti
       writes.push({ col: 'health', id: day.date, data: { id: day.date, ...merged, fileAt: Math.max(at, stored?.fileAt ?? 0), file: name, updatedAt: now() } });
     }
     if (writes.length) store.writeLocalMany(writes);
+    if (parsed.samples.length) store.setMeta(SENDS, [...(store.getMeta(SENDS) || []), { at: now(), from }].slice(-300));
     const summary = { name, from, at, readAt: now(), samples: parsed.samples.length, bad: parsed.bad, days: days.length, changed: writes.length,
       range: days.length ? [days[0].date, days.at(-1).date] : null, types: countTypes(parsed.samples) };
     log(`health: ${name} (${from}): ${summary.samples} samples, ${summary.changed} of ${summary.days} days changed${summary.bad ? `, ${summary.bad} lines not read` : ''}`);
@@ -104,6 +110,24 @@ export function openHealth({ store, dir, tz = Intl.DateTimeFormat().resolvedOpti
   }
 
   return { scan, upload, importText, link, check: (k) => secret.check(k), receive, dir };
+}
+
+/**
+ * What reached the Mac from Apple Health since `since`, in his words, for the coach's "are your steps counted?" check
+ * (Wed 10/21): how often the Shortcut sent straight to the Mac, what iCloud brought, and today's steps.
+ */
+export function healthSendsText(store, { since = 0, now = Date.now(), tz }) {
+  const sends = (store.getMeta(SENDS) || []).filter((x) => x.at >= since);
+  const direct = sends.filter((x) => x.from === 'shortcut');
+  const icloud = sends.filter((x) => x.from === 'folder').length;
+  const at = (ms) => `${formatDay(new Date(ms), tz)}, ${formatTime(new Date(ms), tz)}`;
+  const parts = [direct.length
+    ? `Since ${at(since)} your phone sent Health straight to the Mac ${direct.length === 1 ? 'once' : `${direct.length} times`}, last at ${formatTime(new Date(direct.at(-1).at), tz)}.`
+    : `Since ${at(since)} your phone sent nothing straight to the Mac.`];
+  if (icloud) parts.push(`iCloud brought ${icloud} more.`);
+  const today = store.getRecord('health', isoDate(new Date(now), tz));
+  if (today && !today.deleted && today.data?.steps != null) parts.push(`Steps today on the Mac: ${today.data.steps.toLocaleString('en-US')}.`);
+  return parts.join(' ');
 }
 
 function countTypes(samples) {

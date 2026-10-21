@@ -640,8 +640,8 @@ function notesText(s, { limit = 20 }) {
   const notes = s.list('coach-notes').sort((a, b) => b.at - a.at).slice(0, Math.min(Number(limit) || 20, 60));
   const rem = s.list('coach-reminders').filter((r) => !r.cancelledAt).sort((a, b) => a.at - b.at);
   const lines = [notes.length ? 'Notes, newest first:' : 'No notes yet.', ...notes.map((n) => `- ${whenText(n.at, s.tz, s.today)}${n.topic ? ` [${n.topic}]` : ''} [id ${n.id}]: ${n.text}`)];
-  const upcoming = rem.filter((r) => r.at >= s.now - 3600000);
-  if (upcoming.length) lines.push('Reminders set:', ...upcoming.map((r) => `- ${whenText(r.at, s.tz, s.today)} [id ${r.id}]: ${r.text}`));
+  const upcoming = rem.filter((r) => (r.trigger ? !r.firedAt : r.at >= s.now - 3600000));
+  if (upcoming.length) lines.push('Reminders set:', ...upcoming.map((r) => `- ${r.trigger ? `when he starts his workout log, ${dayText(r.date, s.today)} or later` : whenText(r.at, s.tz, s.today)} [id ${r.id}]: ${r.text}`));
   return lines.join('\n');
 }
 

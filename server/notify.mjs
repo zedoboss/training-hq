@@ -16,6 +16,7 @@ import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor } from '../app/js/lib/scans.js';
 import { zonedTime } from '../app/js/lib/time.js';
+import { healthSendsText } from './health.mjs';
 
 const SENT = 'notify:sent';
 
@@ -30,6 +31,12 @@ export function stateFrom(store, tz) {
     scans: list('body-scans'), scanPlan: one('scan-plan', 'main'), coachReminders: list('coach-reminders'),
     ...recoveryFrom(one, list),
   }, tz);
+}
+
+/** A reminder tied to his workout has gone out: the coach's lists stop showing it as waiting. */
+function markFired(store, id, t) {
+  const r = store.getRecord('coach-reminders', id);
+  if (r && !r.deleted) store.writeLocal('coach-reminders', id, { ...r.data, firedAt: t });
 }
 
 /** A13: his recovery record and what it needs (photos only when there is a record: they are big). */
@@ -303,11 +310,13 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       if (items.length) {
         const opts = voiceOpts(store);
         for (const i of items) {
-          // The coach says it (Mon 10/19): title "Coach", the reminder's facts, one short line in his moods.
-          const v = coachReminder(i, opts);
+          // The coach says it (Mon 10/19): title "Coach", the reminder's facts, one short line in his moods. A coach
+          // reminder can carry live facts (Wed 10/21: "are my steps counted?" gets what the Shortcut really sent).
+          const v = coachReminder(i.facts === 'health' ? { ...i, body: `${i.body} ${healthSendsText(store, { since: i.since, now: t, tz: zone })}` } : i, opts);
           const r = await push.notify({ title: v.title, body: v.body, url: i.url, tag: i.tag });
           sent[i.id] = t;
           sayInTalk(store, { text: v.body, at: t, tz: zone, kind: 'reminder', ref: i.id });
+          if (i.trigger) markFired(store, i.id.slice('coach:'.length), t);
           log(`notify ${i.id}: ${i.title} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
         }
         // Forget ids older than 3 days.

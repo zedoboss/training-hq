@@ -60,11 +60,13 @@ const holdText = (s) => (s.ask ? `${s.label}: the gym for the ${s.restHold || s.
  * @param {Array} [o.suppAnswers] restock and weekly planning answers
  * @param {Array} [o.sauna]      sauna sessions; [o.saunaPlan] the sauna plan
  * @param {Array} [o.scans]      body scans (step 7); [o.scanPlan] the scan plan
- * @param {Array} [o.coachReminders] reminders the coach set for him (step 8): {id, at, date, text, cancelledAt}
+ * @param {Array} [o.coachReminders] reminders the coach set for him (step 8): {id, at, date, text, cancelledAt}, or
+ *   {trigger: 'session-start', date, delayMin}: a few minutes after he starts his workout log on or after that day
+ * @param {number[]} [o.sessionStarts] when his workouts started (not holds, not discarded), oldest first
  * @param {object} [o.recovery]  A13: {plan, state, notes, photos} (lib/recovery.js), when he has a recovery record
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recovery = null }) {
+export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -127,8 +129,10 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   // Step 8: reminders he asked the coach for, at their time, in his words.
   if (on('coach')) {
     for (const r of coachReminders) {
-      if (!r?.at || isoDate(new Date(r.at), tz) !== date) continue;
-      out.push({ id: `coach:${r.id}`, kind: 'coach', at: r.at, url: '#/coach', tag: `coach-${r.id}`, fixed: true, title: 'Reminder', body: String(r.text || ''), due: !r.cancelledAt });
+      const at = r?.trigger === 'session-start' ? sessionStartAt(r, sessionStarts, tz) : r?.at;
+      if (!at || isoDate(new Date(at), tz) !== date) continue;
+      out.push({ id: `coach:${r.id}`, kind: 'coach', at, url: '#/coach', tag: `coach-${r.id}`, fixed: true, title: 'Reminder', body: String(r.text || ''), due: !r.cancelledAt,
+        ...(r.trigger ? { trigger: r.trigger } : {}), ...(r.facts ? { facts: r.facts, since: r.createdAt } : {}) });
     }
   }
 
@@ -178,6 +182,15 @@ export function dueNow(items, now, sent = {}, graceMs = 30 * 60000) {
   return items.filter((i) => i.due && i.at <= now && now - i.at < graceMs && !sent[i.id]);
 }
 
+/**
+ * "Remind me after I arrive at the gym and start my log" (Wed 10/21): a coach reminder tied to his workout fires
+ * `delayMin` (default 1) minutes after the first workout he starts on or after its day, once the reminder exists.
+ */
+export function sessionStartAt(r, sessionStarts, tz) {
+  const t = sessionStarts.find((x) => x >= (r.createdAt || 0) && isoDate(new Date(x), tz) >= (r.date || ''));
+  return t == null ? null : t + (r.delayMin ?? 1) * 60000;
+}
+
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
 export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [] }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
@@ -191,6 +204,7 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     meta,
     table: tendons.find((d) => d?.kind === 'readiness') ?? null,
     trainedDates: new Set(sessions.filter((s) => s.kind !== 'holds' && s.startedAt && s.status !== 'discarded').map((s) => isoDate(new Date(s.startedAt), tz))),
+    sessionStarts: sessions.filter((s) => s.kind !== 'holds' && s.startedAt && s.status !== 'discarded').map((s) => s.startedAt).sort((a, b) => a - b),
     neck,
     meals,
     mealChecks,
