@@ -20,6 +20,8 @@ import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
 import { walkLines, usualWalkHm } from '../../app/js/lib/walks.js';
+import { fastingOn } from '../../app/js/lib/fast.js';
+import { activeHolds } from '../../app/js/lib/holdoffs.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN, proposeSaunaDays, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
@@ -216,13 +218,29 @@ export function contextLine({ store, tz, now, screen = null }) {
   lines.push(moodLine(s));
   lines.push(...recoveryContext(s));
   lines.push(...noticeLines(s));
+  lines.push(...situationLines(s));
   return lines.join('\n');
+}
+
+/**
+ * Wed 10/21 (his words: "like a human coach, with proper two-way communication... with good memory"): what he has
+ * told you that the app now follows (a fast, hold-offs), and your notes on him (memory), with every message.
+ */
+function situationLines(s) {
+  const out = [];
+  const f = s.days()[s.today]?.fast;
+  if (fastingOn(s.days(), s.today, s.list('meals'))) out.push(`He is FASTING today (his decision, ${timeText(f.at, s.tz)}${f.said ? `: "${f.said}"` : ''}): the app sends no food, cooking or supplement prompts. Never argue it or count his kcal against him; walks are the push; no sauna today (his checklist wants food in the last few hours). If he eats, the fast ends.`);
+  const holds = activeHolds(s.list('coach-holds'), s.now);
+  if (holds.length) out.push(`He asked the app to hold off (it does): ${holds.map((h) => `${h.areas.join(', ')} until ${dayText(s.date(h.until), s.today)} ${timeText(h.until, s.tz)}${h.reason ? ` (${h.reason})` : ''} [id ${h.id}]`).join('; ')}.`);
+  const notes = s.list('coach-notes').sort((a, b) => b.at - a.at).slice(0, 15);
+  if (notes.length) out.push(`Your notes on him (your memory; use them, never ask again what they answer): ${notes.map((n) => `[${dayText(n.date || s.date(n.at), s.today)}${n.topic ? `, ${n.topic}` : ''}] ${String(n.text).slice(0, 160)}`).join(' | ')}`);
+  return out;
 }
 
 /** Mon 10/19: what the app (as the coach) sent him lately, so a short reply ("done", "yes", "82.4") makes sense, and
  * whether today's weigh-in and last night's sleep are in. */
 function noticeLines(s) {
-  const recent = s.list('coach-messages').filter((m) => (m.kind === 'nudge' || m.kind === 'reminder') && s.now - (m.at || 0) <= 3 * 3600000)
+  const recent = s.list('coach-messages').filter((m) => (m.kind === 'nudge' || m.kind === 'reminder' || m.kind === 'initiative') && s.now - (m.at || 0) <= 3 * 3600000)
     .sort((a, b) => b.at - a.at).slice(0, 4);
   const health = s.one('health', s.today);
   const weighed = s.list('measurements').some((m) => m.date === s.today && m.weightKg != null) || Boolean(health?.weights?.length)

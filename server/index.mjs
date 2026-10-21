@@ -54,7 +54,8 @@ setInterval(scanInbox, 60000).unref();
 const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subject: config.pushSubject || DEFAULT_SUBJECT, log });
 
 // Reminders (step 4): checked once a minute, sent as push notifications.
-const notifier = startNotifier({ store, push, log });
+// The coach is made further down; the notifier asks for it when it needs it (coach initiatives).
+const notifier = startNotifier({ store, push, log, coach: () => { try { return coach; } catch { return null; } } });
 // "When I arrive at the gym" (A10): the iPhone automation's call; days follow the phone's zone like the reminders.
 const arrive = openArrive({ store, push, tz: () => phoneZone(store), log });
 // Evolt results PDFs (A11): originals kept in imports/evolt/ in the private folder.

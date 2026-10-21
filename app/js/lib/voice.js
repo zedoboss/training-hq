@@ -276,7 +276,7 @@ export function watchNudges(repo) {
   const said = new Set();
   let primed = false;
   const check = async () => {
-    const msgs = (await repo.list('coach-messages')).filter((m) => m && m.role === 'assistant' && (m.kind === 'nudge' || m.kind === 'reminder'));
+    const msgs = (await repo.list('coach-messages')).filter((m) => m && m.role === 'assistant' && (m.kind === 'nudge' || m.kind === 'reminder' || m.kind === 'initiative'));
     for (const m of msgs) {
       if (said.has(m.id)) continue;
       said.add(m.id);

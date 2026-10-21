@@ -19,10 +19,13 @@ import { newId } from '../../app/js/lib/routines.js';
 import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol, measurementFromScan } from '../../app/js/lib/scans.js';
-import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
+import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText, doctorDue } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone, hmOf } from '../../app/js/lib/time.js';
 import { restAskAreas, withRestChoice, restChoiceText } from '../../app/js/lib/holds.js';
 import { withAnswer, planAt } from '../../app/js/lib/walks.js';
+import { fastingOn, withFast } from '../../app/js/lib/fast.js';
+import { answerNeck, placeLabel, NECK_PLACES } from '../../app/js/lib/neck.js';
+import { AREA_NAMES } from '../../app/js/lib/holdoffs.js';
 import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods.js';
 import { foodsDb, myFoods } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
@@ -598,6 +601,64 @@ async function setReminder(a, ctx) {
   return wrote(`Reminder set for ${when}: "${a.text}". It comes to his phone as a notification from Coach, and shows in Talk [id ${id}].`, a.inMinutes ? `in ${Math.round(a.inMinutes)} min` : `${dayText(date, s.today)} ${formatHm(hm)}`);
 }
 
+/** Where his neck routine goes (Wed 10/21: the coach helps him fit it in): a place in the rotation, or not yet. */
+async function neckPlan(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const neck = s.one('schedule', 'neck');
+  if (a.place === 'off') {
+    put(s, 'schedule', 'neck', { ...(neck || {}), planned: false, place: null, lastAskedOn: s.today });
+    return wrote('Neck is out of the rotation (unplanned) for now.', 'neck unplanned');
+  }
+  if (!NECK_PLACES.some(([k]) => k === a.place) && a.place !== 'not-yet') return refuse(`Where: ${NECK_PLACES.map(([k]) => k).join(', ')}, not-yet or off.`);
+  put(s, 'schedule', 'neck', { ...answerNeck(neck, a.place, s.today), ...(a.reason ? { source: `${a.reason} (via the coach, ${s.today})` } : {}) });
+  return wrote(a.place === 'not-yet' ? 'Neck: not yet; asked again in a week.' : `Neck goes ${placeLabel(a.place).toLowerCase()} from now on; Train offers it on those days.`, `neck ${a.place}`);
+}
+
+/** A fasting day (Wed 10/21): no food or supplement prompts; today's open supplements skipped ("fasting"). */
+async function fastDay(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const date = a.date || s.today;
+  const days = s.days();
+  if (a.action === 'end') {
+    if (!fastingOn(days, date, s.list('meals'))) return refuse(`He isn't fasting on ${dayText(date, s.today)}.`);
+    put(s, 'days', date, withFast(days[date], date, { on: false }, s.now));
+    return wrote(`Fast ended at ${timeText(s.now, s.tz)}: meal and supplement prompts are back.`, 'fast ended');
+  }
+  put(s, 'days', date, withFast(days[date], date, { on: true, said: a.said }, s.now));
+  const skipped = [];
+  if (date === s.today) {
+    const dayKind = suppDayKind(s, date);
+    for (const i of checklist({ supps: s.list('supplements'), log: s.list('supp-log'), date, dayKind }).flatMap((g) => g.items).filter((x) => !x.entry)) {
+      const e = logEntry({ supp: i.supp, date, dayKind, status: 'skipped', reason: 'fasting', at: s.now, by: 'coach' });
+      put(s, 'supp-log', e.id, e);
+      skipped.push(i.supp.short || i.supp.name);
+    }
+  }
+  return wrote(`${dayText(date, s.today)} is a fasting day: no cooking, meal-time, food or supplement prompts${skipped.length ? `; skipped (fasting): ${skipped.join(', ')}` : ''}. Walks are the push; no sauna that day (his checklist wants food in the last few hours). Acknowledge in one line; no lecture.`, `fasting ${date === s.today ? 'today' : date}`);
+}
+
+/** What he wants the app to leave alone for a while (Wed 10/21): areas, until when, his reason. */
+async function holdOff(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const t = (ms) => `${dayText(s.date(ms), s.today)} ${timeText(ms, s.tz)}`;
+  if (a.cancel) {
+    const h = s.one('coach-holds', a.cancel);
+    if (!h) return refuse(`No hold with id ${a.cancel}.`);
+    put(s, 'coach-holds', h.id, { ...h, cancelledAt: s.now });
+    return wrote(`Hold lifted: ${h.areas.join(', ')} are back.`, 'hold lifted');
+  }
+  const areas = (a.areas || []).filter((x) => AREA_NAMES.includes(x));
+  if (!areas.length) return refuse(`Which areas? ${AREA_NAMES.join(', ')}.`);
+  let until = null;
+  if (a.forMinutes) until = s.now + Math.round(a.forMinutes) * 60000;
+  else if (a.untilTime) until = planAt({ time: a.untilTime, now: s.now, tz: s.tz });
+  else if (a.untilDate) until = zonedTime(addDays(a.untilDate, 1), '00:00', s.tz);
+  if (!until) return refuse('Until when? forMinutes, untilTime (HH:MM) or untilDate (the whole day included).');
+  const id = newId('hold');
+  put(s, 'coach-holds', id, { id, areas, until, reason: a.reason ? String(a.reason).slice(0, 160) : '', at: s.now, by: 'coach' });
+  return wrote(`Holding off ${areas.join(', ')} until ${t(until)}${a.reason ? ` (${a.reason})` : ''} [id ${id}]. The app's reminders and nudges for that leave him alone until then; safety alarms and his own reminders still come.`, `hold ${areas.join(', ')} until ${t(until)}`);
+}
+
 /** His answer to a walk question (Tue 10/20): a time, going now, done, or not now. */
 async function walkAnswer(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
@@ -756,11 +817,25 @@ function saunaPlan(a, ctx) {
     save({ ...plan, planned: plan.planned.filter((p) => p.date !== a.date) });
     return wrote(`Sauna on ${dayText(a.date, s.today)} taken off the plan.`, 'sauna day removed');
   }
+  if (a.action === 'later') {
+    // "Not this week" (Wed 10/21): the planning question waits until then.
+    const until = a.date || addDays(s.today, Math.max(1, Math.min(30, Math.round(num(a.days) ?? 7))));
+    save({ ...plan, askAfter: until });
+    return wrote(`No sauna planning questions until ${dayText(until, s.today)}.`, `sauna asks from ${until}`);
+  }
+  if (a.action === 'doctor') {
+    if (!['yes', 'not-yet', 'no'].includes(a.answer)) return refuse('His answer to the doctor question: yes, not-yet or no.');
+    const context = doctorDue(plan, ladderState(s.list('sauna'), s.today, plan), ladderState(s.list('sauna'), s.today, plan).step) || 'first';
+    save({ ...plan, doctor: [...(plan.doctor || []), { at: s.now, answer: a.answer, context, by: 'coach' }] });
+    return wrote(`Recorded his answer to the doctor question: ${a.answer}. No other medical advice.`, `doctor: ${a.answer}`);
+  }
   if (a.action === 'plan') {
     const list = a.dates?.length ? a.dates : [];
     if (!list.length) return refuse('Which days? Give dates (and times) he agreed to.');
     let next = plan; const done = [];
     for (const d of list) {
+      // His own checklist: eaten and drunk in the last few hours. Not on a day he fasts.
+      if (fastingOn(s.days(), d.date, s.list('meals'))) return refuse(`${dayText(d.date, s.today)}: he's fasting, and his sauna checklist needs food and water in the last few hours. Pick another day.`);
       const exp = expectedEitherWay({ last: s.last(), days: s.days(), today: s.today, date: d.date });
       const r = planSaunaDay(next, d, { today: s.today, kind: exp?.kind, sessionTime: s.days()[d.date]?.sessionTime || null });
       if (r.error) return refuse(`${dayText(d.date, s.today)}: ${r.error} Nothing planned.`);
@@ -770,7 +845,7 @@ function saunaPlan(a, ctx) {
     ctx.action({ kind: 'open', url: '#/sauna', label: 'Open the sauna screen' });
     return wrote(`Sauna planned: ${done.join('; ')}. A reminder comes at each time with the day's step and his checklist.`, `${done.length} sauna day${done.length === 1 ? '' : 's'} planned`);
   }
-  return refuse('action is propose, plan, remove or set_time.');
+  return refuse('action is propose, plan, remove, set_time, later or doctor.');
 }
 
 // ---- Diet.html supplement lines (A6) ----------------------------------------------------------------------------------
@@ -929,11 +1004,14 @@ export const WRITE_TOOLS = [
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
   write('body_scan', 'Body scan', "How often he scans (every: 'training' = every training day, 'monthly' = every 4 weeks on a confirmed date); confirm the next scan date (monthly only; default: the app's proposal) or cancel it; change one preparation checklist line in his words (line: its id from body_scans, or none to add one; text; when: 'before' or 'day'); record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['every', 'checklist_line', 'confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, every: { type: 'string', enum: ['training', 'monthly'] }, line: { type: 'string' }, when: { type: 'string', enum: ['before', 'day'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),
   write('set_reminder', 'Set a reminder', "A notification to his phone from Coach, for anything in his life, not only training (\"throw out the trash in 10 minutes\"). Give inMinutes for 'in N minutes/hours', or time (HH:MM, 24-hour: today, or tomorrow if passed) with an optional date. When he gives a range or a vague time ('10 to 15 minutes', 'in a bit', 'after dinner', 'tonight'), decide one yourself: he wants you to (the middle of a range; 'in a bit' = 15 minutes) and say the exact time back. Or cancel one by id.", obj({ time: HM, inMinutes: { type: 'integer', minimum: 1, maximum: 2880 }, date: ISO, text: { type: 'string' }, cancel: { type: 'string' } }), setReminder),
+  write('neck_plan', 'Neck in the rotation', "Where his Neck routine goes: after-pull, after-push, after-legs or rest-day (Train offers it on those days), not-yet (asked again in a week), or off. Only what he chooses; you may suggest a better fit once, with the reason.", obj({ place: { type: 'string', enum: [...NECK_PLACES.map(([k]) => k), 'not-yet', 'off'] }, reason: { type: 'string' } }, ['place']), neckPlan),
+  write('fast', 'Fasting day', "He says he's fasting (today by default, or a date): record it so the app stops cooking, meal-time, food and supplement prompts that day and skips today's open supplements ('fasting'); end when he breaks it (a meal logged also ends it). Acknowledge in one line. Never argue his fast or count his kcal against him; no lecture.", obj({ action: { type: 'string', enum: ['start', 'end'] }, date: ISO, said: { type: 'string' } }, ['action']), fastDay),
+  write('hold_off', 'Hold off', "When he tells you to leave something alone for a while ('no sauna this week', 'busy until 3', 'stop the walk questions today', 'no food reminders tonight'): the app's reminders and nudges for those areas stay quiet until then. Areas: food, supps, walk, holds, sauna, scan, training, sleep, recovery, health, evening, all. Until: forMinutes, untilTime (HH:MM, today or tomorrow), or untilDate (through that whole day). His reason in his words. cancel: an id to lift it. Safety alarms and reminders he asked for always come.", obj({ areas: { type: 'array', items: { type: 'string', enum: AREA_NAMES } }, forMinutes: { type: 'integer', minimum: 5, maximum: 20160 }, untilTime: HM, untilDate: ISO, reason: { type: 'string' }, cancel: { type: 'string' } }), holdOff),
   write('walk', 'Walk', "His answer to a walk question (the app asks him to walk through the day until his step goal, and asks again 5 minutes after no answer). plan: when he'll go (inMinutes for 'in an hour', or time HH:MM; said = his words); vague ('later', 'after dinner', 'in a bit'): pick a time yourself and say it. going: he is out now. done: he walked (minutes, steps if he says). skip: not now, with his reason and when to ask again (askAgainInMinutes, default 60). clear: forget the time. Always say the time back: 'Okay, I'll message you at 6:10 PM.'", obj({ action: { type: 'string', enum: ['plan', 'going', 'done', 'skip', 'clear'] }, inMinutes: { type: 'integer', minimum: 1, maximum: 1440 }, time: HM, said: { type: 'string' }, minutes: { type: 'integer', minimum: 1, maximum: 600 }, steps: { type: 'integer', minimum: 0, maximum: 100000 }, reason: { type: 'string' }, askAgainInMinutes: { type: 'integer', minimum: 5, maximum: 720 } }, ['action']), walkAnswer),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
   write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
-  write('sauna_plan', 'Sauna days', "Plan sauna days WITH him: propose (from his rotation: rest days first, never before lifting, about two a week on separate days while building up, once a week at his level; at his usual sauna time), then plan the dates he agrees to, remove one, or set his usual sauna time. The ladder decides each session's step. About food and drink say only his checklist line (eaten and drunk in the last few hours); never tell him to fast.", obj({ action: { type: 'string', enum: ['propose', 'plan', 'remove', 'set_time'] }, dates: { type: 'array', items: obj({ date: ISO, time: HM }, ['date']) }, date: ISO, time: HM }, ['action']), saunaPlan),
+  write('sauna_plan', 'Sauna days', "Plan sauna days WITH him: propose (from his rotation: rest days first, never before lifting, about two a week on separate days while building up, once a week at his level; at his usual sauna time), then plan the dates he agrees to, remove one, set his usual sauna time, later = he doesn't want to plan now (no planning questions for days, or until date), doctor = his answer to the one-time doctor question (yes, not-yet, no). The ladder decides each session's step. About food and drink say only his checklist line (eaten and drunk in the last few hours); never tell him to fast.", obj({ action: { type: 'string', enum: ['propose', 'plan', 'remove', 'set_time', 'later', 'doctor'] }, dates: { type: 'array', items: obj({ date: ISO, time: HM }, ['date']) }, date: ISO, time: HM, days: { type: 'integer', minimum: 1, maximum: 30 }, answer: { type: 'string', enum: ['yes', 'not-yet', 'no'] } }, ['action']), saunaPlan),
   write('supplement_review', 'Diet.html line', "His answer about a line of his Diet.html that differs from his supplement list (the supplements tool lists the open ones): use = change the supplement to the Diet.html line, keep = leave his list. Only his answer; never decide for him.", obj({ supplement: { type: 'string' }, answer: { type: 'string', enum: ['use', 'keep'] } }, ['supplement', 'answer']), supplementReview),
   write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
   write('recovery_log', 'Recovery', "His recovery record (A13): save his weekly check-in answers in his words (check_in: one answer per question; for choice questions one of the choices the recovery tool lists; 'anything new' in his words, empty if nothing), tick or untick a thing he had to do (task_done / task_undo), or set the checkup date he booked (set_checkup). Only what he says: no advice.", obj({ action: { type: 'string', enum: ['check_in', 'task_done', 'task_undo', 'set_checkup'] }, answers: { type: 'array', items: obj({ question: { type: 'string' }, answer: { type: 'string' } }, ['question', 'answer']) }, task: { type: 'string' }, date: ISO }, ['action']), recoveryLog),

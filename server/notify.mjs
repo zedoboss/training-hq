@@ -10,6 +10,9 @@ import { dayTotals } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, usualWalkHm } from '../app/js/lib/walks.js';
+import { fastingOn } from '../app/js/lib/fast.js';
+import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
+import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor } from '../app/js/lib/scans.js';
 import { zonedTime } from '../app/js/lib/time.js';
@@ -66,6 +69,7 @@ export function phoneZone(store, fallback = deviceTimeZone()) {
 }
 
 const NUDGES = 'nudge:sent';
+const holdsOf = (store) => store.listRecords('coach-holds').map((r) => r.data).filter(Boolean);
 const LAST = 'notify:last';
 const MSGS = 'coach-messages';
 
@@ -98,12 +102,13 @@ export function nudgeInputs(store, now, tz) {
   const untimed = groups.filter((g) => !g.time && !g.afterMeal).flatMap((g) => g.items);
   const afterMeal = groups.filter((g) => g.afterMeal).flatMap((g) => g.items);
   const firstMealAt = Math.min(...list('meals').filter((m) => m.date === date && m.at).map((m) => m.at));
+  const fasting = fastingOn(st.days || {}, date, list('meals'));
   return {
-    date, n,
+    date, n, fasting,
     busy: list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active'),
     lastUserAt: Math.max(0, ...list(MSGS).filter((m) => m.role === 'user').map((m) => m.at || 0)),
     args: {
-      now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm,
+      now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm, fasting,
       reminders: remindersFor({ ...st, date }),
       rot,
       suppsUntimed: untimed.length ? { total: untimed.length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
@@ -156,7 +161,8 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   // The first meal of the day, the moment it is logged (Tue 10/20, his words): "take your supplements" at once, with
   // the ones he takes after it that aren't ticked yet. Then the dishes, two minutes later, as below.
   const first = meals.filter((m) => m.at).sort((a, b) => a.at - b.at)[0];
-  if (first && st && !state.suppsFor?.[date] && state.seen[first.id] === now) {
+  const holds = holdsOf(store);
+  if (first && st && !state.suppsFor?.[date] && state.seen[first.id] === now && !heldOff('supps-after-meal', holds, now)) {
     const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' });
     const open = groups.filter((g) => g.afterMeal).flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.name);
     state.suppsFor = { [date]: now };
@@ -171,7 +177,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       out = { key: 'supps-after-meal', body };
     }
   }
-  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now });
+  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) || heldOff('dishes', holds, now) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now });
   if (due.length) {
     for (const m of due) state.sent[m.id] = now;
     const opts = voiceOpts(store);
@@ -196,7 +202,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
  */
 export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
-  if (inp.n.kinds?.walk === false || now < (inp.n.nudgePausedUntil || 0)) return null;
+  if (inp.n.kinds?.walk === false || now < (inp.n.nudgePausedUntil || 0) || heldOff('walk', holdsOf(store), now)) return null;
   const a = inp.args;
   if (a.workoutEndedAt && now >= a.workoutEndedAt && now - a.workoutEndedAt < AFTER_WORKOUT_QUIET_MIN * 60000) return null;
   if (now - (store.getMeta(LAST) || 0) < 2 * 60000 || now - (inp.lastUserAt || 0) < 60000) return null;
@@ -204,7 +210,7 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const docs = store.listRecords('walks').map((r) => r.data).filter(Boolean);
   const doc = docs.find((d) => d.date === date) || null;
   const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
-  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }) });
+  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting });
   if (!due) return null;
   const v = coachVoice(due.text, voiceOpts(store));
   const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };
@@ -215,13 +221,55 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   return { key: `walk:${due.kind}`, body: v.body };
 }
 
+/** Which hold-off area an initiative belongs to (lib/holdoffs.js). */
+const INIT_AREA = (key) => (key.startsWith('holds-') ? 'holds' : key === 'sauna' ? 'sauna-plan' : key === 'scan-safety' ? 'scan' : key);
+const INIT = 'initiative:state';
+export const INITIATIVE_GAP_MIN = 180;
+
+/**
+ * Coach initiatives (Wed 10/21, his words: "I've skipped the neck workout... He should suggest or ask... When do you
+ * think you want to start? Let me help you... You can fit this in that day"). At most one every 3 hours, each topic at
+ * most once a day; never while a workout or the sauna runs, while he is talking to the coach (10 minutes), right after
+ * another notification, outside his waking hours or while nudges are paused or held. The coach writes the message
+ * itself (it may answer SKIP); it is pushed and is part of the conversation, so his reply continues it.
+ */
+export async function initiativeTick({ store, push, coach, log = () => {}, now, tz }) {
+  if (!coach?.initiate) return null;
+  const inp = nudgeInputs(store, now, tz);
+  if (inp.busy || now < (inp.n.nudgePausedUntil || 0) || inp.n.kinds?.coach === false) return null;
+  const awake = awakeAt(now, tz, addMinHm(inp.n.wakeHm, 60), addMinHm(inp.n.bedHm, -60));
+  if (!awake || now - (store.getMeta(LAST) || 0) < 10 * 60000 || now - (inp.lastUserAt || 0) < 10 * 60000) return null;
+  const state = store.getMeta(INIT) || { last: 0, byKey: {} };
+  if (now - state.last < INITIATIVE_GAP_MIN * 60000) return null;
+  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
+  const holds = holdsOf(store);
+  const items = openItems({
+    today: inp.date, sessions: list('sessions'), sets: list('sets'), neck: one('schedule', 'neck'), areas: list('tendons').filter((d) => d.kind === 'area'),
+    bridge: one('bridge', 'last-loads'), sauna: list('sauna'), saunaPlan: one('sauna-plan', 'main'), readiness: one('tendons', 'readiness'), scanPlan: one('scan-plan', 'main'),
+    dayOf: (ms) => isoDate(new Date(ms), tz),
+  }).filter((i) => now - (state.byKey[i.key] || 0) >= 22 * 3600000 && !heldOff(INIT_AREA(i.key), holds, now) && !heldOff('all', holds, now));
+  const item = items[0];
+  if (!item) return null;
+  state.last = now; state.byKey[item.key] = now;
+  store.setMeta(INIT, state);
+  const msg = await coach.initiate({ instruction: initiativePrompt(item), model: withDefaults(one('settings', 'main')).coach?.model || 'fast', ref: `init:${item.key}`, tz });
+  if (!msg) return null;
+  const r = push.list().length ? await push.notify({ title: 'Coach', body: msg.text, url: '#/coach', tag: `init-${item.key}` }) : { sent: 0 };
+  store.setMeta(LAST, now);
+  log(`initiative ${item.key}: ${msg.text.slice(0, 80)} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
+  return { key: `init:${item.key}`, body: msg.text };
+}
+const addMinHm = (hm, m) => { const [h, mm] = String(hm || '00:00').split(':').map(Number); const t = ((h * 60 + mm + m) % 1440 + 1440) % 1440; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+
 /** One nudge if it's time and something is open: pushed and written into Talk. Returns what was sent, or null. */
 export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
   const state = store.getMeta(NUDGES) || { last: 0, byKey: {} };
   const awake = awakeAt(now, tz, inp.n.wakeHm, inp.n.bedHm);
   if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy, pausedUntil: inp.n.nudgePausedUntil })) return null;
-  const pick = pickNudge(nudgeCandidates(inp.args), state.byKey, now);
+  const holds = holdsOf(store);
+  const pick = pickNudge(nudgeCandidates(inp.args).filter((c) => !heldOff(c.key, holds, now)), state.byKey, now);
   if (!pick) return null;
   const v = coachVoice(pick.text, { ...voiceOpts(store), calm: pick.calm });
   const r = await push.notify({ title: v.title, body: v.body, url: pick.url, tag: `nudge-${pick.key.split(':')[0]}` });
@@ -234,7 +282,7 @@ export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   return { ...pick, body: v.body };
 }
 
-export function startNotifier({ store, push, log = () => {}, tz = () => phoneZone(store), now = () => Date.now(), everyMs = 60000 }) {
+export function startNotifier({ store, push, coach = () => null, log = () => {}, tz = () => phoneZone(store), now = () => Date.now(), everyMs = 60000 }) {
   let busy = false;
   let lastZone = null;
   async function tick() {
@@ -246,7 +294,9 @@ export function startNotifier({ store, push, log = () => {}, tz = () => phoneZon
       if (zone !== lastZone) { if (lastZone) log(`notify: reminders now follow ${zone}`); lastZone = zone; }
       if (!push.list().length) return [];
       const sent = store.getMeta(SENT) || {};
-      const items = dueNow(plan(store, t, zone), t, sent);
+      // What he told the coach to hold off on is skipped (lib/holdoffs.js).
+      const holds = holdsOf(store);
+      const items = dueNow(plan(store, t, zone), t, sent).filter((i) => !itemHeld(i, holds, t));
       if (items.length) {
         const opts = voiceOpts(store);
         for (const i of items) {
@@ -266,7 +316,8 @@ export function startNotifier({ store, push, log = () => {}, tz = () => phoneZon
       const walk = await walkTick({ store, push, log, now: t, tz: zone });
       // One coach notification a minute: a walk question that just went out holds the other nudges.
       const nudge = walk ? null : await nudgeTick({ store, push, log, now: t, tz: zone });
-      return [...items, ...(dishes ? [dishes] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : [])];
+      const init = walk || nudge ? null : await initiativeTick({ store, push, coach: typeof coach === 'function' ? coach() : coach, log, now: t, tz: zone });
+      return [...items, ...(dishes ? [dishes] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : []), ...(init ? [init] : [])];
     } catch (e) {
       log(`notify error: ${e.stack || e}`);
       return [];

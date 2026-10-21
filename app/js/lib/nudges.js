@@ -86,9 +86,11 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null }) {
+  wokeAt = null, morning = null, workoutEndedAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, fasting = false }) {
   const out = [];
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
+  // A fasting day (Wed 10/21): nothing about food or supplements.
+  if (fasting) { suppsAfterMeal = null; suppsUntimed = null; targets = null; workoutEndedAt = workoutEndedAt && lastMealAt > workoutEndedAt ? workoutEndedAt : null; }
   if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt) {
     out.push({ key: 'supps-after-meal', priority: 91, gapMin: 30, url: '#/supps',
       text: `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });

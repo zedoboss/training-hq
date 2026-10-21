@@ -131,8 +131,45 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
     return msg;
   }
 
+  /**
+   * The coach opens a conversation itself (Wed 10/21, coach initiatives): the app's instruction goes to Claude as one
+   * turn of the same conversation (never saved as his words); only the reply is saved, as a message he sees, so his
+   * answer continues it. Returns that message, or null when the coach answered SKIP.
+   */
+  async function initiate({ instruction, model = 'fast', kind = 'initiative', ref = null, tz: tzIn = null }) {
+    const key = MODELS[model] ? model : 'fast';
+    const zone = tzIn || tz;
+    const at = now();
+    const turnId = `init.${at.toString(36)}.${rand()}`;
+    const earlier = conversation(store);
+    const t = { turnId, tz: zone, deviceId: null, tools: [], actions: [], emit: () => {} };
+    let res;
+    try {
+      res = await proc.turn({
+        model: key,
+        content: ({ fresh }) => {
+          active = t;
+          const before = fresh ? lastMarker(store)?.summary || '' : '';
+          const recap = fresh ? [before ? `The day before, in short:\n${before}` : '', recapText(earlier.slice(-RECAP_MESSAGES))].filter(Boolean).join('\n\n') : '';
+          let extra = '';
+          try { extra = context ? context({ store, tz: zone, now: now(), screen: null }) : ''; } catch (e) { log(`coach context: ${e.stack || e}`); }
+          return turnText({ text: instruction, now: now(), tz: zone, recap, extra });
+        },
+      });
+    } finally {
+      if (active === t) active = null;
+    }
+    const text = String(res?.text || '').trim();
+    if (!text || /^SKIP\b/i.test(text)) { log(`coach initiative ${ref || ''}: skipped`); return null; }
+    const msgAt = Math.max(now(), at + 1);
+    const msg = save({ id: messageId(msgAt), role: 'assistant', text, at: msgAt, tz: zone, turnId, tools: t.tools, actions: [], kind, ref, model: key, ms: res.ms });
+    log(`coach initiative ${ref || ''}: written in ${(res.ms / 1000).toFixed(1)} s`);
+    return msg;
+  }
+
   return {
     send,
+    initiate,
     ready: mcp.ready,
     warm: (model = 'fast') => proc.warm(MODELS[model] ? model : 'fast'),
     stop: () => proc.stop('stopped from the app'),

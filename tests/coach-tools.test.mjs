@@ -602,3 +602,21 @@ test('walk (Tue 10/20): "in an hour" sets the time and says it back; going, done
   assert.match(skip.text, /^Not now \(raining\): asked again at 4:30 AM\./);
   assert.match((await call('walk', { action: 'plan' })).text, /needs inMinutes or a time/, 'a plan needs a time');
 });
+
+test('human coach (Wed 10/21): fast, hold_off, neck_plan, sauna later and the doctor answer', async () => {
+  const f = await call('fast', { action: 'start', said: 'Today I fast' });
+  assert.match(f.text, /^Tuesday 1\/20 is a fasting day: no cooking, meal-time, food or supplement prompts; skipped \(fasting\): powder, caps\./);
+  assert.equal(list('days').find((d) => d.date === '2026-01-20').fast.said, 'Today I fast');
+  assert.deepEqual(list('supp-log').map((e) => [e.status, e.reason]), [['skipped', 'fasting'], ['skipped', 'fasting']]);
+  assert.match((await call('fast', { action: 'end' })).text, /^Fast ended at 3:00 AM/);
+  const h = await call('hold_off', { areas: ['walk', 'sauna'], untilTime: '18:00', reason: 'wedding' });
+  assert.match(h.text, /^Holding off walk, sauna until Tuesday 1\/20 6:00 PM \(wedding\)/);
+  const hold = list('coach-holds')[0];
+  assert.match((await call('hold_off', { cancel: hold.id })).text, /^Hold lifted/);
+  assert.match((await call('hold_off', { areas: ['nothing'] })).text, /^Which areas\?/);
+  assert.match((await call('neck_plan', { place: 'after-pull', reason: 'Pull is shorter' })).text, /^Neck goes after pull from now on/);
+  assert.equal(list('schedule').find((x) => x.place)?.place, 'after-pull');
+  assert.match((await call('sauna_plan', { action: 'later', days: 7 })).text, /^No sauna planning questions until Tuesday 1\/27\./);
+  assert.match((await call('sauna_plan', { action: 'doctor', answer: 'not-yet' })).text, /^Recorded his answer to the doctor question: not-yet\./);
+  assert.equal(list('sauna-plan')[0].doctor[0].context, 'first');
+});

@@ -61,7 +61,7 @@ export function usualWalkHm(docs = [], { today, tz } = {}) {
  * @param {string|null} [o.usualHm]  his usual walk hour (usualWalkHm)
  * @returns {{kind: 'ask'|'follow'|'nag'|'plan'|'plan-follow'|'back'|'goal', text: string}|null}
  */
-export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, cfg = WALK }) {
+export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, cfg = WALK }) {
   const d = doc || emptyWalk(isoDate(new Date(now), tz));
   if (goal && steps?.steps != null && steps.steps >= goal) {
     return d.goalAt ? null : { kind: 'goal', text: `${nf(steps.steps)} steps: today's ${nf(goal)} is done. Walks are off until tomorrow.` };
@@ -100,7 +100,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   }
   const since = Math.max(last?.at || 0, skip?.at || 0, walked?.at || 0);
   if (!last || (skip && skip.at > last.at)) {
-    return { kind: 'ask', text: `Walk: ${st} Go out for a walk now.${usualHm ? ` You usually go around ${formatHm(usualHm)}.` : ''} When are you going?` };
+    return { kind: 'ask', text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${st} Go out for a walk now.${usualHm ? ` You usually go around ${formatHm(usualHm)}.` : ''} When are you going?` };
   }
   if (heardSince(last.at)) {
     return now - Math.max(d.answeredAt || 0, lastUserAt || 0, since) >= cfg.againMin * 60000 ? { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` } : null;

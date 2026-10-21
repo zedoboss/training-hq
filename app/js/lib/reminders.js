@@ -10,6 +10,7 @@ import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
 import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
 import { mealReminders, suppReminders, planReminders, saunaReminders } from './fuel-reminders.js';
+import { fastingOn } from './fast.js';
 import { scanReminders, planFor } from './scans.js';
 import { recoveryReminders } from './recovery.js';
 
@@ -116,7 +117,9 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   }
 
   // Supplements (6.6): at his times, then again every 45 minutes until each is answered.
-  const supps = on('supps') ? suppReminders({ date, tz, supps: supplements, log: suppLog, dayKind: rot.today.kind === 'rest' ? 'rest' : 'train', follow: { everyMin: n.suppFollowMin, max: n.suppFollowMax } }) : { items: [], open: [] };
+  // A fasting day (Wed 10/21): no supplement or meal prompts.
+  const fasting = fastingOn(days, date, meals);
+  const supps = on('supps') && !fasting ? suppReminders({ date, tz, supps: supplements, log: suppLog, dayKind: rot.today.kind === 'rest' ? 'rest' : 'train', follow: { everyMin: n.suppFollowMin, max: n.suppFollowMax } }) : { items: [], open: [] };
   out.push(...supps.items);
   if (on('sauna')) out.push(...saunaReminders({ date, tz, sessions: sauna, plan: saunaPlan || {} }));
   if (on('scan')) out.push(...scanReminders({ date, tz, plan: planFor(scanPlan || {}, { scans, today: date, last, days }), scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin }));
@@ -164,7 +167,7 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   // A13: his recovery record: the weekly check-in, things to do, photos.
   if (on('recovery') && recovery?.plan) out.push(...recoveryReminders({ date, tz, ...recovery, hm: n.recoveryHm }));
   // Meals (6.3): his meal times with nothing logged, and the after photo.
-  if (on('meals')) out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
+  if (on('meals') && !fasting) out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
   return out.sort((a, b) => a.at - b.at);
 }
 
