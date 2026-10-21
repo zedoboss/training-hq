@@ -224,7 +224,7 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
 }
 
 /** Which hold-off area an initiative belongs to (lib/holdoffs.js). */
-const INIT_AREA = (key) => (key.startsWith('holds-') ? 'holds' : key === 'sauna' ? 'sauna-plan' : key === 'scan-safety' ? 'scan' : key);
+const INIT_AREA = (key) => (key.startsWith('holds-') || key.startsWith('phase-') ? 'holds' : key === 'sauna' ? 'sauna-plan' : key === 'scan-safety' ? 'scan' : key.startsWith('q-') ? 'questions' : key);
 const INIT = 'initiative:state';
 export const INITIATIVE_GAP_MIN = 180;
 
@@ -249,6 +249,7 @@ export async function initiativeTick({ store, push, coach, log = () => {}, now, 
   const items = openItems({
     today: inp.date, sessions: list('sessions'), sets: list('sets'), neck: one('schedule', 'neck'), areas: list('tendons').filter((d) => d.kind === 'area'),
     bridge: one('bridge', 'last-loads'), sauna: list('sauna'), saunaPlan: one('sauna-plan', 'main'), readiness: one('tendons', 'readiness'), scanPlan: one('scan-plan', 'main'),
+    questions: store.listRecords('coach-questions').filter((r) => !r.deleted).map((r) => ({ id: r.id, ...r.data })),
     dayOf: (ms) => isoDate(new Date(ms), tz),
   }).filter((i) => now - (state.byKey[i.key] || 0) >= 22 * 3600000 && !heldOff(INIT_AREA(i.key), holds, now) && !heldOff('all', holds, now));
   const item = items[0];

@@ -16,6 +16,8 @@ import { photoTime } from '../lib/photos.js';
 import { dayKindOn } from './supps.js';
 import { checklist } from '../lib/supplements.js';
 import { toast } from '../ui/toast.js';
+import { fastingOn, withFast } from '../lib/fast.js';
+import { daysByDate } from '../lib/rotation.js';
 import { loadFoods, planItems, SOURCE_NOTE } from '../lib/foods.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -131,8 +133,12 @@ export function render(view, params) {
   });
 
   const draw = async () => {
-    const [meals, estimates, photos, plan, checks] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks')]);
+    const [meals, estimates, photos, plan, checks, dayList] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days')]);
     if (!alive) return;
+    // A fasting day (Wed 10/21): no target, no "to go"; a meal logged after it began ends it.
+    const days = daysByDate(dayList);
+    const fasting = fastingOn(days, date, meals);
+    const fast = days[date]?.fast;
     const tg = targetsOf(plan);
     const times = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes);
     const dayChecks = checks.filter((c) => c.date === date && c.answer !== 'eaten');
@@ -153,7 +159,10 @@ export function render(view, params) {
         ${date < today ? `<a class="pill" href="#/fuel/${addDays(date, 1)}" aria-label="Next day">›</a>` : '<span class="pill is-off" aria-hidden="true">›</span>'}
       </div>
       <h1 class="view-title">Fuel</h1>
-      <section class="card pad-card fuel-totals" id="f-totals">
+      ${fasting ? `<section class="card pad-card fuel-fast" id="f-fast"><div class="hud c-cyan">FASTING ${date === today ? 'TODAY' : ''} · SINCE ${esc(formatTime(new Date(fast.at)).toUpperCase())}</div>
+        <p class="hint c-text">No food target, no cooking, meal-time or supplement reminders ${date === today ? 'today' : 'that day'}. Walks are the push. ${date === today ? 'Tomorrow is back to normal by itself; logging a meal ends the fast now.' : ''}</p>
+        ${date === today ? '<button class="btn-ghost" id="f-fast-end" type="button">End the fast</button>' : ''}</section>` : ''}
+      <section class="card pad-card fuel-totals" id="f-totals"${fasting ? ' hidden' : ''}>
         <div class="fuel-total"><span class="hud c-muted">KCAL</span><b>${n0(t.kcal)}</b>${tg ? `<small>${tg.kcal > t.kcal ? `${n0(tg.kcal - t.kcal)} to go` : 'target reached'}</small>` : ''}</div>
         <div class="fuel-total"><span class="hud c-muted">PROTEIN</span><b>${Math.round(t.protein * 10) / 10} g</b>${tg ? `<small>${tg.proteinG > t.protein ? `${n1(tg.proteinG - t.protein)} g to go` : 'target reached'}</small>` : ''}</div>
         <div class="fuel-total"><span class="hud c-muted">MEALS</span><b>${t.meals}</b></div>
@@ -165,6 +174,7 @@ export function render(view, params) {
       ${date === today ? `<div class="fuel-log">
         <label class="btn-primary fuel-cam file-btn" for="f-cam">${CAMERA}<span>LOG MEAL</span></label>
         <button class="btn-ghost" id="f-manual" type="button">No photo</button></div>
+        ${!fasting ? '<button class="link-btn" id="f-fast-start" type="button">Fasting today?</button>' : ''}
         <p class="hint">Take the before photo. The Mac names the foods and estimates grams from your packs and usual amounts; kcal and protein come from USDA values. You confirm or fix (Fix has one-tap packs and counts).</p>` : ''}
       ${queued ? '<p class="hint c-amber">Mac unreachable: photos are kept on this phone and read when it is back.</p>' : ''}
       ${date === today ? `<section class="card pad-card fuel-times"><div class="ex-head"><span class="hud c-muted">MEAL TIMES</span><button class="link-btn" id="f-times" type="button">${times.length ? 'Change' : 'Set them'}</button></div>
@@ -196,6 +206,16 @@ export function render(view, params) {
     body.querySelector('#f-targets')?.addEventListener('click', () => editTargets(repo));
     body.querySelector('#f-plan')?.addEventListener('click', () => showPlan(repo));
     body.querySelector('#f-times')?.addEventListener('click', () => editMealTimes());
+    const fastStart = body.querySelector('#f-fast-start');
+    if (fastStart) fastStart.onclick = async () => {
+      await repo.put('days', today, withFast(days[today], today, { on: true, by: 'tap' }, Date.now()));
+      toast('Fasting today: no food or supplement reminders until tomorrow.');
+    };
+    const fastEnd = body.querySelector('#f-fast-end');
+    if (fastEnd) fastEnd.onclick = async () => {
+      await repo.put('days', today, withFast(days[today], today, { on: false }, Date.now()));
+      toast('Fast ended: meal and supplement reminders are back.');
+    };
     const man = body.querySelector('#f-manual');
     if (man) man.onclick = async () => {
       const id = await logMealManual();
@@ -215,7 +235,7 @@ export function render(view, params) {
   const unsub = subscribe((s) => { const k = `${s.paired}|${s.mac.reachable}|${s.sync.pending > 0}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log', 'days'].includes(c))) draw(); });
     draw().then(() => { if (checking && alive) answerCheck(repo, date, params[2]); });
   });
   return () => { alive = false; off(); unsub(); };

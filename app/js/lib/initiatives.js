@@ -25,7 +25,7 @@ const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.pa
  * @param {(ms:number) => string} o.dayOf  local date of a time
  * @returns {Array<{key: string, priority: number, facts: string}>} most important first
  */
-export function openItems({ today, sessions = [], sets = [], neck = null, areas = [], bridge = null, sauna = [], saunaPlan = null, readiness = null, scanPlan = null, dayOf }) {
+export function openItems({ today, sessions = [], sets = [], neck = null, areas = [], bridge = null, sauna = [], saunaPlan = null, readiness = null, scanPlan = null, questions = [], dayOf }) {
   const out = [];
   // Neck: planned in the rotation and never done since (or not for a week and more).
   if (neck?.planned) {
@@ -75,6 +75,11 @@ export function openItems({ today, sessions = [], sets = [], neck = null, areas 
   }
   // Body scan safety notice never read.
   if (scanPlan && !scanPlan.safety?.readAt) out.push({ key: 'scan-safety', priority: 35, facts: "Body scans: he hasn't recorded reading the Evolt scanner's own safety notice yet (one tap on the body scan screen, or tell you)." });
+  // His open questions from the brief (private seed questions.json), one at a time, below the training topics.
+  for (const q of questions) {
+    if (!q?.q || q.answered || (q.askAfter && q.askAfter > today)) continue;
+    out.push({ key: `q-${q.id}`, priority: q.priority ?? 20, facts: `An open question from his brief, never asked yet [question id ${q.id}]: ${q.q} Why it matters: ${q.why || ''} Ask it naturally, as one short question. When he answers, record it with open_question (answer, his words) and a memory note; "not now" -> open_question later.` });
+  }
   return out.sort((a, b) => b.priority - a.priority);
 }
 

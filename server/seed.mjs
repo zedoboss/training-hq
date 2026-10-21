@@ -37,7 +37,8 @@ export function seedDocs(seedDir) {
   // schedule.json: places he has given things in the week (e.g. where Neck goes), as {id: doc}.
   // recovery.json (A13): his recovery record's check-in questions, dates, things to do and photo poses, as {id: doc}.
   // coach-lines.json (A15): his coach's lines for sets and holds, by mood and moment, as {id: doc}.
-  for (const [file, col] of [['fuel.json', 'fuel'], ['supplements.json', 'supplements'], ['schedule.json', 'schedule'], ['recovery.json', 'recovery'], ['coach-lines.json', 'coach-lines']]) {
+  // questions.json (Wed 10/21): his open questions from the brief the coach still has to ask him, as {id: doc}.
+  for (const [file, col] of [['fuel.json', 'fuel'], ['supplements.json', 'supplements'], ['schedule.json', 'schedule'], ['recovery.json', 'recovery'], ['coach-lines.json', 'coach-lines'], ['questions.json', 'coach-questions']]) {
     const f = join(seedDir, file);
     if (!existsSync(f)) continue;
     const j = JSON.parse(readFileSync(f, 'utf8'));

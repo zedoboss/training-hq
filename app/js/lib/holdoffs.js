@@ -16,6 +16,7 @@ export const HOLD_AREAS = {
   recovery: ['recovery'],
   health: ['health'],
   evening: ['evening'],
+  questions: ['questions'],
   all: ['*'],
 };
 export const AREA_NAMES = Object.keys(HOLD_AREAS);

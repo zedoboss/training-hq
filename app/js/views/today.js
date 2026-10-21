@@ -7,6 +7,7 @@ import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, f
 import { withDefaults } from '../lib/settings.js';
 import { ready, saveSettings } from '../lib/data.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
+import { fastingOn } from '../lib/fast.js';
 import { weekColumn } from '../lib/programme.js';
 import { roundsByDate, holdSlots, restChoices, openSlots } from '../lib/holds.js';
 import { logMealFromFile, cameraInput } from './meal.js';
@@ -83,6 +84,10 @@ async function fuelToday(repo) {
   const [meals, estimates, plan, supps, slog, sessions, bridge, dayList] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.get('fuel', 'plan'),
     repo.list('supplements'), repo.list('supp-log'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days')]);
   const today = isoDate(new Date());
+  // A fasting day (Wed 10/21, his words: "it should be over there that I'm fast just for today"): no food target, no
+  // supplement count; tomorrow is back to normal by itself (the fast belongs to its date).
+  const fast = daysByDate(dayList)[today]?.fast;
+  if (fastingOn(daysByDate(dayList), today, meals)) return { readout: `FASTING TODAY<br>SINCE ${formatTime(new Date(fast.at)).toUpperCase()}<br>NO FOOD OR SUPPS`, progress: null };
   const t = dayTotals(meals, estimates, today);
   const kcal = Math.round(t.kcal).toLocaleString('en-US');
   const rot = rotationDay({ last: lastRotationSession(sessions, bridge), today, days: daysByDate(dayList) });
