@@ -94,3 +94,16 @@ test('walks and the weather (Wed 10/21): never "go now" in strong sun or heat; t
   // No weather known: as before.
   assert.equal(walkDue({ ...base, now: at('12:30'), doc: null, steps: steps(3000, '12:00') }).kind, 'ask');
 });
+
+test('walks and rain (Wed 10/21): raining now -> planned for the first safe hour under 50% rain; the coach sees it', async () => {
+  const { rainingNow } = await import('../app/js/lib/walks.js');
+  const hour = (hm, uv, feels, rain) => ({ at: at(hm), uv, feels, rain });
+  const weather = { current: { at: at('17:30'), precip: 0.6, code: 80 }, hours: [hour('17:00', 1.1, 31, 53), hour('18:00', 0.1, 31, 63), hour('19:00', 0, 32, 65), hour('20:00', 0, 32, 55), hour('21:00', 0, 32, 39)] };
+  assert.deepEqual(rainingNow(weather, at('17:40')), { words: 'rain showers, 0.6 mm in the last hour' });
+  assert.equal(rainingNow({ current: { ...weather.current, precip: 0, code: 2 } }, at('17:40')), null);
+  assert.equal(rainingNow(weather, at('20:00')), null, 'old conditions are not trusted');
+  const p = walkDue({ ...base, now: at('17:40'), doc: null, steps: steps(356, '17:01'), weather });
+  assert.equal(p.kind, 'planned');
+  assert.equal(p.planAt, at('21:00'));
+  assert.match(p.text, /^Walk: raining now \(rain showers, 0\.6 mm in the last hour\)\. I planned it for 9:00 PM, when it's UV 0, feels 32°C, rain 39%\./);
+});

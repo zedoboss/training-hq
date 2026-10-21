@@ -24,7 +24,15 @@ export const WALK = {
 // dangerous"). Claude's thresholds from common UV and heat guidance (not medical advice): safe = UV under 3 and it
 // feels 33°C or less; never = UV 6 or more, or it feels 36°C or more; in between only when nothing safe is left today.
 // Rain of 70% or more is avoided when another hour is free.
-export const HEAT = { uvSafe: 3, uvNever: 6, feelsSafe: 33, feelsNever: 36, rainAvoid: 70 };
+export const HEAT = { uvSafe: 3, uvNever: 6, feelsSafe: 33, feelsNever: 36, rainAvoid: 70, rainNowMm: 0.3, dryAfterRain: 50 };
+const WET = (code) => (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
+/** Raining at his place now (the model's current conditions, if fresh): {words} or null. */
+export function rainingNow(weather, now) {
+  const c = weather?.current;
+  if (!c || now - c.at > 90 * 60000) return null;
+  if ((c.precip ?? 0) >= HEAT.rainNowMm || WET(c.code)) return { words: `${weatherCodeText(c.code) || 'rain'}${c.precip != null ? `, ${c.precip} mm in the last hour` : ''}` };
+  return null;
+}
 const HOUR = 3600000;
 /** 'safe' | 'caution' | 'never' for one forecast hour. */
 export function hourRisk(h) {
@@ -34,6 +42,19 @@ export function hourRisk(h) {
   return 'caution';
 }
 const hourAt = (weather, at) => (weather?.hours || []).find((h) => h.at <= at && at < h.at + HOUR) || null;
+/** WMO weather codes (Open-Meteo) in words. */
+export function weatherCodeText(code) {
+  if (code == null) return null;
+  if (code === 0) return 'clear';
+  if (code <= 3) return 'cloudy';
+  if (code === 45 || code === 48) return 'fog';
+  if (code >= 51 && code <= 57) return 'drizzle';
+  if (code >= 61 && code <= 67) return 'rain';
+  if (code >= 71 && code <= 77) return 'snow';
+  if (code >= 80 && code <= 82) return 'rain showers';
+  if (code >= 95) return 'thunderstorm';
+  return 'unsettled';
+}
 export const weatherWords = (h) => (h ? `UV ${Math.round(h.uv * 10) / 10}, feels ${Math.round(h.feels)}°C${h.rain != null && h.rain >= 40 ? `, rain ${h.rain}%` : ''}` : '');
 /**
  * The next good time to walk from `from` until `until`: the first safe hour (a dry one if there is one), else the
@@ -112,8 +133,11 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   const endMs = now + (bed - cfg.stopBeforeBedMin - at) * 60000;
   const nowH = hourAt(weather, now);
   const risk = hourRisk(nowH);
-  const better = weather ? nextWalkTime(weather, now, endMs) : null;
-  const badNow = weather && (risk === 'never' || (risk === 'caution' && better && better.risk === 'safe' && better.at > now));
+  // Raining now (Wed 10/21, "check if it's raining"): wait for the first safe hour with under 50% rain.
+  const wet = weather ? rainingNow(weather, now) : null;
+  const dry = wet ? (weather.hours || []).find((h) => h.at > now && h.at < endMs && hourRisk(h) === 'safe' && (h.rain ?? 100) < HEAT.dryAfterRain) : null;
+  const better = wet ? (dry ? { at: dry.at, h: dry, risk: 'safe' } : null) : weather ? nextWalkTime(weather, now, endMs) : null;
+  const badNow = weather && (wet ? Boolean(better) : risk === 'never' || (risk === 'caution' && better && better.risk === 'safe' && better.at > now));
   const t = (ms) => formatHm(hmOf(new Date(ms), tz));
   const heardSince = (t) => (d.answeredAt || 0) > t || (lastUserAt || 0) > t;
   // Out walking: one "back?" after a while.
@@ -132,7 +156,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     if (now < d.plan.at) return null;
     // His time came but it's too hot or bright now: move it to the next good time, once per plan.
     if (badNow && better && better.at > now && !d.asks.some((a) => a.kind === 'moved' && a.at >= d.plan.setAt)) {
-      return { kind: 'moved', planAt: better.at, text: `It's ${weatherWords(nowH)} now: not a walk to do. I moved your walk to ${t(better.at)} (${weatherWords(better.h)}). Say if you want to go anyway.` };
+      return { kind: 'moved', planAt: better.at, text: `${wet ? `Raining now (${wet.words})` : `It's ${weatherWords(nowH)} now`}: not a walk to do. I moved your walk to ${t(better.at)} (${weatherWords(better.h)}${wet ? `, rain ${better.h.rain}%` : ''}). Say if you want to go anyway.` };
     }
     const asked = d.asks.filter((a) => a.at >= d.plan.at);
     const planTime = formatHm(hmOf(new Date(d.plan.at), tz));
@@ -146,7 +170,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   const since = Math.max(last?.at || 0, skip?.at || 0, walked?.at || 0);
   // No time set and it isn't good walking weather now: the coach plans it (his words: "he can schedule them").
   if (badNow) {
-    if (better && better.at > now) return { kind: 'planned', planAt: better.at, text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: too hot or bright now (${weatherWords(nowH)}). I planned it for ${t(better.at)}, when it's ${weatherWords(better.h)}. ${st} Tell me if another time suits you.` };
+    if (better && better.at > now) return { kind: 'planned', planAt: better.at, text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${wet ? `raining now (${wet.words})` : `too hot or bright now (${weatherWords(nowH)})`}. I planned it for ${t(better.at)}, when it's ${weatherWords(better.h)}${wet ? `, rain ${better.h.rain}%` : ''}. ${st} Tell me if another time suits you.` };
     if (!d.asks.some((a) => a.kind === 'no-window')) return { kind: 'no-window', text: `No safe walking weather left today (now ${weatherWords(nowH)}). Steps can wait for a cooler hour: early morning or after sunset.` };
     return null;
   }

@@ -19,7 +19,7 @@ import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/m
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
-import { walkLines, usualWalkHm, hourRisk, weatherWords, safeWindowsText } from '../../app/js/lib/walks.js';
+import { walkLines, usualWalkHm, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
 import { activeHolds } from '../../app/js/lib/holdoffs.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
@@ -154,6 +154,18 @@ function foodLine(s) {
   return `Food today: ${t.kcal.toLocaleString('en-US')} kcal of ${plan.kcal ? plan.kcal.toLocaleString('en-US') : '?'}, ${t.protein} g protein of ${plan.proteinG ?? '?'} g (${plural(t.meals, 'meal')}${t.estimated ? `, ${t.estimated} still estimates` : ''}${t.unread ? `, ${t.unread} being read` : ''}).`;
 }
 
+/** The weather now and the next 12 hours (Wed 10/21: "check if it's raining for me"). */
+function weatherText(s) {
+  const w = s.store.getMeta?.('weather');
+  if (!w?.hours?.length) return 'No weather data on the Mac yet (it fetches from Open-Meteo about every 30 minutes).';
+  const cur = w.current;
+  const hours = w.hours.filter((h) => h.at + 3600000 > s.now && h.at <= s.now + 12 * 3600000);
+  return [`Weather at ${w.label || 'his place'} (Open-Meteo forecast model, updated ${timeText(w.fetchedAt, s.tz)}; it models the area, it isn't a rain gauge at his door).`,
+    cur ? `Now: ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm of rain in the last hour` : ''}, ${Math.round(cur.temp)}°C, feels ${Math.round(cur.feels)}°C.` : '',
+    `Next hours: ${hours.map((h) => `${timeText(h.at, s.tz)} UV ${Math.round(h.uv * 10) / 10}, feels ${Math.round(h.feels)}°C, rain ${h.rain}% (${hourRisk(h)})`).join('; ')}.`,
+    'Walking rule: safe = UV under 3 and feels 33°C or less; never at UV 6+ or feels 36°C+.'].filter(Boolean).join('\n');
+}
+
 /** His meal times (Tue 10/20): the coach guides him by them: when to cook, when to eat, the latest. */
 /** The walk coach's state (Tue 10/20): today in one line, and the last days as memory (week: true). */
 export function walkTextLines(s, { week = false } = {}) {
@@ -168,7 +180,9 @@ export function walkTextLines(s, { week = false } = {}) {
   if (nowH) {
     const end = zonedTime(addDays(s.today, 1), '00:00', s.tz);
     const windows = safeWindowsText(w, s.now, end, s.tz);
-    lines.splice(1, 0, `Walking weather (${w.label || 'his area'}, Open-Meteo): now ${weatherWords(nowH)}: ${{ safe: 'fine to walk', caution: 'only with shade and water, and only if nothing safer is left today', never: 'NOT safe to walk' }[hourRisk(nowH)] || 'unknown'}. Safe windows left today (UV under 3, feels 33°C or less): ${windows || 'none'}. Never suggest a walk at UV 6+ or feels 36°C+; plan it in a safe window.`);
+    const cur = w.current && s.now - w.current.at < 2 * 3600000 ? w.current : null;
+    const next = (w.hours || []).filter((h) => h.at > s.now && h.at <= s.now + 4 * 3600000).map((h) => `${timeText(h.at, s.tz)} rain ${h.rain ?? '?'}%`).join(', ');
+    lines.splice(1, 0, `Walking weather (${w.label || 'his area'}, Open-Meteo forecast model, updated ${timeText(w.fetchedAt, s.tz)}; not a rain gauge at his door): ${cur ? `now ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm in the last hour` : ''}, ` : 'now '}${weatherWords(nowH)}: ${rainingNow(w, s.now) ? 'RAINING now: walk with an umbrella only if he wants; otherwise the first drier hour' : { safe: 'fine to walk', caution: 'only with shade and water, and only if nothing safer is left today', never: 'NOT safe to walk' }[hourRisk(nowH)] || 'unknown'}. Chance of rain next hours: ${next || 'unknown'}. Safe windows left today (UV under 3, feels 33°C or less): ${windows || 'none'}. Never suggest a walk at UV 6+ or feels 36°C+; plan it in a safe window.`);
   }
   return week ? lines : lines.slice(0, nowH ? 2 : 1);
 }
@@ -192,7 +206,6 @@ export function todayText(s) {
   if (arrived) lines.push(`At the gym since ${timeText(arrived, s.tz)} (his iPhone arrival automation).`);
   const active = s.active();
   if (active) lines.push(activeText(s, active));
-  lines.push(...walkTextLines(s));
   lines.push(...holdLines(s), suppLine(s), foodLine(s), mealTimesLine(s), ...walkTextLines(s, { week: true }), scanLine(s));
   const neck = s.one('schedule', 'neck');
   if (s.list('routines').some((r) => r.dayType === 'neck')) {
@@ -235,7 +248,7 @@ export function contextLine({ store, tz, now, screen = null }) {
  * told you that the app now follows (a fast, hold-offs), and your notes on him (memory), with every message.
  */
 function situationLines(s) {
-  const out = [];
+  const out = [...walkTextLines(s)];
   const f = s.days()[s.today]?.fast;
   if (fastingOn(s.days(), s.today, s.list('meals'))) out.push(`He is FASTING today (his decision, ${timeText(f.at, s.tz)}${f.said ? `: "${f.said}"` : ''}): the app sends no food, cooking or supplement prompts. Never argue it or count his kcal against him; walks are the push; no sauna today (his checklist wants food in the last few hours). If he eats, the fast ends.`);
   const holds = activeHolds(s.list('coach-holds'), s.now);
@@ -639,6 +652,7 @@ const read = (name, title, description, inputSchema, fn) => ({ name, title, desc
 } });
 
 export const READ_TOOLS = [
+  read('weather', 'Weather', "The weather at his place now and the next hours (Open-Meteo forecast model): raining or not now, chance of rain, UV and how hot it feels, and today's safe walking windows. For 'is it raining?', 'should I walk now?'.", obj(), (s) => weatherText(s)),
   read('today', 'Today', "Everything about today: the rotation (today's day type, week column, or why it's a rest day, and the next session), the session time and check-in, the session in progress with the next set, tendon holds due, supplements, food so far, the next body scan. Call it first for any question about today or tomorrow.", obj(), (s) => todayText(s)),
   read('programme', 'Programme', "A day's routine with each exercise's target for the next session (exactly what Start gives: total kg with the bar and plates per side, reps, sets, and why: table, 30% cap, check-in), plus last time. dayType defaults to the next session; week shows another week's column.", obj({ dayType: DAY_TYPE, week: { type: 'integer', minimum: 1, maximum: 12 } }), (s, a) => programmeText(s, a)),
   read('tendons', 'Tendons', 'His tendon areas with their phase, holds (load, sets, seconds, where, when), what is done and due, his note\'s rules, the readiness table and today\'s check-in.', obj(), (s) => tendonsText(s)),
