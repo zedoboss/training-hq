@@ -76,3 +76,35 @@ test('delete removes the file and marks the record deleted', async () => {
   assert.equal(store.getRecord('demos', 'squat-smith-machine').deleted, true);
   assert.deepEqual(readdirSync(join(dir, 'demos')).filter((f) => f.endsWith('.webm')), []);
 });
+
+test('animated demos (.html): picked up by a rescan, served sandboxed, never uploaded', async () => {
+  const page = Buffer.from('<!doctype html><html lang="en"><body>demo</body></html>');
+  writeFileSync(join(dir, 'demos', 'triceps-pushdown.html'), page);
+  assert.equal(demos.rescan().added >= 1, true);
+  const rec = store.getRecord('demos', 'triceps-pushdown').data;
+  assert.equal(rec.file, 'triceps-pushdown.html');
+  assert.equal(rec.type, 'text/html');
+  const got = await fetch(`${base}/api/demo?id=triceps-pushdown`, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(got.status, 200);
+  assert.equal(got.headers.get('content-type'), 'text/html');
+  assert.equal(got.headers.get('content-security-policy'), 'sandbox allow-scripts');
+  assert.deepEqual(Buffer.from(await got.arrayBuffer()), page);
+  assert.equal(extForType('text/html'), null);
+  assert.equal((await up('triceps-pushdown', page, 'text/html')).status, 415);
+});
+
+test('his own clip wins over the animation; removing the clip brings the animation back', async () => {
+  const res = await up('triceps-pushdown', clip);
+  assert.equal((await res.json()).file, 'triceps-pushdown.mp4');
+  assert.ok(existsSync(join(dir, 'demos', 'triceps-pushdown.html')), 'the animation stays on disk');
+  assert.equal(demos.rescan().added, 0);
+  assert.equal(store.getRecord('demos', 'triceps-pushdown').data.file, 'triceps-pushdown.mp4');
+  assert.equal(demos.read('triceps-pushdown').type, 'video/mp4');
+  const del = await fetch(`${base}/api/demo/delete`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'triceps-pushdown' }) });
+  assert.deepEqual(await del.json(), { removed: true });
+  const back = store.getRecord('demos', 'triceps-pushdown');
+  assert.equal(back.deleted, false);
+  assert.equal(back.data.file, 'triceps-pushdown.html');
+  assert.ok(demos.remove('triceps-pushdown'));
+  assert.equal(store.getRecord('demos', 'triceps-pushdown').deleted, true);
+});

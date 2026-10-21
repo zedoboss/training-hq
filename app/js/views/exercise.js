@@ -136,6 +136,7 @@ export function render(view, params = []) {
       </nav>
       <div id="ex-tab"></div>`;
     const body = view.querySelector('#ex-tab');
+    offInfo(); offInfo = () => {};
     const recordList = (list) => (list.length ? `<ul class="best-list rec-list">${list.map((r) => {
       const href = open(r.sessionId);
       const inner = `<span>${esc(r.label)}<br><span class="c-faint">${esc(longDay(r.date))} · ${srcText(r.source)}</span></span><b>${esc(valueText(r.unit, r.value))}${r.set && r.key !== 'heaviest' ? `<br><span class="c-faint">${esc(plainSet(r.set))}</span>` : r.set?.reps != null && r.key === 'heaviest' ? `<br><span class="c-faint">× ${r.set.reps}</span>` : ''}</b>`;
@@ -206,9 +207,12 @@ export function render(view, params = []) {
           <tbody>${reps.map((r) => `<tr><td>${r.reps}</td><td>${kg(r.kg)} kg</td><td>${r.sessionId ? `<a href="${open(r.sessionId)}">${esc(longDay(r.date))}</a>` : esc(longDay(r.date))}</td></tr>`).join('')}</tbody></table>
           <p class="hint">Heaviest weight lifted for exactly that many reps. Warm-ups and holds don't count.</p>` : ''}`;
     } else {
-      body.innerHTML = `${ex.howTo ? `<div class="card pad-card howto">${esc(ex.howTo).replace(/\n/g, '<br>')}</div>` : '<p class="hint">No written how-to yet. It is optional: write your own cues, in your own words.</p>'}
+      body.innerHTML = `<div id="demo-info"></div>
+        ${ex.howTo ? `<div class="card pad-card howto">${esc(ex.howTo).replace(/\n/g, '<br>')}</div>` : '<p class="hint">No written how-to of your own yet. It is optional: write your own cues, in your own words.</p>'}
         <button class="btn-ghost" id="howto-edit" type="button">${ex.howTo ? 'Edit how-to' : 'Write a how-to'}</button>`;
       body.querySelector('#howto-edit').onclick = () => editText('howTo', 'How-to (your own cues)', ex.howTo || '');
+      // An animated demo also explains the exercise: what it works, cues, mistakes, rules.
+      offInfo = demoPanel(body.querySelector('#demo-info'), ex, { part: 'info' });
     }
     view.querySelectorAll('[data-tab-x]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tabX; draw(repo); }));
 
@@ -254,6 +258,7 @@ export function render(view, params = []) {
     offDemo = demoPanel(view.querySelector('#demo'), ex);
   };
   let offDemo = () => {};
+  let offInfo = () => {};
 
   let off = () => {};
   let alive = true;
@@ -263,5 +268,5 @@ export function render(view, params = []) {
   });
   const hideTip = () => { if (tipEl) tipEl.hidden = true; };
   window.addEventListener('scroll', hideTip, { passive: true });
-  return () => { alive = false; off(); offDemo(); tipEl?.remove(); window.removeEventListener('scroll', hideTip); };
+  return () => { alive = false; off(); offDemo(); offInfo(); tipEl?.remove(); window.removeEventListener('scroll', hideTip); };
 }

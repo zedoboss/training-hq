@@ -16,7 +16,7 @@ export const SCREENS = [
   ['routine', '#/routine/', 'One routine', 'routine'],
   ['programme', '#/programme', 'Programme'],
   ['holds', '#/holds', 'Tendon holds'],
-  ['demos', '#/demos', 'Demo clips'],
+  ['demos', '#/demos', 'Demos'],
   ['stats', '#/stats', 'Statistics'],
   ['stats_month', '#/stats/month', 'Monthly report'],
   ['calendar', '#/calendar', 'Calendar'],

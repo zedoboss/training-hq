@@ -466,10 +466,10 @@ export function render(view, params = []) {
       const lib = ctx.lib.get(ex.exerciseId) || {};
       actionSheet(ex.name, [
         ...(!editing && isSquatExercise(ex) ? [{ label: 'Squat Depth camera (fills reps and depth)', run: () => { location.hash = `#/squat/set/${session.id}/${ex.key}`; } }] : []),
-        { label: 'Demo clip', run: () => {
+        { label: 'Demo', run: () => {
           let offDemo = () => {};
           const { el, close } = overlay(`<div class="hud c-muted sheet-title">${esc(ex.name)}</div><div data-demo></div><button class="sheet-btn sheet-cancel" type="button" data-cancel>Close</button>`, () => offDemo());
-          offDemo = demoPanel(el.querySelector('[data-demo]'), { id: ex.exerciseId, name: ex.name });
+          offDemo = demoPanel(el.querySelector('[data-demo]'), { id: ex.exerciseId, name: ex.name }, { part: 'all' });
           el.querySelector('[data-cancel]').addEventListener('click', () => close());
         } },
         { label: lib.pinnedNote ? 'Edit pinned note' : 'Pin a note (shows every time)', run: async () => {

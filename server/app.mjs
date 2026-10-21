@@ -172,7 +172,7 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       return { revoked: store.revokeDevice(id) };
     },
 
-    // Exercise demo clips (2.17). The id is the exercise id, passed as ?id=.
+    // Exercise demos (2.17): clips and animated demo pages. The id is the exercise id, passed as ?id=.
     'GET /api/demos': async (req) => {
       auth(req);
       if (!demos) throw new HttpError(404, 'no demo folder');
@@ -194,7 +194,9 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       auth(req);
       const clip = demos?.read(url.searchParams.get('id'));
       if (!clip) throw new HttpError(404, 'no demo for this exercise');
-      res.writeHead(200, { 'Content-Type': clip.type, 'Content-Length': clip.body.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      // An animated demo is a page: if it is ever opened directly it runs sandboxed, with no access to this origin.
+      const sandbox = clip.type === 'text/html' ? { 'Content-Security-Policy': 'sandbox allow-scripts' } : {};
+      res.writeHead(200, { 'Content-Type': clip.type, 'Content-Length': clip.body.length, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...sandbox });
       res.end(clip.body);
     },
 
