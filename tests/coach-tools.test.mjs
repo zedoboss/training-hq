@@ -614,7 +614,10 @@ test('human coach (Wed 10/21): fast, hold_off, neck_plan, sauna later and the do
   const hold = list('coach-holds')[0];
   assert.match((await call('hold_off', { cancel: hold.id })).text, /^Hold lifted/);
   assert.match((await call('hold_off', { areas: ['nothing'] })).text, /^Which areas\?/);
-  assert.match((await call('neck_plan', { place: 'after-pull', reason: 'Pull is shorter' })).text, /^Neck goes after pull from now on/);
+  assert.match((await call('neck_plan', { place: 'after-pull', reason: 'Pull is shorter' })).text, /^Neck goes after pull from now on; Train offers it on those days\. Where \(gym or home\) is not decided: ask him\./);
+  assert.match((await call('neck_plan', { place: 'rest-day', where: 'home', homeGear: 'water bottles' })).text, /Where: home\. At home \(no plates\): a 1 L water bottle filled to 900 ml \(0\.9 kg\)/);
+  assert.equal(list('schedule').find((x) => x.place)?.where, 'home');
+  await call('neck_plan', { place: 'after-pull', where: 'gym' });
   assert.equal(list('schedule').find((x) => x.place)?.place, 'after-pull');
   assert.match((await call('sauna_plan', { action: 'later', days: 7 })).text, /^No sauna planning questions until Tuesday 1\/27\./);
   assert.match((await call('sauna_plan', { action: 'doctor', answer: 'not-yet' })).text, /^Recorded his answer to the doctor question: not-yet\./);

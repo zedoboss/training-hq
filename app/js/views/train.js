@@ -102,7 +102,7 @@ export function render(view) {
           ${nextRoutine ? `<a class="${t.kind === 'train' ? 'btn-primary' : 'btn-ghost'} center" href="#/session/start/${esc(nextRoutine.id)}">${t.kind === 'train' ? `Start ${esc(LABEL[next])}` : `${esc(LABEL[next])} now`}</a>` : ''}
           <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
         </div>
-        ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">${esc(neckTodayText(neck.place))} (your plan) ›</a>` : ''}
+        ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">${esc(neckTodayText(neck.place, neck.where))} (your plan) ›</a>` : ''}
         ${t.kind === 'train' ? '<button class="link-btn" id="rest-today" type="button">Rest today instead</button>' : ''}
         ${undoable ? '<button class="link-btn" id="undo-rest" type="button">Undo rest day</button>' : ''}
       </section>

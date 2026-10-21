@@ -150,7 +150,7 @@ export function render(view, params = []) {
         <p class="hint">${fullHistory ? (inComeback ? 'Heaviest working set since the comeback started, against the sessions before this one. ALL-TIME: heaviest ever, Hevy and Strong included.' : 'Heaviest working set ever at the time, Hevy and Strong included.') : 'All-time bests show once your Hevy history is imported (Settings > Import and export).'}</p>
       </section>
       ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
-      ${neckNext ? `<a class="card hold-prompt" id="neck-next" href="#/session/start/${esc(neckRoutine.id)}"><span><span class="hud c-cyan">${esc(neckTodayText(neck.place).toUpperCase())}</span><br>Your plan: ${neckRoutine.exercises.length} neck exercises</span><span class="pill is-on">Start</span></a>` : ''}
+      ${neckNext ? `<a class="card hold-prompt" id="neck-next" href="#/session/start/${esc(neckRoutine.id)}"><span><span class="hud c-cyan">${esc(neckTodayText(neck.place, neck.where).toUpperCase())}</span><br>Your plan: ${neckRoutine.exercises.length} neck exercises</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
       ${session.gym ? `<p class="hint">Gym: ${esc(session.gym)}</p>` : ''}

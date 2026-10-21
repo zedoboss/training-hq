@@ -33,3 +33,19 @@ test('neck after Push (his answer Sun 10/18): the Train line, done-today check, 
   assert.equal(neckDoneOn([{ dayType: 'neck', status: 'active', startedAt: at }], '2026-10-20', dayOf), true);
   assert.equal(neckDoneOn([{ dayType: 'neck', status: 'done', startedAt: at }], '2026-10-21', dayOf), false);
 });
+
+test('neck at home (Wed 10/21): no plates, a water bottle filled by volume; the workout says which and how', async () => {
+  const { bottleFor, withHomeNotes, neckTodayText, answerNeck } = await import('../app/js/lib/neck.js');
+  assert.deepEqual(bottleFor(0.9), { ml: 900, text: 'a 1 L water bottle filled to 900 ml (0.9 kg)' });
+  assert.equal(bottleFor(1.15).text, 'a 1.5 L water bottle filled to 1150 ml (1.15 kg)');
+  assert.equal(bottleFor(0.45).text, 'a 0.5 L water bottle filled to 450 ml (0.45 kg)');
+  const session = { dayType: 'neck', exercises: [{ key: 'a', name: 'Lying Neck Extension (Weighted)', notes: '' }], gym: 'Anytime' };
+  const sets = [{ exKey: 'a', type: 'normal', kg: 0.9, target: { kg: 0.9 } }];
+  const home = withHomeNotes(session, sets, { planned: true, place: 'after-push', where: 'home' });
+  assert.match(home.exercises[0].notes, /^At home: a 1 L water bottle filled to 900 ml \(0\.9 kg\)\. Lie with your head just off the edge/);
+  assert.equal(home.gym, 'Home');
+  assert.equal(withHomeNotes(session, sets, { where: 'gym' }), session, 'at the gym: unchanged');
+  assert.equal(neckTodayText('rest-day', 'home'), 'Neck today (rest day, at home)');
+  assert.equal(neckTodayText('after-push', 'gym'), 'Neck after Push today, at the gym');
+  assert.equal(answerNeck(null, 'rest-day', '2026-03-18', { where: 'home', homeGear: 'water bottles, a towel' }).homeGear, 'water bottles, a towel');
+});

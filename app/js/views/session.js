@@ -2,6 +2,7 @@
 import { setQuiet } from '../lib/quiet.js';
 import { currentBodyweight } from '../lib/health.js';
 import { ready, syncNow } from '../lib/data.js';
+import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory } from '../lib/history.js';
 import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
@@ -100,6 +101,8 @@ async function startSession(view, routineId, logFor = null) {
   });
   // Logged after the fact from the calendar (P12): the finish screen starts on that date.
   if (/^\d{4}-\d{2}-\d{2}$/.test(logFor || '') && logFor < isoDate(new Date())) session.logFor = logFor;
+  // Neck at home (Wed 10/21): no plates, so each exercise says which water bottle and how.
+  if (routine?.dayType === 'neck') Object.assign(session, withHomeNotes(session, sets, await repo.get('schedule', 'neck')));
   // Sets first: if the app is closed half-way, no session exists without its sets.
   for (const s of sets) await repo.put('sets', s.id, s);
   await repo.put('sessions', session.id, session);

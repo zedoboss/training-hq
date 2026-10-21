@@ -35,7 +35,7 @@ export function openItems({ today, sessions = [], sets = [], neck = null, areas 
     const host = (neck.place || '').replace('after-', '');
     const missed = sessions.filter((s) => s.status === 'done' && s.dayType === host && s.startedAt && dayOf(s.startedAt) >= (since || '0000') && !neckDays.includes(dayOf(s.startedAt))).map((s) => dayOf(s.startedAt));
     if (!last ? missed.length : daysBetween(last, today) >= 8) {
-      out.push({ key: 'neck', priority: 60, facts: `Neck: his plan since ${since || '?'} puts it ${(placeLabel(neck.place) || neck.place || '').toLowerCase()}. ${last ? `Last done ${last}.` : 'Never done yet.'}${missed.length ? ` ${host[0].toUpperCase()}${host.slice(1)} days without it: ${missed.join(', ')}.` : ''} His Neck routine is 3 exercises (light, about 10 minutes); the 30% cap applies from a light start.` });
+      out.push({ key: 'neck', priority: 60, facts: `Neck: his plan since ${since || '?'} puts it ${(placeLabel(neck.place) || neck.place || '').toLowerCase()}. ${last ? `Last done ${last}.` : 'Never done yet.'}${missed.length ? ` ${host[0].toUpperCase()}${host.slice(1)} days without it: ${missed.join(', ')}.` : ''} His Neck routine is 3 exercises, 2 × 20 each at 0.9 kg (light, about 10 minutes); the 30% cap applies from a light start. Where: ${neck.where ? `${neck.where}${neck.homeGear ? ` (at home he has: ${neck.homeGear})` : ''}` : 'not decided: ask whether he wants it at the gym (after a session, plates there) or at home'}. At home he has no plates: a water bottle filled by volume (0.9 kg = a 1 L bottle filled to 900 ml) on a folded towel.` });
     }
   }
   // Tendon holds: behind the phase's target (heal: 2 a day; fix: 3-4 a week).
