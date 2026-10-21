@@ -143,6 +143,7 @@ const ROWS = [
   ['Standing Calf Raise (Smith)', W, 'calves', '', 'smith'],
   ['Seated Calf Raise', W, 'calves', '', 'machine'],
   ['Calf Press (Machine)', W, 'calves', '', 'machine'],
+  ['Calf Raise (Horizontal Leg Press)', W, 'calves', '', 'machine'],
   // Abs
   ['Crunch', B, 'abdominals', '', 'bodyweight'],
   ['Crunch (Machine)', W, 'abdominals', '', 'machine'],
