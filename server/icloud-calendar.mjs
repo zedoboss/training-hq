@@ -42,7 +42,10 @@ export function desiredEvents(items, now = Date.now(), { hours = HOURS, tz = 'UT
   return items.filter((r) => r.at <= now + hours * 3600000).map((r) => {
     const title = `${oneLine(r.kind === 'coach' && r.body ? r.body : r.title, 180)} · ${formatTime(new Date(r.at), tz)}`;
     const notes = oneLine(`${r.kind === 'coach' ? '' : `${r.body || ''} `}Backup from Training HQ for ${formatTime(new Date(r.at), tz)}: it rings only when the Mac couldn't send it.`, 400);
-    return { key: `${KEY_PREFIX}${r.id}@${r.at}#${hash(`${title}|${notes}`)}`, title, notes, at: r.at + alertMin * 60000 };
+    // Only characters Calendar stores as they are (Thu 10/22: it kept "#" as "%23", so the Mac never recognised its own
+    // events and made all of them again at every check).
+    const key = `${KEY_PREFIX}${r.id}@${r.at}-${hash(`${title}|${notes}`)}`.replace(/[^A-Za-z0-9:@._-]/g, '_');
+    return { key, title, notes, at: r.at + alertMin * 60000 };
   });
 }
 

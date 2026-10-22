@@ -28,7 +28,10 @@ test('the events: his own words for a coach reminder, starting at the alert time
   assert.equal(ev[0].notes, "Backup from Training HQ for 5:00 PM: it rings only when the Mac couldn't send it.");
   assert.equal(ev[1].title, 'Evening holds · 9:30 PM');
   assert.equal(ev[1].notes, "Knees: 3 holds. Backup from Training HQ for 9:30 PM: it rings only when the Mac couldn't send it.");
-  assert.ok(ev[0].key.startsWith(`${KEY_PREFIX}coach:r1@${at('2026-03-18', '17:00')}#`));
+  assert.ok(ev[0].key.startsWith(`${KEY_PREFIX}coach:r1@${at('2026-03-18', '17:00')}-`));
+  // Thu 10/22: Calendar stored "#" as "%23", so no event was recognised and all were made again at every check.
+  for (const e of ev) assert.match(e.key, /^[A-Za-z0-9:@._-]+$/, 'only characters Calendar keeps as they are');
+  assert.match(desiredEvents([{ ...items[0], id: 'coach:r 1#x/y?z' }], now)[0].key, /^thq-backup:coach:r_1_x_y_z@\d+-[0-9a-f]{8}$/);
   const moved = desiredEvents([{ ...items[0], at: at('2026-03-18', '17:30') }], now, { tz: TZ })[0];
   const reworded = desiredEvents([{ ...items[0], body: 'Mall run' }], now, { tz: TZ })[0];
   assert.notEqual(moved.key, ev[0].key);
