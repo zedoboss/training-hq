@@ -103,19 +103,39 @@ export function workoutDetail(session, sets, records = new Map()) {
 }
 
 /**
- * Record banner (P27): does this ticked set beat the comeback best? Heaviest working weight, against history since
- * the comeback started and the sets already ticked in this session. Never on an exercise's first-ever session.
- * @returns {{kg:number, reps:number|null, previous:number|null}|null}
+ * The records a ticked set makes (P27; Thu 10/22, his words: "Add the PR features from Hevy too, not just new comeback
+ * set record: weight, volume, and I believe 1RM"): Hevy's set records for the exercise's type (Weight, 1RM, Volume for
+ * weight and reps; Reps, Time, Pace for the others), against every session before this one and the sets already
+ * ticked today. A record is ALL-TIME when the full Hevy and Strong history is in (fullHistory) and nothing ever beat
+ * it, else since the comeback started. Never on an exercise's first-ever session, never for warm-ups or holds, and a
+ * value already reached earlier today is no new record.
+ * @returns {null | {kg, reps, previous, kinds: Array<{key, label, value, previous, allTime}>}} previous: the weight
+ *   record's old value (kept for the older callers).
  */
-export function setRecord({ set, name, sessionId, otherSets = [], history, comebackStart = null }) {
-  if (!set?.done || set.kg == null || set.type === 'warmup' || set.type === 'hold') return null;
+export function setRecord({ set, name, type = 'weight_reps', sessionId, otherSets = [], history, comebackStart = null, fullHistory = false, bodyweightKg = null }) {
+  if (!set?.done || set.type === 'warmup' || set.type === 'hold') return null;
   const past = history.all(name).filter((e) => e.sessionId !== sessionId);
   if (!past.length) return null;
-  const prevComeback = past.filter((e) => since(comebackStart)(e) && e.heaviest?.kg != null).reduce((m, e) => Math.max(m, e.heaviest.kg), 0);
-  const today = heaviestOf(otherSets.filter((x) => x.done && x.id !== set.id).map((x) => ({ ...x, hold: x.type === 'hold' })))?.kg ?? 0;
-  const bar = Math.max(prevComeback, today);
-  if (set.kg <= bar) return null;
-  return { kg: set.kg, reps: set.reps ?? null, previous: bar || null };
+  const pts = sessionPoints(past, type);
+  const ptsComeback = pts.filter(since(comebackStart));
+  const point = (sets) => sessionPoints([{ date: '9999-12-31', sets, bodyweightKg }], type)[0] || null;
+  const mine = point([set]);
+  if (!mine) return null;
+  const today = point(otherSets.filter((x) => x.done && x.id !== set.id));
+  const kinds = [];
+  for (const { key, label, better } of setRecordKinds(type)) {
+    const v = mine[key];
+    if (v == null || (better === 'max' && v <= 0)) continue;
+    const pick = (a, b) => (a == null ? b : b == null ? a : better === 'min' ? Math.min(a, b) : Math.max(a, b));
+    const bestOf = (list) => list.reduce((m, p) => pick(m, p[key] ?? null), null);
+    const beats = (prior) => prior != null && (better === 'min' ? v < prior : v > prior);
+    const all = bestOf(pts); const comeback = bestOf(ptsComeback); const t = today?.[key] ?? null;
+    const allTime = fullHistory && beats(pick(all, all == null ? null : t));
+    if (allTime) { kinds.push({ key, label, value: v, previous: pick(all, t), allTime: true }); continue; }
+    if (beats(pick(comeback, comeback == null ? null : t))) kinds.push({ key, label, value: v, previous: pick(comeback, t), allTime: false });
+  }
+  if (!kinds.length) return null;
+  return { kg: set.kg ?? null, reps: set.reps ?? null, previous: kinds.find((x) => x.key === 'heaviest')?.previous ?? null, kinds };
 }
 
 /** True when the logged structure differs from the routine: exercises added, removed, reordered, or set counts changed. */

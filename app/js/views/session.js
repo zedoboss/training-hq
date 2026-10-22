@@ -4,7 +4,8 @@ import { currentBodyweight } from '../lib/health.js';
 import { ready, syncNow } from '../lib/data.js';
 import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
-import { buildHistory } from '../lib/history.js';
+import { buildHistory, activeBridge } from '../lib/history.js';
+import { clockText } from '../lib/records.js';
 import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
@@ -76,7 +77,9 @@ async function context(repo, excludeSessionId) {
   // The programme's name for a lift can differ from his (e.g. a machine's name): the ceiling knows both.
   const alias = new Map(programme.filter((d) => d.kind === 'routine').flatMap((r) => r.exercises || []).filter((e) => e.comebackName && e.hevyName).map((e) => [e.comebackName, e.hevyName]));
   const ceilings = (meta?.preLayoffCeilings || []).map((c) => ({ ...c, also: alias.has(c.name) ? [alias.get(c.name)] : [] }));
-  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, comebackStart: comebackStartOf(meta), bank, ceilings, calm };
+  // All-time records only once the whole Hevy history is in (as the workout detail).
+  const fullHistory = !activeBridge(bridge, sessions) && sessions.some((s) => s.source === 'hevy' && s.status === 'done');
+  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, comebackStart: comebackStartOf(meta), fullHistory, bank, ceilings, calm };
 }
 
 async function startSession(view, routineId, logFor = null) {
@@ -184,14 +187,17 @@ export function render(view, params = []) {
     el.querySelector('[data-k="eta"]').title = eta ? (eta.basis === 'pace' ? 'From your pace today' : eta.basis === 'history' ? 'From your recent sessions of this type' : 'Rough estimate: 2.5 minutes a set') : '';
   };
 
-  /** Banner at the top for a few seconds when a ticked set beats the comeback best (P27). */
+  /** Banner at the top for a few seconds when a ticked set makes records (P27; Thu 10/22: every Hevy kind). */
   const recordBanner = (ex, rec) => {
     document.querySelector('.record-banner')?.remove();
     const el = document.createElement('div');
     el.className = 'record-banner';
     el.setAttribute('role', 'status');
-    el.innerHTML = `<span class="hud c-amber">NEW COMEBACK BEST</span><b>${esc(ex.name)}</b>
-      <span class="hud">${showKg(ex, rec.kg)} ${unitOf(ex).toUpperCase()} × ${rec.reps ?? '–'}${rec.previous ? ` · BEFORE ${showKg(ex, rec.previous)}` : ''}</span>`;
+    const allTime = rec.kinds.every((x) => x.allTime); const mixed = !allTime && rec.kinds.some((x) => x.allTime);
+    const val = (x) => (['heaviest', 'e1rm', 'bestSet'].includes(x.key) ? `${showKg(ex, x.value)} ${unitOf(ex).toUpperCase()}` : x.key === 'longest' ? clockText(x.value) : x.key === 'pace' ? `${clockText(x.value)} /KM` : `${x.value}`);
+    const one = rec.kinds.length === 1 ? rec.kinds[0] : null;
+    el.innerHTML = `<span class="hud c-amber">NEW ${rec.kinds.length > 1 ? 'RECORDS' : 'RECORD'} · ${allTime ? 'ALL-TIME' : mixed ? 'ALL-TIME AND COMEBACK' : 'SINCE THE COMEBACK'}</span><b>${esc(ex.name)}</b>
+      <span class="hud">${rec.kinds.map((x) => `${esc(x.label.toUpperCase())} ${val(x)}${mixed && x.allTime ? ' (ALL-TIME)' : ''}`).join(' · ')}${one?.previous != null ? ` · BEFORE ${val({ ...one, value: one.previous })}` : ''}</span>`;
     document.body.append(el);
     setTimeout(() => el.classList.add('is-on'), 20);
     setTimeout(() => { el.classList.remove('is-on'); setTimeout(() => el.remove(), 400); }, 4000);
@@ -411,7 +417,7 @@ export function render(view, params = []) {
       if (s.done) { await saveSet({ ...s, done: false, doneAt: null }); redrawCard(ex.key); return; }
       const prev = previousFor(prevOf(ex), exSets(ex.key), s);
       const filled = { ...s, ...fillForTick(s, prev), done: true, doneAt: Date.now() };
-      const rec = !editing && prefs().show.recordBanner ? setRecord({ set: filled, name: ex.name, sessionId: session.id, otherSets: exSets(ex.key), history: ctx.history, comebackStart: ctx.comebackStart }) : null;
+      const rec = !editing && prefs().show.recordBanner ? setRecord({ set: filled, name: ex.name, type: ex.type, sessionId: session.id, otherSets: exSets(ex.key), history: ctx.history, comebackStart: ctx.comebackStart, fullHistory: ctx.fullHistory, bodyweightKg: session.bodyweightKg ?? null }) : null;
       if (rec) play('record', prefs().sounds.recordVolume); else play('tick', prefs().sounds.tickVolume);
       if (!editing) talkRun?.stop();
       await saveSet(filled);

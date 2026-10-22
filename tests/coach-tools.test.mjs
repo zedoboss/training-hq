@@ -251,7 +251,7 @@ test('a session started, sets logged by voice-style numbers, the 30% guard and t
   const a = await call('log_set', { kg: 60, reps: 8 });
   assert.match(a.text, /^Logged Squat \(Smith Machine\), set 1 of 2: 60 kg total \(15 kg bar \+ 22\.5 kg a side\) × 8\./);
   assert.match(a.text, /Over his 30% cap: heaviest in the last 7 days was 40 kg \(Tuesday 1\/13\); 60 kg is 50% more; the cap is 52 kg\. 50 kg keeps him under it\./);
-  assert.match(a.text, /New comeback best/);
+  assert.match(a.text, /New records? on Squat \(Smith Machine\): heaviest weight 60 kg \(before [0-9.]+ kg\), since the comeback/);
   assert.deepEqual(actions.at(-1), { kind: 'rest', seconds: 180, label: 'Squat (Smith Machine)' });
   clock += 60000;
   const b = await call('log_set', { reps: 9 });

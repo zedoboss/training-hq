@@ -201,7 +201,7 @@ test('record banner: a ticked set over the comeback best, not on a first-ever ex
   const h = buildHistory({ bridge });
   const set = (id, kg, type = 'normal') => ({ id, kg, reps: 8, type, done: true });
   const name = 'Bench Press (Smith Machine)';
-  assert.deepEqual(setRecord({ set: set('a', 53.8), name, sessionId: 'x', history: h }), { kg: 53.8, reps: 8, previous: 51.3 });
+  assert.deepEqual(setRecord({ set: set('a', 53.8), name, sessionId: 'x', history: h }), { kg: 53.8, reps: 8, previous: 51.3, kinds: [{ key: 'heaviest', label: 'Weight', value: 53.8, previous: 51.3, allTime: false }] });
   assert.equal(setRecord({ set: set('a', 51.3), name, sessionId: 'x', history: h }), null, 'equal is not a record');
   assert.equal(setRecord({ set: set('b', 53.8), name, sessionId: 'x', otherSets: [set('a', 53.8)], history: h }), null, 'already beaten today at that load');
   assert.deepEqual(setRecord({ set: set('b', 56.3), name, sessionId: 'x', otherSets: [set('a', 53.8)], history: h }).previous, 53.8);
@@ -209,6 +209,25 @@ test('record banner: a ticked set over the comeback best, not on a first-ever ex
   assert.equal(setRecord({ set: set('a', 99, 'hold'), name, sessionId: 'x', history: h }), null, 'holds never count');
   assert.equal(setRecord({ set: set('a', 99), name: 'Never Done Before', sessionId: 'x', history: h }), null, 'first-ever session');
   assert.equal(setRecord({ set: { ...set('a', 60), done: false }, name, sessionId: 'x', history: h }), null);
+});
+
+test('records on a tick, as Hevy (Thu 10/22): weight, 1RM and volume, each all-time or since the comeback', async () => {
+  const { setRecord } = await import('../app/js/lib/finish.js');
+  const entry = (sessionId, date, sets) => ({ sessionId, date, at: Date.parse(`${date}T05:00:00Z`), sets: sets.map(([kg, reps]) => ({ kg, reps, type: 'normal' })) });
+  // Before the layoff: 100 x 3 (heaviest, 1RM 110), 80 x 10 (volume 800). Since the comeback (9/24): 60 x 10 and 65 x 8.
+  const h = { all: () => [entry('c2', '2026-10-15', [[65, 8]]), entry('c1', '2026-09-28', [[60, 10]]), entry('old', '2026-04-10', [[100, 3], [80, 10]])] };
+  const o = { name: 'Squat (Smith Machine)', sessionId: 'now', history: h, comebackStart: '2026-09-24' };
+  const set = (id, kg, reps) => ({ id, kg, reps, type: 'normal', done: true });
+  const keys = (r) => r?.kinds.map((x) => `${x.label} ${x.value}${x.allTime ? ' all-time' : ''}`) ?? null;
+  // 70 x 6: weight 70 > 65, 1RM 84 > 82.3, volume 420 < 600: two comeback records.
+  assert.deepEqual(keys(setRecord({ ...o, set: set('a', 70, 6) })), ['Weight 70', '1RM 84']);
+  // 62.5 x 12: volume 750 > 600 (and 1RM 87.5); weight no.
+  assert.deepEqual(keys(setRecord({ ...o, set: set('a', 62.5, 12) })), ['1RM 87.5', 'Volume 750']);
+  // With the whole history in: 85 x 10 beats 800 volume and 110 1RM all-time; weight only since the comeback.
+  assert.deepEqual(keys(setRecord({ ...o, fullHistory: true, set: set('a', 85, 10) })), ['Weight 85', '1RM 113.3 all-time', 'Volume 850 all-time']);
+  // A set already beaten earlier today makes no record; the earlier set is the bar.
+  assert.equal(setRecord({ ...o, set: set('b', 70, 6), otherSets: [set('a', 70, 6)] }), null);
+  assert.deepEqual(setRecord({ ...o, set: set('b', 72.5, 6), otherSets: [set('a', 70, 6)] }).kinds.map((x) => x.previous), [70, 84]);
 });
 
 test('routine weights follow the last session set by set, or the routine own weights when switched off (P11)', () => {

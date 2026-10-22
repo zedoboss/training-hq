@@ -32,6 +32,7 @@ import { foodsDb, myFoods } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 import { newChange, COL as CHANGES, KINDS as CHANGE_KINDS } from './changes.mjs';
+import { activeBridge } from '../../app/js/lib/history.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -113,7 +114,9 @@ async function logSet(a, ctx) {
   let filled = { ...set, ...patch };
   filled = { ...filled, ...fillForTick(filled, previousFor(prevAll, withNew, filled)), done: true, doneAt: s.now };
   const guard = filled.type === 'warmup' || filled.type === 'hold' ? null : guardFor(s, session, ex, filled.kg);
-  const rec = setRecord({ set: filled, name: ex.name, sessionId: session.id, otherSets: withNew, history, comebackStart: comebackStartOf(s.meta()) });
+  const sessions = s.list('sessions');
+  const fullHistory = !activeBridge(s.one('bridge', 'last-loads'), sessions) && sessions.some((x) => x.source === 'hevy' && x.status === 'done');
+  const rec = setRecord({ set: filled, name: ex.name, type: ex.type, sessionId: session.id, otherSets: withNew, history, comebackStart: comebackStartOf(s.meta()), fullHistory, bodyweightKg: session.bodyweightKg ?? null });
   put(s, 'sets', filled.id, filled);
   const after = withNew.map((x) => (x.id === filled.id ? filled : x));
   const next = after.find((x) => !x.done);
@@ -128,7 +131,7 @@ async function logSet(a, ctx) {
   const lines = [`Logged ${ex.name}, set ${setNo(after, filled)} of ${after.length}${added ? ' (an extra set)' : ''}${filled.type !== 'normal' ? ` (${filled.type})` : ''}: ${valuesText(ex, filled)}.${t.kg != null || t.reps ? ` Target was ${t.kg != null ? k(t.kg) : '?'} × ${repsText(t.reps) || '?'}.` : ''}${restLine}`];
   if (guard) lines.push(guard);
   else if (t.kg > 0 && filled.kg != null && filled.kg > t.kg * 1.5 && filled.type !== 'warmup') lines.push(`Check it: ${k(filled.kg)} kg is far above today's target of ${k(t.kg)} kg on ${ex.name}.`);
-  if (rec) lines.push(`New comeback best on ${ex.name}: ${k(rec.kg)} kg${rec.previous ? ` (before: ${k(rec.previous)} kg)` : ''}.`);
+  if (rec) lines.push(`New record${rec.kinds.length > 1 ? 's' : ''} on ${ex.name}: ${rec.kinds.map((x) => `${x.label === 'Volume' ? 'best set volume' : x.label === '1RM' ? 'best 1RM (est.)' : x.label === 'Weight' ? 'heaviest weight' : x.label.toLowerCase()} ${['heaviest', 'e1rm', 'bestSet'].includes(x.key) ? `${k(x.value)} kg` : x.value}${x.previous != null ? ` (before ${['heaviest', 'e1rm', 'bestSet'].includes(x.key) ? `${k(x.previous)} kg` : x.previous})` : ''}, ${x.allTime ? 'all-time' : 'since the comeback'}`).join('; ')}.`);
   lines.push(nowEx ? `Next: ${nextSetText(nowEx, allSets)}.` : 'That was the last set of the session: he finishes it on the phone (summary and records).');
   return wrote(lines.join('\n'), `${ex.name} ${valuesText(ex, filled)}${guard ? ' · over 30% cap' : ''}`);
 }
