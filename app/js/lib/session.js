@@ -184,6 +184,28 @@ export function previousFor(prev, sets, set) {
   return prev?.[kind]?.[i] ?? null;
 }
 
+/**
+ * One tap on the "previous" column copies last time's numbers into a set, but never into a set already ticked (Thu
+ * 10/22, his words: "fix it so a logged set is never overwritten": at 10:38 AM, on leg curls, a tap on the squat card's
+ * previous column put last time's 51.8 kg x 8 over the 61.3 kg x 8 he had ticked at 10:27 AM). Returns the set with
+ * the copy, or null when nothing may change. A ticked set changes only when he types into it.
+ */
+export function copyPrevious(set, previous) {
+  if (!set || set.done || !previous) return null;
+  return { ...set, kg: previous.kg ?? set.kg, reps: previous.reps ?? set.reps, durationS: previous.durationS ?? set.durationS };
+}
+
+/**
+ * The sets a load from the plate calculator goes into: the next set not ticked (all: every set not ticked, holds and
+ * warm-ups aside). Never a ticked set: with every set ticked, nothing (the calculator is then only a calculator).
+ */
+export function plateTargets(sets, { all = false } = {}) {
+  const open = sets.filter((s) => !s.done);
+  if (all) return open.filter((s) => s.type !== 'hold' && s.type !== 'warmup');
+  const next = open.find((s) => s.type !== 'hold' && s.type !== 'warmup') || open[0];
+  return next ? [next] : [];
+}
+
 /** What to fill when a set is ticked with empty fields: previous values, then the target. */
 export function fillForTick(set, previous) {
   const out = {};

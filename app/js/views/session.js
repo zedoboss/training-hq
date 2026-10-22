@@ -6,7 +6,7 @@ import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { clockText } from '../lib/records.js';
-import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
+import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay, timeAt, zoneOf } from '../lib/time.js';
@@ -150,6 +150,11 @@ export function render(view, params = []) {
   };
   const saveSession = async (patch) => { session = { ...session, ...patch }; await repo.put('sessions', session.id, session); };
   const saveSet = async (set) => { sets = sets.map((s) => (s.id === set.id ? set : s)); if (!sets.some((s) => s.id === set.id)) sets.push(set); await repo.put('sets', set.id, set); };
+  /**
+   * Changes some fields of a set as it is NOW (Thu 10/22: a save that waited on the 30% sheet, or on a menu, wrote back
+   * the copy from before: he'd ticked the set meanwhile and it came back un-ticked with no reps). Gone: nothing.
+   */
+  const patchSet = async (setId, patch) => { const cur = sets.find((x) => x.id === setId); if (!cur) return null; const next = { ...cur, ...patch }; await saveSet(next); return next; };
 
   /** Previous values for an exercise: any session, or the same routine (Settings). */
   const prevOf = (ex) => ctx.history.previous(ex.name, prefs().previousFrom === 'same-routine' ? { routineId: session.routineId, dayType: session.dayType } : null);
@@ -343,7 +348,7 @@ export function render(view, params = []) {
     const placeholder = second === 'reps' ? rangeText(s.target?.reps) || (prev?.reps ?? '') : second === 'durationS' ? '30' : '';
     return `<div class="set-row ${s.done ? 'is-done' : ''} type-${s.type}" data-set="${esc(s.id)}">
       <button class="set-label" data-a="type" type="button" aria-label="Set ${esc(label)}: change type or delete">${esc(label)}</button>
-      <button class="set-prev" data-a="prev" type="button" ${prev ? '' : 'disabled'} aria-label="Copy previous ${esc(prevText)}">${esc(prevText)}</button>
+      <button class="set-prev" data-a="prev" type="button" ${prev && !s.done ? '' : 'disabled'} aria-label="${s.done ? `Previous ${esc(prevText)} (this set is logged)` : `Copy previous ${esc(prevText)}`}">${esc(prevText)}</button>
       ${fields.includes('kg') || fields.includes('distanceM') && !fields.includes('kg')
         ? `<input class="set-in" data-f="${fields.includes('kg') ? 'kg' : 'distanceM'}" inputmode="decimal" value="${esc(fields.includes('kg') ? showKg(ex, s.kg) : s.distanceM != null ? toDistance(s.distanceM, distUnit()) : '')}" placeholder="${fields.includes('kg') ? (s.target?.kg != null ? showKg(ex, s.target.kg) : unitOf(ex)) : distUnit()}" aria-label="${fields.includes('kg') ? unitOf(ex) : distUnit()}">`
         : '<span></span>'}
@@ -447,13 +452,13 @@ export function render(view, params = []) {
       talkRun?.stop(); scriptFor = null;
       // Stopped during GET READY: nothing was held, nothing is filled.
       if (secs == null) { redrawCard(ex.key); return; }
-      await saveSet({ ...s, durationS: secs });
+      await patchSet(s.id, { durationS: secs });
       if (!s.done) await onSetAction(setId, 'tick');
       return;
     }
     if (action === 'tick') {
       rest.unlockAudio();
-      if (s.done) { await saveSet({ ...s, done: false, doneAt: null }); redrawCard(ex.key); return; }
+      if (s.done) { await patchSet(s.id, { done: false, doneAt: null }); redrawCard(ex.key); return; }
       const prev = previousFor(prevOf(ex), exSets(ex.key), s);
       const filled = { ...s, ...fillForTick(s, prev), done: true, doneAt: Date.now() };
       const rec = !editing && prefs().show.recordBanner ? setRecord({ set: filled, name: ex.name, type: ex.type, sessionId: session.id, otherSets: exSets(ex.key), history: ctx.history, comebackStart: ctx.comebackStart, fullHistory: ctx.fullHistory, bodyweightKg: session.bodyweightKg ?? null }) : null;
@@ -470,18 +475,19 @@ export function render(view, params = []) {
         view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     } else if (action === 'prev') {
-      const prev = previousFor(prevOf(ex), exSets(ex.key), s);
-      if (!prev) return;
-      await saveSet({ ...s, kg: prev.kg ?? s.kg, reps: prev.reps ?? s.reps, durationS: prev.durationS ?? s.durationS });
+      // A ticked set is logged: a tap here (on purpose or while scrolling) never changes it (copyPrevious).
+      const copied = copyPrevious(s, previousFor(prevOf(ex), exSets(ex.key), s));
+      if (!copied) return;
+      await saveSet(copied);
       redrawCard(ex.key);
     } else if (action === 'type') {
       actionSheet('Set type', [
-        ...Object.entries(SET_TYPES).map(([k, t]) => ({ label: `${t.short || 'N'} · ${t.label}${s.type === k ? ' (now)' : ''}`, run: async () => { await saveSet({ ...s, type: k, ...(k === 'hold' && s.durationS == null ? { durationS: 30 } : {}) }); redrawCard(ex.key); } })),
+        ...Object.entries(SET_TYPES).map(([k, t]) => ({ label: `${t.short || 'N'} · ${t.label}${s.type === k ? ' (now)' : ''}`, run: async () => { const cur = sets.find((x) => x.id === s.id) || s; await patchSet(s.id, { type: k, ...(k === 'hold' && cur.durationS == null ? { durationS: 30 } : {}) }); redrawCard(ex.key); } })),
         ...(prefs().show.rpe || s.rpe ? [{ label: `RPE${s.rpe ? ` (now ${s.rpe})` : ''}`, run: () => actionSheet('RPE: how many more reps could you have done?', [
-          ...RPE.map(([v, hint]) => ({ label: `${v} · ${hint}`, run: async () => { await saveSet({ ...s, rpe: v }); redrawCard(ex.key); } })),
-          { label: 'Clear RPE', run: async () => { await saveSet({ ...s, rpe: null }); redrawCard(ex.key); } },
+          ...RPE.map(([v, hint]) => ({ label: `${v} · ${hint}`, run: async () => { await patchSet(s.id, { rpe: v }); redrawCard(ex.key); } })),
+          { label: 'Clear RPE', run: async () => { await patchSet(s.id, { rpe: null }); redrawCard(ex.key); } },
         ]) }] : []),
-        { label: s.note ? 'Edit set note' : 'Add set note', run: async () => { const t = await promptText('Set note', s.note || ''); if (t != null) { await saveSet({ ...s, note: t }); redrawCard(ex.key); } } },
+        { label: s.note ? 'Edit set note' : 'Add set note', run: async () => { const t = await promptText('Set note', s.note || ''); if (t != null) { await patchSet(s.id, { note: t }); redrawCard(ex.key); } } },
         { label: 'Delete set', danger: true, run: async () => { await repo.remove('sets', s.id); sets = sets.filter((x) => x.id !== s.id); redrawCard(ex.key); } },
       ]);
     }
@@ -518,12 +524,14 @@ export function render(view, params = []) {
       redrawCard(key);
     } else if (action === 'plates') {
       const all = exSets(key);
-      const cur = all.find((s) => !s.done && s.type !== 'hold' && s.type !== 'warmup') || all.find((s) => !s.done) || all[all.length - 1];
-      const res = await platesSheet({ name: ex.name, kg: cur?.kg ?? ex.target?.kg ?? null, barKg: ex.barKg, plates: equipmentWithDefaults(getState().equipment).plates });
+      const cur = plateTargets(all)[0] || null;
+      const res = await platesSheet({ name: ex.name, kg: cur?.kg ?? all[all.length - 1]?.kg ?? ex.target?.kg ?? null, barKg: ex.barKg, plates: equipmentWithDefaults(getState().equipment).plates });
       if (!res) return;
+      // Only sets not ticked yet: a logged set is never overwritten (Thu 10/22).
+      const targets = plateTargets(all, { all: res.all });
+      if (!targets.length) { toast('Every set is ticked: nothing changed.'); return; }
       const ok = await checkGuard(ex, res.kg);
-      const targets = res.all ? all.filter((s) => !s.done && s.type !== 'hold' && s.type !== 'warmup') : [cur].filter(Boolean);
-      for (const s of targets) await saveSet({ ...s, kg: ok });
+      for (const s of targets) if (!sets.find((x) => x.id === s.id)?.done) await patchSet(s.id, { kg: ok });
       redrawCard(key);
     } else if (action === 'ex-more') {
       const idx = session.exercises.indexOf(ex);
@@ -665,7 +673,9 @@ export function render(view, params = []) {
         value = await checkGuard(ex, value);
         input.value = showKg(ex, value);
       }
-      await saveSet({ ...s, [input.dataset.f]: value });
+      await patchSet(s.id, { [input.dataset.f]: value });
+      // The row was drawn again while the 30% sheet was open (he ticked it): show the saved number.
+      if (!input.isConnected) redrawCard(ex.key);
       header();
       view.dispatchEvent(new CustomEvent('set-changed', { detail: { setId: s.id, field: input.dataset.f } }));
     });

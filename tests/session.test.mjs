@@ -323,3 +323,18 @@ test('holds never step up (Thu 10/22: his knee hold is the full stack, 104 kg)',
   const lib = new Map([['leg-extension-hold-machine', { id: 'leg-extension-hold-machine', name: 'Leg Extension Hold (Machine)', type: 'weight_duration' }]]);
   assert.deepEqual(buildSession({ routine: r, meta, lib, history: h, today: '2026-10-25' }).sets.map((x) => x.kg), [104, 104, 104]);
 });
+
+test('a logged set is never overwritten by "previous" or the plate calculator (Thu 10/22: 51.8 x 8 over his ticked 61.3 x 8)', async () => {
+  const { copyPrevious, plateTargets } = await import('../app/js/lib/session.js');
+  const prev = { kg: 51.8, reps: 8 };
+  const ticked = { id: 's1', type: 'normal', kg: 61.3, reps: 8, done: true, doneAt: 1 };
+  assert.equal(copyPrevious(ticked, prev), null, 'a tap on the previous column of a ticked set changes nothing');
+  assert.deepEqual(copyPrevious({ ...ticked, done: false, doneAt: null, kg: null, reps: null }, prev), { id: 's1', type: 'normal', kg: 51.8, reps: 8, done: false, doneAt: null, durationS: undefined });
+  assert.equal(copyPrevious({ ...ticked, done: false }, null), null);
+  const warm = { id: 'w', type: 'warmup', done: true };
+  const s1 = { id: 'a', type: 'normal', done: true }; const s2 = { id: 'b', type: 'normal', done: false }; const s3 = { id: 'c', type: 'normal', done: false };
+  assert.deepEqual(plateTargets([warm, s1, s2, s3]).map((x) => x.id), ['b'], 'the next set not ticked');
+  assert.deepEqual(plateTargets([warm, s1, s2, s3], { all: true }).map((x) => x.id), ['b', 'c']);
+  assert.deepEqual(plateTargets([warm, s1, { ...s2, done: true }, { ...s3, done: true }]), [], 'every set ticked: nothing');
+  assert.deepEqual(plateTargets([{ id: 'h', type: 'hold', done: false }]).map((x) => x.id), ['h'], 'only a hold left: that one');
+});
