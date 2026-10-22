@@ -98,7 +98,7 @@ test('after the gym, in order: the Evolt ask, "head home" 5 min after the scan, 
   const r = of({ sessions: [...sessions, holds] });
   const ask = pick(r, `scan-after:${D}`);
   assert.equal(ask.at, at('11:59'));
-  assert.match(ask.body, /^Before you leave the gym: the Evolt scan/);
+  assert.match(ask.body, /^Do it before you leave the gym/);
   assert.equal(pick(r, `home:${D}`).at, at('12:14'));
   assert.equal(pick(r, `meal-cook:${D}:1230`).at, at('12:19'));
   assert.ok(r.filter((x) => x.due).map((x) => x.id).indexOf(`scan-after:${D}`) < r.filter((x) => x.due).map((x) => x.id).indexOf(`meal-cook:${D}:1230`), 'the Evolt ask comes first');

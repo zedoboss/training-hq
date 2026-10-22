@@ -32,6 +32,9 @@ test('every notification is the coach\'s: facts first, one line in his moods; ca
   assert.equal(coachReminder({ kind: 'session', title: 'Legs at 4:30 AM', body: 'Week 3 column.' }, { rng: fixed }).body, 'Legs at 4:30 AM. Week 3 column. Get it done.');
   assert.equal(coachReminder({ kind: 'readiness', title: 'Sore, or good to go?', body: 'Check in.' }, { rng: fixed }).body, 'Sore, or good to go? Check in. Get it done.');
   assert.equal(coachReminder({ kind: 'sauna', title: 'Sauna: time is up', body: 'Get out now.' }, { rng: fixed }).body, 'Sauna: time is up. Get out now.', 'sauna stays calm');
+  // Thu 10/22, his words: "Why did it say head home twice?": a title the text already says is not said again.
+  assert.equal(coachReminder({ kind: 'meals', title: 'Head home', body: 'Gym done. Head home and get settled.', calm: true }, { rng: fixed }).body, 'Gym done. Head home and get settled.');
+  assert.equal(coachReminder({ kind: 'meals', title: 'Head home', body: 'Gym done. Get settled, food is next.', calm: true }, { rng: fixed }).body, 'Head home. Gym done. Get settled, food is next.', 'soft: no mood line');
 });
 
 test('nudges: the morning sleep question, the session and the Evolt, food behind pace, fresh steps only', () => {

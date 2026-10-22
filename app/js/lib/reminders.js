@@ -155,7 +155,7 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
     const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan });
     if (ag?.scanAskAt) {
       out.push({ id: `scan-after:${date}`, kind: 'scan', at: ag.scanAskAt, url: '#/body/scan', tag: `scan-after-${date}`, fixed: false,
-        title: 'Evolt scan?', body: 'Before you leave the gym: the Evolt scan, then add the results (photo or PDF).', due: true });
+        title: 'Evolt scan?', body: 'Do it before you leave the gym, then add the results (photo or PDF).', due: true });
     }
   }
   if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday }));
@@ -212,7 +212,7 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
     if (ag) {
       const fed = meals.some((m) => m.date === date && m.at >= ag.doneAt);
       out.push({ id: `home:${date}`, kind: 'meals', at: ag.homeAt, url: '#/fuel', tag: `home-${date}`, fixed: false,
-        title: 'Head home', body: 'Gym done. Head home and get settled. Food is next.', due: !fed });
+        title: 'Head home', body: 'Gym done. Get settled, food is next.', calm: true, due: !fed });
       const from = activity.workoutStart?.[date] ?? ag.doneAt;
       const moved = out.filter((i) => (i.kind === 'meals' || i.kind === 'cook') && i.id !== `home:${date}` && i.at >= from && i.at < ag.mealAt);
       // One prompt per meal at that moment: the later one (the meal itself over "start cooking").

@@ -47,11 +47,15 @@ export function coachVoice(text, { bank = null, moods = {}, intensity = 3, calm 
   return { title: 'Coach', body: line?.text ? `${facts} ${line.text}` : facts };
 }
 
-/** A planned reminder (lib/reminders.js) said by the coach: its title becomes the first sentence. */
+/**
+ * A planned reminder (lib/reminders.js) said by the coach: its title becomes the first sentence, unless the text
+ * already says it (Thu 10/22, his words: "Why did it say head home twice?"). A calm item gets no mood line.
+ */
 export function coachReminder(item, opts = {}) {
   const head = String(item.title || '').replace(/[.?!:]?\s*$/, (m) => (/[?!]/.test(m) ? m.trim() : '.'));
-  const text = [head, item.body].filter(Boolean).join(' ');
-  return coachVoice(text, { ...opts, calm: opts.calm || CALM_KINDS.has(item.kind) });
+  const said = (t) => t.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const text = item.body && head && said(item.body).includes(said(head)) ? item.body : [head, item.body].filter(Boolean).join(' ');
+  return coachVoice(text, { ...opts, calm: opts.calm || item.calm || CALM_KINDS.has(item.kind) });
 }
 
 // Which planned reminders are nudged again while still open: [key prefix, priority, minutes between nudges].
