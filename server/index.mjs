@@ -101,6 +101,8 @@ const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.data
 const changes = config.coachChanges === false ? null : openChanges({
   store, push, codeDir: config.changesCodeDir || CODE_DIR, privateDir: p.privateDir, tz: () => phoneZone(store), log,
   restart: () => setTimeout(() => shutdown('a coach change updated the server'), 2000).unref(),
+  // A workout left open for hours (a forgotten test) doesn't hold the restart back for ever.
+  busy: () => store.listRecords('sessions').some((r) => r.data?.status === 'active' && Date.now() - (r.data.startedAt || 0) < 4 * 3600000),
 });
 const changesTimer = changes ? setInterval(() => { changes.tick().catch((e) => log(`coach changes: ${e.stack || e}`)); }, 15000) : null;
 changesTimer?.unref();

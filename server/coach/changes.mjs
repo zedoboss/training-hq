@@ -113,13 +113,15 @@ export function guardSettings({ node = process.execPath, guard, codeDir, private
  * @param {(o) => number} [o.launch] starts a builder, returns its pid (tests pass a fake)
  * @param {(pid:number) => boolean} [o.isAlive]
  * @param {() => void} [o.restart] the server restarts itself (a builder changed server code)
+ * @param {() => boolean} [o.busy] a workout is running: the restart waits for it to end
  */
-export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, log = () => {}, now = () => Date.now(), tz = () => 'UTC', maxPerDay = MAX_PER_DAY, timeoutMs = TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)) }) {
+export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, log = () => {}, now = () => Date.now(), tz = () => 'UTC', maxPerDay = MAX_PER_DAY, timeoutMs = TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)) }) {
   const dir = join(privateDir, 'logs', 'coach-changes');
   const all = () => store.listRecords(COL).map((r) => r.data).filter(Boolean).sort((a, b) => a.at - b.at);
   const put = (c) => { store.writeLocal(COL, c.id, c); return c; };
   const files = (id) => ({ logFile: join(dir, `${id}.log`), resultFile: join(dir, `${id}.result.json`) });
-  let busy = false;
+  let ticking = false;
+  let restartDue = false;
 
   function sayInTalk(c, text, kind = 'change') {
     const at = now();
@@ -156,7 +158,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     put({ ...c, status, doneAt: now(), answer, reload: Boolean(result?.reload), commits: Array.isArray(result?.commits) ? result.commits.slice(0, 6).map((x) => clip(x, 120)) : [] });
     await tell(c, answer);
     log(`coach change ${c.id}: ${status}${result?.reload ? ', server restarts' : ''}`);
-    if (status === 'done' && result?.reload) restart();
+    if (status === 'done' && result?.reload) restartDue = true;
   }
 
   async function check(c) {
@@ -193,11 +195,14 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
 
   /** Once every few seconds: finish what ended, start the next one. */
   async function tick() {
-    if (busy) return;
-    busy = true;
+    if (ticking) return;
+    ticking = true;
     try {
       const working = all().filter((c) => c.status === 'working');
       for (const c of working) await check(c);
+      // New server code is live only after a restart; never in the middle of a workout (the phone carries on offline,
+      // but the voice coach would drop out).
+      if (restartDue && !busy()) { restartDue = false; restart(); return; }
       if (all().some((c) => c.status === 'working')) return;
       const next = all().find((c) => c.status === 'queued');
       if (!next) return;
@@ -208,7 +213,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
         log(`coach change ${next.id}: ${e.message}`);
         await finish(next, { status: 'failed', said: `I couldn't start the change on the Mac: ${e.message}.` });
       }
-    } finally { busy = false; }
+    } finally { ticking = false; }
   }
 
   return { request, cancel, tick, list: all, forContext, files, _finish: finish };

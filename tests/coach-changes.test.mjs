@@ -23,14 +23,14 @@ const msg = (id, role, text, hm, extra = {}) => store.writeLocal('coach-messages
 const talk = () => store.listRecords('coach-messages').map((r) => r.data).filter((m) => m.kind === 'change');
 
 function queue(o = {}) {
-  const launched = []; const pushed = []; let restarts = 0; const alive = new Set();
+  const launched = []; const pushed = []; let restarts = 0; const alive = new Set(); let workout = false;
   const q = openChanges({
     store, codeDir: '/code', privateDir: dir, tz: () => TZ, now: () => clock,
     push: { list: () => [{}], notify: async (n) => { pushed.push(n); return { sent: 1 }; } },
     launch: (a) => { launched.push(a); const pid = 1000 + launched.length; alive.add(pid); return pid; },
-    isAlive: (pid) => alive.has(pid), restart: () => { restarts++; }, ...o,
+    isAlive: (pid) => alive.has(pid), restart: () => { restarts++; }, busy: () => workout, ...o,
   });
-  return { q, launched, pushed, alive, restarts: () => restarts };
+  return { q, launched, pushed, alive, restarts: () => restarts, training: (v) => { workout = v; } };
 }
 
 test('his complaint in Talk: the coach files it with his words and the conversation, and follows it already', async () => {
@@ -55,7 +55,7 @@ test('his complaint in Talk: the coach files it with his words and the conversat
 });
 
 test('the builder: started detached in the private folder with the guard; its answer lands in Talk and as a notification', async () => {
-  const { q, launched, pushed, alive, restarts } = queue();
+  const { q, launched, pushed, alive, restarts, training } = queue();
   msg('m1', 'user', 'Stop the supplement message after a snack', '09:22');
   const c = q.request({ said: 'Stop the supplement message after a snack', want: 'supplements after the first and second meal only', kind: 'behaviour' });
   await q.tick();
@@ -72,6 +72,7 @@ test('the builder: started detached in the private folder with the guard; its an
   clock += 8 * 60000;
   writeFileSync(q.files(c.id).resultFile, JSON.stringify({ status: 'done', said: 'Done: no supplement message after a snack any more.', reload: true, commits: ['abc123 Supplements wait for a real meal'] }));
   alive.clear();
+  training(true);
   await q.tick();
   const done = store.getRecord(COL, c.id).data;
   assert.equal(done.status, 'done');
@@ -80,7 +81,12 @@ test('the builder: started detached in the private folder with the guard; its an
   assert.deepEqual(talk().map((m) => m.text), ['Done: no supplement message after a snack any more.']);
   assert.equal(talk()[0].ref, `change:${c.id}`);
   assert.deepEqual(pushed.map((p) => [p.title, p.url]), [['Coach', '#/coach']]);
-  assert.equal(restarts(), 1, 'server code changed: the server restarts itself');
+  assert.equal(restarts(), 0, 'not while he trains');
+  await q.tick();
+  assert.equal(restarts(), 0);
+  training(false);
+  await q.tick();
+  assert.equal(restarts(), 1, 'server code changed: the server restarts itself once the workout is over');
   assert.match(contextLine({ store, tz: TZ, now: clock }), /Changes finished in the last day[^\n]*\[Thursday 3\/19 9:32 AM, done\] "Stop the supplement message after a snack" -> Done: no supplement/);
 });
 
