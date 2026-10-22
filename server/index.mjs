@@ -10,9 +10,10 @@ import { openImports } from './imports.mjs';
 import { openImportInbox } from './import-inbox.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
-import { startNotifier, phoneZone, sessionBusy } from './notify.mjs';
+import { startNotifier, phoneZone } from './notify.mjs';
 import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
+import { openCalendar } from './calendar.mjs';
 import { openEvoltImport } from './evolt-import.mjs';
 import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
@@ -70,6 +71,7 @@ restTimer.unref();
 const notifier = startNotifier({ store, push, log, coach: () => { try { return coach; } catch { return null; } } });
 // "When I arrive at the gym" (A10): the iPhone automation's call; days follow the phone's zone like the reminders.
 const arrive = openArrive({ store, push, tz: () => phoneZone(store), log });
+const calendar = openCalendar({ store, tz: () => phoneZone(store) });
 // Evolt results PDFs (A11): originals kept in imports/evolt/ in the private folder.
 const evolt = openEvoltImport({ dir: join(p.importsDir, 'evolt'), log });
 
@@ -107,8 +109,8 @@ const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.data
 const changes = config.coachChanges === false ? null : openChanges({
   store, push, codeDir: config.changesCodeDir || CODE_DIR, privateDir: p.privateDir, tz: () => phoneZone(store), log,
   restart: () => setTimeout(() => shutdown('a coach change updated the server'), 2000).unref(),
-  // A workout left open for hours (a forgotten test) or a holds round left open doesn't hold the restart back for ever.
-  busy: () => sessionBusy(store.listRecords('sessions').map((r) => r.data).filter(Boolean), Date.now()),
+  // Mid-workout is fine (his words: "even mid workout it can restart... as long as it saves"); a coach answer isn't.
+  busy: () => Boolean(coach?.talking?.()),
 });
 const changesTimer = changes ? setInterval(() => { changes.tick().catch((e) => log(`coach changes: ${e.stack || e}`)); }, 15000) : null;
 changesTimer?.unref();
@@ -123,7 +125,7 @@ const voice = openVoice({ store, dataDir: p.dataDir, engine, whisper, coach, log
 const tts = openTts({ configDir: p.configDir, log });
 log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, evolt, restPush, onSync, log });
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, calendar, evolt, restPush, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });

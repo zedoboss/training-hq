@@ -361,6 +361,16 @@ export async function arriveLink({ renew = false } = {}) {
   return (await repo.getMeta('macUrl')) + out.path;
 }
 
+/**
+ * The backup reminders' calendar subscription (server/calendar.mjs): {webcal} makes the iPhone offer to subscribe;
+ * {url} (the Mac address this device uses, https through Tailscale) is for adding it by hand in Settings.
+ */
+export async function calendarLink({ renew = false } = {}) {
+  const out = await postJson('/api/calendar/link', { renew }, 30000);
+  const url = (await repo.getMeta('macUrl')) + out.path;
+  return { url, webcal: url.replace(/^https?:/, 'webcal:') };
+}
+
 /** The Health Shortcut's link: it sends its file straight to the Mac (Wed 10/21: through iCloud alone it took 78 min). */
 export async function healthLink({ renew = false } = {}) {
   const out = await postJson('/api/apple-health/link', { renew }, 30000);

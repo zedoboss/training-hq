@@ -61,9 +61,13 @@ function fold(line) {
   return parts.join('\r\n ');
 }
 
-/** A calendar file with one short event and an alert per reminder (for Calendar, without a Shortcut). */
-export function icsFor(items, now = Date.now()) {
-  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Training HQ//Backup reminders//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', `X-WR-CALNAME:${LIST_NAME}`];
+/**
+ * A calendar file with one short event and an alert per reminder (for Calendar, without a Shortcut). refreshMin: for
+ * a subscribed calendar (server/calendar.mjs), how often the iPhone should fetch it again.
+ */
+export function icsFor(items, now = Date.now(), { refreshMin = null } = {}) {
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Training HQ//Backup reminders//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', `X-WR-CALNAME:${LIST_NAME}`,
+    ...(refreshMin ? [`REFRESH-INTERVAL;VALUE=DURATION:PT${refreshMin}M`, `X-PUBLISHED-TTL:PT${refreshMin}M`] : [])];
   for (const r of items) {
     lines.push('BEGIN:VEVENT', `UID:${r.id.replace(/[^\w.-]/g, '-')}@training-hq`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(r.at)}`, 'DURATION:PT10M',
       `SUMMARY:${icsText(r.title)}`, `DESCRIPTION:${icsText(r.body)}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', `DESCRIPTION:${icsText(r.title)}`, 'END:VALARM', 'END:VEVENT');

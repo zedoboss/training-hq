@@ -72,21 +72,28 @@ test('the builder: started detached in the private folder with the guard; its an
   clock += 8 * 60000;
   writeFileSync(q.files(c.id).resultFile, JSON.stringify({ status: 'done', said: 'Done: no supplement message after a snack any more.', reload: true, commits: ['abc123 Supplements wait for a real meal'] }));
   alive.clear();
-  training(true);
+  training(true); // the coach is answering him right now
   await q.tick();
   const done = store.getRecord(COL, c.id).data;
   assert.equal(done.status, 'done');
   assert.equal(done.said, 'Stop the supplement message after a snack', 'his words stay');
   assert.equal(done.answer, 'Done: no supplement message after a snack any more.');
-  assert.deepEqual(talk().map((m) => m.text), ['Done: no supplement message after a snack any more.']);
-  assert.equal(talk()[0].ref, `change:${c.id}`);
-  assert.deepEqual(pushed.map((p) => [p.title, p.url]), [['Coach', '#/coach']]);
-  assert.equal(restarts(), 0, 'not while he trains');
-  await q.tick();
-  assert.equal(restarts(), 0);
+  // Thu 10/22, "fix the not fixed part": server code is announced once the restart has made it live; the restart comes
+  // right away, mid-workout too ("as long as it saves"), only not while the coach is answering.
+  assert.deepEqual(talk(), [], 'not before it is live');
+  assert.equal(restarts(), 0, 'not while the coach answers');
   training(false);
   await q.tick();
-  assert.equal(restarts(), 1, 'server code changed: the server restarts itself once the workout is over');
+  assert.equal(restarts(), 1, 'server code changed: the server restarts itself');
+  assert.deepEqual(talk(), []);
+  // The server is back (a new process): now he hears it, once.
+  clock += 5000;
+  const again = queue();
+  await again.q.tick();
+  await again.q.tick();
+  assert.deepEqual(talk().map((m) => m.text), ['Done: no supplement message after a snack any more.']);
+  assert.equal(talk()[0].ref, `change:${c.id}`);
+  assert.deepEqual(again.pushed.map((p) => [p.title, p.url]), [['Coach', '#/coach']]);
   assert.match(contextLine({ store, tz: TZ, now: clock }), /Changes finished in the last day[^\n]*\[Thursday 3\/19 9:32 AM, done\] "Stop the supplement message after a snack" -> Done: no supplement/);
 });
 

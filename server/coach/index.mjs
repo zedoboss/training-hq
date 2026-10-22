@@ -45,6 +45,8 @@ export function lastMarker(store) {
  */
 export function openCoach({ store, tools = [], profile = () => '', recovery = () => '', context = null, process = null, log = () => {}, now = () => Date.now(), tz = deviceTimeZone() }) {
   let active = null; // the turn whose tool calls are arriving now (one at a time)
+  // Answers on their way, and when the last one ended: a restart waits for them (and for its voice to play).
+  let inFlight = 0; let lastDoneAt = 0;
 
   const mcp = openMcp({ tools, log, onCall: (tool, args) => callTool(tool, args) });
   const proc = process || openCoachProcess({ system: () => systemPrompt({ profile: profile(), recovery: recovery() }), mcpUrl: () => mcp.url(), log, now });
@@ -104,6 +106,7 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
     emit({ type: 'user', message: userMsg });
     const t = { turnId, tz: zone, deviceId, tools: [], actions: [], emit };
     let reply;
+    inFlight++;
     try {
       const res = await proc.turn({
         model: key,
@@ -124,6 +127,7 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
       reply = { role: 'assistant', text: e.message, error: true, model: key };
     } finally {
       if (active === t) active = null;
+      inFlight--; lastDoneAt = now();
     }
     const doneAt = now();
     const msg = save({ id: messageId(Math.max(doneAt, at + 1)), at: Math.max(doneAt, at + 1), tz: zone, turnId, tools: t.tools, actions: t.actions, ...reply });
@@ -170,6 +174,8 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
   return {
     send,
     initiate,
+    /** Answering now, or answered in the last 30 s (its voice may still be playing on the phone). */
+    talking: () => inFlight > 0 || now() - lastDoneAt < 30000,
     ready: mcp.ready,
     warm: (model = 'fast') => proc.warm(MODELS[model] ? model : 'fast'),
     stop: () => proc.stop('stopped from the app'),

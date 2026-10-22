@@ -88,7 +88,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, evolt = null, restPush = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, calendar = null, evolt = null, restPush = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -349,6 +349,22 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       return arrive.link({ renew: !!renew });
     },
     'GET /api/arrive': async (req, url) => arriveCall(url),
+
+    // The backup reminders as a calendar the iPhone subscribes to (server/calendar.mjs): the link for paired devices,
+    // and the feed itself (the link's own secret: a calendar subscription has no device token).
+    'POST /api/calendar/link': async (req) => {
+      auth(req);
+      if (!calendar) throw new HttpError(404, 'not available');
+      const { renew } = await readJson(req);
+      return calendar.link({ renew: !!renew });
+    },
+    'GET /api/calendar.ics': async (req, url, res) => {
+      if (!calendar) throw new HttpError(404, 'not available');
+      let body;
+      try { body = calendar.ics(url.searchParams.get('k')); } catch (e) { throw new HttpError(e.status || 500, e.message); }
+      res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(body);
+    },
     'POST /api/arrive': async (req, url) => arriveCall(url),
 
     // The coach (step 8). A message is answered as a stream of JSON lines (the reply as it is written, the tools it

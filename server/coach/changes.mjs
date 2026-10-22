@@ -121,6 +121,9 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
   const files = (id) => ({ logFile: join(dir, `${id}.log`), resultFile: join(dir, `${id}.result.json`) });
   let ticking = false;
   let restartDue = false;
+  // When this server started: a change built before it is live now (Thu 10/22, his words, "fix the not fixed part":
+  // "done" used to come before the restart that makes server changes live).
+  const bootAt = now();
 
   function sayInTalk(c, text, kind = 'change') {
     const at = now();
@@ -154,10 +157,12 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
   async function finish(c, result) {
     const status = ['done', 'failed', 'question'].includes(result?.status) ? result.status : 'failed';
     const answer = clip(result?.said, 300) || (status === 'done' ? 'Done: the change you asked for is in.' : 'That change didn\'t go through.');
-    put({ ...c, status, doneAt: now(), answer, reload: Boolean(result?.reload), commits: Array.isArray(result?.commits) ? result.commits.slice(0, 6).map((x) => clip(x, 120)) : [] });
-    await tell(c, answer);
-    log(`coach change ${c.id}: ${status}${result?.reload ? ', server restarts' : ''}`);
-    if (status === 'done' && result?.reload) restartDue = true;
+    const afterRestart = status === 'done' && Boolean(result?.reload);
+    put({ ...c, status, doneAt: now(), answer, reload: Boolean(result?.reload), ...(afterRestart ? { announce: 'after-restart' } : {}), commits: Array.isArray(result?.commits) ? result.commits.slice(0, 6).map((x) => clip(x, 120)) : [] });
+    // Server code: he hears it once the restart has made it live (announced()); the rest is live now.
+    if (!afterRestart) await tell(c, answer);
+    log(`coach change ${c.id}: ${status}${result?.reload ? ', server restarts, then he hears it' : ''}`);
+    if (afterRestart) restartDue = true;
   }
 
   async function check(c) {
@@ -192,15 +197,24 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     log(`coach change ${c.id}: builder started (pid ${pid})`);
   }
 
+  /** Changes built before this server started: live now, so he hears them now. */
+  async function announced() {
+    for (const c of all().filter((x) => x.announce === 'after-restart' && (x.doneAt || 0) < bootAt)) {
+      put({ ...c, announce: 'done', announcedAt: now() });
+      await tell(c, c.answer);
+    }
+  }
+
   /** Once every few seconds: finish what ended, start the next one. */
   async function tick() {
     if (ticking) return;
     ticking = true;
     try {
+      await announced();
       const working = all().filter((c) => c.status === 'working');
       for (const c of working) await check(c);
-      // New server code is live only after a restart; never in the middle of a workout (the phone carries on offline,
-      // but the voice coach would drop out).
+      // New server code is live only after a restart: right away, mid-workout too (Thu 10/22, his words: "even mid workout
+      // it can restart... as long as it saves": the phone saves on its own), but not while the coach is answering.
       if (restartDue && !busy()) { restartDue = false; restart(); return; }
       if (all().some((c) => c.status === 'working')) return;
       // No daily limit (Thu 10/22, his words: "Don't have a daily build limit. Make it unlimited"): one at a time.
