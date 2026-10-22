@@ -76,6 +76,7 @@ test('a day is reviewed after it ends: input written, diary kept, dated facts wi
   assert.match(input, /Learned facts \(current; replaces or expire by id\): \[note-old\] \(from 2026-03-01\) He walks around 6 PM\./);
   assert.match(input, /His corrections in his profile \(rules already made\):\n- Thursday: no apology lines\.\n/);
   assert.match(input, /\[chg\.water\] done: "Stop telling me to drink water after every set" -> Done: no water line after sets\./);
+  assert.match(input, /STATE NOW \(Wednesday 3\/18, 1:30 AM; the records, true now\):\nReminders still set \(not sent, not cancelled\): none\nHold-offs running: none\nChange requests not finished: none/);
   assert.ok(existsSync(join(dir, 'logs', 'memory', '2026-03-17.result.json')));
   const d = store.getRecord(DIARY, '2026-03-17').data;
   assert.equal(d.status, 'done');
@@ -254,4 +255,14 @@ test('switched on today: the days before are left alone (their fixes were made o
   const progress = '# P\n\n## Where we stopped\n\nNEXT: x\n\nLATEST (Tue 3/17, 4:41 PM): NO EGG TIP WITH THE BEEF MEAL (abc). Fixed.\n\nLATEST (Mon 3/16, 9:00 PM): OTHER.\n\nLATEST (Tue 3/17, 2:10 PM): DISHES. Fixed too.\n\n## Steps\nLATEST (Tue 3/17, 1:00 PM): not in the section';
   assert.equal(fixedOnMacFrom(progress, '2026-03-17'), 'LATEST (Tue 3/17, 4:41 PM): NO EGG TIP WITH THE BEEF MEAL (abc). Fixed.\nLATEST (Tue 3/17, 2:10 PM): DISHES. Fixed too.');
   assert.match(inputFor(snapshot(store, { tz: TZ, now: clock }), '2026-03-17', { fixedOnMac: 'LATEST (Tue 3/17, 4:41 PM): NO EGG TIP' }), /FIXED THAT DAY IN CHATS ON THE MAC \(from the build log; already done, never a fix again\):\nLATEST \(Tue 3\/17, 4:41 PM\): NO EGG TIP/);
+});
+
+test('the input says how things stand now: a reminder the coach once called cancelled but still set is listed as set', () => {
+  w('coach-reminders', 'r1', { id: 'r1', at: at('17:00', '2026-03-18'), createdAt: at('12:06'), text: 'Mall run', meal: 'wait', restoredAt: at('16:33') });
+  w('coach-reminders', 'r2', { id: 'r2', at: at('17:15', '2026-03-18'), createdAt: at('12:10'), text: 'Water', cancelledAt: at('16:24') });
+  w('coach-holds', 'h', { id: 'h', areas: ['sauna'], until: at('23:00', '2026-03-18'), reason: 'busy', at: at('16:00') });
+  const input = inputFor(snapshot(store, { tz: TZ, now: at('01:30', '2026-03-18') }), '2026-03-17');
+  assert.match(input, /Reminders still set \(not sent, not cancelled\): \[r1\] Wednesday 3\/18 5:00 PM \(waits until his meal is done if it lands in one\): "Mall run"\n/);
+  assert.doesNotMatch(/STATE NOW[\s\S]*?\n\n/.exec(input)[0], /\[r2\]/, 'a cancelled one is in the timeline, not in how things stand');
+  assert.match(input, /Hold-offs running: sauna until Wednesday 3\/18 11:00 PM \("busy"\)/);
 });

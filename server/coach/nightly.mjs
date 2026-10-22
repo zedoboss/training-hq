@@ -43,10 +43,11 @@ export const SYSTEM = `You are the nightly review of the coach inside Training H
 
 RULES
 - Only what the day shows: his words, what he logged, what the app and the coach said and did. Never invent, never guess a number.
+- The records win: where a message (the coach's, the app's, a line of the build log) says something the timeline or STATE NOW contradicts (a reminder "cancelled" that is still set, a set "logged" at another weight), go by the records, and name the difference only if it matters to him.
 - diary.summary: at most ${SUMMARY_WORDS} words, plain: what he did (training, food, supplements, walks, sleep, holds), what he asked for, what went wrong, how the day ended. diary.line: the day in one or two short sentences, for the coach's memory. diary.words: up to 12 of his own sentences that matter (a decision, a preference, a complaint, a plan), copied exactly from his messages, with their time. diary.decisions: what he decided, one line each. diary.open: threads left open (a question not answered, something he said he'd do, a problem not fixed yet).
 - facts: lasting things about him the coach should know from now on (a habit, a preference, his schedule, how he wants things done, what he eats at which meal), one line each, with the date of the day they come from and the source (his words or what happened, with the time). Not one-day events (the timeline keeps those) and not what the coach's notes or his corrections below already say. When a learned fact below is no longer true, give the new one with replaces: its id. A learned fact that is simply no longer true, with nothing new: expire, with why. At most ${MAX_FACTS}; none is fine.
 - fixes: something he said should change about how the coach or the app talks or behaves, a wrong message or a bug, that no change request below already covers; or a clear mistake of the coach or the app in the day's messages (a wrong date, time or number, a message that contradicts what he had just said, a reminder at the wrong moment). At most ${MAX_FIXES}, the clearest first; none is fine and most days have none. quote: his words, or the wrong message, copied exactly from the day's messages. Never a new feature he didn't ask for, never a rule made from one day's timing, never anything that weakens a safety rule (the 30% cap, the readiness table, his tendon pain limit, the sauna ladder and hard stops, no supplement advice, no medical advice).
-- morning: one short message for him when he wakes (at most 200 characters, plain and blunt, no greeting formula): what you learned that changes something for him and what is being fixed. Empty when nothing is worth his time.
+- morning: one short message for him when he wakes (at most 200 characters, plain and blunt, no greeting formula): what you learned that changes something for him and what is being fixed. Only what the records show now; never tell him something was cancelled, missed or not done unless STATE NOW or the timeline says so. Empty when nothing is worth his time.
 
 ANSWER (JSON only):
 {"diary": {"summary": "...", "line": "...", "words": [{"at": "H:MM AM", "text": "..."}], "decisions": ["..."], "open": ["..."]},
@@ -74,6 +75,11 @@ export function inputFor(s, date, { profile = '', fixedOnMac = '' } = {}) {
   const changes = s.list(CHANGES).filter((c) => c.status !== 'cancelled' && (c.doneAt || c.at) >= zonedTime(addDays(date, -2), '00:00', s.tz))
     .sort((a, b) => a.at - b.at).map((c) => `[${c.id}] ${c.status}: ${asksOf(c).map((a) => `"${clip(a.said, 300)}"`).join(' + ')}${c.answer ? ` -> ${clip(c.answer, 200)}` : ''}`);
   const corrections = correctionsOf(profile);
+  // How things stand now (the review runs after the day ends): what is still set, open or held off.
+  const reminders = s.list('coach-reminders').filter((r) => !r.cancelledAt && (r.trigger ? !r.firedAt : r.at > s.now - 6 * 3600000 && !r.firedAt)).sort((a, b) => (a.at || 0) - (b.at || 0))
+    .map((r) => `[${r.id}] ${r.trigger ? 'when he starts his workout log' : `${formatDay(new Date(r.at), s.tz)} ${t(r.at)}`}${r.meal === 'wait' ? ' (waits until his meal is done if it lands in one)' : ''}: "${clip(r.text, 160)}"`);
+  const holds = s.list('coach-holds').filter((h) => !h.cancelledAt && h.until > s.now).map((h) => `${(h.areas || []).join(', ')} until ${formatDay(new Date(h.until), s.tz)} ${t(h.until)}${h.reason ? ` ("${clip(h.reason, 100)}")` : ''}`);
+  const openChanges = s.list(CHANGES).filter((c) => c.status === 'queued' || c.status === 'working').map((c) => `[${c.id}] ${c.status}: "${clip(c.said, 160)}"`);
   return [
     `DAY: ${dayName(date)} (${date}), time zone ${s.tz}.`,
     '', 'THE DAY, TO THE MINUTE (from the app\'s records; the messages follow in full below):', timeline,
@@ -82,6 +88,10 @@ export function inputFor(s, date, { profile = '', fixedOnMac = '' } = {}) {
     `Learned facts (current; replaces or expire by id): ${learnedOf(s).map((n) => `[${n.id}] (from ${n.from || n.date}) ${clip(n.text, 300)}`).join(' | ') || 'none yet'}`,
     `The coach's notes: ${notesOf(s).filter((n) => n.topic !== 'learned').map((n) => `[${n.id}] ${clip(n.text, 300)}`).join(' | ') || 'none'}`,
     corrections ? `His corrections in his profile (rules already made):\n${corrections}` : '',
+    '', `STATE NOW (${formatDay(new Date(s.now), s.tz)}, ${t(s.now)}; the records, true now):`,
+    `Reminders still set (not sent, not cancelled): ${reminders.join(' | ') || 'none'}`,
+    `Hold-offs running: ${holds.join(' | ') || 'none'}`,
+    `Change requests not finished: ${openChanges.join(' | ') || 'none'}`,
     '', `CHANGES HE ASKED FOR, that day and the 2 days before (a fix must not repeat one of these):\n${changes.join('\n') || 'none'}`,
     fixedOnMac ? `\nFIXED THAT DAY IN CHATS ON THE MAC (from the build log; already done, never a fix again):\n${fixedOnMac}` : '',
   ].filter((x) => x !== null).join('\n');
