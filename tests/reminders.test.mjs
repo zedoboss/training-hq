@@ -170,9 +170,16 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   const date = '2026-01-20';
   const settings = { fuel: { mealTimes: [{ name: 'Breakfast', time: '07:30' }, { name: 'Lunch', time: '12:30' }] } };
   const breakfast = { id: 'm1', date, at: at(date, '07:40'), name: 'Breakfast', source: 'photo', before: { photoId: 'p1', at: at(date, '07:40') }, after: null };
-  let items = remindersFor({ ...base, date, last: null, settings, meals: [breakfast] }).filter((i) => i.kind === 'meals');
+  const all = remindersFor({ ...base, date, last: null, settings, meals: [breakfast] }).filter((i) => i.kind === 'meals');
+  let items = all.filter((i) => !i.group);
   const k = byKind(items);
   assert.equal(items.length, 3);
+  // Thu 10/22, his words: "He should remind me every 5 minutes if I haven't responded": every 5 minutes for 2 hours.
+  const again = all.filter((i) => i.group === `meal-again:${date}:1230`);
+  assert.equal(again.length, 24);
+  assert.deepEqual([again[0].at, again[23].at], [at(date, '13:20'), at(date, '15:15')]);
+  assert.equal(again[0].body, 'Asked at 1:15 PM. Eaten, cooking, or skipping?');
+  assert.ok(again.every((i) => i.due) && all.filter((i) => i.group === `meal-again:${date}:0730`).every((i) => !i.due), 'breakfast was logged');
   const lunch = items.find((i) => i.id === `meal:${date}:1230`);
   assert.equal(lunch.at, at(date, '13:15'));
   assert.equal(lunch.title, 'Lunch time');
@@ -186,9 +193,10 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   const checks = [{ id: `${date}.1230`, date, slot: '12:30', answer: 'cooking', at: at(date, '13:16') }];
   items = mealReminders({ date, tz: TZ, meals: [breakfast], checks, mealTimes: settings.fuel.mealTimes });
   assert.equal(items.find((i) => i.id === `meal:${date}:1230`).due, false);
-  const again = items.find((i) => i.id.startsWith('meal-cooking'));
-  assert.equal(again.at, at(date, '13:46'));
-  assert.equal(again.due, true);
+  assert.ok(items.filter((i) => i.group === `meal-again:${date}:1230`).every((i) => !i.due), 'answered: no more repeats');
+  const cooking = items.find((i) => i.id.startsWith('meal-cooking'));
+  assert.equal(cooking.at, at(date, '13:46'));
+  assert.equal(cooking.due, true);
   const lunchMeal = { id: 'm2', date, at: at(date, '13:40'), name: 'Lunch', source: 'manual', before: { photoId: null } };
   items = mealReminders({ date, tz: TZ, meals: [breakfast, lunchMeal], checks, mealTimes: settings.fuel.mealTimes });
   assert.equal(items.find((i) => i.id.startsWith('meal-cooking')).due, false);
@@ -302,4 +310,39 @@ test('meals with a latest time and cook minutes (Tue 10/20): cook reminder, aske
   assert.equal(eaten.find((i) => i.id === `meal-cook:${date}:1230`).due, false, 'eaten: no cook reminder');
   assert.equal(eaten.find((i) => i.id === `meal:${date}:1230`).due, false);
   assert.deepEqual(mealTimesOf([{ name: 'X', time: '12:00', latest: '11:00' }])[0].latest, null, 'a latest before the meal time is ignored');
+});
+
+test('a meal asked again every 5 minutes; after the Mac slept, only the latest repeat is sent (Thu 10/22)', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { startNotifier } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-meal-again-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }] }, notify: { wakeHm: '09:00' } });
+    let now = at('2026-01-20', '12:30');
+    const sent = [];
+    const push = { list: () => [{ deviceId: 'a1b2c3d4e5f6' }], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0, dropped: 0 }; } };
+    const n = startNotifier({ store, push, tz: TZ, now: () => now, everyMs: 1e9 });
+    n.stop();
+    const ids = async () => (await n.tick()).map((i) => i.id || '').filter((id) => /^meal(-again)?:/.test(id));
+    assert.deepEqual(await ids(), ['meal:2026-01-20:1230']);
+    now = at('2026-01-20', '12:35');
+    assert.deepEqual(await ids(), ['meal-again:2026-01-20:1230:1']);
+    // Asleep 12:36-12:51: one repeat, the latest, not three at once; the skipped ones never come.
+    now = at('2026-01-20', '12:51');
+    assert.deepEqual(await ids(), ['meal-again:2026-01-20:1230:4']);
+    now = at('2026-01-20', '12:52');
+    assert.deepEqual(await ids(), []);
+    assert.equal(sent.at(-1).tag, 'meal-2026-01-20-1230');
+    // He answers: no more.
+    store.writeLocal('meal-checks', '2026-01-20.1230', { id: '2026-01-20.1230', date: '2026-01-20', slot: '12:30', answer: 'skipped', at: at('2026-01-20', '12:53') });
+    now = at('2026-01-20', '12:55');
+    assert.deepEqual(await ids(), []);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

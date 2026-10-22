@@ -337,7 +337,13 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const sent = store.getMeta(SENT) || {};
       // What he told the coach to hold off on is skipped (lib/holdoffs.js).
       const holds = holdsOf(store);
-      const items = dueNow(plan(store, t, zone), t, sent).filter((i) => !itemHeld(i, holds, t));
+      const due = dueNow(plan(store, t, zone), t, sent).filter((i) => !itemHeld(i, holds, t));
+      // A run of repeats due at once (the meal asked every 5 minutes, the Mac asleep a while): the latest only; the
+      // rest count as sent.
+      const latest = new Map();
+      for (const i of due) if (i.group && !(latest.get(i.group)?.at >= i.at)) latest.set(i.group, i);
+      for (const i of due) if (i.group && latest.get(i.group) !== i) sent[i.id] = t;
+      const items = due.filter((i) => !i.group || latest.get(i.group) === i);
       if (items.length) {
         const opts = voiceOpts(store);
         for (const i of items) {

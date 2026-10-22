@@ -8,7 +8,7 @@ import { addDays } from './rotation.js';
 import { ladderState, stepText, plannedHm, OVERDUE_MIN } from './sauna.js';
 
 /** Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. */
-export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, cookingMin: 30 };
+export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, cookingMin: 30, againMin: 5, againForMin: 120 };
 
 const hmId = (hm) => hm.replace(':', '');
 
@@ -60,6 +60,16 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
       due: !logged && !check,
       ...(slot.latest ? { latestAt: zonedTime(date, slot.latest, tz), name: slot.name } : {}),
     });
+    // Thu 10/22, his words: "He should remind me every 5 minutes if I haven't responded": until he answers (eaten,
+    // cooking or skipping) or logs a meal, every 5 minutes for 2 hours; the coach's 30-minute nudges after that.
+    const askAt = zonedTime(date, askHm, tz);
+    for (let k = 1; k * MEAL_NUDGE.againMin <= MEAL_NUDGE.againForMin; k++) {
+      out.push({
+        id: `meal-again:${date}:${hmId(slot.time)}:${k}`, kind: 'meals', at: askAt + k * MEAL_NUDGE.againMin * 60000, url: `#/fuel/check/${date}/${hmId(slot.time)}`,
+        tag: `meal-${date}-${hmId(slot.time)}`, group: `meal-again:${date}:${hmId(slot.time)}`, fixed: false,
+        title: `${slot.name}: still waiting`, body: `Asked at ${formatHm(askHm)}. Eaten, cooking, or skipping?`, due: !logged && !check,
+      });
+    }
     // "Cooking": ask again a little later, until a meal is logged.
     if (check?.answer === 'cooking') {
       const again = check.at + MEAL_NUDGE.cookingMin * 60000;

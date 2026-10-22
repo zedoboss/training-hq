@@ -214,7 +214,10 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
       out.push({ id: `home:${date}`, kind: 'meals', at: ag.homeAt, url: '#/fuel', tag: `home-${date}`, fixed: false,
         title: 'Head home', body: 'Gym done. Get settled, food is next.', calm: true, due: !fed });
       const from = activity.workoutStart?.[date] ?? ag.doneAt;
-      const moved = out.filter((i) => (i.kind === 'meals' || i.kind === 'cook') && i.id !== `home:${date}` && i.at >= from && i.at < ag.mealAt);
+      const inGym = (i) => (i.kind === 'meals' || i.kind === 'cook') && i.id !== `home:${date}` && i.at >= from && i.at < ag.mealAt;
+      // Repeats (every 5 minutes until he answers) that fell in the gym time: none; the moved prompt asks once.
+      for (const i of out) if (inGym(i) && i.group) i.due = false;
+      const moved = out.filter((i) => inGym(i) && !i.group);
       // One prompt per meal at that moment: the later one (the meal itself over "start cooking").
       for (const i of moved) {
         if (moved.some((j) => j !== i && j.tag === i.tag && j.at > i.at && j.due)) i.due = false;
