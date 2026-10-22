@@ -261,7 +261,7 @@ function renderNotes(view) {
       const [notes, rems, changes] = await Promise.all([repo.list('coach-notes'), repo.list('coach-reminders'), repo.list('coach-changes')]);
       if (gone) return;
       const now = Date.now();
-      const upcoming = rems.filter((r) => !r.cancelledAt && (r.trigger ? !r.firedAt : r.at > now - 3600000)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
+      const upcoming = rems.filter((r) => !r.cancelledAt && !r.firedAt && (r.trigger || r.at > now - 3600000)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
       const sorted = notes.sort((a, b) => b.at - a.at);
       // Thu 10/22: what he asked the coach to change about itself, built on the Mac; newest first.
       const asked = changes.filter((c) => c.status !== 'cancelled').sort((a, b) => b.at - a.at).slice(0, 20);

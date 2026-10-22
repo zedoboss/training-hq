@@ -832,7 +832,7 @@ function notesText(s, { limit = 20 }) {
   const lines = [notes.length ? 'Notes, newest first:' : 'No notes yet.', ...notes.map((n) => `- ${whenText(n.at, s.tz, s.today)}${n.topic ? ` [${n.topic}]` : ''}${n.from ? ` (from ${dayText(n.from, s.today)})` : ''} [id ${n.id}]: ${n.text}`)];
   // Thu 10/22: facts the nightly review expired stay, marked, never as current.
   if (gone.length) lines.push('Expired (kept for the record, NOT true now):', ...gone.map((n) => `- ${n.text} (expired ${whenText(n.expiredAt, s.tz, s.today)}${n.replacedBy ? `, replaced by ${n.replacedBy}` : ''}${n.why ? `: ${n.why}` : ''})`));
-  const upcoming = rem.filter((r) => (r.trigger ? !r.firedAt : r.at >= s.now - 3600000));
+  const upcoming = rem.filter((r) => !r.firedAt && (r.trigger || r.at >= s.now - 3600000));
   // One that lands in a meal waits for its collagen and dishes (notify.mjs, afterMeals).
   const moved = new Map(afterMeals(upcoming.filter((r) => !r.trigger).map((r) => ({ id: `coach:${r.id}`, kind: 'coach', at: r.at })), mealSpansFor(s.store, s.now, s.tz), upcoming)
     .filter((i) => i.afterMeal).map((i) => [i.id.slice('coach:'.length), i]));

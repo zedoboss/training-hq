@@ -391,6 +391,38 @@ test('a reminder for when he starts his workout log fires a minute in, with what
   assert.deepEqual(await coachItems(), [], 'once');
 });
 
+test('a timed reminder that went out is marked sent: not listed as set, not in the calendar, never again (Fri 10/23)', async () => {
+  const { startNotifier } = await import('../server/notify.mjs');
+  const { calendarItems } = await import('../server/calendar.mjs');
+  const { inputFor } = await import('../server/coach/nightly.mjs');
+  const { snapshot } = await import('../server/coach/shared.mjs');
+  // His mall run in 10 minutes, and a later one that hasn't come yet.
+  const mall = await call('set_reminder', { inMinutes: 10, meal: 'on-time', text: 'Mall run: buy water, eggs and a banana.' });
+  const later = await call('set_reminder', { inMinutes: 120, text: 'Take the trash out.' });
+  assert.equal(mall.wrote, true); assert.equal(later.wrote, true);
+  const [mallRem] = list('coach-reminders').filter((r) => /Mall run/.test(r.text));
+  const sent = [];
+  const n = startNotifier({ store, push: { list: () => [1], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } }, tz: TZ, now: () => clock, everyMs: 1e9 });
+  n.stop();
+  const coachItems = async () => (await n.tick()).filter((i) => i.kind === 'coach');
+  clock = NOW + 10 * 60000;
+  assert.deepEqual((await coachItems()).map((i) => i.id), [`coach:${mallRem.id}`]);
+  assert.ok(sent.some((m) => /Mall run/.test(m.body)), 'went out');
+  assert.equal(store.getRecord('coach-reminders', mallRem.id).data.firedAt, clock, 'marked as gone out');
+  assert.ok(!list('coach-reminders').find((r) => /trash/.test(r.text)).firedAt, 'the later one is still waiting');
+  // The coach's notes, the nightly review (5 1/2 hours on) and the backup calendar no longer carry it; the later one stays.
+  const notes = (await call('notes')).text;
+  assert.doesNotMatch(notes, /Mall run/);
+  assert.match(notes, /Reminders set:\n- .*Take the trash out\./);
+  assert.ok(!calendarItems(store, TZ, clock).some((i) => i.id === `coach:${mallRem.id}`));
+  clock += 330 * 60000;
+  const input = inputFor(snapshot(store, { tz: TZ, now: clock }), '2026-01-20');
+  assert.doesNotMatch(input.split('\n').find((l) => l.startsWith('Reminders still set')), /Mall run/);
+  assert.match(input, /Reminder went off \[rem-/);
+  assert.deepEqual(await coachItems(), [], 'never again');
+  assert.equal(sent.filter((m) => /Mall run/.test(m.body)).length, 1);
+});
+
 test('schedule: a session time, a rest day and its undo follow the rotation rules', async () => {
   const r = await call('schedule', { action: 'set_time', time: '04:30' });
   assert.match(r.text, /^Legs Tuesday 1\/20 at 4:30 AM; check-in 4:00 AM\./);

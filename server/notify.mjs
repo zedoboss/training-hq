@@ -36,7 +36,7 @@ export function stateFrom(store, tz) {
   }, tz);
 }
 
-/** A reminder tied to his workout has gone out: the coach's lists stop showing it as waiting. */
+/** A reminder he set has gone out (timed or at his workout start; Fri 10/23): the coach's lists stop showing it as waiting. */
 function markFired(store, id, t) {
   const r = store.getRecord('coach-reminders', id);
   if (r && !r.deleted) store.writeLocal('coach-reminders', id, { ...r.data, firedAt: t });
@@ -570,7 +570,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
           const r = await push.notify({ title: v.title, body: v.body, url: i.url, tag: i.tag });
           sent[i.id] = t;
           sayInTalk(store, { text: v.body, at: t, tz: zone, kind: 'reminder', ref: i.id });
-          if (i.trigger) markFired(store, i.id.slice('coach:'.length), t);
+          if (i.kind === 'coach') markFired(store, i.id.slice('coach:'.length), t);
           log(`notify ${i.id}: ${i.title} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
         }
         // Forget ids older than 3 days.
