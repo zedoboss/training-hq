@@ -6,7 +6,7 @@ import { remindersFor, dueNow, reminderState } from '../app/js/lib/reminders.js'
 import { addDays, rotationDay } from '../app/js/lib/rotation.js';
 import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
-import { dayTotals } from '../app/js/lib/meals.js';
+import { dayTotals, isSnack } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
@@ -108,7 +108,7 @@ export function nudgeInputs(store, now, tz) {
   const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
   const untimed = groups.filter((g) => !g.time && !g.afterMeal).flatMap((g) => g.items);
   const afterMeal = groups.filter((g) => g.afterMeal).flatMap((g) => g.items);
-  const firstMealAt = Math.min(...list('meals').filter((m) => m.date === date && m.at).map((m) => m.at));
+  const firstMealAt = Math.min(...list('meals').filter((m) => m.date === date && m.at && !isSnack(m)).map((m) => m.at));
   const fasting = fastingOn(st.days || {}, date, list('meals'));
   return {
     date, n, fasting,
@@ -166,8 +166,9 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   const busy = list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active');
   let out = null;
   // The first meal of the day, the moment it is logged (Tue 10/20, his words): "take your supplements" at once, with
-  // the ones he takes after it that aren't ticked yet. Then the dishes, two minutes later, as below.
-  const first = meals.filter((m) => m.at).sort((a, b) => a.at - b.at)[0];
+  // the ones he takes after it that aren't ticked yet. A snack isn't his first meal (Thu 10/22, his words: "I take them
+  // after the first and the second meal, not after the snack"). Then the dishes, two minutes later, as below.
+  const first = meals.filter((m) => m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[0];
   const holds = holdsOf(store);
   if (first && st && !state.suppsFor?.[date] && state.seen[first.id] === now && !heldOff('supps-after-meal', holds, now)) {
     const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' });

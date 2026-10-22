@@ -15,6 +15,8 @@
 import { isoDate, formatTime, zoneOf } from './time.js';
 
 export const MEAL_NAMES = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+/** A snack isn't one of his meals (Thu 10/22): his after-meal supplements wait for a real meal. */
+export const isSnack = (m) => /^snack/i.test(String(m?.name || '').trim());
 /** Minutes after the before photo when the app asks for the after photo (brief: about 25). */
 export const AFTER_PHOTO_MIN = 25;
 

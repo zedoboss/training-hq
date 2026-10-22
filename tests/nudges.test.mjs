@@ -240,7 +240,7 @@ test('the Mac asks for his after-meal supplements the moment the first meal is l
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { openStore } = await import('../server/store.mjs');
-  const { dishesTick } = await import('../server/notify.mjs');
+  const { dishesTick, nudgeInputs } = await import('../server/notify.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'thq-supps-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
@@ -250,6 +250,13 @@ test('the Mac asks for his after-meal supplements the moment the first meal is l
     const sent = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ }); // first run: notes what is there
+    // Thu 10/22: a snack first (his bananas on waking) is not his first meal: no supplements prompt.
+    store.writeLocal('meals', 'm0', { id: 'm0', date: D, at: at(D, '11:10'), name: 'Snack', source: 'manual', before: { items: [] } });
+    assert.equal((await dishesTick({ store, push, now: at(D, '11:10'), tz: TZ }))?.key, undefined);
+    assert.equal(sent.length, 0);
+    assert.equal(nudgeInputs(store, at(D, '11:12'), TZ).args.suppsAfterMeal, null, 'no later nudge for it either');
+    await dishesTick({ store, push, now: at(D, '11:13'), tz: TZ }); // the snack's dishes
+    sent.length = 0;
     store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '11:30'), name: 'Breakfast', source: 'manual', before: { items: [] } });
     const r = await dishesTick({ store, push, now: at(D, '11:31'), tz: TZ });
     assert.equal(r.key, 'supps-after-meal');
