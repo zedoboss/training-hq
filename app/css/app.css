@@ -748,4 +748,7 @@ body.has-wbar .app { padding-bottom: calc(76px + var(--safe-bottom)); }
 body.has-wbar .coach-compose { bottom: 0; padding-top: 76px; }
 body.has-wbar:has(.coach-compose) .wbar { bottom: calc(62px + var(--safe-bottom)); box-shadow: none; }
 body.has-wbar:has(.coach-compose) .app { padding-bottom: 0; }
+/* Thu 10/22, his screenshot: at the bottom of Talk the hint under the box pushed the box up under the bar; with a
+   workout running the hint goes, so the box ends the page and the layout is the same scrolled or not. */
+body.has-wbar .coach-foot { display: none; }
 body.has-wbar .toast { bottom: calc(86px + var(--safe-bottom)); }
