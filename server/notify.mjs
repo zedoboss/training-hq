@@ -8,7 +8,7 @@ import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
@@ -332,9 +332,24 @@ export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   return { ...pick, body: v.body };
 }
 
+/**
+ * The next reminder or dishes due before the next minute's tick (Thu 10/22: the coach's "dishes in 2 minutes" was due
+ * 1:33:54 PM, the clock ticked at :52, so it went out at 1:34:52 PM). Its exact time, or null.
+ */
+export function nextDueAt(store, now, tz, withinMs = 60000) {
+  const sent = store.getMeta(SENT) || {};
+  const ds = store.getMeta(DISHES) || { seen: {}, sent: {} };
+  const times = [
+    ...plan(store, now, tz).filter((i) => i.due && !sent[i.id]).map((i) => i.at),
+    ...Object.entries(ds.seen || {}).filter(([id]) => !ds.sent?.[id]).map(([, at]) => at + DISHES_AFTER_MIN * 60000),
+  ].filter((at) => at > now && at - now < withinMs);
+  return times.length ? Math.min(...times) : null;
+}
+
 export function startNotifier({ store, push, coach = () => null, log = () => {}, tz = () => phoneZone(store), now = () => Date.now(), everyMs = 60000 }) {
   let busy = false;
   let lastZone = null;
+  let soon = null;
   async function tick() {
     if (busy) return [];
     busy = true;
@@ -375,6 +390,11 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       // One coach notification a minute: a walk question that just went out holds the other nudges.
       const nudge = walk ? null : await nudgeTick({ store, push, log, now: t, tz: zone });
       const init = walk || nudge ? null : await initiativeTick({ store, push, coach: typeof coach === 'function' ? coach() : coach, log, now: t, tz: zone });
+      // Something due before the next tick: an extra tick on the second it's due.
+      clearTimeout(soon);
+      const next = nextDueAt(store, t, zone, everyMs);
+      soon = next ? setTimeout(tick, next - t + 250) : null;
+      soon?.unref?.();
       return [...items, ...(dishes ? [dishes] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : []), ...(init ? [init] : [])];
     } catch (e) {
       log(`notify error: ${e.stack || e}`);
@@ -386,5 +406,5 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
   const first = setTimeout(tick, 5000);
   const timer = setInterval(tick, everyMs);
   first.unref?.(); timer.unref?.();
-  return { tick, stop: () => { clearTimeout(first); clearInterval(timer); } };
+  return { tick, stop: () => { clearTimeout(first); clearTimeout(soon); clearInterval(timer); } };
 }

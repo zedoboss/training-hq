@@ -306,6 +306,40 @@ test('Thu 10/22: a mark left by the morning snack and a holds round left open bl
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('Thu 10/22: a reminder or the dishes due between two ticks go out on the second, not up to a minute late', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { nextDueAt, startNotifier } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-soon-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    // "Dishes in 2 minutes", said at 1:31:54 PM; the clock ticks at :52 each minute.
+    const due = at(D, '13:33') + 54000;
+    store.writeLocal('coach-reminders', 'rem-1', { id: 'rem-1', at: due, date: D, hm: '13:33', text: 'Get up and clean the dishes.', createdAt: due - 120000, by: 'coach' });
+    assert.equal(nextDueAt(store, due - 2000, TZ), due);
+    assert.equal(nextDueAt(store, due - 61000, TZ), null, 'more than a tick away: the regular tick has it');
+    // A meal first seen at 1:30:52 PM: its dishes at 1:32:52 PM.
+    store.setMeta('dishes:state', { seen: { m1: at(D, '13:30') + 52000 }, sent: {} });
+    assert.equal(nextDueAt(store, at(D, '13:32'), TZ), at(D, '13:32') + 52000);
+    store.setMeta('dishes:state', { seen: { m1: at(D, '13:30') + 52000 }, sent: { m1: at(D, '13:32') + 52000 } });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    let t = due - 2000;
+    const n = startNotifier({ store, push, tz: TZ, now: () => t, everyMs: 3600000 });
+    try {
+      const dishes = () => sent.filter((m) => /clean the dishes/.test(m.body));
+      await n.tick();
+      assert.equal(dishes().length, 0);
+      t = due + 250;
+      await n.tick();
+      assert.equal(dishes().length, 1);
+    } finally { n.stop(); }
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('holds an hour past their time say so; a late morning round: one now, the evening one at its time', () => {
   const reminders = [
     { id: `holds-morning:${D}`, kind: 'holds', tag: 'holds-morning', at: at(D, '10:30'), due: true, title: 'Morning holds', body: 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.' },
