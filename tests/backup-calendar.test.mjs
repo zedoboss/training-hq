@@ -26,7 +26,7 @@ test('the calendar: open fixed reminders after the Mac\'s 45 minutes; a cancelle
     const ics = cal.ics(k);
     assert.match(ics, /^BEGIN:VCALENDAR\r\n/);
     assert.match(ics, /REFRESH-INTERVAL;VALUE=DURATION:PT15M/);
-    assert.match(ics, /SUMMARY:Reminder\r\nDESCRIPTION:Reminder later/);
+    assert.match(ics, /SUMMARY:Reminder later\r\nDESCRIPTION:Reminder later/);
     assert.doesNotMatch(ics, /Reminder soon/, 'the Mac sends that one itself');
     assert.doesNotMatch(ics, /Reminder gone/, 'cancelled');
     assert.throws(() => cal.ics('nope'), /wrong link/);

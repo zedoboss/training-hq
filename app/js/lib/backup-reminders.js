@@ -70,7 +70,8 @@ export function icsFor(items, now = Date.now(), { refreshMin = null } = {}) {
     ...(refreshMin ? [`REFRESH-INTERVAL;VALUE=DURATION:PT${refreshMin}M`, `X-PUBLISHED-TTL:PT${refreshMin}M`] : [])];
   for (const r of items) {
     lines.push('BEGIN:VEVENT', `UID:${r.id.replace(/[^\w.-]/g, '-')}@training-hq`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(r.at)}`, 'DURATION:PT10M',
-      `SUMMARY:${icsText(r.title)}`, `DESCRIPTION:${icsText(r.body)}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', `DESCRIPTION:${icsText(r.title)}`, 'END:VALARM', 'END:VEVENT');
+      // A reminder he asked the coach for is titled by its words, not "Reminder".
+      `SUMMARY:${icsText(r.kind === 'coach' && r.body ? r.body : r.title)}`, `DESCRIPTION:${icsText(r.body)}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', `DESCRIPTION:${icsText(r.kind === 'coach' && r.body ? r.body : r.title)}`, 'END:VALARM', 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   return `${lines.map(fold).join('\r\n')}\r\n`;
