@@ -543,7 +543,7 @@ async function supplementPlan(a, ctx) {
     if (a.answer === 'arrived') return wrote(`${names}: back in stock, on his daily list again from now. If he knows how many servings, the count goes on the supplement.`, `${names}: restocked`);
     if (a.answer === 'stop') return wrote(`${names}: no more restock questions. It stays on his list, off his day while out; he removes it on My list if he's done with it.`, `${names}: stopping`);
     if (a.answer === 'ordered' && a.arrives) return wrote(`${names}: ordered, arriving ${dayText(a.arrives, today)}. The app asks that day whether it arrived; no restock questions before then.`, `${names}: arriving ${a.arrives}`);
-    return wrote(`${names}: ${a.answer === 'ordered' ? 'ordered, no date yet' : 'not ordered yet'}. Asked again in two days, at his evening check.`, `${names}: ${a.answer}`);
+    return wrote(`${names}: ${a.answer === 'ordered' ? 'ordered, no date yet' : 'not ordered yet'}. Asked again in two days, once, halfway through his waking day.`, `${names}: ${a.answer}`);
   }
   if (a.kind === 'weekly') {
     if (!['nothing', 'restock-some', 'add'].includes(a.answer)) return refuse('The weekly answer is nothing, restock-some or add.');
