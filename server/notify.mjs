@@ -8,7 +8,7 @@ import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack } from '../app/js/lib/meals.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
@@ -142,7 +142,7 @@ export function nudgeInputs(store, now, tz) {
   const trained = st.trainedDates?.has?.(date) || false;
   const rot = rotationDay({ last: st.last, today: date, days: st.days || {} });
   const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
-  const untimed = groups.filter((g) => !g.time && !g.afterMeal).flatMap((g) => g.items);
+  const untimed = groups.filter((g) => !g.time && !g.afterMeal && !g.afterMeal2).flatMap((g) => g.items);
   const afterMeal = groups.filter((g) => g.afterMeal).flatMap((g) => g.items);
   const firstMealAt = Math.min(...list('meals').filter((m) => m.date === date && m.at && !isSnack(m)).map((m) => m.at));
   const fasting = fastingOn(st.days || {}, date, list('meals'));
@@ -224,7 +224,39 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       out = { key: 'supps-after-meal', body };
     }
   }
-  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) || heldOff('dishes', holds, now) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now });
+  // After the second meal (Thu 10/22, his words, lib/nudges.js): "get up and take collagen" once it is eaten, again
+  // every 5 minutes until it's ticked or skipped (on the phone or to the coach); that meal's dishes wait for it, then
+  // go out at once.
+  const second = meals.filter((m) => m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[1];
+  const readyAt = {};
+  if (second && st && second.at > now - 3 * 3600000) {
+    const open2 = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' }).filter((g) => g.afterMeal2)
+      .flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
+    const w = state.after2?.[date]?.id === second.id ? state.after2[date] : null;
+    const say = async (text, tag) => {
+      const opts = voiceOpts(store);
+      const line = pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
+      const body = `${text}${line?.text ? ` ${line.text}` : ''}`;
+      const r = push.list().length ? await push.notify({ title: 'Coach', body, url: '#/supps', tag }) : { sent: 0 };
+      sayInTalk(store, { text: body, at: now, tz, kind: 'nudge', ref: `supps-after-meal-2:${second.id}` });
+      store.setMeta(LAST, now);
+      log(`after second meal: ${text.slice(0, 60)} (${r.sent} sent)`);
+      out = { key: 'supps-after-meal-2', body };
+    };
+    if (!w && mealEatenAt(second, state.seen[second.id]) <= now && !heldOff('supps-after-meal', holds, now)) {
+      state.after2 = { [date]: { id: second.id, asked: open2.length ? now : null, last: now, done: open2.length ? null : now } };
+      if (open2.length) await say(`${second.name || 'Second meal'} done. Get up and take your ${open2.join(', ')} now. I'll ask again every ${AFTER_MEAL2_BUMP_MIN} minutes until you tick it.`, 'supps-after-meal-2');
+    } else if (w?.asked && !w.done) {
+      if (!open2.length) w.done = now;
+      else if (now - w.last >= AFTER_MEAL2_BUMP_MIN * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)) {
+        w.last = now;
+        await say(`Still waiting: ${open2.join(', ')}. Get up and take it now, then the dishes.`, 'supps-after-meal-2');
+      }
+    }
+    const w2 = state.after2?.[date];
+    if (w2?.id === second.id && w2.asked) readyAt[second.id] = w2.done || Infinity;
+  }
+  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) || heldOff('dishes', holds, now) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now, readyAt });
   if (due.length) {
     for (const m of due) state.sent[m.id] = now;
     const opts = voiceOpts(store);
@@ -237,6 +269,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     out = { key: 'dishes', body };
   }
   if (state.suppsFor) for (const d of Object.keys(state.suppsFor)) if (d < date) delete state.suppsFor[d];
+  if (state.after2) for (const d of Object.keys(state.after2)) if (d < date) delete state.after2[d];
   store.setMeta(DISHES, state);
   return out;
 }
@@ -339,9 +372,14 @@ export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
 export function nextDueAt(store, now, tz, withinMs = 60000) {
   const sent = store.getMeta(SENT) || {};
   const ds = store.getMeta(DISHES) || { seen: {}, sent: {} };
+  // Waiting for his collagen after the second meal: the next bump on the second, and a look every 10 seconds so the
+  // dishes follow at once when he ticks it.
+  const w = ds.after2?.[isoDate(new Date(now), tz)];
+  const waiting = w?.asked && !w.done ? [w.last + AFTER_MEAL2_BUMP_MIN * 60000, now + 10000] : [];
   const times = [
+    ...waiting,
     ...plan(store, now, tz).filter((i) => i.due && !sent[i.id]).map((i) => i.at),
-    ...Object.entries(ds.seen || {}).filter(([id]) => !ds.sent?.[id]).map(([, at]) => at + DISHES_AFTER_MIN * 60000),
+    ...Object.entries(ds.seen || {}).filter(([id]) => !ds.sent?.[id] && !(w?.id === id && w.asked && !w.done)).map(([, at]) => at + DISHES_AFTER_MIN * 60000),
   ].filter((at) => at > now && at - now < withinMs);
   return times.length ? Math.min(...times) : null;
 }

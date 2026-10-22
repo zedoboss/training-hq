@@ -229,14 +229,26 @@ export const DISHES_TEXT = "You just ate. I know you're full and want to sit, bu
  * @param {Object<string, number>} o.sent   meal id -> when its reminder went out
  * @returns {Array<object>} the meals, oldest first
  */
-export function dishesDue({ meals = [], seen = {}, sent = {}, now = Date.now() }) {
+export function dishesDue({ meals = [], seen = {}, sent = {}, now = Date.now(), readyAt = {} }) {
   return meals.filter((m) => m?.id && !sent[m.id] && seen[m.id] && (m.at || 0) > now - 3 * 3600000).filter((m) => {
-    const after = m.after?.at || null;
-    const photoBefore = m.source === 'photo' && m.before?.photoId && !after;
-    const from = after ? Math.max(after, seen[m.id]) : seen[m.id] + (photoBefore ? (DISHES_EAT_MIN - DISHES_AFTER_MIN) * 60000 : 0);
-    return now - from >= DISHES_AFTER_MIN * 60000;
+    // A meal whose dishes wait for something else (his collagen after the second meal): due at that time, or not yet.
+    if (m.id in readyAt) return now >= readyAt[m.id];
+    return now - mealEatenAt(m, seen[m.id]) >= DISHES_AFTER_MIN * 60000;
   }).sort((a, b) => (a.at || 0) - (b.at || 0));
 }
+
+/** When a meal counts as eaten: when the Mac saw it, its "after" photo, or 23 minutes after a photo taken before eating. */
+export function mealEatenAt(m, seenAt) {
+  const after = m.after?.at || null;
+  const photoBefore = m.source === 'photo' && m.before?.photoId && !after;
+  return after ? Math.max(after, seenAt) : seenAt + (photoBefore ? (DISHES_EAT_MIN - DISHES_AFTER_MIN) * 60000 : 0);
+}
+
+// ---- After the second meal (Thu 10/22, his words: "after my second meal have it prompt first notification that i
+// should get up and take collagen and wait until i take it... bump me in five minutes if i haven't responded and keep
+// bumping me until i take it and after that's done then i should get a notification immediately prompted for me to
+// clean the dishes") ----
+export const AFTER_MEAL2_BUMP_MIN = 5;
 
 /** Whether it's time for a nudge at all. */
 export function nudgeDue({ now, everyMin = NUDGE_DEFAULTS.everyMin, awake = true, lastNudgeAt = 0, lastNoticeAt = 0, lastUserAt = 0, busy = false, pausedUntil = 0 }) {

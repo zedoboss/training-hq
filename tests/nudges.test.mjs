@@ -401,3 +401,73 @@ test('walk tick (Tue 10/20): asks, 5 minutes later asks for a time, stays quiet 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Thu 10/22: after the second meal, collagen first, again every 5 minutes until ticked, then the dishes at once', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick, nudgeInputs, nextDueAt } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-after2-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
+    assert.equal(nudgeInputs(store, at(D, '11:00'), TZ).args.suppsUntimed, null, 'collagen is not an untimed supplement any more');
+    // The first meal: its dishes as before, no collagen.
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [] } });
+    await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
+    assert.equal((await dishesTick({ store, push, now: at(D, '13:17'), tz: TZ }))?.key, 'dishes');
+    sent.length = 0;
+    // The second meal: collagen at once, no dishes yet.
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '18:00'), name: 'Second meal', source: 'manual', before: { items: [] } });
+    const r = await dishesTick({ store, push, now: at(D, '18:01'), tz: TZ });
+    assert.equal(r.key, 'supps-after-meal-2');
+    assert.match(sent[0].body, /^Second meal done\. Get up and take your collagen now\./);
+    assert.equal(nextDueAt(store, at(D, '18:01'), TZ), at(D, '18:01') + 10000, 'looks again in 10 seconds');
+    assert.equal(await dishesTick({ store, push, now: at(D, '18:04'), tz: TZ }), null, 'no dishes while collagen is open, no bump before 5 minutes');
+    // Five minutes without an answer: bumped, and again five minutes after that.
+    assert.equal((await dishesTick({ store, push, now: at(D, '18:06'), tz: TZ }))?.key, 'supps-after-meal-2');
+    assert.match(sent.at(-1).body, /^Still waiting: collagen\./);
+    assert.equal(await dishesTick({ store, push, now: at(D, '18:09'), tz: TZ }), null);
+    assert.equal((await dishesTick({ store, push, now: at(D, '18:11'), tz: TZ }))?.key, 'supps-after-meal-2');
+    assert.deepEqual(sent.map((m) => m.tag), ['supps-after-meal-2', 'supps-after-meal-2', 'supps-after-meal-2']);
+    // He ticks it (phone or coach): the dishes on the next look, not 2 minutes later.
+    store.writeLocal('supp-log', `${D}:supp.co`, { id: `${D}:supp.co`, date: D, suppId: 'supp.co', status: 'taken', at: at(D, '18:12') });
+    const d = await dishesTick({ store, push, now: at(D, '18:12') + 10000, tz: TZ });
+    assert.equal(d.key, 'dishes');
+    assert.equal(sent.at(-1).tag, 'dishes');
+    assert.equal(await dishesTick({ store, push, now: at(D, '18:20'), tz: TZ }), null, 'once, and no more collagen');
+    assert.equal(nextDueAt(store, at(D, '18:20'), TZ), null);
+    // A third meal: nothing about collagen.
+    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '21:00'), name: 'Dinner', source: 'manual', before: { items: [] } });
+    assert.equal(await dishesTick({ store, push, now: at(D, '21:00'), tz: TZ }), null);
+    assert.equal(sent.filter((m) => m.tag === 'supps-after-meal-2').length, 3);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Thu 10/22: collagen already taken before the second meal: no prompt, the dishes 2 minutes later as usual', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-after2b-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
+    store.writeLocal('supp-log', `${D}:supp.co`, { id: `${D}:supp.co`, date: D, suppId: 'supp.co', status: 'taken', at: at(D, '12:00') });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [] } });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '18:00'), name: 'Second meal', source: 'manual', before: { items: [] } });
+    assert.equal(await dishesTick({ store, push, now: at(D, '18:00'), tz: TZ }), null);
+    assert.equal((await dishesTick({ store, push, now: at(D, '18:02'), tz: TZ }))?.key, 'dishes');
+    assert.deepEqual(sent.map((m) => m.tag), ['dishes']);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
