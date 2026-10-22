@@ -102,13 +102,20 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
 // Outside his meals every reminder fires on time; so does one he set during the meal or for within 30 minutes (about the
 // meal or the moment: "take a shower now", "clean the dishes", "are you home? cooking?"). The coach can say which way
 // when he says (meal: 'wait' | 'on-time' on the reminder).
-export const MEAL_HOLD = { graceMin: 30, washMin: 10, chainMaxMin: 45, nearMin: 30 };
+// Thu 10/22, his words: "I don't think I've gotten the other reminders after the food supplement and dishes": he said
+// "cooking" at 4:51 PM and logged the meal at 6:21 PM, and his errands went out at 5:30 PM, mid-meal, when the span of a
+// meal not logged yet ended. Now a meal still not logged keeps what landed in it waiting for the meal, its collagen and
+// dishes, 2 hours past that at most (pendingMaxMin, Claude's default), so nothing waits forever on a meal he never logs.
+export const MEAL_HOLD = { graceMin: 30, washMin: 10, chainMaxMin: 45, nearMin: 30, pendingMaxMin: 120 };
 
 /**
  * Today's meals as the spans he is busy with them: from the start-cooking time (or his "about to cook" / "cooking"
  * answer) until the dishes are done: the dishes prompt plus 10 minutes, after the second meal's collagen is ticked; at
- * most 45 minutes after he ate. Not logged yet: until 30 minutes past the latest he set, or past the time he said he'd
- * finish by, whichever is later. Skipped: none. [{name, start, end, open}]; open = still on, end is the most it waits.
+ * most 45 minutes after he ate. Not logged yet: the meal runs until 30 minutes past the latest he set, or past the time
+ * he said he'd finish by, whichever is later (until); still not logged after that, he is taken to be at it until he logs
+ * it, up to 2 hours more (end), and what comes due meanwhile lands in it too. Skipped: none.
+ * [{name, start, end, until?, open}]; a reminder lands in it from start until `until` (else end); open = still on, end
+ * is the most it waits.
  */
 export function mealSpans({ date, tz, now, mealTimes = [], meals = [], checks = [], dishes = {}, dishesOn = true }) {
   const slots = mealTimesOf(mealTimes);
@@ -134,8 +141,11 @@ export function mealSpans({ date, tz, now, mealTimes = [], meals = [], checks = 
     if (check?.answer === 'eaten') return { name: slot.name, start, end: check.at, open: false };
     const finish = Math.max(slot.latest ? zonedTime(date, slot.latest, tz) : slotAt + MEAL_NUDGE.afterMin * 60000,
       /^\d{2}:\d{2}$/.test(check?.until || '') ? zonedTime(date, check.until, tz) : 0);
-    const end = finish + MEAL_HOLD.graceMin * 60000;
-    return { name: slot.name, start, end, open: now < end };
+    const frameEnd = finish + MEAL_HOLD.graceMin * 60000;
+    const end = frameEnd + MEAL_HOLD.pendingMaxMin * 60000;
+    // Past its frame and still not logged: what comes due now (and on the next tick) lands in it as well.
+    const until = now >= frameEnd ? Math.min(end, now + 60000) : frameEnd;
+    return { name: slot.name, start, end, until, open: now < end };
   }).filter(Boolean);
 }
 
@@ -158,10 +168,28 @@ export function afterMeals(items, spans, reminders = []) {
     const r = i.kind === 'coach' && !i.trigger ? byId.get(i.id) : null;
     if (!r || r.meal === 'on-time') return i;
     const set = r.createdAt ?? 0;
-    const s = spans.find((x) => i.at >= x.start && i.at < x.end
+    const s = spans.find((x) => i.at >= x.start && i.at < (x.until ?? x.end)
       && (r.meal === 'wait' || (set < x.start && i.at - set > MEAL_HOLD.nearMin * 60000)));
     return s ? { ...i, at: s.end, afterMeal: s.name, waiting: s.open, plannedAt: i.at } : i;
   });
+}
+
+// Thu 10/22: at 4:30 PM "Last meal time... Eaten, cooking, or skipping?" and his own "Are you home? Started cooking?"
+// went out in the same second, and at 4:40 PM again, 20 seconds apart. A meal ask within 3 minutes of a reminder he set
+// about that meal (the coach marked it 'on-time', or its words are about cooking or eating) is left to his reminder: the
+// ask counts as sent, the next one in its run comes as usual.
+const MEAL_ASK = /^meal(-again|-soon|-cooking|-cook)?:/;
+const ABOUT_MEAL = /\b(cook\w*|eat|eats|eaten|eating|ate|meal|meals|lunch|dinner|breakfast|food|plate)\b/i;
+export const MEAL_ASK_NEAR_MIN = 3;
+
+/** The ids among `items` (due now) that are meal asks covered by one of his reminders about the meal. */
+export function coveredMealAsks(items, all, { sent = {}, now, reminders = [] }) {
+  const byId = new Map(reminders.map((r) => [`coach:${r.id}`, r]));
+  const near = all.filter((i) => i.kind === 'coach' && !i.trigger && i.due !== false
+    && (byId.get(i.id)?.meal === 'on-time' || ABOUT_MEAL.test(i.body || '')))
+    .map((i) => ({ id: i.id, at: sent[i.id] ?? i.at }))
+    .filter((c) => Math.abs(c.at - now) <= MEAL_ASK_NEAR_MIN * 60000);
+  return new Map(items.filter((i) => MEAL_ASK.test(i.id || '') && near.length).map((i) => [i.id, near[0].id]));
 }
 
 /**
@@ -521,13 +549,18 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const sent = store.getMeta(SENT) || {};
       // What he told the coach to hold off on is skipped (lib/holdoffs.js).
       const holds = holdsOf(store);
-      const due = dueNow(plan(store, t, zone), t, sent).filter((i) => !itemHeld(i, holds, t));
+      const all = plan(store, t, zone);
+      const due = dueNow(all, t, sent).filter((i) => !itemHeld(i, holds, t));
       // A run of repeats due at once (the meal asked every 5 minutes, the Mac asleep a while): the latest only; the
       // rest count as sent.
       const latest = new Map();
       for (const i of due) if (i.group && !(latest.get(i.group)?.at >= i.at)) latest.set(i.group, i);
       for (const i of due) if (i.group && latest.get(i.group) !== i) sent[i.id] = t;
-      const items = due.filter((i) => !i.group || latest.get(i.group) === i);
+      // A meal ask his own reminder about the meal says at the same time: counted, not sent.
+      const covered = coveredMealAsks(due, all, { sent, now: t, reminders: recordsOf(store, 'coach-reminders') });
+      for (const [id, by] of covered) { sent[id] = t; log(`notify ${id}: not sent (his reminder ${by} says it)`); }
+      if (covered.size) store.setMeta(SENT, sent);
+      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id));
       if (items.length) {
         const opts = voiceOpts(store);
         for (const i of items) {

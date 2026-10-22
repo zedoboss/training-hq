@@ -58,21 +58,22 @@ export function modelsAgree(h) {
   const mm = (h?.mm || []).filter((x) => x != null);
   return mm.length ? { wet: mm.filter((x) => x >= HEAT.rainNowMm).length, of: mm.length } : null;
 }
-/** The forecast for one hour in words, with how sure it is: "rain 47%, 1 of 4 models show rain (unsure)". */
+/**
+ * The forecast for one hour in words, with how sure it is: "rain 47%, 1 of 4 models show rain (models split, leaning
+ * dry)". Half of them is a tie, not a lean (Thu 10/22 audit: 2 of 4 had read "leaning rain").
+ */
 export function rainChanceText(h) {
   if (!h) return 'unknown';
   const a = modelsAgree(h);
-  const sure = !a ? '' : a.wet === 0 ? 'models agree: dry' : a.wet === a.of ? 'models agree: rain' : a.wet * 2 >= a.of ? 'models split, leaning rain' : 'models split, leaning dry';
+  const sure = !a ? '' : a.wet === 0 ? 'models agree: dry' : a.wet === a.of ? 'models agree: rain' : a.wet * 2 === a.of ? 'models split evenly' : a.wet * 2 > a.of ? 'models split, leaning rain' : 'models split, leaning dry';
   return `rain ${h.rain ?? '?'}%${a ? `, ${a.wet} of ${a.of} models show rain (${sure})` : ''}`;
 }
-/** Umbrella only on a sure thing: raining for sure now, or the hour ahead 70%+ with most models showing rain. */
+/**
+ * Umbrella only for confirmed rain (Thu 10/22, what he was told: "umbrella only for confirmed rain"): the station or
+ * his own word says it's raining now. A forecast, however high, is given as a forecast.
+ */
 export function umbrellaWorth(weather, now) {
-  const r = rainingNow(weather, now);
-  if (r) return r.sure;
-  if (seenNow(weather, now)) return false;
-  const h = (weather?.hours || []).find((x) => x.at <= now && now < x.at + HOUR) || null;
-  const a = modelsAgree(h);
-  return Boolean(h && h.rain >= HEAT.rainAvoid && a && a.wet * 2 > a.of);
+  return Boolean(rainingNow(weather, now)?.sure);
 }
 const HOUR = 3600000;
 /** 'safe' | 'caution' | 'never' for one forecast hour. */

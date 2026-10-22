@@ -140,4 +140,12 @@ test('rain is a forecast until confirmed (Thu 10/22: "drizzle, take an umbrella"
   assert.equal(rainingNow({ seen: { ...seen, raining: true, said: 'pouring' } }, at('16:30')).words, 'he says it\'s raining ("pouring")');
   // The walk isn't moved for a model drizzle.
   assert.equal(walkDue({ ...base, now: at('16:08'), doc: null, steps: steps(3000, '16:00'), weather: w }).kind, 'ask');
+  // Thu 10/22 audit: 2 of 4 is a tie, not "leaning rain"; a high forecast alone is no umbrella (7:00 PM: 73%, 3 of 4,
+  // the station reporting thunderstorms nearby but no rain).
+  assert.equal(rainChanceText(hour('21:00', 41, [0.5, 0, 0.4, 0])), 'rain 41%, 2 of 4 models show rain (models split evenly)');
+  assert.equal(rainChanceText(hour('19:00', 73, [0.5, 0.6, 0.4, 0])), 'rain 73%, 3 of 4 models show rain (models split, leaning rain)');
+  const storm = { at: at('19:00'), id: 'XXXX', km: 19, rain: false, near: true, wx: 'thunderstorms nearby', sky: 'mostly cloudy' };
+  const high = { current: { at: at('19:00'), precip: 0, code: 3 }, hours: [hour('19:00', 73, [0.5, 0.6, 0.4, 0])], obs: storm };
+  assert.equal(umbrellaWorth(high, at('19:10')), false, 'a forecast stays a forecast');
+  assert.equal(umbrellaWorth({ ...high, seen: { at: at('19:05'), raining: true, said: 'pouring' } }, at('19:10')), true, 'his word confirms it');
 });

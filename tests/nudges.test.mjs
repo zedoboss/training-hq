@@ -535,18 +535,21 @@ test('Thu 10/22: a reminder set earlier that lands while he cooks or eats waits 
     await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
     await dishesTick({ store, push, now: at(D, '13:17'), tz: TZ });
 
-    // Not cooking yet and nothing said: the last meal runs to 30 minutes past its latest (5:30 PM).
+    // Not cooking yet and nothing said: the last meal runs to 30 minutes past its latest (5:30 PM); not logged by then,
+    // what landed in it waits for the meal, 2 hours more at most (7:30 PM).
+    const cap = at(D, '17:30') + MEAL_HOLD.pendingMaxMin * 60000;
     let a = atOf(at(D, '15:00'));
-    assert.equal(a['errand-1'], at(D, '17:30'));
-    assert.equal(a['errand-2'], at(D, '17:30'));
+    assert.equal(a['errand-1'], cap);
+    assert.equal(a['errand-2'], cap);
     assert.equal(a['errand-3'], at(D, '17:30'), 'at the end of the span: not in it, on time');
     for (const id of ['home', 'later', 'pan', 'during']) assert.equal(a[id], at(D, id === 'home' ? '16:30' : id === 'later' ? '18:30' : id === 'pan' ? '17:10' : '17:20'), id);
-    assert.equal(a.shop, at(D, '17:30'));
+    assert.equal(a.shop, cap);
 
-    // He says he'll finish by 5:30 PM: all three errands wait, at most until 6:00 PM.
+    // He says he'll finish by 5:30 PM: all three errands wait past 6:00 PM, while the meal isn't logged.
     store.writeLocal('meal-checks', `${D}.1630`, { id: `${D}.1630`, date: D, slot: '16:30', name: 'Last meal', answer: 'soon', until: '17:30', at: at(D, '16:20'), by: 'coach' });
     a = atOf(at(D, '17:00'));
-    assert.deepEqual([a['errand-1'], a['errand-2'], a['errand-3']], [at(D, '18:00'), at(D, '18:00'), at(D, '18:00')]);
+    const cap2 = at(D, '18:00') + MEAL_HOLD.pendingMaxMin * 60000;
+    assert.deepEqual([a['errand-1'], a['errand-2'], a['errand-3']], [cap2, cap2, cap2]);
     assert.equal(a.home, at(D, '16:30'));
     assert.equal(a['errand-1'] > at(D, '17:00'), true, 'not due mid-meal');
 
@@ -583,5 +586,110 @@ test('Thu 10/22: a reminder set earlier that lands while he cooks or eats waits 
     // A skipped meal holds nothing; a meal with no times set holds nothing.
     assert.deepEqual(mealSpans({ date: D, tz: TZ, now: at(D, '16:00'), mealTimes, checks: [{ id: `${D}.1630`, answer: 'skipped' }] }).map((x) => x.name), ['First meal']);
     assert.deepEqual(mealSpans({ date: D, tz: TZ, now: at(D, '16:00'), mealTimes: [] }), []);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Thu 10/22: errands that land in a meal logged late wait for that meal, its collagen and dishes (not 5:30 PM mid-meal)', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick, plan, startNotifier, MEAL_HOLD } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-meallate-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    const mealTimes = [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
+    store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
+    // His three errands that day, restored with meal 'wait' at 4:33 PM.
+    const rem = (id, hm, createdHm) => store.writeLocal('coach-reminders', id, { id, at: at(D, hm), date: D, hm, text: id, createdAt: at(D, createdHm), by: 'coach', meal: 'wait' });
+    rem('mall', '17:00', '12:06');
+    rem('water', '17:15', '12:10');
+    rem('eggs', '17:30', '12:47');
+    const atOf = (t) => Object.fromEntries(plan(store, t, TZ).filter((i) => i.kind === 'coach').map((i) => [i.id.slice(6), i.at]));
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m.tag); return { sent: 1, failed: 0 }; } };
+    await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [{ name: 'Eggs', grams: 500, kcal: 700, protein: 60 }] } });
+    await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
+    await dishesTick({ store, push, now: at(D, '13:17'), tz: TZ });
+    // "Cooking" at 4:51 PM; nothing logged at 5:30 PM, the end of the meal's frame.
+    store.writeLocal('meal-checks', `${D}.1630`, { id: `${D}.1630`, date: D, slot: '16:30', name: 'Last meal', answer: 'cooking', at: at(D, '16:51'), by: 'app' });
+    const errands = () => sent.filter((x) => /^coach-/.test(x)).sort();
+    let t = at(D, '17:30') + 250;
+    const n = startNotifier({ store, push, tz: TZ, now: () => t, everyMs: 3600000 });
+    try {
+      await n.tick();
+      assert.deepEqual(errands(), [], 'not at 5:30 PM, mid-meal');
+      t = at(D, '18:00');
+      await n.tick();
+      assert.deepEqual(errands(), []);
+      const cap = at(D, '17:30') + MEAL_HOLD.pendingMaxMin * 60000;
+      assert.deepEqual(Object.values(atOf(t)), [cap, cap, cap], 'still not logged: 7:30 PM at the latest');
+      // Logged at 6:21 PM: collagen is asked; the errands wait for it and the dishes.
+      store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '18:21'), name: 'Second meal', source: 'manual', before: { items: [{ name: 'Beef', grams: 500, kcal: 900, protein: 120 }] } });
+      t = at(D, '18:21') + 1000;
+      await n.tick();
+      assert.ok(sent.includes('supps-after-meal-2'), 'collagen asked');
+      t = at(D, '18:30');
+      await n.tick();
+      assert.deepEqual(errands(), [], 'waiting for collagen');
+      // Collagen ticked at 6:40 PM: the dishes at once, the errands 10 minutes after them.
+      store.writeLocal('supp-log', `${D}:supp.co`, { id: `${D}:supp.co`, date: D, suppId: 'supp.co', status: 'taken', at: at(D, '18:40') });
+      t = at(D, '18:40') + 10000;
+      await n.tick();
+      assert.ok(sent.includes('dishes'));
+      assert.deepEqual(errands(), [], 'not before the dishes are done');
+      t = at(D, '18:50') + 10000 + 250;
+      await n.tick();
+      assert.deepEqual(errands(), ['coach-eggs', 'coach-mall', 'coach-water']);
+    } finally { n.stop(); }
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Thu 10/22: a meal ask and his own reminder about the meal in the same minutes = one notification, his', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { startNotifier, coveredMealAsks } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-mealdouble-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    const mealTimes = [{ name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
+    const rem = (id, hm, createdHm, text, extra = {}) => store.writeLocal('coach-reminders', id, { id, at: at(D, hm), date: D, hm, text, createdAt: at(D, createdHm), by: 'coach', ...extra });
+    rem('home', '16:30', '16:20', "It's 4:30 PM. Are you home? Started cooking?");
+    const all = [];
+    const push = { list: () => [{}], notify: async (m) => { all.push(m.tag); return { sent: 1, failed: 0 }; } };
+    // Only his reminders and the meal asks (walk and nudge questions have their own spacing).
+    const sent = { get list() { return all.filter((x) => /^(coach|meal)-/.test(x)); } };
+    let t = at(D, '16:30') + 250;
+    const n = startNotifier({ store, push, tz: TZ, now: () => t, everyMs: 3600000 });
+    try {
+      await n.tick();
+      assert.deepEqual(sent.list, ['coach-home'], '4:30 PM: his reminder only, not the app\'s "Last meal time"');
+      // "About to cook" at 4:35:23 PM: the app asks again at 4:40:23; his "remind me in 4 minutes" is due at 4:40:38.
+      store.writeLocal('meal-checks', `${D}.1630`, { id: `${D}.1630`, date: D, slot: '16:30', name: 'Last meal', answer: 'soon', at: at(D, '16:35') + 23000, by: 'app' });
+      rem('pan', '16:40', '16:36', '4:40 PM. Started cooking?', { meal: 'on-time', at: at(D, '16:40') + 38000 });
+      t = at(D, '16:40') + 23250;
+      await n.tick();
+      assert.deepEqual(sent.list, ['coach-home'], 'the ask 15 seconds before his reminder is left to it');
+      t = at(D, '16:40') + 38250;
+      await n.tick();
+      assert.deepEqual(sent.list, ['coach-home', 'coach-pan']);
+      // The next ask in the run comes as usual.
+      t = at(D, '16:45') + 23250;
+      await n.tick();
+      assert.deepEqual(sent.list, ['coach-home', 'coach-pan', `meal-${D}-1630`]);
+    } finally { n.stop(); }
+    // A reminder about something else at the same minute doesn't cover the meal ask.
+    const ask = { id: `meal:${D}:1630`, kind: 'meals', at: at(D, '16:30') };
+    const shower = { id: 'coach:shower', kind: 'coach', at: at(D, '16:30'), body: 'Take a shower now.' };
+    assert.equal(coveredMealAsks([ask], [ask, shower], { now: at(D, '16:30') }).size, 0);
+    const cook = { ...shower, id: 'coach:cook', body: 'Start cooking the beef.' };
+    assert.equal(coveredMealAsks([ask], [ask, cook], { now: at(D, '16:30') }).get(ask.id), 'coach:cook');
+    assert.equal(coveredMealAsks([ask], [ask, { ...cook, at: at(D, '16:34') }], { now: at(D, '16:30') }).size, 0, 'more than 3 minutes apart: both');
+    assert.equal(coveredMealAsks([ask], [ask, { ...cook, due: false }], { now: at(D, '16:30') }).size, 0, 'a cancelled reminder covers nothing');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
