@@ -18,6 +18,9 @@
 .fuel-log { display: flex; gap: 8px; }
 .fuel-cam { flex: 2 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 52px; }
 .fuel-log .btn-ghost { flex: 1 1 0; height: 52px; }
+.fuel-presets { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.fuel-preset { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; min-height: 52px; padding: 8px 14px; text-align: left; }
+.fuel-preset small { font: 400 12px/1.35 var(--sans); color: var(--muted); }
 
 .meal-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .meal-item { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 12px; padding: 8px 12px 8px 8px; color: var(--text); text-decoration: none; }

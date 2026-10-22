@@ -13,7 +13,7 @@ import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoic
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
-import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks, itemTotals } from '../../app/js/lib/meals.js';
+import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks, itemTotals, presetsOf } from '../../app/js/lib/meals.js';
 import { amountsLine } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
@@ -545,6 +545,8 @@ export function mealsText(s, { date = null }) {
   if (plan.foods?.length) lines.push(`His planned day (his diet analysis): ${plan.foods.map((f) => `${f.name} ${f.perDay || `${f.gramsPerDay} g`}`).join('; ')}.`);
   const amounts = amountsLine(plan);
   if (amounts) lines.push(`No kitchen scale: he goes by packs and counts: ${amounts}.`);
+  const presets = presetsOf(s.one('fuel', 'presets'));
+  if (presets.length) lines.push(`His presets (log_meal preset; one tap on Fuel): ${presets.map((p) => { const t = itemTotals(p.items); return `${p.name}: ${p.items.map((x) => `${x.name} ${x.portion || `${Math.round(x.grams)} g`}`).join(', ')} (${t.kcal} kcal, ${t.protein} g protein)`; }).join('; ')}.`);
   return lines.join('\n');
 }
 

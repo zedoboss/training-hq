@@ -205,3 +205,35 @@ export function mealMarks(meals = [], estimates = [], tz) {
 
 /** "Lunch · 1:04 PM" */
 export const mealTitle = (meal, tz) => `${meal.name} · ${formatTime(new Date(meal.at), zoneOf(meal, tz))}`;
+
+// Meal presets (Thu 10/22, his words: "have them as presets basically. This meal and my next meal"): a meal he eats
+// the same way again, logged with one tap (Fuel) or by name to the coach. fuel/presets {kind: 'presets',
+// presets: [{id, name, items, savedAt, fromMeal?}]}; items as in a meal, with their kcal and protein.
+export const presetsOf = (doc) => (Array.isArray(doc?.presets) ? doc.presets : []).filter((p) => p?.name && Array.isArray(p.items) && p.items.length);
+
+const words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+/** The preset he means by name: exact (case aside), else the one whose name words are all in his words ("my usual first meal"). */
+export function findPreset(doc, name) {
+  const list = presetsOf(doc);
+  const n = String(name || '').trim().toLowerCase();
+  const exact = list.find((p) => p.name.toLowerCase() === n || p.id === name);
+  if (exact) return exact;
+  const said = words(name);
+  const hits = list.filter((p) => words(p.name).every((w) => said.includes(w)));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** A new meal from a preset, logged and confirmed at `at`. */
+export function mealFromPreset({ id, at, preset, tz, name }) {
+  const meal = newMeal({ id, at, name: name || preset.name, tz });
+  return { ...meal, before: { ...meal.before, items: cleanItems(preset.items), confirmedAt: at }, preset: preset.id };
+}
+
+/** The presets doc with `name` saved from these items (a preset of the same name is replaced). */
+export function withPreset(doc, { name, items, at, fromMeal = null }) {
+  const clean = String(name || '').trim().slice(0, 40);
+  const list = presetsOf(doc);
+  const old = list.find((p) => p.name.toLowerCase() === clean.toLowerCase());
+  const preset = { id: old?.id || `preset.${words(clean).join('-') || 'meal'}`, name: clean, items: cleanItems(items), savedAt: at, ...(fromMeal ? { fromMeal } : {}) };
+  return { ...(doc || {}), kind: 'presets', presets: old ? list.map((p) => (p === old ? preset : p)) : [...list, preset] };
+}

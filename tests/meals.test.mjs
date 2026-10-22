@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   defaultMealName, newMeal, cleanItems, itemTotals, regram, scaleTo, currentEstimate, beforeItems, leftovers, netItems,
-  mealState, mealTotals, dayTotals, afterPhotoAt, mealMarks, AFTER_PHOTO_MIN,
+  mealState, mealTotals, dayTotals, afterPhotoAt, mealMarks, AFTER_PHOTO_MIN, presetsOf, findPreset, mealFromPreset, withPreset,
 } from '../app/js/lib/meals.js';
 import { zonedTime } from '../app/js/lib/time.js';
 
@@ -112,4 +112,26 @@ test('day totals count estimates (flagged) and meals still being read', () => {
   assert.equal(marks.length, 1);
   assert.equal(marks[0].kind, 'meals');
   assert.match(marks[0].label, /Meals: 3 · 1,127 kcal · 139 g protein \(estimate\)/);
+});
+
+test('meal presets (Thu 10/22): saved by name, found from his words, logged as a confirmed meal', () => {
+  const eggs = { name: 'Eggs', grams: 600, kcal: 858, protein: 75.4, fdcId: 171287, source: 'usda', portion: '10 eggs' };
+  const beef = { name: 'Lean beef', grams: 500, kcal: 650, protein: 103.8 };
+  let doc = withPreset(null, { name: 'First meal', items: [eggs], at: 1 });
+  doc = withPreset(doc, { name: 'Second meal', items: [beef], at: 2, fromMeal: 'meal-x' });
+  assert.deepEqual(presetsOf(doc).map((p) => [p.id, p.name, p.items.length]), [['preset.first-meal', 'First meal', 1], ['preset.second-meal', 'Second meal', 1]]);
+  // Same name replaces, keeps its id and place.
+  doc = withPreset(doc, { name: 'first meal', items: [eggs, beef], at: 3 });
+  assert.deepEqual(presetsOf(doc).map((p) => [p.id, p.items.length]), [['preset.first-meal', 2], ['preset.second-meal', 1]]);
+  assert.equal(findPreset(doc, 'FIRST MEAL').id, 'preset.first-meal');
+  assert.equal(findPreset(doc, 'my usual second meal').id, 'preset.second-meal');
+  assert.equal(findPreset(doc, 'meal'), null);
+  assert.deepEqual(presetsOf({ presets: [{ name: 'Empty', items: [] }] }), []);
+  const m = mealFromPreset({ id: 'meal-1', at: at('13:29', '2026-10-22'), preset: presetsOf(doc)[1], tz: TZ });
+  assert.equal(m.name, 'Second meal');
+  assert.equal(m.date, '2026-10-22');
+  assert.equal(m.source, 'manual');
+  assert.equal(m.before.confirmedAt, m.at);
+  assert.equal(m.preset, 'preset.second-meal');
+  assert.deepEqual(itemTotals(m.before.items), { grams: 500, kcal: 650, protein: 103.8 });
 });

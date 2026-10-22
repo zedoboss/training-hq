@@ -10,7 +10,8 @@ import { formatHm } from '../lib/time.js';
 import { getState, subscribe } from '../lib/store.js';
 import { isoDate, formatDay, formatTime, daysBetween, timeAt } from '../lib/time.js';
 import { addDays } from '../lib/rotation.js';
-import { dayTotals, mealTotals, mealState, STATE_SHORT } from '../lib/meals.js';
+import { dayTotals, mealTotals, mealState, STATE_SHORT, presetsOf, mealFromPreset, itemTotals } from '../lib/meals.js';
+import { newId } from '../lib/routines.js';
 import { logMealFromFile, logMealManual, cameraInput } from './meal.js';
 import { photoTime } from '../lib/photos.js';
 import { dayKindOn } from './supps.js';
@@ -134,7 +135,7 @@ export function render(view, params) {
   });
 
   const draw = async () => {
-    const [meals, estimates, photos, plan, checks, dayList] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days')]);
+    const [meals, estimates, photos, plan, checks, dayList, presetDoc] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days'), repo.get('fuel', 'presets')]);
     if (!alive) return;
     // A fasting day (Wed 10/21): no target, no "to go"; a meal logged after it began ends it.
     const days = daysByDate(dayList);
@@ -142,6 +143,7 @@ export function render(view, params) {
     const fast = days[date]?.fast;
     const tg = targetsOf(plan);
     const times = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes);
+    const presets = presetsOf(presetDoc);
     const dayChecks = checks.filter((c) => c.date === date && c.answer !== 'eaten');
     const n1 = (x) => String(Math.round((x || 0) * 10) / 10);
     const bar = (label, val, target, unit, cls, f = n0) => `<div class="fuel-bar"><span class="hud c-muted">${label}</span>
@@ -175,6 +177,7 @@ export function render(view, params) {
       ${date === today ? `<div class="fuel-log">
         <label class="btn-primary fuel-cam file-btn" for="f-cam">${CAMERA}<span>LOG MEAL</span></label>
         <button class="btn-ghost" id="f-manual" type="button">No photo</button></div>
+        ${presets.length ? `<div class="fuel-presets" id="f-presets"><span class="hud c-muted">SAME AS USUAL · ONE TAP LOGS IT</span>${presets.map((p) => { const pt = itemTotals(p.items); return `<button class="btn-ghost fuel-preset" type="button" data-preset="${esc(p.id)}"><b>${esc(p.name)}</b><small>${esc(p.items.map((x) => x.portion || x.name.split(/[,(]/)[0].trim()).join(', '))} · ${n0(pt.kcal)} kcal · ${pt.protein} g protein</small></button>`; }).join('')}</div>` : ''}
         ${!fasting ? '<button class="link-btn" id="f-fast-start" type="button">Fasting today?</button>' : ''}
         <p class="hint">Take the before photo. The Mac names the foods and estimates grams from your packs and usual amounts; kcal and protein come from USDA values. You confirm or fix (Fix has one-tap packs and counts).</p>` : ''}
       ${queued ? '<p class="hint c-amber">Mac unreachable: photos are kept on this phone and read when it is back.</p>' : ''}
@@ -217,6 +220,16 @@ export function render(view, params) {
       await repo.put('days', today, withFast(days[today], today, { on: false }, Date.now()));
       toast('Fast ended: meal and supplement reminders are back.');
     };
+    // Thu 10/22 (his words: "have them as presets basically"): one tap logs a preset as eaten now.
+    body.querySelectorAll('[data-preset]').forEach((b) => { b.onclick = async () => {
+      const preset = presets.find((p) => p.id === b.dataset.preset);
+      if (!preset) return;
+      b.disabled = true;
+      const id = newId('meal');
+      await repo.put('meals', id, mealFromPreset({ id, at: Date.now(), preset }));
+      const pt = itemTotals(preset.items);
+      toast(`Logged ${preset.name}: ${n0(pt.kcal)} kcal, ${pt.protein} g protein. Tap it below to change or delete.`);
+    }; });
     const man = body.querySelector('#f-manual');
     if (man) man.onclick = async () => {
       const id = await logMealManual();

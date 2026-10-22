@@ -17,7 +17,7 @@ import { modeOf } from '../../app/js/lib/progression.js';
 import { currentBodyweight, weightSeries, dailyWeights } from '../../app/js/lib/health.js';
 import { measureIdFor } from '../../app/js/lib/body.js';
 import { newId } from '../../app/js/lib/routines.js';
-import { newMeal, cleanItems, itemTotals, defaultMealName } from '../../app/js/lib/meals.js';
+import { newMeal, cleanItems, itemTotals, defaultMealName, presetsOf, findPreset, mealFromPreset, withPreset } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview } from '../../app/js/lib/supplements.js';
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol, measurementFromScan } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText, doctorDue } from '../../app/js/lib/sauna.js';
@@ -407,17 +407,38 @@ async function logMeal(a, ctx) {
   const at = momentOf(s, a.date, a.time);
   if (at > s.now + 3600000) return refuse('That time is in the future. Meals are logged once eaten.');
   const id = newId('meal');
-  const { items, unknown, noSize } = mealItems(s, a.items);
+  // Thu 10/22: one of his presets, as saved (plus any extra items he names).
+  const presets = s.one('fuel', 'presets');
+  const preset = a.preset ? findPreset(presets, a.preset) : null;
+  if (a.preset && !preset) return refuse(`No preset "${a.preset}". His presets: ${presetsOf(presets).map((p) => p.name).join(', ') || 'none yet (meal_preset saves a logged meal as one)'}. Nothing logged yet.`);
+  if (!preset && !a.items?.length) return refuse('No items and no preset: say what he ate. Nothing logged yet.');
+  const { items: extra, unknown, noSize } = a.items?.length ? mealItems(s, a.items) : { items: [], unknown: [], noSize: [] };
   if (noSize.length) return refuse(sizeRefusal(noSize));
   if (unknown.length) return refuse(`No USDA match for ${unknown.map((x) => `"${x.name}"`).join(', ')}. Give its USDA FoodData Central description (usda), or ask him for the kcal and protein. Nothing logged yet.`);
-  const meal = newMeal({ id, at, name: a.name ? String(a.name).slice(0, 40) : defaultMealName(at, s.settings().fuel?.mealTimes, s.tz), tz: s.tz });
+  const name = a.name ? String(a.name).slice(0, 40) : preset ? preset.name : defaultMealName(at, s.settings().fuel?.mealTimes, s.tz);
+  const meal = preset ? mealFromPreset({ id, at, preset, tz: s.tz, name }) : newMeal({ id, at, name, tz: s.tz });
+  const items = [...(preset ? meal.before.items : []), ...extra];
   meal.before = { ...meal.before, items, confirmedAt: s.now };
   meal.by = 'coach';
   if (a.note) meal.note = String(a.note).slice(0, 300);
   put(s, 'meals', id, meal);
   const t = itemTotals(items);
   const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
-  return wrote(`Logged ${meal.name}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.today ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+  return wrote(`Logged ${meal.name}${preset ? ` (his preset "${preset.name}")` : ''}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.today ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+}
+
+/** Thu 10/22: save a logged meal as one of his presets, to log again by name or with one tap on Fuel. */
+async function mealPreset(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const meal = s.one('meals', a.meal) || s.list('meals').find((m) => m.id === a.meal);
+  if (!meal) return refuse(`No meal with id ${a.meal}. The meals tool lists the ids.`);
+  const items = meal.before?.items || [];
+  if (!items.length) return refuse(`${meal.name} has no confirmed items yet. Nothing saved.`);
+  const name = String(a.name || meal.name).trim();
+  const old = findPreset(s.one('fuel', 'presets'), name);
+  put(s, 'fuel', 'presets', withPreset(s.one('fuel', 'presets'), { name, items, at: s.now, fromMeal: meal.id }));
+  const t = itemTotals(items);
+  return wrote(`Preset "${name}" ${old ? 'replaced' : 'saved'}: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein. He logs it with one tap on Fuel, or by telling you (log_meal preset).`, `preset ${name} saved`);
 }
 
 async function correctMeal(a, ctx) {
@@ -1184,7 +1205,8 @@ export const WRITE_TOOLS = [
   write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),
   write('next_exercise', 'Next exercise', 'Move his phone to the next exercise with sets left and say its next set.', obj(), nextExercise),
   write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
-  write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now.', obj({ items: ITEMS, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default from the time' }, time: HM, date: ISO, note: { type: 'string' } }, ['items']), logMeal),
+  write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
+  write('meal_preset', 'Save a meal preset', 'Save a logged meal (its id from the meals tool) as one of his presets, under the name he says (default the meal\'s name). A preset of the same name is replaced. He then logs it with one tap on Fuel or by telling you.', obj({ meal: { type: 'string' }, name: { type: 'string' } }, ['meal']), mealPreset),
   write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
   write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
   write('supplement_setup', 'Set up a supplement', "Set up one of his supplements the way he says (what he'd enter on its page): time of day (24-hour HH:MM, or '' for no set time), with food or not, servings left in the pack, a different rest-day dose. Only what he asks for; it never adds or removes a supplement. afterMeal true = he takes it right after his first meal (the app asks the moment that meal is logged; a meal named Snack doesn't count).", obj({ supplement: { type: 'string' }, time: { type: 'string', pattern: '^(([01]\\d|2[0-3]):[0-5]\\d)?$' }, withFood: { type: 'string', enum: ['with', 'without', 'either'] }, servings: { type: 'number', minimum: 0 }, doseRest: { type: 'string' }, afterMeal: { type: 'boolean' } }, ['supplement']), supplementSetup),

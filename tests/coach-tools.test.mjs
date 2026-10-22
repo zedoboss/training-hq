@@ -700,3 +700,18 @@ test('meal_check (Thu 10/22): about to cook = asked again in 5 minutes, cooking 
   }
   store.writeLocal('fuel', 'plan', plan);
 });
+
+test('meal presets (Thu 10/22): a logged meal saved as a preset, then logged by name with extras; unknown names refused', async () => {
+  await call('log_meal', { items: [{ name: 'Eggs', grams: 600, kcal: 858, protein: 75.4 }, { name: 'Butter', grams: 10, kcal: 73, protein: 0.1 }], time: '02:00', name: 'Breakfast' });
+  const first = list('meals').at(-1);
+  const saved = await call('meal_preset', { meal: first.id, name: 'First meal' });
+  assert.match(saved.text, /^Preset "First meal" saved: Eggs 600 g \(his numbers\), Butter 10 g \(his numbers\); 931 kcal, 75.5 g protein/);
+  assert.match((await call('meals')).text, /His presets \(log_meal preset; one tap on Fuel\): First meal: Eggs 600 g, Butter 10 g \(931 kcal, 75.5 g protein\)\./);
+  const r = await call('log_meal', { preset: 'my usual first meal', items: [{ name: 'Banana', grams: 100, kcal: 89, protein: 1.1 }], time: '02:45' });
+  assert.match(r.text, /^Logged First meal \(his preset "First meal"\), 2:45 AM .*Eggs 600 g.*Butter 10 g.*Banana 100 g.*; 1020 kcal, 76.6 g protein/);
+  const m = list('meals').at(-1);
+  assert.deepEqual([m.name, m.preset, m.before.items.length, !!m.before.confirmedAt], ['First meal', 'preset.first-meal', 3, true]);
+  assert.match((await call('log_meal', { preset: 'lunch' })).text, /No preset "lunch"\. His presets: First meal\. Nothing logged yet/);
+  assert.match((await call('log_meal', {})).text, /No items and no preset/);
+  assert.match((await call('meal_preset', { meal: first.id, name: 'First meal' })).text, /^Preset "First meal" replaced/);
+});
