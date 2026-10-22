@@ -617,6 +617,8 @@ button, .btn-ghost, .btn-primary, .pill { touch-action: manipulation; }
 /* ---------- Exercise charts and records ---------- */
 .chart-card { display: flex; flex-direction: column; gap: 10px; }
 .chart-box { position: relative; }
+/* A long press on a chart showed the phone's text selection (Copy / Look Up) over it (Thu 10/22). */
+.chart-card, .chart-box, .chart-card svg { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .line-chart { width: 100%; height: auto; display: block; overflow: visible; touch-action: pan-y; }
 .line-chart .line { fill: none; stroke: var(--cyan); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .line-chart .area { fill: var(--cyan); opacity: .1; }

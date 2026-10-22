@@ -109,12 +109,16 @@ export function bindTips(root) {
     tip.style.left = `${Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2))}px`;
     tip.style.top = `${Math.max(8, r.top - tip.offsetHeight - 8)}px`;
   };
-  const hide = () => { if (tip) tip.hidden = true; };
+  // Thu 10/22, his words: "if I only click, it shows there for a microsecond and disappears": on the phone the finger
+  // lifting counts as leaving, so a tapped value stays until a tap elsewhere or a scroll; the mouse hides it on leaving.
+  const hide = (e) => { if (e?.pointerType === 'touch') return; if (tip) tip.hidden = true; };
+  const away = (e) => { if (tip && !root.contains(e.target)) tip.hidden = true; };
   root.addEventListener('pointerover', show);
   root.addEventListener('pointerdown', show);
   root.addEventListener('pointerleave', hide);
+  document.addEventListener('pointerdown', away, true);
   window.addEventListener('scroll', hide, { passive: true });
-  return () => { window.removeEventListener('scroll', hide); tip?.remove(); };
+  return () => { window.removeEventListener('scroll', hide); document.removeEventListener('pointerdown', away, true); tip?.remove(); };
 }
 
 /** Crosshair and tooltip that follow the finger along a timeLine chart in `box`. */
@@ -139,11 +143,15 @@ export function bindCrosshair(box, chart, textFor) {
     tip.style.left = `${Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, cx - tip.offsetWidth / 2))}px`;
     tip.style.top = `${Math.max(8, r.top + (py / chart.H) * r.height - tip.offsetHeight - 14)}px`;
   };
-  const hide = () => { xh.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); if (tip) tip.hidden = true; };
+  const hide = (e) => { if (e?.pointerType === 'touch') return; xh.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); if (tip) tip.hidden = true; };
+  // As bindTips: a tapped point stays until a tap elsewhere or a scroll.
+  const away = (e) => { if (!svg.contains(e.target)) hide(); };
   svg.addEventListener('pointermove', show);
   svg.addEventListener('pointerdown', show);
   svg.addEventListener('pointerleave', hide);
-  return () => tip?.remove();
+  document.addEventListener('pointerdown', away, true);
+  window.addEventListener('scroll', hide, { passive: true });
+  return () => { document.removeEventListener('pointerdown', away, true); window.removeEventListener('scroll', hide); tip?.remove(); };
 }
 
 /** "Show as a table" under a chart. rows: arrays of cell text; the first column is the label. */
