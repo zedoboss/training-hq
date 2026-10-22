@@ -251,6 +251,9 @@ select.input.mini { min-width: 78px; padding-right: 22px; }
 .ex-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .ex { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-m); padding: 12px 14px; display: flex; flex-direction: column; gap: 5px; }
 .ex-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+/* Thu 10/22: the demo button before the name, as Hevy's small picture. */
+.ex-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ex-demo { flex: 0 0 30px; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--core); color: var(--cyan); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .ex-name { font-size: 15px; font-weight: 600; }
 .ex-line { font-size: 14px; line-height: 1.4; }
 .ex-line b { font-weight: 600; color: var(--cyan); font-family: var(--mono); font-size: 13px; }

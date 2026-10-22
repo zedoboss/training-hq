@@ -65,6 +65,8 @@ function stopwatchSheet() {
   el.querySelector('[data-cancel]').addEventListener('click', () => close());
   draw();
 }
+// A small figure in motion: the demo button beside each exercise's name.
+const DEMO_ICON = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="M8 21l3-6 3 2v4"/><path d="M6 12l3-4h5l3 4"/><path d="M11 15l1-7"/></svg>';
 const minPlate = () => smallestPlate(getState().equipment);
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -362,7 +364,7 @@ export function render(view, params = []) {
     const gi = g ? [...groups.keys()].indexOf(ex.supersetId) : -1;
     return `<section class="card s-ex ${g ? 'in-superset' : ''}" data-ex="${esc(ex.key)}" ${g ? `style="--ss:${SS_COLORS[gi % SS_COLORS.length]}"` : ''}>
       ${g ? `<div class="hud ss-label">SUPERSET ${g.letter} · ${g.keys.indexOf(ex.key) + 1} OF ${g.keys.length}</div>` : ''}
-      <div class="ex-head"><a class="ex-name plain" href="#/exercise/${esc(ex.exerciseId)}">${esc(ex.name)}</a>
+      <div class="ex-head"><span class="ex-title"><button class="ex-demo" data-a="demo" type="button" aria-label="Demo: ${esc(ex.name)}">${DEMO_ICON}</button><a class="ex-name plain" href="#/exercise/${esc(ex.exerciseId)}">${esc(ex.name)}</a></span>
         <span class="btn-row tight">${ex.capClass === 'main' ? '<span class="tag tag-main">30% CAP</span>' : ex.role === 'tendon-hold' ? '<span class="tag tag-hold">HOLD</span>' : ''}
         <button class="icon-mini" data-a="ex-more" type="button" aria-label="Exercise options">···</button></span></div>
       ${pinned ? `<div class="pinned small">${esc(pinned)}</div>` : ''}
@@ -459,8 +461,19 @@ export function render(view, params = []) {
     }
   };
 
+  /** The exercise's demo (the animation and its explanation) over the workout. */
+  const openDemo = (ex) => {
+    let offDemo = () => {};
+    const { el, close } = overlay(`<div class="hud c-muted sheet-title">${esc(ex.name)}</div><div data-demo></div><button class="sheet-btn sheet-cancel" type="button" data-cancel>Close</button>`, () => offDemo());
+    offDemo = demoPanel(el.querySelector('[data-demo]'), { id: ex.exerciseId, name: ex.name }, { part: 'all' });
+    el.querySelector('[data-cancel]').addEventListener('click', () => close());
+  };
+
   const onExAction = async (key, action) => {
     const ex = session.exercises.find((e) => e.key === key);
+    // Thu 10/22, his words: "just like Hevy at the name... a very small icon of the animation; when I tap on that, it
+    // opens the demo".
+    if (action === 'demo') { openDemo(ex); return; }
     if (action === 'add-set') {
       const all = exSets(key);
       const last = all.filter((x) => x.type !== 'warmup').pop() || all[all.length - 1];
@@ -483,12 +496,7 @@ export function render(view, params = []) {
       const lib = ctx.lib.get(ex.exerciseId) || {};
       actionSheet(ex.name, [
         ...(!editing && isSquatExercise(ex) ? [{ label: 'Squat Depth camera (fills reps and depth)', run: () => { location.hash = `#/squat/set/${session.id}/${ex.key}`; } }] : []),
-        { label: 'Demo', run: () => {
-          let offDemo = () => {};
-          const { el, close } = overlay(`<div class="hud c-muted sheet-title">${esc(ex.name)}</div><div data-demo></div><button class="sheet-btn sheet-cancel" type="button" data-cancel>Close</button>`, () => offDemo());
-          offDemo = demoPanel(el.querySelector('[data-demo]'), { id: ex.exerciseId, name: ex.name }, { part: 'all' });
-          el.querySelector('[data-cancel]').addEventListener('click', () => close());
-        } },
+        { label: 'Demo', run: () => openDemo(ex) },
         { label: lib.pinnedNote ? 'Edit pinned note' : 'Pin a note (shows every time)', run: async () => {
           const t = await promptText('Pinned note for this exercise', lib.pinnedNote?.text ?? lib.pinnedNote ?? '');
           if (t == null) return;
