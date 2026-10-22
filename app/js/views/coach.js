@@ -23,7 +23,6 @@ const draftSet = (v) => { try { if (v) localStorage.setItem(DRAFT, v); else loca
 const modelOf = () => withDefaults(getState().settings).coach.model;
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const MIC_ICON = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
-const BACK_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
 const SEND = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2.5-6.5z"/></svg>';
 
 /** Actions the coach asked this device for (its rest timer, a sync, moving the session screen to an exercise).
@@ -61,7 +60,7 @@ function msgHtml(m, { live = false } = {}) {
 function renderChat(view) {
   let repo; let stored = []; let live = []; let busy = null; let gone = false; let pendingLive = null;
   view.innerHTML = `
-    <div class="lib-head"><span class="btn-row tight" style="gap:6px"><a class="pill" href="#/today">Today</a><a class="pill is-on" id="c-workout" href="#/train" hidden>Workout</a></span><span class="btn-row tight" style="gap:6px"><a class="pill" href="#/coach/notes">Notes</a><button class="pill" id="c-more" type="button" aria-label="More">···</button></span></div>
+    <div class="lib-head"><a class="pill" href="#/today">Today</a><span class="btn-row tight" style="gap:6px"><a class="pill" href="#/coach/notes">Notes</a><button class="pill" id="c-more" type="button" aria-label="More">···</button></span></div>
     <div class="coach-head">
       <div><div class="hud c-muted">COACH · TEXT AND VOICE</div><div class="hud coach-state" id="c-state">…</div></div>
       <div class="seg" role="group" id="c-model">${Object.entries(MODEL_LABEL).map(([k, l]) => `<button class="pill" type="button" data-model="${k}" aria-pressed="false">${l}</button>`).join('')}</div>
@@ -71,7 +70,6 @@ function renderChat(view) {
       <button class="pill" id="c-next" type="button" aria-label="Next day">›</button></div>
     <div class="coach-log" id="c-log" aria-live="polite"></div>
     <form class="coach-compose" id="c-form" autocomplete="off">
-      <a class="btn-ghost coach-back" id="c-back" href="#/train" aria-label="Back to the workout" hidden>${BACK_ICON}</a>
       <button class="btn-ghost coach-mic" id="c-mic" type="button" aria-label="Dictate into the box" aria-pressed="false">${MIC_ICON}</button>
       <textarea class="input coach-input" id="c-text" rows="1" placeholder="Message the coach" aria-label="Message to the coach"></textarea>
       <button class="btn-primary coach-send" id="c-send" type="submit" aria-label="Send">${SEND}</button>
@@ -245,28 +243,10 @@ function renderChat(view) {
   ready.then(async (r) => {
     repo = r;
     const load = async () => { stored = (await repo.list('coach-messages')); live = live.filter((m) => !stored.some((x) => x.id === m.id)); };
-    // Thu 10/22, his words: "if I want to talk and type, I have to go to homepage, click the chat, and then go back to
-    // Train, and then resume": with a workout running, one tap back to it.
-    // Only when Talk was opened from the workout (his words: "if I go from homepage and click the chat, there should be
-    // no arrow there"); Notes and back keep that.
-    let prev = '';
-    try { prev = sessionStorage.getItem('thq.prevHash') || ''; } catch { /* private mode */ }
-    let back = '';
-    try { back = /^#\/coach/.test(prev) ? sessionStorage.getItem('thq.talk.back') || '' : /^#\/session\/[^/]+$/.test(prev) ? prev : ''; sessionStorage.setItem('thq.talk.back', back); } catch { /* private mode */ }
-    const drawWorkout = async () => {
-      const act = back && (await repo.list('sessions')).find((s) => s.status === 'active' && back === `#/session/${encodeURIComponent(s.id)}`);
-      // Thu 10/22: and an arrow at the bottom left, beside the box ("so I can go back directly to the workout").
-      for (const b of [$('#c-workout'), $('#c-back')]) {
-        if (!b || gone) continue;
-        b.hidden = !act;
-        if (act) b.href = `#/session/${encodeURIComponent(act.id)}`;
-      }
-    };
-    drawWorkout();
     await load();
     if (gone) return;
     draw(); drawModel(); idleState(); fit();
-    off = repo.onChange(async (cols) => { if (cols.includes('sessions')) drawWorkout(); if (cols.includes('coach-messages')) { await load(); if (!gone) draw({ scroll: !busy }); } });
+    off = repo.onChange(async (cols) => { if (cols.includes('coach-messages')) { await load(); if (!gone) draw({ scroll: !busy }); } });
     // Start the coach's Claude on the Mac now, so the first answer comes sooner.
     if (getState().paired) macPost('/api/coach/warm', { model: modelOf() }).then(() => { if (!busy) idleState(); }).catch(() => { if (!busy) setState('MAC UNREACHABLE', 'c-amber'); });
   });

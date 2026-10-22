@@ -103,11 +103,7 @@ function shell() {
 
 let cleanup = null;
 
-// Thu 10/22: the screen before this one (Talk shows its back arrow only when it was opened from the workout).
-let lastHash = location.hash;
 function route() {
-  try { sessionStorage.setItem('thq.prevHash', lastHash || ''); } catch { /* private mode */ }
-  lastHash = location.hash;
   const [first, ...params] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
   const id = VIEWS[first] ? first : 'today';
   const entry = VIEWS[id];

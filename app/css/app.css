@@ -743,5 +743,9 @@ body::after { content: ''; position: fixed; top: 0; left: 0; right: 0; height: v
 .wbar-go { color: var(--cyan); font-size: 20px; line-height: 1; }
 .wbar-next { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 body.has-wbar .app { padding-bottom: calc(76px + var(--safe-bottom)); }
-body.has-wbar .coach-compose { bottom: calc(64px + var(--safe-bottom)); padding-bottom: 8px; }
+/* Talk (Thu 10/22, his screenshot): the bar sits right above the message row, inside its background, both pinned to the
+   bottom; nothing scrolls under them. */
+body.has-wbar .coach-compose { bottom: 0; padding-top: 76px; }
+body.has-wbar:has(.coach-compose) .wbar { bottom: calc(62px + var(--safe-bottom)); box-shadow: none; }
+body.has-wbar:has(.coach-compose) .app { padding-bottom: 0; }
 body.has-wbar .toast { bottom: calc(86px + var(--safe-bottom)); }
