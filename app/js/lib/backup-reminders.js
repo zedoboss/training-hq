@@ -79,3 +79,19 @@ export function icsFor(items, now = Date.now(), { refreshMin = null, alertAfterM
 
 /** File name for the calendar file: training-hq-reminders-2026-10-18.ics */
 export const icsName = (from) => `training-hq-reminders-${from || isoDate(new Date())}.ics`;
+
+/** The iCloud calendar the Mac keeps the backup in (server/icloud-calendar.mjs). */
+export const BACKUP_CALENDAR = 'Training HQ Backup';
+
+/**
+ * Settings > Notifications: how the backup stands, from the Mac's last run ({ok, why, events, added, at} or null).
+ * Returns {ok, text}.
+ */
+export function backupStatusText(st, { enabled = true, formatTime = (ms) => new Date(ms).toLocaleTimeString() } = {}) {
+  if (!enabled) return { ok: false, text: 'The backup is off on this Mac.' };
+  if (!st) return { ok: false, text: 'Not set up yet: the Mac tries within a minute of starting.' };
+  if (st.ok) return { ok: true, text: `Working: ${st.events} reminder${st.events === 1 ? '' : 's'} for the next 3 days in your "${BACKUP_CALENDAR}" calendar (checked ${formatTime(st.at)}).` };
+  if (st.why === 'no-calendar') return { ok: false, text: `Waiting for the calendar: on your iPhone, Calendar, Calendars, Add Calendar, name it ${BACKUP_CALENDAR}, iCloud, Done.` };
+  if (st.why === 'not-allowed') return { ok: false, text: 'Waiting for the Mac: macOS asks whether "node" may control Calendar. Click OK on the Mac (or System Settings, Privacy & Security, Automation, node, Calendar on).' };
+  return { ok: false, text: `Not working: ${st.text || st.why} (the Mac tries again every 5 minutes).` };
+}

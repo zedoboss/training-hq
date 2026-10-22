@@ -15,6 +15,7 @@ import { startNotifier, phoneZone, sessionBusy } from './notify.mjs';
 import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
 import { openCalendar } from './calendar.mjs';
+import { openICloudCalendar } from './icloud-calendar.mjs';
 import { openEvoltImport } from './evolt-import.mjs';
 import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
@@ -74,6 +75,14 @@ const notifier = startNotifier({ store, push, log, coach: () => { try { return c
 // "When I arrive at the gym" (A10): the iPhone automation's call; days follow the phone's zone like the reminders.
 const arrive = openArrive({ store, push, tz: () => phoneZone(store), log });
 const calendar = openCalendar({ store, tz: () => phoneZone(store) });
+// The backup reminders in his iCloud calendar "Training HQ Backup" (Thu 10/22, "never rings at a stale time"): the Mac
+// keeps it in line with the open reminders through its Calendar app; iCloud updates the iPhone in seconds. Only the
+// real server (a dev copy runs with TRAINING_HQ_PRIVATE and would overwrite his calendar); config.icloudCalendar overrides.
+const icloud = (config.icloudCalendar ?? !process.env.TRAINING_HQ_PRIVATE) ? openICloudCalendar({ store, tz: () => phoneZone(store), log }) : null;
+const icloudTick = () => icloud?.sync().catch((e) => log(`icloud calendar: ${e.stack || e}`));
+if (icloud) setTimeout(icloudTick, 20000).unref();
+const icloudTimer = icloud ? setInterval(icloudTick, 60000) : null;
+icloudTimer?.unref();
 // Evolt results PDFs (A11): originals kept in imports/evolt/ in the private folder.
 const evolt = openEvoltImport({ dir: join(p.importsDir, 'evolt'), log });
 
@@ -143,7 +152,7 @@ const voice = openVoice({ store, dataDir: p.dataDir, engine, whisper, coach, log
 const tts = openTts({ configDir: p.configDir, log });
 log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, calendar, evolt, restPush, onSync, log });
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, calendar, icloud, evolt, restPush, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });
@@ -156,6 +165,7 @@ const shutdown = (sig) => {
   clearInterval(healthTimer);
   if (changesTimer) clearInterval(changesTimer);
   if (nightlyTimer) clearInterval(nightlyTimer);
+  if (icloudTimer) clearInterval(icloudTimer);
   clearInterval(restTimer);
   coach.close().catch(() => {});
   whisper.stop('server stopping');

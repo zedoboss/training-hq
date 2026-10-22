@@ -88,7 +88,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, calendar = null, evolt = null, restPush = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, calendar = null, icloud = null, evolt = null, restPush = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -357,6 +357,11 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       if (!calendar) throw new HttpError(404, 'not available');
       const { renew } = await readJson(req);
       return calendar.link({ renew: !!renew });
+    },
+    // Thu 10/22: how the backup in his iCloud calendar stands (icloud-calendar.mjs), for Settings > Notifications.
+    'GET /api/backup/status': async (req) => {
+      auth(req);
+      return { icloud: icloud ? icloud.status() : null, enabled: Boolean(icloud) };
     },
     'GET /api/calendar.ics': async (req, url, res) => {
       if (!calendar) throw new HttpError(404, 'not available');

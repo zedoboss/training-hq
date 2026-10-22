@@ -1,3 +1,5 @@
+// RETIRED Thu 10/22, 5:45 PM: the feed is empty now; the backup lives in his iCloud calendar (icloud-calendar.mjs),
+// which uses calendarItems below. Kept so a phone still subscribed fetches an empty calendar and drops the old alerts.
 // The backup reminders as a calendar his iPhone subscribes to (Thu 10/22, his words about reminders exported to the
 // iPhone that can't know what's done: "fix the not fixed part... make it work somehow"; then "it can miss info by 15
 // mins or what?"). The Mac serves the next 7 days' fixed reminders that are still open and that it hasn't sent yet;
@@ -37,7 +39,10 @@ export function openCalendar({ store, tz, now = () => Date.now() }) {
       secret.check(k);
       const t = now();
       store.setMeta(FETCHED, { at: t, agent: String(agent).slice(0, 120), count: (store.getMeta(FETCHED)?.count || 0) + 1 });
-      return icsFor(calendarItems(store, typeof tz === 'function' ? tz() : tz, t), t, { refreshMin: REFRESH_MIN, alertAfterMin: ALERT_AFTER_MIN });
+      // Retired (Thu 10/22, 5:45 PM): the iPhone didn't fetch it for over an hour, so its alerts rang at stale times. The
+      // backup is in his iCloud calendar now (icloud-calendar.mjs); this answers with an empty calendar, so a phone
+      // that still fetches it drops the old events and their alerts.
+      return icsFor([], t, { refreshMin: REFRESH_MIN });
     },
   };
 }

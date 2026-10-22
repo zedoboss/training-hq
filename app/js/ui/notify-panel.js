@@ -4,8 +4,8 @@ import { ready, saveSettings } from '../lib/data.js';
 import { withDefaults } from '../lib/settings.js';
 import { KINDS, remindersFor, reminderState } from '../lib/reminders.js';
 import { isoDate, formatTime, formatDay } from '../lib/time.js';
-import { fixedReminders, shortcutPayload, shortcutUrl, icsFor, icsName } from '../lib/backup-reminders.js';
-import { calendarLink } from '../lib/data.js';
+import { fixedReminders, backupStatusText, BACKUP_CALENDAR } from '../lib/backup-reminders.js';
+import { macGet } from '../lib/data.js';
 import { pushSupported, isStandalone, permission, currentSubscription, enablePush, disablePush, testPush, pushStatus } from '../lib/push.js';
 import { toast } from './toast.js';
 
@@ -30,33 +30,19 @@ export async function todaysReminders(date = isoDate(new Date())) {
   return remindersFor({ ...(await loadState()), date });
 }
 
-const SHORTCUT_STEPS = [
-  'Open the Shortcuts app, tap +, and name the new shortcut exactly: Training HQ Reminders.',
-  'If the top of the editor says "Receive ... input from ...", set it to receive Text.',
-  'Add the action "Get Dictionary from Input" (input: Shortcut Input).',
-  'Optional, to replace old ones: add "Find Reminders" where List is Training HQ and Is Completed is off, then "Remove Reminders" (switch off "Confirm Before Removing" if it is shown).',
-  'Add "Get Dictionary Value": Get Value for "items" in Dictionary.',
-  'Add "Repeat with Each" item in Dictionary Value.',
-  'Inside the repeat: "Get Dictionary Value" for "due" in Repeat Item, then "Get Dates from Input" (input: that Dictionary Value).',
-  'Still inside: "Add New Reminder": the title is Repeat Item\'s "title" (tap the variable, choose Repeat Item, then key title), list Training HQ (create the list in Reminders first), turn on "Remind Me" At Time with Dates, notes = Repeat Item\'s "notes".',
-  'Done. Back in Training HQ, tap "Send to Reminders": Shortcuts opens, runs, and the reminders appear in the Training HQ list.',
-];
-
 function backupHtml(items) {
   const first = items[0]; const last = items[items.length - 1];
   return `<div class="hud c-muted rem-head">BACKUP REMINDERS ON THIS IPHONE</div>
     <section class="card pad-card" id="backup">
-      <p class="hint c-text">If your Mac is off or offline, notifications stop. Subscribe once and your iPhone's Calendar keeps the next 7 days' fixed reminders (check-ins and sessions you set a time for, reminders you asked the coach for) and rings them, 20 minutes late, when the Mac couldn't send them. It updates itself: what you've done, or the Mac already sent, drops off before it rings.</p>
-      <div class="btn-row"><button class="btn-primary" id="bk-copy" type="button">Copy link</button></div>
-      <p class="hint">Then iPhone Settings, Apps, Calendar, Calendar Accounts, Add Account, Subscribed Calendar: paste, Next, Remove Alerts off, Save. Then Fetch New Data: every 15 minutes. (Thu 10/22: a calendar link opened from here lands in iCloud, whose servers can't reach your Mac, so it never updated.)</p>
-      <p class="hint" id="backup-count">${items.length ? `${items.length} reminders, ${esc(formatDay(new Date(first.at)))} to ${esc(formatDay(new Date(last.at)))}.` : 'Nothing to add for the next 7 days.'}</p>
-      <details class="bk-steps"><summary>One-time copies instead (they don't update)</summary>
-      <div class="btn-row"><button class="btn-ghost" id="bk-shortcut" type="button" ${items.length ? '' : 'disabled'}>Send to Reminders</button>
-        <button class="btn-ghost" id="bk-ics" type="button" ${items.length ? '' : 'disabled'}>Calendar file</button></div>
-      <details class="bk-steps"><summary>Make the Shortcut once (about 3 minutes)</summary>
-        <ol>${SHORTCUT_STEPS.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
-        <p class="hint">"Calendar file" needs no Shortcut: it opens the calendar file; tap Add All. Re-adding can make doubles; delete the old ones in Calendar first.</p>
-      </details></details>
+      <p class="hint c-text">If your Mac is off or offline, notifications stop. So the Mac keeps the next 3 days' fixed reminders (check-ins and sessions you set a time for, holds, reminders you asked the coach for) in a calendar in your iCloud, "${esc(BACKUP_CALENDAR)}". iCloud updates your iPhone within seconds: one the Mac sent, moved or you did is gone before it would ring. With the Mac off they stay, and ring 20 minutes after their time.</p>
+      <p class="hint" id="backup-status">Asking the Mac…</p>
+      <p class="hint" id="backup-count">${items.length ? `${items.length} reminders in the next 7 days, ${esc(formatDay(new Date(first.at)))} to ${esc(formatDay(new Date(last.at)))}.` : 'Nothing to back up for the next days.'}</p>
+      <details class="bk-steps"><summary>Set it up once</summary><ol>
+        <li>On your iPhone: Calendar, Calendars, Add Calendar, name it ${esc(BACKUP_CALENDAR)}, account iCloud, Done.</li>
+        <li>On the Mac: when macOS asks whether "node" may control Calendar, click OK.</li>
+        <li>If you subscribed to the old Training HQ link: iPhone Settings, Apps, Calendar, Calendar Accounts, the subscribed Training HQ, Delete Account. Your iPhone stopped refreshing it, so its alerts rang at old times.</li>
+        <li>Calendar alerts through Do Not Disturb: in the Focus, allow Calendar or Time Sensitive notifications.</li>
+      </ol></details>
     </section>`;
 }
 
@@ -130,24 +116,13 @@ export function notifyPanel(el) {
     const today = isoDate(new Date());
     const items = fixedReminders(st, today, 7);
     box.innerHTML = backupHtml(items);
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    box.querySelector('#bk-copy').onclick = async () => {
-      try { await navigator.clipboard.writeText((await calendarLink()).url); saveSettings({ notify: { backupSentOn: today } }); toast('Link copied.'); } catch { toast('Could not copy: is the Mac on?'); }
-    };
-    box.querySelector('#bk-shortcut').onclick = () => {
-      saveSettings({ notify: { backupSentOn: today } });
-      location.href = shortcutUrl(shortcutPayload(items, tz));
-    };
-    box.querySelector('#bk-ics').onclick = () => {
-      const blob = new Blob([icsFor(items)], { type: 'text/calendar' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = icsName(today);
-      document.body.append(a);
-      a.click();
-      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
-      saveSettings({ notify: { backupSentOn: today } });
-    };
+    // Thu 10/22: how the iCloud backup stands, from the Mac.
+    try {
+      const bs = await macGet('/api/backup/status');
+      const v = backupStatusText(bs.icloud, { enabled: bs.enabled, formatTime: (ms) => formatTime(new Date(ms)) });
+      const el2 = box.querySelector('#backup-status');
+      if (el2) { el2.textContent = v.text; el2.className = `hint ${v.ok ? 'c-green' : 'c-amber'}`; }
+    } catch (e) { const el2 = box.querySelector('#backup-status'); if (el2) el2.textContent = `Couldn't ask the Mac: ${e.message}`; }
   }
 
   async function listToday() {
