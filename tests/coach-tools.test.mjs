@@ -715,3 +715,16 @@ test('meal presets (Thu 10/22): a logged meal saved as a preset, then logged by 
   assert.match((await call('log_meal', {})).text, /No items and no preset/);
   assert.match((await call('meal_preset', { meal: first.id, name: 'First meal' })).text, /^Preset "First meal" replaced/);
 });
+
+test('supplement_plan kind out (Thu 10/22): ordered with a date, arrived puts it back on his day', async () => {
+  const { logEntry } = await import('../app/js/lib/supplements.js');
+  // Ran out of both test supplements yesterday.
+  for (const id of ['supp.powder', 'supp.caps']) { const sp = list('supplements').find((x) => x.id === id); store.writeLocal('supp-log', `2026-01-19.${id}`, logEntry({ supp: sp, date: '2026-01-19', dayKind: 'train', status: 'skipped', reason: 'Ran out', at: at('2026-01-19') })); }
+  const o = await call('supplement_plan', { kind: 'out', supplement: 'powder', answer: 'ordered', arrives: '2026-01-23' });
+  assert.match(o.text, /^powder: ordered, arriving Friday 1\/23\./);
+  assert.deepEqual(list('supp-answers').map((x) => [x.kind, x.suppId, x.arrives]), [['out', 'supp.powder', '2026-01-23']]);
+  const back = await call('supplement_plan', { kind: 'out', supplement: 'all', answer: 'arrived' });
+  assert.match(back.text, /^caps, powder: back in stock/);
+  assert.ok(list('supplements').filter((x) => x.restockedAt).length === 2);
+  assert.match((await call('supplement_plan', { kind: 'out', answer: 'arrived' })).text, /Nothing is out of stock/);
+});

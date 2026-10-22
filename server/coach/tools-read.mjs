@@ -17,7 +17,7 @@ import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STA
 import { amountsLine } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
-import { reviewOpen, checklist, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
+import { reviewOpen, checklist, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
 import { walkLines, usualWalkHm, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
@@ -150,7 +150,8 @@ function suppLine(s) {
   const taken = items.filter((i) => i.entry?.status === 'taken').length;
   const skipped = items.filter((i) => i.entry?.status === 'skipped').length;
   const open = items.filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
-  return `Supplements today: ${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}.`;
+  const outs = outOfStock(supps, log, s.today);
+  return `Supplements today: ${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out): ${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
 }
 
 function foodLine(s) {

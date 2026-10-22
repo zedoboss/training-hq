@@ -163,7 +163,9 @@ export function nudgeInputs(store, now, tz) {
       now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm, fasting,
       reminders: remindersFor({ ...st, date }),
       rot,
-      suppsUntimed: untimed.length ? { total: untimed.length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
+      // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
+      // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
+      suppsUntimed: untimed.length ? { total: groups.flatMap((g) => g.items).length, taken: groups.flatMap((g) => g.items).filter((i) => i.entry?.status === 'taken').length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
       suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },

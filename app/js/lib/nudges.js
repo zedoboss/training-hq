@@ -77,7 +77,8 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  * @param {{steps: number, asOf: number}|null} o.steps   today's steps from Apple Health and when they were read
  * @param {number|null} o.stepGoal
  * @param {{items: string[]}|null} o.scanToday  a body scan planned for today and not done: the on-the-day checklist
- * @param {{open: string[], total: number}|null} o.suppsUntimed  today's supplements with no time set: names still open
+ * @param {{open: string[], total: number, taken?: number}|null} o.suppsUntimed  today's supplements with no time set: names
+ *   still open; total and taken over all of today's (out of stock ones aren't on the list)
  * @param {string} o.wakeHm
  * @param {string} o.bedHm
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
@@ -185,7 +186,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   if (suppsUntimed?.open?.length && frac >= 0.25) {
     const o = suppsUntimed.open;
     out.push({ key: 'supps-untimed', priority: 58, gapMin: 60, url: '#/supps',
-      text: `Supplements: ${suppsUntimed.total - o.length} of ${suppsUntimed.total} taken today. Still open: ${o.slice(0, 4).join(', ')}${o.length > 4 ? ` and ${o.length - 4} more` : ''}. Take them and tell me.` });
+      text: `Supplements: ${suppsUntimed.taken ?? suppsUntimed.total - o.length} of ${suppsUntimed.total} taken today. Still open: ${o.slice(0, 4).join(', ')}${o.length > 4 ? ` and ${o.length - 4} more` : ''}. Take them and tell me.` });
   }
   if (targets?.kcal && frac >= 0.15) {
     const expect = targets.kcal * frac;

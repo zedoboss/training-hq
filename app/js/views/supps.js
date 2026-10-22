@@ -7,7 +7,7 @@ import { ready } from '../lib/data.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { isoDate, formatHm, formatDay, formatTime, timeAt } from '../lib/time.js';
-import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, logEntry, dayKindFrom, scheduledOn, logId, streak, reviewOpen, applyReview, answerReview } from '../lib/supplements.js';
+import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, outOfStock, logEntry, dayKindFrom, scheduledOn, logId, streak, reviewOpen, applyReview, answerReview } from '../lib/supplements.js';
 import { addDays } from '../lib/rotation.js';
 import { actionSheet, promptText, promptLong, confirmSheet } from '../ui/sheet.js';
 import { lowAnswered, weeklyAnsweredSince } from '../lib/fuel-reminders.js';
@@ -90,6 +90,8 @@ function renderDay(view, repo, alive, dateParam) {
     const [all, log, dayKind, answers] = await Promise.all([repo.list('supplements'), repo.list('supp-log'), dayKindOn(repo, date), repo.list('supp-answers')]);
     if (!alive()) return;
     const groups = checklist({ supps: all, log, date, dayKind });
+    // Out of stock (Thu 10/22): off the day until he restocks; one tap puts it back (or tell the coach).
+    const outs = date === today ? outOfStock(all, log, today) : [];
     // Running low (about a week or less) and not answered for this count yet.
     const low = all.filter((x) => statusOn(x, today) === 'active').map((x) => ({ x, st: stockStatus(x, log) })).filter((y) => y.st?.low && !lowAnswered(y.x, answers));
     const due = groups.flatMap((g) => g.items);
@@ -132,7 +134,11 @@ function renderDay(view, repo, alive, dateParam) {
       ${groups.map((g) => `<div class="section-label">${esc(g.label)}${g.time ? ` · ${formatHm(g.time)}` : ''}</div>
         <section class="card supp-group" data-group="${esc(g.key)}">${g.items.map(row).join('')}
           ${g.open.length > 1 ? `<button class="btn-ghost supp-all" type="button" data-all="${esc(g.key)}">All ${g.open.length} taken</button>` : ''}</section>`).join('')
-        || '<p class="hint">Nothing scheduled on this day.</p>'}`;
+        || '<p class="hint">Nothing scheduled on this day.</p>'}
+      ${outs.length ? `<div class="section-label">Out of stock · ${outs.length}</div>
+        <section class="card supp-group">${outs.map(({ supp, since }) => `<div class="supp-item" data-out="${esc(supp.id)}"><div class="supp-main"><b>${esc(supp.name)}</b>
+          <span class="hint c-amber">Ran out ${esc(formatDay(new Date(`${since}T12:00:00`)))} · off your day until it's back</span></div>
+          <span class="supp-btns"><button class="btn-primary small" type="button" data-restocked>Restocked</button></span></div>`).join('')}</section>` : ''}`;
     const find = (el) => due.find((i) => i.supp.id === el.closest('[data-id]').dataset.id);
     view.querySelectorAll('[data-take]').forEach((b) => b.addEventListener('click', async () => { await answerSupp(repo, find(b).supp, date, 'taken'); }));
     view.querySelectorAll('[data-skip]').forEach((b) => b.addEventListener('click', () => {
@@ -140,6 +146,11 @@ function renderDay(view, repo, alive, dateParam) {
       actionSheet(`Skip ${i.supp.name}? Why?`, [...SKIP_REASONS.map((r) => ({ label: r, run: () => answerSupp(repo, i.supp, date, 'skipped', r) })),
         { label: 'Other reason…', run: async () => { const r = await promptText('Why skip it?', '', { placeholder: 'reason' }); if (r !== null) answerSupp(repo, i.supp, date, 'skipped', r); } },
         { label: 'No reason', run: () => answerSupp(repo, i.supp, date, 'skipped', '') }]);
+    }));
+    view.querySelectorAll('[data-restocked]').forEach((b) => b.addEventListener('click', async () => {
+      const supp = all.find((x) => x.id === b.closest('[data-out]').dataset.out);
+      await repo.put('supplements', supp.id, { ...supp, restockedAt: Date.now() });
+      toast(`${supp.name}: back on your day.`);
     }));
     view.querySelectorAll('[data-undo]').forEach((b) => b.addEventListener('click', async () => { await repo.remove('supp-log', logId(date, find(b).supp.id)); }));
     view.querySelectorAll('[data-all]').forEach((b) => b.addEventListener('click', async () => {

@@ -66,8 +66,9 @@ test('streak: all taken counts, open today does not break it, a skip does', () =
 test('adherence over 7 and 30 days counts from the first answer, today once answered', () => {
   const a = supp('a');
   const log = [take('2026-10-12', a), take('2026-10-13', a, 'skipped'), take('2026-10-15', a), take('2026-10-16', a)];
-  assert.deepEqual(adherence(a, log, '2026-10-18', 7), { taken: 3, scheduled: 6, pct: 50 });
-  assert.deepEqual(adherence(a, [...log, take('2026-10-18', a)], '2026-10-18', 30), { taken: 4, scheduled: 7, pct: 57 });
+  // 10/14, the day after "ran out" with nothing answered, isn't counted: it was out of stock (Thu 10/22).
+  assert.deepEqual(adherence(a, log, '2026-10-18', 7), { taken: 3, scheduled: 5, pct: 60 });
+  assert.deepEqual(adherence(a, [...log, take('2026-10-18', a)], '2026-10-18', 30), { taken: 4, scheduled: 6, pct: 67 });
   assert.deepEqual(adherence(a, [], '2026-10-18', 7), { taken: 0, scheduled: 0, pct: null });
 });
 
@@ -113,4 +114,40 @@ test('supplements taken after the first meal are their own group (Tue 10/20)', a
   ];
   const g = checklist({ supps, log: [], date: '2026-10-20', dayKind: 'train' });
   assert.deepEqual(g.map((x) => [x.key, x.label, x.items.map((i) => i.supp.id)]), [['09:00', 'Morning', ['a']], ['after-meal', 'After your first meal', ['b']], ['', 'No time set', ['c']]]);
+});
+
+test('out of stock (Thu 10/22, his words: "I literally told it that I ran out"): off the list until a tick, a new count or an arrival', async () => {
+  const { outOf, outOfStock } = await import('../app/js/lib/supplements.js');
+  const c = supp('c'); const mg = supp('mg'); const o3 = supp('o3');
+  const log = [take('2026-10-20', c, 'skipped'), take('2026-10-20', mg, 'skipped'), take('2026-10-20', o3), take('2026-10-22', o3)];
+  assert.deepEqual(outOf(c, log), { since: '2026-10-20', at: Date.parse('2026-10-20T08:00:00Z') });
+  const items = checklist({ supps: [c, mg, o3], log, date: '2026-10-22', dayKind: 'train' }).flatMap((g) => g.items);
+  assert.deepEqual(items.map((i) => i.supp.id), ['o3'], 'today: only what he has');
+  assert.deepEqual(checklist({ supps: [c, mg, o3], log, date: '2026-10-20', dayKind: 'train' }).flatMap((g) => g.items).map((i) => i.supp.id).sort(), ['c', 'mg', 'o3'], 'the day he said it still shows his answer');
+  assert.deepEqual(outOfStock([c, mg, o3], log, '2026-10-22').map((x) => x.supp.id), ['c', 'mg']);
+  // Back: a tick, a new count, or the arrival he told the coach about.
+  assert.equal(outOf(c, [...log, take('2026-10-23', c)]), null);
+  assert.equal(outOf({ ...mg, stock: { servings: 60, countedAt: Date.parse('2026-10-22T10:00:00Z') } }, log), null);
+  assert.equal(outOf({ ...mg, restockedAt: Date.parse('2026-10-22T10:00:00Z') }, log), null);
+  // A skip for another reason isn't "out".
+  assert.equal(outOf(c, [logEntry({ supp: c, date: '2026-10-21', dayKind: 'train', status: 'skipped', reason: 'Forgot it' })]), null);
+});
+
+test('restock question (Thu 10/22): every second day while out, on the arrival day once he says it, never one he stops', async () => {
+  const { restockAsk } = await import('../app/js/lib/fuel-reminders.js');
+  const c = supp('c', { name: 'Vitamin C', short: 'vitamin C' }); const mg = supp('mg', { name: 'Magnesium', short: 'magnesium' });
+  const log = [take('2026-10-20', c, 'skipped'), take('2026-10-20', mg, 'skipped')];
+  const supps = [c, mg];
+  assert.equal(restockAsk({ date: '2026-10-21', supps, log }), null, 'not the next day');
+  assert.deepEqual(restockAsk({ date: '2026-10-22', supps, log }), { names: 'Vitamin C, Magnesium', arriving: false, due: true });
+  assert.equal(restockAsk({ date: '2026-10-23', supps, log }), null);
+  const at = Date.parse('2026-10-22T13:00:00Z');
+  // Answered today: no more today, two days after the answer again.
+  const notYet = [{ kind: 'out', suppId: 'c', answer: 'not-yet', at, date: '2026-10-22' }, { kind: 'out', suppId: 'mg', answer: 'not-yet', at, date: '2026-10-22' }];
+  assert.equal(restockAsk({ date: '2026-10-22', supps, log, answers: notYet }), null);
+  assert.equal(restockAsk({ date: '2026-10-24', supps, log, answers: notYet }).due, true);
+  // Ordered, arriving Saturday: quiet until then, then "arrived?"; a stopped one is never asked.
+  const ordered = [{ kind: 'out', suppId: 'c', answer: 'ordered', arrives: '2026-10-24', at, date: '2026-10-22' }, { kind: 'out', suppId: 'mg', answer: 'stop', at, date: '2026-10-22' }];
+  assert.equal(restockAsk({ date: '2026-10-23', supps, log, answers: ordered }), null);
+  assert.deepEqual(restockAsk({ date: '2026-10-24', supps, log, answers: ordered }), { names: 'Vitamin C', arriving: true, due: true });
 });

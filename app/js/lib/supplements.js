@@ -84,7 +84,8 @@ const byOrder = (a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeComp
 export function checklist({ supps = [], log = [], date, dayKind }) {
   const entries = new Map(log.filter((e) => e.date === date).map((e) => [e.suppId, e]));
   const groups = new Map();
-  for (const s of supps.filter((x) => scheduledOn(x, date)).sort(byOrder)) {
+  // Out of stock: off the day's list until it's back (outOf); a day he answered for it still shows that answer.
+  for (const s of supps.filter((x) => scheduledOn(x, date) && (entries.has(x.id) || !outOf(x, log, date))).sort(byOrder)) {
     // Tue 10/20: the ones he takes right after his first meal (afterMeal 'first') are a group of their own; Thu 10/22:
     // so are the ones after his second meal (afterMeal 'second', his collagen).
     const second = s.afterMeal === 'second';
@@ -96,6 +97,24 @@ export function checklist({ supps = [], log = [], date, dayKind }) {
   return [...groups.values()].sort((a, b) => rank(a) - rank(b) || String(a.time).localeCompare(String(b.time)))
     .map((g) => ({ ...g, open: g.items.filter((i) => !i.entry) }));
 }
+
+const RAN_OUT = /\b(ran|run|running) out\b|out of stock|none left/i;
+
+/**
+ * Out of stock (Thu 10/22, his words: "I literally told it that I ran out"): his last "Ran out" skip, with no tick, new
+ * count or arrival since. {since: date, at} or null. `before`: what was known before that date (a past day's list).
+ */
+export function outOf(supp, log = [], before = null) {
+  const mine = log.filter((e) => e.suppId === supp.id && (!before || e.date < before));
+  const ran = mine.filter((e) => e.status === 'skipped' && RAN_OUT.test(e.reason || '')).sort((a, b) => a.at - b.at).at(-1);
+  if (!ran) return null;
+  const back = mine.some((e) => e.status === 'taken' && e.at > ran.at) || (supp.stock?.countedAt || 0) > ran.at || (supp.restockedAt || 0) > ran.at;
+  return back ? null : { since: ran.date, at: ran.at };
+}
+
+/** His active supplements that are out of stock now: [{supp, since}]. */
+export const outOfStock = (supps = [], log = [], date) => supps.filter((s) => statusOn(s, date) === 'active')
+  .map((supp) => ({ supp, out: outOf(supp, log) })).filter((x) => x.out).map((x) => ({ supp: x.supp, since: x.out.since }));
 
 /** A log entry for a tick (taken) or a skip with its reason. */
 export function logEntry({ supp, date, dayKind, status, reason = '', at = Date.now(), by = 'tap' }) {
@@ -119,7 +138,7 @@ export function streak({ supps = [], log = [], today }) {
   const answered = new Set(log.map((e) => e.id));
   let days = 0; let todayDone = false;
   for (let d = today; d >= from; d = addDays(d, -1)) {
-    const due = supps.filter((s) => scheduledOn(s, d));
+    const due = supps.filter((s) => scheduledOn(s, d) && (answered.has(logId(d, s.id)) || !outOf(s, log, d)));
     if (!due.length) continue;
     const all = due.every((s) => taken.has(logId(d, s.id)));
     if (d === today) {
@@ -144,6 +163,7 @@ export function adherence(supp, log = [], today, n = 7) {
     if (d < from) break;
     if (!scheduledOn(supp, d)) continue;
     const e = mine.get(d);
+    if (!e && outOf(supp, log, d)) continue;
     if (d === today && !e) continue;
     scheduled++;
     if (e?.status === 'taken') taken++;

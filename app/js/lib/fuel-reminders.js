@@ -3,7 +3,7 @@
 // photo. Supplements and the sauna add theirs here too.
 import { zonedTime, formatHm, addMinutesHm, formatTime } from './time.js';
 import { afterPhotoAt } from './meals.js';
-import { checklist, shortName, statusOn, stockStatus, lastsText } from './supplements.js';
+import { checklist, shortName, statusOn, stockStatus, lastsText, outOfStock, outOf } from './supplements.js';
 import { addDays } from './rotation.js';
 import { ladderState, stepText, plannedHm, OVERDUE_MIN } from './sauna.js';
 
@@ -138,6 +138,32 @@ export function weeklyAnsweredSince(answers = [], fromIso) {
   return answers.some((a) => a.kind === 'weekly' && a.date >= fromIso);
 }
 
+const daysApart = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
+
+/**
+ * The restock question (Thu 10/22, his words: "it should ask me a question... daily or every second day, about my
+ * restock, when they're coming"): out-of-stock supplements are asked about every second day from the day they ran out
+ * or his last answer; once he says when they arrive, on that day ("arrived?"); never one he is stopping. One question
+ * for all of them. {names, arriving, due} or null on a day with nothing to ask.
+ */
+export function restockAsk({ date, supps = [], log = [], answers = [] }) {
+  const asked = [];
+  let arriving = false; let answeredToday = true;
+  for (const { supp, since } of outOfStock(supps, log, date)) {
+    const ranAt = outOf(supp, log)?.at || 0;
+    const a = answers.filter((x) => x.kind === 'out' && x.suppId === supp.id && x.at > ranAt).sort((p, q) => p.at - q.at).at(-1);
+    if (a?.answer === 'stop') continue;
+    let on;
+    if (a?.arrives) { on = date >= a.arrives; if (on) arriving = true; } else on = daysApart(a?.date || since, date) >= 2 && daysApart(a?.date || since, date) % 2 === 0;
+    if (!on) continue;
+    asked.push(shortName(supp));
+    if (!(a?.date === date)) answeredToday = false;
+  }
+  if (!asked.length) return null;
+  const names = asked.map((n) => n.charAt(0).toUpperCase() + n.slice(1)).join(', ');
+  return { names, arriving, due: !answeredToday };
+}
+
 /**
  * Stock and planning (6.7): "Creatine: 7 servings left, about a week. Restocking?" every evening until he answers for
  * that count, and roughly once a week "planning to get anything?" (brief section 6). The app records his answer and
@@ -151,6 +177,14 @@ export function planReminders({ date, tz, supps = [], log = [], answers = [], ev
     out.push({
       id: `supps-low:${s.id}:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 10), tz), url: `#/supps/plan/${s.id}`, tag: `supps-low-${s.id}`, fixed: false,
       title: `${s.name}: running low`, body: `${cap1(shortName(s))}: ${st.left} serving${st.left === 1 ? '' : 's'} left, ${lastsText(st.days)}. Restocking?`, due: !lowAnswered(s, answers),
+    });
+  }
+  const ask = restockAsk({ date, supps, log, answers });
+  if (ask) {
+    out.push({
+      id: `supps-out:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 10), tz), url: '#/supps', tag: 'supps-out', fixed: false,
+      title: ask.arriving ? `Restock arrived? ${ask.names}` : `Still out: ${ask.names}`,
+      body: ask.arriving ? 'Tap Restocked on each, or tell me.' : 'Ordered them? When do they arrive? Tell me.', due: ask.due,
     });
   }
   if (new Date(`${date}T12:00:00Z`).getUTCDay() === weekday && supps.some((x) => statusOn(x, date) === 'active')) {
