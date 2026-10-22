@@ -606,6 +606,16 @@ export function render(view, params = []) {
       if (row) onSetAction(row.dataset.set, a.dataset.a);
       else onExAction(a.closest('[data-ex]').dataset.ex, a.dataset.a);
     });
+    // Thu 10/22, his words: "when I click on a set to edit the weight, it always clicks at the start of the number and
+    // doesn't let me backspace": the cursor goes to the end of the number on every tap (iPhone puts it where the finger
+    // lands, after focus, so once more on the tap's end).
+    const caretToEnd = (e) => {
+      const i = e.target.closest?.('input.set-in');
+      if (!i) return;
+      setTimeout(() => { if (document.activeElement === i) { const n = i.value.length; try { i.setSelectionRange(n, n); } catch { /* not a text box */ } } }, 0);
+    };
+    box.addEventListener('focusin', caretToEnd);
+    box.addEventListener('pointerup', caretToEnd);
     box.addEventListener('change', async (e) => {
       const input = e.target.closest('[data-f]');
       if (!input) return;
