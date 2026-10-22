@@ -130,6 +130,10 @@ async function turn(wav, { overCoach: echo = false } = {}) {
           // Not him. A clip that began while the coach was talking is mostly its own echo: no readout for that.
           if (!e.ok) { if (!(echo && e.reason === 'not-you')) showReadout(e.reason, e.score); return; }
           ok = true;
+          // The rest of what he was saying, joined on the Mac to the message already on its way: that turn's answer is
+          // the one to speak (Thu 10/22: treating it as a new turn dropped it: "he did set the reminder in the chat,
+          // but I didn't hear anything").
+          if (e.joined) { setPhase('thinking'); return; }
           // His voice, confirmed: whatever the coach was saying stops (barge-in), the set or hold talk too (only real
           // words get this far: grunts and breathing are dropped on the Mac). Pain, stop or anything off: Calm.
           // Earlier answers still coming in are dropped; this turn speaks from here on.
