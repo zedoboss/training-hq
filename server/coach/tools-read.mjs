@@ -161,6 +161,32 @@ function foodLine(s) {
   return `Food today: ${t.kcal.toLocaleString('en-US')} kcal of ${plan.kcal ? plan.kcal.toLocaleString('en-US') : '?'}, ${t.protein} g protein of ${plan.proteinG ?? '?'} g (${plural(t.meals, 'meal')}${t.estimated ? `, ${t.estimated} still estimates` : ''}${t.unread ? `, ${t.unread} being read` : ''}).`;
 }
 
+/**
+ * Thu 10/22, 4:36 PM (his words: "I'm not eating eggs for the second meal... I'm cooking beef for the second meal.
+ * That's obvious. It's already in the presets"): asked to remind him to start cooking his last meal, the coach added
+ * the eggs' butter step from a note, though the eggs were his first meal, logged at 1:15 PM. Every message now says
+ * what he ate today and which meal is next with what he usually eats then (his presets, in order), so a tip about a
+ * food goes only with the meal that has it.
+ */
+export function mealsNowLine(s) {
+  const slots = mealTimesOf(s.settings().fuel?.mealTimes);
+  const meals = s.list('meals').filter((m) => m.date === s.today).sort((a, b) => a.at - b.at);
+  const items = (m) => (m.before?.items || []).map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g`).join(', ') || 'items being read';
+  const had = meals.length ? meals.map((m) => `${m.name} ${timeText(m.at, s.tz)} (${items(m)})`).join('; ') : 'nothing logged yet';
+  if (!slots.length) return `Meals today: ${had}.`;
+  // Each real meal (not a snack) and each answer "eaten" or "skipped" uses up the next meal time, in order.
+  const checks = s.list('meal-checks').filter((c) => c.date === s.today);
+  const answered = (t) => checks.some((c) => c.slot === t.time && (c.answer === 'eaten' || c.answer === 'skipped'));
+  let real = meals.filter((m) => !/snack/i.test(m.name || '')).length;
+  const nextIdx = slots.findIndex((t) => { if (answered(t)) return false; if (real > 0) { real -= 1; return false; } return true; });
+  if (nextIdx < 0) return `Meals today: ${had}. Every meal time is done for today.`;
+  const slot = slots[nextIdx];
+  const presets = presetsOf(s.one('fuel', 'presets'));
+  const preset = presets.find((p) => p.name.toLowerCase() === slot.name.toLowerCase()) || presets[nextIdx] || null;
+  const usual = preset ? ` What he usually eats then (his preset "${preset.name}"): ${preset.items.map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g`).join(', ')}.` : '';
+  return `Meals today: ${had}. Next meal: ${slot.name} (${formatHm(slot.time)}${slot.latest ? `, ${formatHm(slot.latest)} at the latest` : ''}).${usual} A cooking tip or a note about a food (like the eggs' butter step) goes only with the meal that has that food and only while it isn't logged today; never assume what he's cooking from a note.`;
+}
+
 /** The weather now and the next 12 hours (Wed 10/21: "check if it's raining for me"). */
 function weatherText(s) {
   const w = s.store.getMeta?.('weather');
@@ -274,6 +300,7 @@ export function contextLine({ store, tz, now, screen = null }) {
   // Thu 10/22: asked "what's up?" he repeated a wrong 2:13 PM notification ("0 of 4 taken") as today's supplements; the
   // live count is here with every message, ahead of what the notifications said.
   lines.push(`Now: ${suppLine(s)}`);
+  lines.push(`Now: ${mealsNowLine(s)}`);
   lines.push(...pathLines(s));
   lines.push(...recoveryContext(s));
   lines.push(...noticeLines(s));
