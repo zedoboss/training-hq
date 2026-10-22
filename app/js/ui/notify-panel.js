@@ -47,8 +47,8 @@ function backupHtml(items) {
   return `<div class="hud c-muted rem-head">BACKUP REMINDERS ON THIS IPHONE</div>
     <section class="card pad-card" id="backup">
       <p class="hint c-text">If your Mac is off or offline, notifications stop. Subscribe once and your iPhone's Calendar keeps the next 7 days' fixed reminders (check-ins and sessions you set a time for, reminders you asked the coach for) and rings them when the Mac can't. It updates itself: what you've done drops off, and while the Mac is up it never rings on top of its notifications.</p>
-      <div class="btn-row"><button class="btn-primary" id="bk-sub" type="button">Subscribe in Calendar</button><button class="btn-ghost" id="bk-copy" type="button">Copy link</button></div>
-      <p class="hint">If Subscribe doesn't open Calendar: Copy link, then Settings, Calendar, Accounts, Add Account, Other, Add Subscribed Calendar, paste. Then Accounts, Fetch New Data: every 15 minutes, so it stays current.</p>
+      <div class="btn-row"><button class="btn-primary" id="bk-copy" type="button">Copy link</button></div>
+      <p class="hint">Then iPhone Settings, Apps, Calendar, Calendar Accounts, Add Account, Subscribed Calendar: paste, Next, Remove Alerts off, Save. Then Fetch New Data: every 15 minutes. (Thu 10/22: a calendar link opened from here lands in iCloud, whose servers can't reach your Mac, so it never updated.)</p>
       <p class="hint" id="backup-count">${items.length ? `${items.length} reminders, ${esc(formatDay(new Date(first.at)))} to ${esc(formatDay(new Date(last.at)))}.` : 'Nothing to add for the next 7 days.'}</p>
       <details class="bk-steps"><summary>One-time copies instead (they don't update)</summary>
       <div class="btn-row"><button class="btn-ghost" id="bk-shortcut" type="button" ${items.length ? '' : 'disabled'}>Send to Reminders</button>
@@ -131,11 +131,8 @@ export function notifyPanel(el) {
     const items = fixedReminders(st, today, 7);
     box.innerHTML = backupHtml(items);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    box.querySelector('#bk-sub').onclick = async () => {
-      try { location.href = (await calendarLink()).webcal; saveSettings({ notify: { backupSentOn: today } }); } catch { toast('The Mac is unreachable: try again when it is on.'); }
-    };
     box.querySelector('#bk-copy').onclick = async () => {
-      try { await navigator.clipboard.writeText((await calendarLink()).url); toast('Link copied.'); } catch { toast('Could not copy: is the Mac on?'); }
+      try { await navigator.clipboard.writeText((await calendarLink()).url); saveSettings({ notify: { backupSentOn: today } }); toast('Link copied.'); } catch { toast('Could not copy: is the Mac on?'); }
     };
     box.querySelector('#bk-shortcut').onclick = () => {
       saveSettings({ notify: { backupSentOn: today } });
