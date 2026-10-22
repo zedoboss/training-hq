@@ -4,13 +4,14 @@
 // hour before), so its alerts rang at stale times. Now the Mac writes the same open reminders into a calendar named
 // "Training HQ Backup" in his iCloud account through the Mac's Calendar app, and iCloud pushes every change to the iPhone in
 // seconds: a reminder the Mac sends, moves, or that he did or cancelled, leaves the iPhone at once; with the Mac off
-// the events stay and ring 20 minutes after their time. One AppleScript run per change (and every 30 minutes).
+// the events stay and ring 20 minutes after their time (each event starts at that alert time). One AppleScript run per change (and every 30 minutes).
 // macOS asks once whether the server may control Calendar; he creates the iCloud calendar once on his iPhone.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { calendarItems, ALERT_AFTER_MIN } from './calendar.mjs';
+import { formatTime } from '../app/js/lib/time.js';
 
 export const CALENDAR_NAME = 'Training HQ Backup';
 export const KEY_PREFIX = 'thq-backup:';
@@ -30,12 +31,18 @@ const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n
  */
 export const isRealFolder = (privateDir, home = homedir()) => resolve(String(privateDir || '')) === resolve(join(home, 'Documents', 'training-hq-private'));
 
-/** The events the iCloud calendar should hold now: {key, title, notes, at}. The key changes when time or words do. */
-export function desiredEvents(items, now = Date.now(), hours = HOURS) {
+/**
+ * The events the iCloud calendar should hold now: {key, title, notes, at}. Each starts at its alert time, the reminder's
+ * time + 20 minutes, with the reminder's own time in the title (Thu 10/22: Calendar adds his account's default alert,
+ * "at time of event", to every new event and AppleScript can't see or remove it; at the reminder's own time it would
+ * ring together with the Mac's notification). The Mac removes the event when it sends, long before either alert.
+ * The key changes when the time or the words do.
+ */
+export function desiredEvents(items, now = Date.now(), { hours = HOURS, tz = 'UTC', alertMin = ALERT_AFTER_MIN } = {}) {
   return items.filter((r) => r.at <= now + hours * 3600000).map((r) => {
-    const title = oneLine(r.kind === 'coach' && r.body ? r.body : r.title, 200);
-    const notes = oneLine(`${r.kind === 'coach' ? '' : `${r.body || ''} `}Backup from Training HQ: it rings only when the Mac couldn't send it.`, 400);
-    return { key: `${KEY_PREFIX}${r.id}@${r.at}#${hash(`${title}|${notes}`)}`, title, notes, at: r.at };
+    const title = `${oneLine(r.kind === 'coach' && r.body ? r.body : r.title, 180)} · ${formatTime(new Date(r.at), tz)}`;
+    const notes = oneLine(`${r.kind === 'coach' ? '' : `${r.body || ''} `}Backup from Training HQ for ${formatTime(new Date(r.at), tz)}: it rings only when the Mac couldn't send it.`, 400);
+    return { key: `${KEY_PREFIX}${r.id}@${r.at}#${hash(`${title}|${notes}`)}`, title, notes, at: r.at + alertMin * 60000 };
   });
 }
 
@@ -43,10 +50,10 @@ const asText = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}
 
 /**
  * The AppleScript that makes the calendar hold exactly these events: ours not wanted are deleted, missing ones made
- * (each with an alert `alertMin` after its start). Times are the Mac's local time (the server runs in it). Returns
+ * (each with an alert at its start, the alert time). Times are the Mac's local time (the server runs in it). Returns
  * "OK <added> <removed> <kept>", or "NO_CALENDAR" when there's no calendar of that name.
  */
-export function syncScript(events, { name = CALENDAR_NAME, alertMin = ALERT_AFTER_MIN } = {}) {
+export function syncScript(events, { name = CALENDAR_NAME, alertMin = 0 } = {}) {
   const wanted = events.map((e) => {
     const d = new Date(e.at);
     const secs = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
@@ -123,7 +130,8 @@ export function openICloudCalendar({ store, tz, run = osascript, now = () => Dat
   async function sync({ force = false } = {}) {
     if (busy) return null;
     const t = now();
-    const events = desiredEvents(calendarItems(store, typeof tz === 'function' ? tz() : tz, t), t);
+    const zone = typeof tz === 'function' ? tz() : tz;
+    const events = desiredEvents(calendarItems(store, zone, t), t, { tz: zone });
     const sig = hash(events.map((e) => e.key).sort().join('\n'));
     if (!force && sig === lastSig && t - lastOkAt < HEAL_MS) return null;
     // After a failure: again in 5 minutes; while only the calendar is missing, every minute (he's making it now).

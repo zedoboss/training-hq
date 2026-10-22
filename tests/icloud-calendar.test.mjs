@@ -14,24 +14,26 @@ import { backupStatusText, BACKUP_CALENDAR } from '../app/js/lib/backup-reminder
 const TZ = 'Asia/Bangkok';
 const at = (d, hm) => Date.parse(`${d}T${hm}:00+07:00`);
 
-test('the events: his own words for a coach reminder, a key that changes with the time or the words, 3 days ahead', () => {
+test('the events: his own words for a coach reminder, starting at the alert time with his time in the title, 3 days ahead', () => {
   const now = at('2026-03-18', '14:00');
   const items = [
     { id: 'coach:r1', kind: 'coach', at: at('2026-03-18', '17:00'), title: 'Reminder', body: 'Mall run: screen protector' },
     { id: 'holds-evening:2026-03-18', kind: 'holds', at: at('2026-03-18', '21:30'), title: 'Evening holds', body: 'Knees: 3 holds.' },
     { id: 'holds-evening:2026-03-22', kind: 'holds', at: at('2026-03-22', '21:30'), title: 'Evening holds', body: 'Knees.' },
   ];
-  const ev = desiredEvents(items, now);
+  const ev = desiredEvents(items, now, { tz: TZ });
   assert.equal(ev.length, 2, 'beyond 3 days: left out');
-  assert.equal(ev[0].title, 'Mall run: screen protector');
-  assert.equal(ev[0].notes, "Backup from Training HQ: it rings only when the Mac couldn't send it.");
-  assert.equal(ev[1].notes, "Knees: 3 holds. Backup from Training HQ: it rings only when the Mac couldn't send it.");
+  assert.equal(ev[0].title, 'Mall run: screen protector · 5:00 PM');
+  assert.equal(ev[0].at, at('2026-03-18', '17:20'), 'Calendar adds his default alert at the event\'s start: the start is the alert time, so nothing rings with the Mac\'s own notification');
+  assert.equal(ev[0].notes, "Backup from Training HQ for 5:00 PM: it rings only when the Mac couldn't send it.");
+  assert.equal(ev[1].title, 'Evening holds · 9:30 PM');
+  assert.equal(ev[1].notes, "Knees: 3 holds. Backup from Training HQ for 9:30 PM: it rings only when the Mac couldn't send it.");
   assert.ok(ev[0].key.startsWith(`${KEY_PREFIX}coach:r1@${at('2026-03-18', '17:00')}#`));
-  const moved = desiredEvents([{ ...items[0], at: at('2026-03-18', '17:30') }], now)[0];
-  const reworded = desiredEvents([{ ...items[0], body: 'Mall run' }], now)[0];
+  const moved = desiredEvents([{ ...items[0], at: at('2026-03-18', '17:30') }], now, { tz: TZ })[0];
+  const reworded = desiredEvents([{ ...items[0], body: 'Mall run' }], now, { tz: TZ })[0];
   assert.notEqual(moved.key, ev[0].key);
   assert.notEqual(reworded.key, ev[0].key);
-  assert.equal(desiredEvents([items[0]], now)[0].key, ev[0].key, 'the same reminder, the same key');
+  assert.equal(desiredEvents([items[0]], now, { tz: TZ })[0].key, ev[0].key, 'the same reminder, the same key');
 });
 
 test('the AppleScript: the calendar by name, the Mac\'s local time, the alert 20 minutes after, text escaped', () => {
@@ -39,7 +41,7 @@ test('the AppleScript: the calendar by name, the Mac\'s local time, the alert 20
   const s = syncScript([{ key: 'thq-backup:a@1#x', title: 'Say "hi" \\ there', notes: 'n', at: t }]);
   assert.match(s, /^tell application "Calendar"\n  set cals to \(every calendar whose name is "Training HQ Backup"\)\n  if \(count of cals\) is 0 then return "NO_CALENDAR"/);
   assert.match(s, /\{"thq-backup:a@1#x", "Say \\"hi\\" \\\\ there", "n", 2026, 3, 18, 77400\}/);
-  assert.match(s, /trigger interval:20\}/);
+  assert.match(s, /trigger interval:0\}/, 'the alert at the event\'s start, which is the alert time');
   assert.match(s, /if u starts with "thq-backup:" then/, 'only its own events are touched');
   assert.match(s, /set day of d to 1\n      set year of d/, 'the day first, so a short month never rolls over');
   assert.equal(CALENDAR_NAME, BACKUP_CALENDAR);
@@ -79,7 +81,11 @@ test('the Mac keeps the calendar in line: a run when something changed, a sent r
     const s2 = await ic.sync();
     assert.equal(s2.ok, true);
     assert.equal(s2.events, 2);
-    assert.match(scripts.at(-1), /"Buy water"[\s\S]*"Call home"/);
+    // It starts at 2:50 PM, its alert time, in the Mac's local time (the CI runs in another zone).
+    const alertAt = new Date(at('2026-03-18', '14:50'));
+    const local = `${alertAt.getFullYear()}, ${alertAt.getMonth() + 1}, ${alertAt.getDate()}, ${alertAt.getHours() * 3600 + alertAt.getMinutes() * 60}}`;
+    assert.ok(scripts.at(-1).includes(`"Buy water · 2:30 PM", "Backup from Training HQ for 2:30 PM: it rings only when the Mac couldn't send it.", ${local}`));
+    assert.match(scripts.at(-1), /"Call home · 5:00 PM"/);
     clock += 60000; await ic.sync();
     assert.equal(scripts.length, 3, 'nothing changed: no run');
     // 14:30: the Mac sends "Buy water": the next minute's run takes it out of his iCloud calendar.
