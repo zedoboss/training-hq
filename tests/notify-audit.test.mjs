@@ -83,3 +83,27 @@ test('sauna planned before a fast: no "sauna today"; running low on something al
   assert.match(evening([]), /Supplements still open: magnesium/);
   assert.doesNotMatch(evening([{ id: 'h', areas: ['supps'], at: at('08:00'), until: at('23:59') }]), /Supplements still open/);
 });
+
+test('restock questions (Fri 10/23, his words: asked at 10:40, 10:50 and 11:35 PM): once that day, halfway through his waking day', () => {
+  const sup = (id, name, o = {}) => ({ id, kind: 'supplement', name, short: name === 'Vitamin C' ? 'vitamin C' : name.toLowerCase(), dose: '1', days: { type: 'daily' }, status: 'active', ...o });
+  const out = ['Creatine', 'Carnitine', 'Magnesium', 'Vitamin C'].map((n, i) => sup(`s${i}`, n));
+  const low = sup('om', 'Omega-3', { stock: { servings: 3, countedAt: at('08:00', '2026-03-10') } });
+  const log = out.map((s) => logEntry({ supp: s, date: '2026-03-16', dayKind: 'train', status: 'skipped', reason: 'Ran out', at: at('09:00', '2026-03-16') }));
+  const settings = { notify: { eveningCheck: '22:30', wakeHm: '10:00', bedHm: '00:00', suppPlanWeekday: new Date(`${D}T12:00:00Z`).getUTCDay() } };
+  const items = remindersFor({ date: D, ...reminderState({ supplements: [...out, low], suppLog: log, settings }, TZ) });
+  const ask = items.find((i) => i.id === `supps-out:${D}`);
+  assert.ok(ask, 'asked on the second day out');
+  assert.match(ask.title, /Still out: Creatine, Carnitine, Magnesium, Vitamin C/);
+  assert.equal(ask.at, at('17:00'), 'halfway from his 10:00 AM wake to midnight, not after the 10:30 PM round-up');
+  const plan = items.filter((i) => /^supps-(out|low|plan):/.test(i.id));
+  assert.equal(plan.length, 3, 'out, running low and the weekly question all planned');
+  // Still unanswered late in the evening: no nudge repeats any of them.
+  for (const hm of ['17:10', '17:50', '22:50', '23:35']) {
+    const keys = nudgeCandidates({ ...base, wakeHm: '10:00', now: at(hm), reminders: items }).map((c) => c.key);
+    assert.equal(keys.some((k) => /supps-(out|low|plan)/.test(k)), false, `nothing at ${hm}`);
+  }
+  // Default waking hours (7:00 AM to 10:00 PM): 2:30 PM.
+  assert.equal(planReminders({ date: D, tz: TZ, supps: out, log }).find((i) => i.id.startsWith('supps-out:')).at, at('14:30'));
+  // Waking hours across midnight (2:00 PM to 4:00 AM): 9:00 PM.
+  assert.equal(planReminders({ date: D, tz: TZ, supps: out, log, wakeHm: '14:00', bedHm: '04:00' }).find((i) => i.id.startsWith('supps-out:')).at, at('21:00'));
+});

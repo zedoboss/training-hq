@@ -164,12 +164,22 @@ export function restockAsk({ date, supps = [], log = [], answers = [] }) {
   return { names, arriving, due: !answeredToday };
 }
 
+/** Halfway through his waking day ("10:00" to "00:00" = "17:00"; works across midnight). */
+export function midDayHm(wakeHm = '07:00', bedHm = '22:00') {
+  const min = (hm) => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
+  const w = min(wakeHm); let b = min(bedHm);
+  if (b <= w) b += 1440;
+  return addMinutesHm('00:00', Math.round((w + b) / 2));
+}
+
 /**
  * Stock and planning (6.7): "Creatine: 7 servings left, about a week. Restocking?" every evening until he answers for
  * that count, and roughly once a week "planning to get anything?" (brief section 6). The app records his answer and
- * changes nothing on the list.
+ * changes nothing on the list. Each is asked once that day, never nudged again (Fri 10/23, his words: the restock
+ * question came at 10:40, 10:50 and 11:35 PM; he wanted it "daily or every second day"); the out-of-stock one comes
+ * halfway through his waking day, not at the late evening round-up.
  */
-export function planReminders({ date, tz, supps = [], log = [], answers = [], eveningHm = '20:30', weekday = 0 }) {
+export function planReminders({ date, tz, supps = [], log = [], answers = [], eveningHm = '20:30', weekday = 0, wakeHm = '07:00', bedHm = '22:00' }) {
   const out = [];
   for (const s of supps.filter((x) => statusOn(x, date) === 'active')) {
     const st = stockStatus(s, log);
@@ -177,21 +187,21 @@ export function planReminders({ date, tz, supps = [], log = [], answers = [], ev
     if (!st?.low || outOf(s, log)) continue;
     out.push({
       id: `supps-low:${s.id}:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 10), tz), url: `#/supps/plan/${s.id}`, tag: `supps-low-${s.id}`, fixed: false,
-      title: `${s.name}: running low`, body: `${cap1(shortName(s))}: ${st.left} serving${st.left === 1 ? '' : 's'} left, ${lastsText(st.days)}. Restocking?`, due: !lowAnswered(s, answers),
+      title: `${s.name}: running low`, body: `${cap1(shortName(s))}: ${st.left} serving${st.left === 1 ? '' : 's'} left, ${lastsText(st.days)}. Restocking?`, again: false, due: !lowAnswered(s, answers),
     });
   }
   const ask = restockAsk({ date, supps, log, answers });
   if (ask) {
     out.push({
-      id: `supps-out:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 10), tz), url: '#/supps', tag: 'supps-out', fixed: false,
+      id: `supps-out:${date}`, kind: 'supps', at: zonedTime(date, midDayHm(wakeHm, bedHm), tz), url: '#/supps', tag: 'supps-out', fixed: false,
       title: ask.arriving ? `Restock arrived? ${ask.names}` : `Still out: ${ask.names}`,
-      body: ask.arriving ? 'Tap Restocked on each, or tell me.' : 'Ordered them? When do they arrive? Tell me.', due: ask.due,
+      body: ask.arriving ? 'Tap Restocked on each, or tell me.' : 'Ordered them? When do they arrive? Tell me.', again: false, due: ask.due,
     });
   }
   if (new Date(`${date}T12:00:00Z`).getUTCDay() === weekday && supps.some((x) => statusOn(x, date) === 'active')) {
     out.push({
       id: `supps-plan:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 15), tz), url: '#/supps/plan', tag: 'supps-plan', fixed: false,
-      title: 'Supplements: planning to get anything?', body: 'Restock anything, or add something new? Tap to answer.',
+      title: 'Supplements: planning to get anything?', body: 'Restock anything, or add something new? Tap to answer.', again: false,
       due: !weeklyAnsweredSince(answers, addDays(date, -6)),
     });
   }

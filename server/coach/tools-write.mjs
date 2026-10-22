@@ -542,7 +542,7 @@ async function supplementPlan(a, ctx) {
     const names = picked.map(({ supp }) => supp.short || supp.name).join(', ');
     if (a.answer === 'arrived') return wrote(`${names}: back in stock, on his daily list again from now. If he knows how many servings, the count goes on the supplement.`, `${names}: restocked`);
     if (a.answer === 'stop') return wrote(`${names}: no more restock questions. It stays on his list, off his day while out; he removes it on My list if he's done with it.`, `${names}: stopping`);
-    if (a.answer === 'ordered' && a.arrives) return wrote(`${names}: ordered, arriving ${dayText(a.arrives, today)}. The app asks that evening whether it arrived; no restock questions before then.`, `${names}: arriving ${a.arrives}`);
+    if (a.answer === 'ordered' && a.arrives) return wrote(`${names}: ordered, arriving ${dayText(a.arrives, today)}. The app asks that day whether it arrived; no restock questions before then.`, `${names}: arriving ${a.arrives}`);
     return wrote(`${names}: ${a.answer === 'ordered' ? 'ordered, no date yet' : 'not ordered yet'}. Asked again in two days, at his evening check.`, `${names}: ${a.answer}`);
   }
   if (a.kind === 'weekly') {

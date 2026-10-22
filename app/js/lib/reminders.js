@@ -161,7 +161,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
         title: 'Evolt scan?', body: 'Do it before you leave the gym, then add the results (photo or PDF).', due: true });
     }
   }
-  if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday }));
+  if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday, wakeHm: n.wakeHm, bedHm: n.bedHm }));
   // Step 8: reminders he asked the coach for, at their time, in his words.
   if (on('coach')) {
     for (const r of coachReminders) {
