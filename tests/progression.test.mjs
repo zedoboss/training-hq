@@ -64,7 +64,7 @@ test('confirmed numbers: latest week up to the one asked; targets use them past 
   const t = targetFor({ plan: plan.exercises[0], week: 6, last: { kg: 70, reps: 8 }, progressKg: 80 });
   // Decision 33 (Thu 10/22): one step over the last load; the confirmed number is the goal.
   assert.equal(t.kg, 72.5);
-  assert.equal(t.why, 'Last time 70 kg, +2.5 kg. Week 6 step (confirmed) goal 80 kg');
+  assert.equal(t.why, 'Last time 70 kg, +2.5 kg. Goal (week 6, confirmed): 80 kg');
   assert.equal(targetFor({ plan: plan.exercises[0], week: 6, last: { kg: 50, reps: 8 }, progressKg: 80 }).kg, 52.5);
 });
 

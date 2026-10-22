@@ -107,7 +107,8 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
   const ceiling = Math.min(table, out.capKg ?? Infinity);
   // A step on top of what he lifted is loadable as it is (1.25 a side more); a ceiling is rounded down to his plates.
   out.kg = up <= ceiling ? up : loadable(ceiling, { barKg, smallestPlate }) ?? ceiling;
-  const goal = `${plan_} goal ${table} kg`;
+  // Thu 10/22, his words: "why is it telling me to do 40?": the table's number is the goal, not today's load.
+  const goal = week > 4 && progressKg != null ? `Goal (week ${week}, confirmed): ${table} kg` : `Goal (The Comeback, week ${out.week}): ${table} kg`;
   out.why = short ? `Same as last time (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first. ${goal}`
     : up <= ceiling ? `Last time ${last.kg} kg, ${stepText}. ${goal}`
       : `Last time ${last.kg} kg, ${stepText} reaches the ${table <= (out.capKg ?? Infinity) ? 'plan' : '30% cap'}: ${out.kg} kg`;

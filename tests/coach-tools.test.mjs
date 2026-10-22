@@ -118,7 +118,7 @@ test('rest_day_hold (A2): asked on a rest day, his answer recorded, never on a t
 test('programme gives exactly what Start would: the table capped at last load + 30%, with the bar split', async () => {
   const r = await call('programme');
   assert.match(r.text, /^Legs, today, week 3 column\./);
-  assert.match(r.text, /1\. Squat \(Smith Machine\): 2 sets × 8-12 at 42\.5 kg total \(15 kg bar \+ 13\.75 kg a side\)\. Why: Last time 40 kg, \+2\.5 kg \(1\.25 a side\)\. Plan goal 70 kg/);
+  assert.match(r.text, /1\. Squat \(Smith Machine\): 2 sets × 8-12 at 42\.5 kg total \(15 kg bar \+ 13\.75 kg a side\)\. Why: Last time 40 kg, \+2\.5 kg \(1\.25 a side\)\. Goal \(The Comeback, week 3\): 70 kg/);
   assert.match(r.text, /Last: Tuesday 1\/13, 40 kg × 10, 40 kg × 10/);
   const wk4 = await call('programme', { week: 4 });
   assert.match(wk4.text, /week 4 column \(asked for\)/);

@@ -22,7 +22,7 @@ test('decision 33 (Thu 10/22, his squat at 66.3 "too big a push"): one step over
   assert.equal(t.kg, 53.8, '51.3 + 1.25 a side');
   assert.deepEqual(t.reps, [6, 8]);
   assert.equal(t.sets, 2);
-  assert.equal(t.why, 'Last time 51.3 kg, +2.5 kg (1.25 a side). Plan goal 70 kg');
+  assert.equal(t.why, 'Last time 51.3 kg, +2.5 kg (1.25 a side). Goal (The Comeback, week 4): 70 kg');
   // His squat today: last 51.8 x 8 on the Smith machine -> 54.3, not 66.3.
   const squat = { capClass: 'main', weeks: [w(40, [10, 12], { count: 1 }), w(50, [8, 10], { count: 2 }), w(65, [6, 8], { count: 2 }), w(80, [6, 8], { count: 2 })] };
   assert.equal(targetFor({ plan: squat, week: 4, last: { kg: 51.8, reps: 8 }, barKg: 11.3, name: 'Squat (Smith Machine)' }).kg, 54.3);
@@ -31,7 +31,7 @@ test('decision 33 (Thu 10/22, his squat at 66.3 "too big a push"): one step over
   assert.equal(targetFor({ plan: curl, week: 4, last: { kg: 36, reps: 10 }, name: 'Seated Leg Curl (Machine)' }).kg, 41);
   const held = targetFor({ plan: curl, week: 4, last: { kg: 36, reps: 6 }, name: 'Seated Leg Curl (Machine)' });
   assert.equal(held.kg, 36);
-  assert.equal(held.why, 'Same as last time (36 kg × 6): get to 8 reps first. Plan goal 45 kg');
+  assert.equal(held.why, 'Same as last time (36 kg × 6): get to 8 reps first. Goal (The Comeback, week 4): 45 kg');
   // Near the table: the step stops at it.
   const near = targetFor({ plan: bench, week: 4, last: { kg: 68.8, reps: 8 }, barKg: 11.3 });
   assert.equal(near.kg, 68.8, '68.8 + 2.5 is over 70; 70 needs 29.35 a side, 28.75 is the most under it');
