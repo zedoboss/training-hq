@@ -79,7 +79,7 @@ function allEvents(s) {
     const items = meal.before?.items || [];
     const kcal = Math.round(items.reduce((n, x) => n + (Number(x.kcal) || 0), 0));
     const protein = Math.round(items.reduce((n, x) => n + (Number(x.protein) || 0), 0));
-    ev(meal.at, 'meals', `Meal: ${meal.name || 'meal'}: ${items.length ? items.map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g${x.portion ? ` (${x.portion})` : ''}`).join(', ') : 'photo, items being read'}${items.length ? `; ${kcal} kcal, ${protein} g protein` : ''}${meal.before?.photoId ? '; before photo' : ''}${meal.note ? `. Note: ${clip(meal.note, 200)}` : ''}`);
+    ev(meal.at, 'meals', `Meal: ${meal.name || 'meal'}: ${items.length ? items.map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g${x.portion ? ` (${x.portion})` : ''}`).join(', ') : meal.before?.photoId ? 'photo, items being read' : 'nothing entered (an empty meal: counts as no meal)'}${items.length ? `; ${kcal} kcal, ${protein} g protein` : ''}${meal.before?.photoId ? '; before photo' : ''}${meal.note ? `. Note: ${clip(meal.note, 200)}` : ''}`);
     if (meal.after?.at && (meal.after.photoId || meal.after.none)) ev(meal.after.at, 'meals', `After the ${String(meal.name || 'meal').toLowerCase()}: ${meal.after.none ? 'ate it all' : 'after photo (leftovers)'}`);
   }
   for (const c of s.list('meal-checks')) ev(c.at, 'meals', `Meal answer (${c.name || c.slot}): ${c.answer}${c.until ? `, done by ${c.until}` : ''}`);

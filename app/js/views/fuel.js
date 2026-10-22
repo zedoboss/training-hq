@@ -12,7 +12,7 @@ import { isoDate, formatDay, formatTime, daysBetween, timeAt } from '../lib/time
 import { addDays } from '../lib/rotation.js';
 import { dayTotals, mealTotals, mealState, STATE_SHORT, presetsOf, mealFromPreset, itemTotals } from '../lib/meals.js';
 import { newId } from '../lib/routines.js';
-import { logMealFromFile, logMealManual, cameraInput } from './meal.js';
+import { logMealFromFile, logMealManual, cameraInput, presetsNear } from './meal.js';
 import { photoTime } from '../lib/photos.js';
 import { dayKindOn } from './supps.js';
 import { checklist } from '../lib/supplements.js';
@@ -103,13 +103,25 @@ async function editTargets(repo) {
 }
 
 const ANSWER = { eaten: 'Eaten', soon: 'About to cook', cooking: 'Cooking', skipped: 'Skipping' };
+/** Today at "HH:MM" on this device (which preset suits a meal time). */
+const zonedTimeLocal = (hm) => { const d = new Date(); d.setHours(Number(hm.slice(0, 2)), Number(hm.slice(3)), 0, 0); return d.getTime(); };
 
 /** "Eaten, cooking, or skipping?" for one meal time (from a reminder). */
 async function answerCheck(repo, date, hmId) {
   const slot = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes).find((t) => t.time.replace(':', '') === hmId);
   const name = slot?.name || 'Meal';
   const save = (answer) => repo.put('meal-checks', `${date}.${hmId}`, { id: `${date}.${hmId}`, date, slot: slot?.time ?? null, name, answer, at: Date.now() });
+  // Thu 10/22 (his words: "a button which should log a normal meal from the ones I already have"): eaten as usual, one
+  // tap, the preset for this meal time first.
+  const usual = (await presetsNear(slot ? zonedTimeLocal(slot.time) : Date.now())).map((p) => ({ label: `Eaten: ${p.name}, as usual`, run: async () => {
+    const id = newId('meal');
+    await repo.put('meals', id, mealFromPreset({ id, at: Date.now(), preset: p }));
+    await save('eaten');
+    const pt = itemTotals(p.items);
+    toast(`Logged ${p.name}: ${n0(pt.kcal)} kcal, ${pt.protein} g protein. Tap it below to change it.`);
+  } }));
   actionSheet(`${name}: eaten, cooking, or skipping?`, [
+    ...usual,
     // The camera must open inside the tap itself (iPhone rule), so it is clicked before the answer is saved.
     { label: 'Eaten: take the photo now', run: () => { document.querySelector('#f-cam')?.click(); save('eaten'); } },
     { label: 'Eaten: log it without a photo', run: () => { document.querySelector('#f-manual')?.click(); save('eaten'); } },
@@ -231,16 +243,16 @@ export function render(view, params) {
       toast(`Logged ${preset.name}: ${n0(pt.kcal)} kcal, ${pt.protein} g protein. Tap it below to change or delete.`);
     }; });
     const man = body.querySelector('#f-manual');
+    // Thu 10/22: nothing is saved until he saves what he ate (an empty meal, saved at the tap, synced while he typed and
+    // the Mac took it for his second meal: "Dinner done. Get up and take your collagen now"). His presets come first.
     if (man) man.onclick = async () => {
-      const id = await logMealManual();
-      location.hash = `#/meal/${id}`;
       const { editItems } = await import('./meal.js');
-      const items = await editItems('WHAT YOU ATE', []);
-      if (items?.length) { const m = await repo.get('meals', id); await repo.put('meals', id, { ...m, before: { ...m.before, items, confirmedAt: Date.now() } }); return; }
-      // Cancelled, or saved with nothing typed: no empty meal left behind (it would count as a meal and quiet the
-      // meal-time reminder).
-      await repo.remove('meals', id);
-      if (location.hash === `#/meal/${id}`) history.back();
+      const items = await editItems('WHAT YOU ATE', [], { presets: await presetsNear() });
+      if (!items?.length) return;
+      const id = await logMealManual({ items });
+      const pt = itemTotals(items);
+      toast(`Logged ${items.presetName || 'it'}: ${n0(pt.kcal)} kcal, ${pt.protein} g protein.`);
+      location.hash = `#/meal/${id}`;
     };
   };
 

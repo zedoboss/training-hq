@@ -9,8 +9,10 @@ import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
 import {
   MEAL_NAMES, defaultMealName, newMeal, cleanItems, itemTotals, regram, scaleTo, currentEstimate, beforeItems, leftovers,
-  netItems, mealState, STATE_TEXT, afterPhotoAt,
+  netItems, mealState, STATE_TEXT, afterPhotoAt, presetsOf, presetsFor,
 } from '../lib/meals.js';
+import { mealTimesOf } from '../lib/fuel-reminders.js';
+import { hmOf } from '../lib/time.js';
 import { actionSheet, confirmSheet, promptText, promptLong, overlay } from '../ui/sheet.js';
 import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE, myFoods, labelItem, sameFood, amountChoices } from '../lib/foods.js';
 
@@ -36,13 +38,25 @@ export async function logMealFromFile(file, { at = Date.now() } = {}) {
   return mealId;
 }
 
-/** A meal typed in by hand (no photo). */
-export async function logMealManual({ at = Date.now() } = {}) {
+/**
+ * A meal typed in by hand (no photo), saved with what he ate (Thu 10/22: it used to be saved empty the moment he tapped
+ * "No photo", before he typed anything, and the Mac took it for his second meal). items: from editItems; a preset he
+ * tapped there names the meal.
+ */
+export async function logMealManual({ at = Date.now(), items = [] } = {}) {
   const repo = await ready;
   const mealId = newId('meal');
-  const name = defaultMealName(at, withDefaults(getState().settings).fuel?.mealTimes);
-  await repo.put('meals', mealId, newMeal({ id: mealId, at, name }));
+  const name = items.presetName || defaultMealName(at, withDefaults(getState().settings).fuel?.mealTimes);
+  const meal = newMeal({ id: mealId, at, name });
+  await repo.put('meals', mealId, { ...meal, before: { ...meal.before, items: cleanItems(items), confirmedAt: at }, ...(items.presetId ? { preset: items.presetId } : {}) });
+  syncNow();
   return mealId;
+}
+
+/** His presets, the one for the meal time nearest `at` first (lib/meals.js presetsFor). */
+export async function presetsNear(at = Date.now()) {
+  const doc = await (await ready).get('fuel', 'presets');
+  return presetsFor(presetsOf(doc), mealTimesOf(withDefaults(getState().settings).fuel?.mealTimes), hmOf(new Date(at)));
 }
 
 /**
@@ -66,14 +80,20 @@ const SOURCE_TEXT = { usda: 'USDA', typed: 'your numbers', estimate: 'estimate',
  * grams exactly. Typing kcal or protein makes them his numbers. On Save, a typed name with no numbers is matched to
  * USDA when it can be.
  */
-export function editItems(title, items) {
+export function editItems(title, items, { presets = [] } = {}) {
   return new Promise((resolve) => {
     let result = null;
     let rows = cleanItems(items);
     if (!rows.length) rows = [{ name: '', grams: 0, kcal: 0, protein: 0, unsure: false }];
     let db = null; let mine = [];
     const dbReady = Promise.all([loadFoods(), myFoodsList()]).then(([d, m]) => { db = d; mine = m; }).catch(() => {});
-    const { el, close } = overlay(`<form class="sheet-form meal-edit"><div class="hud c-muted sheet-title">${esc(title)}</div>
+    // Thu 10/22 (his words: "a button which should log a normal meal from the ones I already have"): his presets, the
+    // one for this meal time first; one tap saves it as what he ate.
+    const usual = presets.length ? `<div class="me-presets"><span class="hud c-muted">SAME AS USUAL · ONE TAP SAVES IT</span><div class="chips wrap">${presets.map((p, i) => {
+      const pt = itemTotals(p.items);
+      return `<button class="chip${i ? '' : ' is-on'}" type="button" data-preset="${i}">${esc(p.name)} · ${n0(pt.kcal)} kcal</button>`;
+    }).join('')}</div></div>` : '';
+    const { el, close } = overlay(`<form class="sheet-form meal-edit"><div class="hud c-muted sheet-title">${esc(title)}</div>${usual}
       <div class="me-head hud c-faint"><span>FOOD</span><span>G</span><span>KCAL</span><span>PROT</span><span></span></div>
       <div class="me-rows"></div>
       <button class="btn-ghost" type="button" data-add>+ Add item</button>
@@ -173,6 +193,12 @@ export function editItems(title, items) {
     dbReady.then(() => { rows = read(); draw(); });
     el.querySelector('[data-add]').onclick = () => { rows = [...read(), { name: '', grams: 0, kcal: 0, protein: 0 }]; draw(); box.querySelector('.me-item:last-child [data-f=name]').focus(); };
     el.querySelector('[data-cancel]').onclick = () => close();
+    el.querySelectorAll('[data-preset]').forEach((b) => { b.onclick = () => {
+      const p = presets[Number(b.dataset.preset)];
+      if (!p) return;
+      result = Object.assign(cleanItems(p.items), { presetId: p.id, presetName: p.name });
+      close();
+    }; });
     el.querySelector('form').addEventListener('submit', async (e) => {
       e.preventDefault();
       await dbReady;
@@ -377,8 +403,9 @@ export function render(view, [id]) {
     };
     $('#m-fix').onclick = async () => {
       const opts = [{ label: meal.after && !meal.after.none ? 'Fix what was on the plate' : 'Fix the items', run: async () => {
-        const next = await editItems('WHAT WAS ON THE PLATE', items);
-        if (next) await save({ before: { ...meal.before, items: next, confirmedAt: Date.now(), edited: true } });
+        // Nothing on it yet (a meal left empty): his presets, one tap fills it.
+        const next = await editItems('WHAT WAS ON THE PLATE', items, { presets: items.length ? [] : await presetsNear(meal.at) });
+        if (next) await save({ before: { ...meal.before, items: next, confirmedAt: Date.now(), edited: true }, ...(next.presetId ? { preset: next.presetId } : {}) });
       } }];
       if (meal.after?.photoId && items.length) opts.push({ label: 'Fix what was left over', run: async () => {
         const next = await editLeftovers(items, l.items);

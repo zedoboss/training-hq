@@ -6,7 +6,7 @@ import { remindersFor, dueNow, reminderState, afterGym } from '../app/js/lib/rem
 import { addDays, rotationDay } from '../app/js/lib/rotation.js';
 import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
-import { dayTotals, isSnack } from '../app/js/lib/meals.js';
+import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
@@ -23,7 +23,7 @@ export const SENT = 'notify:sent';
 
 /** Everything the planner needs, read from the Mac's database. */
 export function stateFrom(store, tz) {
-  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const list = (col) => recordsOf(store, col);
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
   return reminderState({
     sessions: list('sessions'), sets: list('sets'), tendons: list('tendons'), bridge: one('bridge', 'last-loads'),
@@ -60,7 +60,7 @@ const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'cook', 'evening', 'ne
 export function wakeHmToday(store, now, tz, wakeHm) {
   const date = isoDate(new Date(now), tz);
   const from = zonedTime(date, '05:00', tz);
-  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const list = (col) => recordsOf(store, col);
   const signs = [
     store.getRecord('sleep-log', date)?.data?.wake,
     ...list('coach-messages').filter((m) => m.role === 'user').map((m) => m.at),
@@ -140,7 +140,7 @@ export function mealSpans({ date, tz, now, mealTimes = [], meals = [], checks = 
 
 /** The spans from the Mac's database. */
 export function mealSpansFor(store, now, tz) {
-  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const list = (col) => recordsOf(store, col);
   const st = withDefaults(store.getRecord('settings', 'main')?.data);
   const date = isoDate(new Date(now), tz);
   return mealSpans({ date, tz, now, mealTimes: st.fuel.mealTimes, meals: list('meals'), checks: list('meal-checks'), dishes: store.getMeta(DISHES) || {}, dishesOn: st.notify.kinds?.dishes !== false });
@@ -177,6 +177,11 @@ const NUDGES = 'nudge:sent';
 const holdsOf = (store) => store.listRecords('coach-holds').map((r) => r.data).filter(Boolean);
 const LAST = 'notify:last';
 const MSGS = 'coach-messages';
+/** A collection's records; meals without anything in them (isEmptyMeal) left out: they count as no meal (Thu 10/22). */
+export function recordsOf(store, col) {
+  const all = store.listRecords(col).map((r) => r.data).filter(Boolean);
+  return col === 'meals' ? all.filter((m) => !isEmptyMeal(m)) : all;
+}
 
 /** The coach's voice settings: his line bank, moods and intensity. */
 function voiceOpts(store) {
@@ -210,7 +215,7 @@ const busyNow = (list, now) => sessionBusy(list('sessions'), now)
 
 /** What the nudges need, read from the Mac's database. */
 export function nudgeInputs(store, now, tz) {
-  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const list = (col) => recordsOf(store, col);
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
   const st = stateFrom(store, tz);
   const date = isoDate(new Date(now), tz);
@@ -274,7 +279,7 @@ const DISHES = 'dishes:state';
  * notification kind. The first run only notes the meals already there.
  */
 export async function dishesTick({ store, push, log = () => {}, now, tz }) {
-  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const list = (col) => recordsOf(store, col);
   const n0 = withDefaults(store.getRecord('settings', 'main')?.data).notify;
   const n = { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
   const date = isoDate(new Date(now), tz);
@@ -369,7 +374,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
 
 /** The last thing he did at home since `since` (a meal answer soon, cooking or eaten; a meal; a workout or holds started), or 0. */
 export function homeSince(store, since) {
-  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const list = (col) => recordsOf(store, col);
   const times = [
     ...list('meal-checks').filter((c) => ['soon', 'cooking', 'eaten'].includes(c.answer)).map((c) => c.at),
     ...list('meals').map((m) => m.at),
@@ -427,7 +432,7 @@ export async function initiativeTick({ store, push, coach, log = () => {}, now, 
   if (!awake || now - (store.getMeta(LAST) || 0) < 10 * 60000 || now - (inp.lastUserAt || 0) < 10 * 60000) return null;
   const state = store.getMeta(INIT) || { last: 0, byKey: {} };
   if (now - state.last < INITIATIVE_GAP_MIN * 60000) return null;
-  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const list = (col) => recordsOf(store, col);
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
   const holds = holdsOf(store);
   const items = openItems({

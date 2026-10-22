@@ -13,7 +13,7 @@ import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoic
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
-import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks, itemTotals, presetsOf } from '../../app/js/lib/meals.js';
+import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks, itemTotals, presetsOf, isEmptyMeal } from '../../app/js/lib/meals.js';
 import { amountsLine } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
@@ -173,7 +173,8 @@ function foodLine(s) {
  */
 export function mealsNowLine(s) {
   const slots = mealTimesOf(s.settings().fuel?.mealTimes);
-  const meals = s.list('meals').filter((m) => m.date === s.today).sort((a, b) => a.at - b.at);
+  // An empty meal (no photo, no items) counts as no meal (Thu 10/22, lib/meals.js isEmptyMeal).
+  const meals = s.list('meals').filter((m) => m.date === s.today && !isEmptyMeal(m)).sort((a, b) => a.at - b.at);
   const items = (m) => (m.before?.items || []).map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g`).join(', ') || 'items being read';
   const had = meals.length ? meals.map((m) => `${m.name} ${timeText(m.at, s.tz)} (${items(m)})`).join('; ') : 'nothing logged yet';
   if (!slots.length) return `Meals today: ${had}.`;

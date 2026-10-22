@@ -223,6 +223,25 @@ export function findPreset(doc, name) {
   return hits.length === 1 ? hits[0] : null;
 }
 
+/**
+ * A meal with nothing in it: no photo and no items (Thu 10/22: "Log it without a photo" saved an empty meal the moment
+ * he tapped it, and the Mac took it for his second meal). It counts as no meal for anything.
+ */
+export const isEmptyMeal = (m) => Boolean(m) && !m.before?.photoId && !(m.before?.items || []).length && !m.after?.photoId;
+
+/**
+ * His presets in the order that suits a moment: first the one for the meal time nearest `hm` ("HH:MM"): the preset
+ * named like that meal time, else the one in the same place (his first meal time, his first preset), then the rest.
+ * slots: his meal times, sorted (fuel-reminders mealTimesOf).
+ */
+export function presetsFor(presets = [], slots = [], hm = null) {
+  if (!presets.length || !slots.length || !/^\d{2}:\d{2}$/.test(hm || '')) return presets;
+  const min = (x) => Number(x.slice(0, 2)) * 60 + Number(x.slice(3));
+  const i = slots.reduce((best, t, k) => (Math.abs(min(t.time) - min(hm)) < Math.abs(min(slots[best].time) - min(hm)) ? k : best), 0);
+  const match = presets.find((p) => p.name.toLowerCase() === String(slots[i].name || '').toLowerCase()) || presets[i] || null;
+  return match ? [match, ...presets.filter((p) => p !== match)] : presets;
+}
+
 /** A new meal from a preset, logged and confirmed at `at`. */
 export function mealFromPreset({ id, at, preset, tz, name }) {
   const meal = newMeal({ id, at, name: name || preset.name, tz });

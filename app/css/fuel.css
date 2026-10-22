@@ -69,6 +69,7 @@
 .meal-edit .me-rows { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
 .meal-edit .me-row .input { padding: 0 6px; font-size: 14px; height: 40px; }
 .meal-edit .me-left { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; }
+.meal-edit .me-presets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 .meal-edit .me-left .input { width: 90px; }
 
 .fuel-bar .mono { font: 500 12px/1 var(--mono); white-space: nowrap; }

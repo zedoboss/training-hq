@@ -257,13 +257,13 @@ test('the Mac asks for his after-meal supplements the moment the first meal is l
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ }); // first run: notes what is there
     // Thu 10/22: a snack first (his bananas on waking) is not his first meal: no supplements prompt.
-    store.writeLocal('meals', 'm0', { id: 'm0', date: D, at: at(D, '11:10'), name: 'Snack', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm0', { id: 'm0', date: D, at: at(D, '11:10'), name: 'Snack', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     assert.equal((await dishesTick({ store, push, now: at(D, '11:10'), tz: TZ }))?.key, undefined);
     assert.equal(sent.length, 0);
     assert.equal(nudgeInputs(store, at(D, '11:12'), TZ).args.suppsAfterMeal, null, 'no later nudge for it either');
     await dishesTick({ store, push, now: at(D, '11:13'), tz: TZ }); // the snack's dishes
     sent.length = 0;
-    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '11:30'), name: 'Breakfast', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '11:30'), name: 'Breakfast', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     const r = await dishesTick({ store, push, now: at(D, '11:31'), tz: TZ });
     assert.equal(r.key, 'supps-after-meal');
     assert.match(sent[0].body, /^Breakfast logged\. Take your supplements now: Vitamin D3 \+ K2\./);
@@ -271,7 +271,7 @@ test('the Mac asks for his after-meal supplements the moment the first meal is l
     // Two minutes later: the dishes. A second meal that day: no supplements prompt again.
     const d = await dishesTick({ store, push, now: at(D, '11:34'), tz: TZ });
     assert.equal(d.key, 'dishes');
-    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '15:00'), name: 'Lunch', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '15:00'), name: 'Lunch', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     assert.equal(await dishesTick({ store, push, now: at(D, '15:00'), tz: TZ }), null);
     assert.equal(sent.filter((m) => m.tag === 'supps-after-meal').length, 1);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
@@ -288,14 +288,14 @@ test('Thu 10/22: a mark left by the morning snack and a holds round left open bl
   try {
     store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.o3', { id: 'supp.o3', kind: 'supplement', name: 'Omega-3', short: 'O3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
-    store.writeLocal('meals', 'm0', { id: 'm0', date: D, at: at(D, '10:20'), name: 'Snack', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm0', { id: 'm0', date: D, at: at(D, '10:20'), name: 'Snack', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     // What the Mac held that day: the snack marked the day's prompt as done, before snacks stopped counting.
     store.setMeta('dishes:state', { seen: { m0: at(D, '10:21') }, sent: { m0: at(D, '10:23') }, suppsFor: { [D]: at(D, '10:21') } });
     // A wrist holds round opened at 11:32 AM and never finished.
     store.writeLocal('sessions', 's1', { id: 's1', kind: 'holds', status: 'active', startedAt: at(D, '11:32') });
     const sent = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
-    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'Breakfast', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'Breakfast', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     assert.equal((await dishesTick({ store, push, now: at(D, '13:30'), tz: TZ }))?.key, 'supps-after-meal');
     assert.equal(nudgeInputs(store, at(D, '13:31'), TZ).busy, false, 'a holds round open two hours is not busy');
     assert.equal((await dishesTick({ store, push, now: at(D, '13:32'), tz: TZ }))?.key, 'dishes');
@@ -418,12 +418,12 @@ test('Thu 10/22: after the second meal, collagen first, again every 5 minutes un
     await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
     assert.equal(nudgeInputs(store, at(D, '11:00'), TZ).args.suppsUntimed, null, 'collagen is not an untimed supplement any more');
     // The first meal: its dishes as before, no collagen.
-    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
     assert.equal((await dishesTick({ store, push, now: at(D, '13:17'), tz: TZ }))?.key, 'dishes');
     sent.length = 0;
     // The second meal: collagen at once, no dishes yet.
-    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '18:00'), name: 'Second meal', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '18:00'), name: 'Second meal', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     const r = await dishesTick({ store, push, now: at(D, '18:01'), tz: TZ });
     assert.equal(r.key, 'supps-after-meal-2');
     assert.match(sent[0].body, /^Second meal done\. Get up and take your collagen now\./);
@@ -443,7 +443,7 @@ test('Thu 10/22: after the second meal, collagen first, again every 5 minutes un
     assert.equal(await dishesTick({ store, push, now: at(D, '18:20'), tz: TZ }), null, 'once, and no more collagen');
     assert.equal(nextDueAt(store, at(D, '18:20'), TZ), null);
     // A third meal: nothing about collagen.
-    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '21:00'), name: 'Dinner', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '21:00'), name: 'Dinner', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     assert.equal(await dishesTick({ store, push, now: at(D, '21:00'), tz: TZ }), null);
     assert.equal(sent.filter((m) => m.tag === 'supps-after-meal-2').length, 3);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
@@ -461,11 +461,11 @@ test('Thu 10/22: collagen already taken before the second meal: no prompt, the d
     store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
     store.writeLocal('supp-log', `${D}:supp.co`, { id: `${D}:supp.co`, date: D, suppId: 'supp.co', status: 'taken', at: at(D, '12:00') });
-    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     const sent = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
-    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '18:00'), name: 'Second meal', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '18:00'), name: 'Second meal', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     assert.equal(await dishesTick({ store, push, now: at(D, '18:00'), tz: TZ }), null);
     assert.equal((await dishesTick({ store, push, now: at(D, '18:02'), tz: TZ }))?.key, 'dishes');
     assert.deepEqual(sent.map((m) => m.tag), ['dishes']);
@@ -486,17 +486,17 @@ test('Thu 10/22: the dishes are not sent late, nor after the coach already said 
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
     // His day: breakfast logged 1:30 PM, the coach's own reminder about the dishes at 1:31 PM.
-    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'Breakfast', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'Breakfast', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     await dishesTick({ store, push, now: at(D, '13:30'), tz: TZ });
     store.writeLocal('coach-messages', 'c1', { id: 'c1', role: 'assistant', kind: 'reminder', text: 'Reminder. Get up and clean the dishes.', at: at(D, '13:31') });
     assert.equal((await dishesTick({ store, push, now: at(D, '13:33'), tz: TZ }))?.key, undefined, 'the coach already said it');
     // A snack, and the Mac busy until 25 minutes later: too late, not sent.
-    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '16:30'), name: 'Snack', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '16:30'), name: 'Snack', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     await dishesTick({ store, push, now: at(D, '16:30'), tz: TZ });
     assert.equal((await dishesTick({ store, push, now: at(D, '16:55'), tz: TZ }))?.key, undefined, 'late');
     assert.equal(sent.filter((m) => m.tag === 'dishes').length, 0);
     // On time it still comes.
-    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '18:00'), name: 'Snack', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '18:00'), name: 'Snack', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     await dishesTick({ store, push, now: at(D, '18:00'), tz: TZ });
     assert.equal((await dishesTick({ store, push, now: at(D, '18:02'), tz: TZ }))?.key, 'dishes');
     // The restart after a coach change: a holds round open 2 hours doesn't count; a workout does, for 4 hours.
@@ -531,7 +531,7 @@ test('Thu 10/22: a reminder set earlier that lands while he cooks or eats waits 
     const atOf = (t) => Object.fromEntries(plan(store, t, TZ).filter((i) => i.kind === 'coach').map((i) => [i.id.slice(6), i.at]));
     const push = { list: () => [{}], notify: async () => ({ sent: 1, failed: 0 }) };
     await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
-    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
     await dishesTick({ store, push, now: at(D, '13:17'), tz: TZ });
 
@@ -551,7 +551,7 @@ test('Thu 10/22: a reminder set earlier that lands while he cooks or eats waits 
     assert.equal(a['errand-1'] > at(D, '17:00'), true, 'not due mid-meal');
 
     // Logged at 5:25 PM: collagen is asked; the errands wait for it (45 minutes at most).
-    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '17:25'), name: 'Last meal', source: 'manual', before: { items: [] } });
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '17:25'), name: 'Last meal', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     assert.equal((await dishesTick({ store, push, now: at(D, '17:25'), tz: TZ }))?.key, 'supps-after-meal-2');
     a = atOf(at(D, '17:26'));
     assert.equal(a['errand-1'], at(D, '17:25') + MEAL_HOLD.chainMaxMin * 60000);
