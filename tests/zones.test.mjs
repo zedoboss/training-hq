@@ -104,3 +104,32 @@ test('the Mac follows the zone the phone reported last; without one, its own', a
     assert.match(sent[1].body, /^Legs at 4:30 AM\. /);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('his day starts when he is up, not at the wake time in Settings; scan reminders before his session never wait (Thu 10/22)', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { wakeHmToday, plan } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-wake-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    const TZ = 'Asia/Bangkok';
+    const at = (hm, d = '2026-03-19') => Date.parse(`${d}T${hm}:00+07:00`);
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    assert.equal(wakeHmToday(store, at('09:20'), TZ, '10:00'), '10:00', 'no sign yet');
+    store.writeLocal('coach-messages', 'm0', { id: 'm0', role: 'user', text: 'night', at: at('00:40') });
+    assert.equal(wakeHmToday(store, at('09:20'), TZ, '10:00'), '10:00', 'a message after midnight is not waking up');
+    store.writeLocal('sleep-log', '2026-03-19', { id: '2026-03-19', date: '2026-03-19', wake: at('08:55') });
+    store.writeLocal('coach-messages', 'm1', { id: 'm1', role: 'user', text: 'Yo', at: at('09:15') });
+    assert.equal(wakeHmToday(store, at('09:20'), TZ, '10:00'), '08:55');
+    assert.equal(wakeHmToday(store, at('09:20'), TZ, '07:00'), '07:00', 'never later than his setting');
+    // A Legs day at 9:50 AM with a scan every training day: "Body scan this morning" at 9:20 AM, not held to 10:00.
+    store.writeLocal('days', '2026-03-19', { date: '2026-03-19', sessionTime: '09:50', timeSetAt: at('08:00') });
+    store.writeLocal('scan-plan', 'main', { id: 'main', cadence: 'training' });
+    store.writeLocal('sessions', 'p1', { id: 'p1', kind: 'workout', dayType: 'push', status: 'done', startedAt: at('09:00', '2026-03-18'), endedAt: at('10:00', '2026-03-18'), exercises: [] });
+    const scan = plan(store, at('09:20'), TZ).filter((i) => /^scan-(morning|arrive):2026-03-19/.test(i.id));
+    assert.equal(scan.length, 2, plan(store, at('09:20'), TZ).map((i) => i.id).join(' '));
+    assert.deepEqual(scan.map((i) => i.at), [at('09:20'), at('09:50')], 'at his session time, not held to 10:00');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

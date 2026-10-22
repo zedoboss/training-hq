@@ -15,7 +15,7 @@ import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor } from '../app/js/lib/scans.js';
-import { zonedTime } from '../app/js/lib/time.js';
+import { zonedTime, hmOf } from '../app/js/lib/time.js';
 import { healthSendsText } from './health.mjs';
 
 const SENT = 'notify:sent';
@@ -51,19 +51,44 @@ function recoveryFrom(one, list) {
 // alarm, reminders he set with the coach, and the check-in and session reminders at a time he chose never move.
 const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'cook', 'evening', 'neck', 'recovery', 'scan', 'flex']);
 
+/**
+ * When his day started today (Thu 10/22: the scan reminders waited for his 10:00 AM wake setting though he was up
+ * before 9:00 and talking to the coach at 9:15): the earliest sign he's up, his logged wake time or his first
+ * message, meal or workout from 5:00 AM on, when that is before the wake time in Settings. "HH:MM".
+ */
+export function wakeHmToday(store, now, tz, wakeHm) {
+  const date = isoDate(new Date(now), tz);
+  const from = zonedTime(date, '05:00', tz);
+  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const signs = [
+    store.getRecord('sleep-log', date)?.data?.wake,
+    ...list('coach-messages').filter((m) => m.role === 'user').map((m) => m.at),
+    ...list('meals').map((m) => m.at),
+    ...list('sessions').filter((x) => x.status !== 'discarded').map((x) => x.startedAt),
+  ].filter((t) => Number.isFinite(t) && t >= from && t <= now && isoDate(new Date(t), tz) === date);
+  if (!signs.length) return wakeHm;
+  const up = hmOf(new Date(Math.min(...signs)), tz);
+  return up < wakeHm ? up : wakeHm;
+}
+
+// Thu 10/22: the scan reminders before his session follow the time he chose for it, like the check-in: never moved.
+const SESSION_TIMED = /^scan-(morning|arrive):/;
+
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */
 export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
   const st = stateFrom(store, tz);
   const today = isoDate(new Date(now), tz);
   const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
-  const awake = (at) => awakeAt(at, tz, n.wakeHm, n.bedHm);
+  const wakeToday = wakeHmToday(store, now, tz, n.wakeHm);
+  const wakeOn = (d) => (d === today ? wakeToday : n.wakeHm);
+  const awake = (at) => awakeAt(at, tz, wakeOn(isoDate(new Date(at), tz)), n.bedHm);
   const toWake = (at) => {
     const d = isoDate(new Date(at), tz);
-    const w = zonedTime(d, n.wakeHm, tz);
+    const w = zonedTime(d, wakeOn(d), tz);
     return w > at ? w : zonedTime(addDays(d, 1), n.wakeHm, tz);
   };
   return [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }))
-    .map((i) => (WAIT_FOR_WAKE.has(i.kind) && !awake(i.at) ? { ...i, at: toWake(i.at) } : i));
+    .map((i) => (WAIT_FOR_WAKE.has(i.kind) && !SESSION_TIMED.test(i.id || '') && !awake(i.at) ? { ...i, at: toWake(i.at) } : i));
 }
 
 /**
@@ -100,7 +125,9 @@ export function nudgeInputs(store, now, tz) {
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
   const st = stateFrom(store, tz);
   const date = isoDate(new Date(now), tz);
-  const n = withDefaults(one('settings', 'main')).notify;
+  const n0 = withDefaults(one('settings', 'main')).notify;
+  // His day starts when he's up (wakeHmToday), for every nudge below.
+  const n = { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
   const health = one('health', date);
   const plan = one('fuel', 'plan');
   const eaten = dayTotals(list('meals'), list('meal-estimates'), date);
@@ -154,7 +181,8 @@ const DISHES = 'dishes:state';
  */
 export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
-  const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  const n0 = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  const n = { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
   const date = isoDate(new Date(now), tz);
   const meals = list('meals').filter((m) => m.date === date);
   const st = store.getMeta(DISHES);
