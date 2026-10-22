@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineReader, conversationOf, runAction, todayCounts, toolLabel, textHtml, MODEL_LABEL } from '../app/js/lib/coach.js';
+import { lineReader, conversationOf, messagesOf, runAction, todayCounts, toolLabel, textHtml, MODEL_LABEL } from '../app/js/lib/coach.js';
 
 test('the reply stream is split into events, whatever the chunk boundaries', () => {
   const got = [];
@@ -18,6 +18,13 @@ test('the conversation: stored and live messages merged by id, after the last ne
   const live = [{ id: 'cm.4', role: 'assistant', text: 'Hey.', at: 4 }, { id: 'cm.3', role: 'user', text: 'hi', at: 3, device: 'x' }];
   assert.deepEqual(conversationOf(stored, live).map((m) => m.id), ['cm.3', 'cm.4']);
   assert.equal(conversationOf(stored, live)[0].device, 'x');
+});
+
+test('Talk by day: every message stays, markers included (Thu 10/22: past days showed "Nothing on this day")', () => {
+  const stored = [{ id: 'cm.1', role: 'user', text: 'Wednesday', at: 1 }, { id: 'cm.2', role: 'marker', text: 'New day', at: 2 }, { id: 'cm.3', role: 'user', text: 'Thursday', at: 3 }];
+  const live = [{ id: 'cm.3', role: 'user', text: 'Thursday', at: 3, device: 'x' }];
+  assert.deepEqual(messagesOf(stored, live).map((m) => m.id), ['cm.1', 'cm.2', 'cm.3']);
+  assert.equal(messagesOf(stored, live)[2].device, 'x');
 });
 
 test('phone actions: rest timer, sync and focus run here; open is a button', () => {

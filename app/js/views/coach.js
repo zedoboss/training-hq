@@ -8,7 +8,7 @@ import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatTimeSec, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
 import * as rest from '../lib/rest-timer.js';
-import { conversationOf, MODEL_LABEL, toolLabel, runAction, textHtml } from '../lib/coach.js';
+import { messagesOf, MODEL_LABEL, toolLabel, runAction, textHtml } from '../lib/coach.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { stop as voiceStop } from '../lib/voice.js';
@@ -97,12 +97,14 @@ function renderChat(view) {
   let day = isoDate(new Date());
   const today = () => isoDate(new Date());
   const draw = ({ scroll = true } = {}) => {
-    const all = conversationOf(stored, live.filter((m) => m !== pendingLive));
-    const msgs = all.filter((m) => isoDate(new Date(m.at)) === day);
+    const all = messagesOf(stored, live.filter((m) => m !== pendingLive));
+    // A day's first message sits right after its "New day" marker: only a "New conversation" mid-day is drawn as a line.
+    const msgs = all.filter((m) => isoDate(new Date(m.at)) === day && !(m.role === 'marker' && m.text === 'New day'));
     const onToday = day === today();
     $('#c-day').textContent = formatDay(new Date(`${day}T12:00:00`)).toUpperCase() + (onToday ? ' · TODAY' : '');
     $('#c-next').disabled = onToday;
-    const parts = msgs.map((m) => msgHtml(m));
+    const parts = msgs.map((m) => (m.role === 'marker' ? `<div class="hud c-faint coach-line">${esc(String(m.text || 'New conversation').toUpperCase())}</div>` : msgHtml(m)));
+    if (!msgs.some((m) => m.role !== 'marker')) parts.length = 0;
     if (pendingLive && onToday) parts.push(msgHtml(pendingLive, { live: true }));
     $('#c-log').innerHTML = parts.join('') || (all.length && !onToday ? '<p class="hint coach-empty">Nothing on this day.</p>' : `<div class="card pad-card coach-empty"><div class="hud c-muted">ASK ANYTHING ABOUT YOUR TRAINING</div>
       <p class="hint c-text">"What's today?" · "Bench number?" · "80 for 8" · "Took creatine and mag" · "Knees 2, not worse; legs 1, back 0, energy 2" · "Set tomorrow at 4:30".</p>

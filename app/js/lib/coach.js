@@ -27,12 +27,21 @@ const byTime = (a, b) => (a.at - b.at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 
  * message), after the last "new conversation" marker, oldest first.
  */
 export function conversationOf(stored = [], live = []) {
-  const map = new Map();
-  for (const m of [...stored, ...live]) if (m?.id) map.set(m.id, { ...(map.get(m.id) || {}), ...m });
-  const all = [...map.values()].sort(byTime);
+  const all = messagesOf(stored, live);
   let from = 0;
   all.forEach((m, i) => { if (m.role === 'marker') from = i + 1; });
   return all.slice(from);
+}
+
+/**
+ * Every message, markers included, merged by id, oldest first. Thu 10/22, his words: "I clicked yesterday, Wednesday.
+ * Nothing on this day": Talk shows one day at a time, and each new day starts with a marker, so cutting at the last
+ * marker hid every day before today. The day view uses this; the markers are drawn as a line.
+ */
+export function messagesOf(stored = [], live = []) {
+  const map = new Map();
+  for (const m of [...stored, ...live]) if (m?.id) map.set(m.id, { ...(map.get(m.id) || {}), ...m });
+  return [...map.values()].sort(byTime);
 }
 
 /** Tool names as the design shows them: capitals, joined with a dot. */

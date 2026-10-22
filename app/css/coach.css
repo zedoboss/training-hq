@@ -35,6 +35,9 @@ a.mic-btn { text-decoration: none; }
 /* Tue 10/20: one day at a time, and the dictation mic beside the box. */
 .coach-day { margin-bottom: 8px; }
 .coach-day .hud { cursor: pointer; }
+/* Thu 10/22: a "New conversation" mid-day, drawn as a line between messages. */
+.coach-line { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 11px; }
+.coach-line::before, .coach-line::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--border); }
 .coach-mic { flex: 0 0 48px; width: 48px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .coach-mic.is-rec { background: var(--red, #ff5c5c); color: #fff; border-color: transparent; animation: coach-rec 1s ease-in-out infinite; }
 .coach-mic.is-busy { opacity: .5; pointer-events: none; }
