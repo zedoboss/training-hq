@@ -1,5 +1,9 @@
 // Today's target for a programme exercise, and the 30% guard.
-// Rules (brief): the table is the plan, the 30% cap always wins (decision 7): target = min(table, last + 30%).
+// Rules (brief): the table is the plan, the 30% cap always wins (decision 7). Decision 33 (Thu 10/22, his words after
+// lower back pain at 61 kg on squat: "we should be pushing 2.5 kgs to 5 kgs more than the last workout... Same principle
+// for every exercise. On machines it's probably going to be closer to 5"): target = last + one step, never above the
+// table or the cap; the table is the goal, not the next number. A step: 2.5 kg on a bar (1.25 a side), 2.5 kg on
+// dumbbells, 5 kg on machines and cables. Below the rep range last time: the same weight again.
 // Ahead of the plan: hold at the last load (never go backwards). The guard checks load only, main lifts only,
 // against the heaviest working set in the previous 7 days (decision 6); with nothing in the last 7 days it uses
 // the last session (Training HQ decision, Sat 10/17). Loads are total kg including the bar.
@@ -15,6 +19,14 @@ export function loadable(kg, { barKg = null, smallestPlate = 1.25, step = 0.5 } 
     return Math.round((barKg + 2 * perSide) * 100) / 100;
   }
   return Math.round(Math.floor(kg / step + 1e-9) * step * 100) / 100;
+}
+
+/** One step up from the last load (decision 33): 2 × the smallest plate on a bar, 2.5 kg dumbbells, 5 kg machines. */
+export function stepFor({ barKg = null, equipment = null, name = '', smallestPlate = 1.25 } = {}) {
+  const eq = equipment || (/smith/i.test(name) ? 'smith' : /\((barbell|ez bar)/i.test(name) ? 'barbell' : /\(dumbbell/i.test(name) ? 'dumbbell' : /machine|cable|leg press/i.test(name) ? 'machine' : null);
+  if (barKg != null || eq === 'smith' || eq === 'barbell') return 2 * smallestPlate;
+  if (eq === 'machine' || eq === 'cable') return 5;
+  return 2.5;
 }
 
 /** The highest load allowed by the cap, before rounding to a loadable weight. */
@@ -51,7 +63,7 @@ export function setCount(sets, doneBefore) {
  * @returns {{kg:number|null, approx:boolean, added:boolean, bodyweight:boolean, reps:[number,number]|null,
  *   sets:number, why:string, table:number|null, capKg:number|null, gated:string|null, week:number}}
  */
-export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25, progressKg = null }) {
+export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25, progressKg = null, equipment = null, name = '' }) {
   const doneBefore = !!last;
   const gatedNotStarted = plan.weeks && plan.weeks.some((w) => w.gate) && !doneBefore;
   const cell = weekCell(plan, gatedNotStarted ? 1 : week, progressKg);
@@ -61,10 +73,15 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     why: '', table: null, capKg: null, gated: cell?.gate ?? null, week: gatedNotStarted ? 1 : Math.min(Math.max(week || 1, 1), 4),
   };
 
-  // Decision 3 (calf raises) and exercises without a table: the target is the last load.
+  const step = stepFor({ barKg, equipment, name: name || plan.name || '', smallestPlate });
+  const r2 = (x) => Math.round(x * 100) / 100;
+  const stepText = barKg != null ? `+${step} kg (${step / 2} a side)` : `+${step} kg`;
+  // Below the bottom of the rep range last time: the same weight until he gets there.
+  const short = last?.reps != null && Array.isArray(out.reps) && last.reps < out.reps[0];
+  // Decision 3 (calf raises) and exercises without a table: one step up from the last load (decision 33).
   if (!cell || /decision 3/.test(rule) || cell.load == null) {
-    out.kg = last?.kg ?? null;
-    out.why = last ? `Your last load (${last.kg} kg)` : 'No plan number and no history yet';
+    out.kg = last?.kg != null ? (short ? last.kg : r2(last.kg + step)) : null;
+    out.why = last?.kg != null ? (short ? `Same as last time (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first` : `Last time ${last.kg} kg, ${stepText}`) : 'No plan number and no history yet';
     return out;
   }
   if (cell.load.type === 'bodyweight') { out.bodyweight = true; out.why = 'bodyweight'; return out; }
@@ -85,19 +102,15 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     out.why = `You're ahead of the ${src} (${table} kg): stay at your last ${last.kg} kg`;
     return out;
   }
-  // Tue 10/20 on his phone: "Plan: 70 kg" with a 68.8 kg target and no word why. The plates decide: say so.
-  const plates = (wanted) => (out.kg != null && Math.abs(out.kg - wanted) >= 0.05 ? `. With your plates: ${out.kg} kg` : '');
-  if (plan.capClass === 'main') {
-    out.capKg = capOf(last.kg);
-    const capped = Math.min(table, out.capKg);
-    out.kg = loadable(capped, { barKg, smallestPlate });
-    // His words (Tue 10/20): "it should just say what the cap is and how it got to that cap".
-    const r1 = (x) => Math.round(x * 10) / 10;
-    out.why = (out.capKg < table ? `Cap ${r1(out.capKg)} kg: last time ${last.kg} kg + 30%. ${plan_} says ${table} kg` : `${plan_}: ${table} kg (under the cap: last ${last.kg} kg + 30%)`) + plates(capped);
-    return out;
-  }
-  out.kg = loadable(table, { barKg, smallestPlate }) ?? table;
-  out.why = `${plan_}: ${table} kg (light work, no cap)${plates(table)}`;
+  if (plan.capClass === 'main') out.capKg = capOf(last.kg);
+  const up = short ? last.kg : r2(last.kg + step);
+  const ceiling = Math.min(table, out.capKg ?? Infinity);
+  // A step on top of what he lifted is loadable as it is (1.25 a side more); a ceiling is rounded down to his plates.
+  out.kg = up <= ceiling ? up : loadable(ceiling, { barKg, smallestPlate }) ?? ceiling;
+  const goal = `${plan_} goal ${table} kg`;
+  out.why = short ? `Same as last time (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first. ${goal}`
+    : up <= ceiling ? `Last time ${last.kg} kg, ${stepText}. ${goal}`
+      : `Last time ${last.kg} kg, ${stepText} reaches the ${table <= (out.capKg ?? Infinity) ? 'plan' : '30% cap'}: ${out.kg} kg`;
   return out;
 }
 

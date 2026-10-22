@@ -374,7 +374,7 @@ function programmeText(s, { dayType = null, week = null } = {}) {
       const ex = lib.get(re.exerciseId) || { barKg: null };
       if (!pe) { lines.push(`${i + 1}. ${re.name}: not in the table (follows his last load).`); continue; }
       const last = history.last(re.name);
-      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date } : null, barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null });
+      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date } : null, barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null, equipment: ex.equipment ?? null, name: re.name });
       const cell = pe.weeks?.find((w) => w.week === Math.min(4, wk));
       lines.push(`${i + 1}. ${re.name}: ${t.bodyweight ? 'bodyweight' : t.kg != null ? loadText(t.kg, ex.barKg) : '?'} × ${repsText(t.reps)}, ${plural(t.sets ?? 0, 'set')}. Why: ${t.why}.${cell ? ` Table: ${cell.text}.` : ''}`);
     }

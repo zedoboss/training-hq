@@ -118,7 +118,7 @@ test('rest_day_hold (A2): asked on a rest day, his answer recorded, never on a t
 test('programme gives exactly what Start would: the table capped at last load + 30%, with the bar split', async () => {
   const r = await call('programme');
   assert.match(r.text, /^Legs, today, week 3 column\./);
-  assert.match(r.text, /1\. Squat \(Smith Machine\): 2 sets × 8-12 at 50 kg total \(15 kg bar \+ 17\.5 kg a side\)\. Why: Cap 52 kg: last time 40 kg \+ 30%\. Plan says 70 kg/);
+  assert.match(r.text, /1\. Squat \(Smith Machine\): 2 sets × 8-12 at 42\.5 kg total \(15 kg bar \+ 13\.75 kg a side\)\. Why: Last time 40 kg, \+2\.5 kg \(1\.25 a side\)\. Plan goal 70 kg/);
   assert.match(r.text, /Last: Tuesday 1\/13, 40 kg × 10, 40 kg × 10/);
   const wk4 = await call('programme', { week: 4 });
   assert.match(wk4.text, /week 4 column \(asked for\)/);
@@ -255,7 +255,7 @@ test('a session started, sets logged by voice-style numbers, the 30% guard and t
   assert.deepEqual(actions.at(-1), { kind: 'rest', seconds: 180, label: 'Squat (Smith Machine)' });
   clock += 60000;
   const b = await call('log_set', { reps: 9 });
-  assert.match(b.text, /set 2 of 2: 50 kg total .* × 9/, 'no kg said: the target load');
+  assert.match(b.text, /set 2 of 2: 42\.5 kg total .* × 9/, 'no kg said: the target load');
   assert.match(b.text, /Next: Leg Extension \(Machine\), set 1 of 2/);
   const sets = list('sets').filter((x) => x.sessionId === session.id);
   assert.equal(sets.filter((x) => x.done).length, 2);

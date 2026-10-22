@@ -85,9 +85,15 @@ export function lighterTarget({ week, targetAt, params = DEFAULT_PARAMS, barKg =
   const now = targetAt(week);
   const back = Math.max(1, (week || 1) - p.weeksBack);
   let kg; let why;
-  if ((week || 1) > 1) {
-    kg = targetAt(back).kg;
+  // Thu 10/22 (decision 33): targets are one step over the last load, so an earlier column often gives the same number;
+  // then lighter is the week 1 rule (X% under), so it is always lighter.
+  const earlier = (week || 1) > 1 ? targetAt(back).kg : null;
+  if (earlier != null && (now.kg == null || earlier < now.kg)) {
+    kg = earlier;
     why = `lighter (check-in): week ${back} column`;
+  } else if ((week || 1) > 1) {
+    kg = now.kg == null ? null : loadable(now.kg * (1 - p.week1Pct / 100), { barKg, smallestPlate });
+    why = `lighter (check-in): ${p.week1Pct}% under`;
   } else {
     kg = now.kg == null ? null : loadable(now.kg * (1 - p.week1Pct / 100), { barKg, smallestPlate });
     why = `lighter (check-in): week 1, ${p.week1Pct}% under`;

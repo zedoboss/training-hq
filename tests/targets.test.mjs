@@ -16,13 +16,26 @@ test('loadable weights: Smith bar + plates per side in 1.25 kg steps; machines i
   assert.equal(capOf(41.3), 53.69);
 });
 
-test('bench, Sunday 10/18 (week 4): table 70, last 51.3 -> capped at 66.69 -> loadable 66.3', () => {
+test('decision 33 (Thu 10/22, his squat at 66.3 "too big a push"): one step over the last load, the table is the goal', () => {
   const t = targetFor({ plan: bench, week: 4, last: { kg: 51.3, reps: 12, date: '2026-10-12' }, barKg: 11.3 });
-  assert.equal(t.capKg, 66.69);
-  assert.equal(t.kg, 66.3);
+  assert.equal(t.capKg, 66.69, 'the cap stays the outer limit');
+  assert.equal(t.kg, 53.8, '51.3 + 1.25 a side');
   assert.deepEqual(t.reps, [6, 8]);
   assert.equal(t.sets, 2);
-  assert.equal(t.why, 'Cap 66.7 kg: last time 51.3 kg + 30%. Plan says 70 kg. With your plates: 66.3 kg');
+  assert.equal(t.why, 'Last time 51.3 kg, +2.5 kg (1.25 a side). Plan goal 70 kg');
+  // His squat today: last 51.8 x 8 on the Smith machine -> 54.3, not 66.3.
+  const squat = { capClass: 'main', weeks: [w(40, [10, 12], { count: 1 }), w(50, [8, 10], { count: 2 }), w(65, [6, 8], { count: 2 }), w(80, [6, 8], { count: 2 })] };
+  assert.equal(targetFor({ plan: squat, week: 4, last: { kg: 51.8, reps: 8 }, barKg: 11.3, name: 'Squat (Smith Machine)' }).kg, 54.3);
+  // Machines: 5 kg. Short of the rep range last time: the same weight.
+  const curl = { capClass: 'main', weeks: [w(25, [10, 12], { count: 1 }), w(30, [10, 12], { count: 2 }), w(35, [10, 12], { count: 2 }), w(45, [8, 10], { count: 2 })] };
+  assert.equal(targetFor({ plan: curl, week: 4, last: { kg: 36, reps: 10 }, name: 'Seated Leg Curl (Machine)' }).kg, 41);
+  const held = targetFor({ plan: curl, week: 4, last: { kg: 36, reps: 6 }, name: 'Seated Leg Curl (Machine)' });
+  assert.equal(held.kg, 36);
+  assert.equal(held.why, 'Same as last time (36 kg × 6): get to 8 reps first. Plan goal 45 kg');
+  // Near the table: the step stops at it.
+  const near = targetFor({ plan: bench, week: 4, last: { kg: 68.8, reps: 8 }, barKg: 11.3 });
+  assert.equal(near.kg, 68.8, '68.8 + 2.5 is over 70; 70 needs 29.35 a side, 28.75 is the most under it');
+  assert.match(near.why, /reaches the plan: 68\.8 kg$/);
 });
 
 test('ahead of the table: hold at the last load, never go backwards (incline 41.6 vs week 3 table 37.5)', () => {
@@ -31,9 +44,9 @@ test('ahead of the table: hold at the last load, never go backwards (incline 41.
   assert.match(t.why, /^You're ahead of the table \(37\.5 kg\): stay at your last 41\.6 kg$/);
 });
 
-test('light work follows the table without the cap', () => {
-  const t = targetFor({ plan: lateral, week: 4, last: { kg: 5, reps: 12, date: '2026-10-12' } });
-  assert.equal(t.kg, 10);
+test('light work: one step too, without the cap', () => {
+  const t = targetFor({ plan: lateral, week: 4, last: { kg: 5, reps: 12, date: '2026-10-12' }, name: 'Lateral Raise (Dumbbell)' });
+  assert.equal(t.kg, 7.5);
   assert.equal(t.capKg, null);
 });
 
@@ -53,10 +66,11 @@ test('gated lift not started yet (RDL): week 1, form focus', () => {
   assert.equal(t.sets, 1);
 });
 
-test('calf raises (decision 3) and extras: the target is the last load', () => {
+test('calf raises (decision 3) and extras: one step over the last load', () => {
   const calves = { capClass: 'light', override: { source: 'brief decision 3' }, weeks: [w(null, [15, 20], { firstSession: 1, after: 2 }), w(null, [15, 20], { count: 2 }), w(null, [15, 20], { min: 2, max: 3 }), w(null, [15, 20], { min: 2, max: 3 })] };
-  assert.equal(targetFor({ plan: calves, week: 3, last: { kg: 63, reps: 15, date: '2026-10-10' } }).kg, 63);
-  assert.equal(targetFor({ plan: { capClass: 'light', weeks: null }, week: 3, last: { kg: 29, reps: 15 } }).kg, 29);
+  assert.equal(targetFor({ plan: calves, week: 3, last: { kg: 63, reps: 15, date: '2026-10-10' }, name: 'Calf Raise (Horizontal Leg Press)' }).kg, 68, 'decision 33: a machine step');
+  assert.equal(targetFor({ plan: calves, week: 3, last: { kg: 63, reps: 12, date: '2026-10-10' }, name: 'Calf Raise (Horizontal Leg Press)' }).kg, 63, 'short of 15 reps: the same');
+  assert.equal(targetFor({ plan: { capClass: 'light', weeks: null }, week: 3, last: { kg: 29, reps: 15 }, name: 'Hip Abduction (Machine)' }).kg, 34);
 });
 
 test('bodyweight and added-load cells', () => {

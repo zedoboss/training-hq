@@ -73,11 +73,11 @@ test('session from a routine: capped targets, hold sets, rest times; Sunday 10/1
   assert.equal(session.week, 4);
   assert.equal(session.status, 'active');
   const bench = session.exercises[0];
-  assert.equal(bench.target.kg, 66.3);
+  assert.equal(bench.target.kg, 53.8, 'decision 33: last 51.3 + 1.25 a side');
   assert.equal(bench.restSeconds, 180);
   const benchSets = sets.filter((s) => s.exKey === bench.key);
   assert.equal(benchSets.length, 2);
-  assert.ok(benchSets.every((s) => s.kg === 66.3 && s.reps === null && s.target.reps[0] === 6));
+  assert.ok(benchSets.every((s) => s.kg === 53.8 && s.reps === null && s.target.reps[0] === 6));
   const holds = sets.filter((s) => s.exKey === session.exercises[1].key);
   assert.deepEqual(holds.map((s) => [s.type, s.kg, s.durationS]), [['hold', 6.8, 30], ['hold', 6.8, 30], ['hold', 6.8, 30]]);
   assert.deepEqual(sets.map((s) => s.order), [0, 1, 2, 3, 4]);
@@ -264,7 +264,7 @@ test('routine weights follow the last session set by set, or the routine own wei
   const mine = { id: 'mine', title: 'Mine', dayType: 'push', exercises: [{ key: 'k', exerciseId: 'bench-press-smith-machine', name: 'Bench Press (Smith Machine)', plan: null,
     sets: [{ type: 'normal', kg: 40, reps: [8, 8] }, { type: 'normal', kg: 40, reps: [8, 8] }, { type: 'normal', kg: 40, reps: [8, 8] }] }] };
   const kgs = (r) => buildSession({ routine: r, meta, lib, history: h, today: '2026-10-19' }).sets.map((s) => s.kg);
-  assert.deepEqual(kgs(mine), [60, 55, 40], 'third set: nothing last time, keeps the routine weight');
+  assert.deepEqual(kgs(mine), [62.5, 57.5, 40], 'one step over each set last time (decision 33); third set: nothing last time, the routine weight');
   assert.deepEqual(kgs({ ...mine, followLast: false }), [40, 40, 40]);
 });
 
@@ -273,7 +273,7 @@ test('warm-up sets in a routine are worked out from today\'s working weight with
   const withWarmup = { ...routine, exercises: routine.exercises.map((e, i) => (i === 0 ? { ...e, warmup: true } : e)) };
   const { session, sets } = buildSession({ routine: withWarmup, meta, programmeRoutines, lib, history: h, today: '2026-10-18' });
   const bench = sets.filter((s) => s.exKey === session.exercises[0].key);
-  assert.deepEqual(bench.map((s) => [s.type, s.kg]), [['warmup', 31.3], ['warmup', 48.8], ['normal', 66.3], ['normal', 66.3]]);
+  assert.deepEqual(bench.map((s) => [s.type, s.kg]), [['warmup', 26.3], ['warmup', 38.8], ['normal', 53.8], ['normal', 53.8]]);
   assert.deepEqual(bench[0].target.reps, [8, 8]);
   const custom = buildSession({ routine: withWarmup, meta, programmeRoutines, lib, history: h, today: '2026-10-18', warmupSteps: [{ pct: 60, reps: 5 }] }).sets;
   assert.equal(custom.filter((s) => s.type === 'warmup').length, 1);
@@ -301,13 +301,14 @@ test('bodyweight (P20): volume and the 30% guard load for bodyweight exercises',
 test('check-in said lighter: previous week column, same sets, reps short; holds untouched', () => {
   const h = buildHistory({ bridge });
   const normal = buildSession({ routine, meta, programmeRoutines, lib, history: h, today: '2026-10-18', now: 1000 });
-  assert.equal(normal.session.exercises[0].target.kg, 66.3);
+  assert.equal(normal.session.exercises[0].target.kg, 53.8);
   const { session, sets } = buildSession({ routine, meta, programmeRoutines, lib, history: h, today: '2026-10-18', now: 1000,
     lighter: { all: false, names: ['Bench Press (Smith Machine)'], params: { weeksBack: 1, week1Pct: 20, repsShort: 2 }, rule: 4 } });
   const t = session.exercises[0].target;
-  assert.equal(t.kg, 56.3); // week 3 column 57.5, loadable on the 11.3 bar
+  // Decision 33: week 3's column gives the same one-step target, so lighter is 20% under it (43.04 -> 41.3 on the bar).
+  assert.equal(t.kg, 41.3);
   assert.deepEqual(t.reps, [4, 6]);
-  assert.match(t.why, /lighter \(check-in\): week 3 column \(planned 66.3\)/);
+  assert.match(t.why, /lighter \(check-in\): 20% under \(planned 53.8\)/);
   assert.equal(sets.filter((x) => x.exKey === session.exercises[0].key).length, 2);
   assert.deepEqual(session.lighter, { all: false, names: ['Bench Press (Smith Machine)'], rule: 4 });
   const holds = sets.filter((x) => x.exKey === session.exercises[1].key);

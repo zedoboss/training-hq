@@ -62,10 +62,10 @@ test('confirmed numbers: latest week up to the one asked; targets use them past 
   assert.equal(weekCell(plan.exercises[0], 6, 80).load.kg, 80);
   assert.equal(weekCell(plan.exercises[0], 6).load.kg, 70);
   const t = targetFor({ plan: plan.exercises[0], week: 6, last: { kg: 70, reps: 8 }, progressKg: 80 });
-  assert.equal(t.kg, 80);
-  assert.equal(t.why, "Week 6 step (confirmed): 80 kg (under the cap: last 70 kg + 30%)");
-  // The 30% cap against the last load still wins.
-  assert.equal(targetFor({ plan: plan.exercises[0], week: 6, last: { kg: 50, reps: 8 }, progressKg: 80 }).kg, 65);
+  // Decision 33 (Thu 10/22): one step over the last load; the confirmed number is the goal.
+  assert.equal(t.kg, 72.5);
+  assert.equal(t.why, 'Last time 70 kg, +2.5 kg. Week 6 step (confirmed) goal 80 kg');
+  assert.equal(targetFor({ plan: plan.exercises[0], week: 6, last: { kg: 50, reps: 8 }, progressKg: 80 }).kg, 52.5);
 });
 
 test('Normal switch: main lifts at their week 4 number in the last 2 sessions of that day type', () => {

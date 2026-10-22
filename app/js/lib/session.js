@@ -1,6 +1,6 @@
 // Building and summarising a workout session. Pure functions; the views save the results.
 // A session holds its exercise list; every set is its own record (so sync can never lose one).
-import { targetFor } from './targets.js';
+import { targetFor, stepFor } from './targets.js';
 import { weekColumn } from './programme.js';
 import { effectiveKg } from './exercise-types.js';
 import { newId, newKey, defaultSets } from './routines.js';
@@ -60,7 +60,7 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     const pe = re.plan ? planExerciseFor(programmeRoutines, re.plan) : null;
     const easy = !!lighter && (lighter.all || (lighter.names || []).includes(re.name));
     if (pe) {
-      const tAt = (w) => targetFor({ plan: pe, week: w, last: lastHeaviest, barKg: ex.barKg ?? null, smallestPlate, progressKg: w > 4 ? confirmedKg(progress, routine.dayType, w, pe.name)?.kg ?? null : null });
+      const tAt = (w) => targetFor({ plan: pe, week: w, last: lastHeaviest, barKg: ex.barKg ?? null, smallestPlate, equipment: ex.equipment ?? null, name: re.name, progressKg: w > 4 ? confirmedKg(progress, routine.dayType, w, pe.name)?.kg ?? null : null });
       let t = tAt(week);
       if (easy) {
         const l = lighterTarget({ week, targetAt: tAt, params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
@@ -89,11 +89,15 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
       const seen = { warmup: 0, working: 0, hold: 0 };
       planned = base.map((s) => {
         const kind = kindOf(s);
-        const fromLast = prev ? prev[kind]?.[seen[kind]]?.kg ?? null : null;
+        const prevSet = prev ? prev[kind]?.[seen[kind]] ?? null : null;
+        const fromLast = prevSet?.kg ?? null;
         seen[kind]++;
         const fallback = kind === 'working' ? lastHeaviest?.kg ?? null : null;
-        let kgGuess = follow ? fromLast ?? s.kg ?? fallback : s.kg ?? fallback;
         let reps = Array.isArray(s.reps) ? s.reps : s.reps ? [s.reps, s.reps] : null;
+        // Decision 33 (Thu 10/22): a working set goes one step over the same set last time when its reps were reached.
+        const up = follow && fromLast != null && (s.type === 'normal' || s.type === 'failure') && (prevSet?.reps ?? 0) >= (reps?.[0] ?? 0)
+          ? stepFor({ barKg: ex.barKg ?? null, equipment: ex.equipment ?? null, name: re.name, smallestPlate }) : 0;
+        let kgGuess = follow ? (fromLast != null ? Math.round((fromLast + up) * 100) / 100 : s.kg ?? fallback) : s.kg ?? fallback;
         if (easy && kind === 'working') {
           kgGuess = lighterKg(kgGuess, { params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
           reps = shortReps(reps, lighter.params?.repsShort ?? 2);
