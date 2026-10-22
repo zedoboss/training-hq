@@ -145,14 +145,7 @@ export function render(view) {
 
       <div class="dock">
         <label class="dock-btn file-btn" for="t-cam">${CAMERA}LOG MEAL</label>${cameraInput('t-cam')}
-        <div class="dock-mid">
-          <a class="mic-btn" href="#/coach" id="t-talk" aria-label="Talk to the coach">${MIC}</a>
-          <div class="dock-voice">
-            <div class="hud c-text dock-name">CLAUDE</div>
-            <div class="level" aria-hidden="true">${'<span></span>'.repeat(8)}</div>
-            <div class="hud c-muted dock-state" data-k="dock-voice">TALK · BY TEXT</div>
-          </div>
-        </div>
+        <a class="dock-btn dock-mid" href="#/coach" id="t-talk" aria-label="Talk to the coach"><span class="mic-btn">${MIC}</span><span data-k="dock-voice">TALK</span></a>
         <button class="dock-btn" type="button" data-later="checkin">${CHECK}CHECK IN</button>
       </div>
     </section>
@@ -217,7 +210,9 @@ export function render(view) {
     // Tue 10/20: his steps weren't in because the Health Shortcut hadn't run today. Stale (no file in 4 hours):
     // the readout is a tap that runs the Shortcut now.
     const stale = !healthAt || Date.now() - healthAt > 4 * 3600000;
-    set('r-steps', steps && !stale ? `<a class="readout-link" href="#/body">${steps.steps.toLocaleString('en-US')}${steps.asOf ? `<br>AS OF ${formatTime(new Date(steps.asOf))}` : ''}</a>`
+    // Thu 10/22, his words: the TAP TO UPDATE button was gone once the steps came in; a tap on the steps runs the Health
+    // Shortcut (it sends them to the Mac), fresh or not. Body has the details.
+    set('r-steps', steps && !stale ? `<a class="readout-link" href="${runShortcutUrl()}">${steps.steps.toLocaleString('en-US')}${steps.asOf ? `<br>AS OF ${formatTime(new Date(steps.asOf))}` : ''}<br><span class="c-cyan">TAP TO UPDATE</span></a>`
       : `<a class="readout-link c-amber" href="${runShortcutUrl()}">${steps ? steps.steps.toLocaleString('en-US') : '—'}<br>TAP TO UPDATE${healthAt ? ` · ${formatTime(new Date(healthAt))}` : ''}</a>`);
     const m = macLine(s);
     set('mac', `<span class="${m.cls}">${m.text}</span>`);
@@ -248,7 +243,7 @@ export function render(view) {
   const drawVoice = (st = voice.snapshot()) => {
     const a = view.querySelector('[data-k="voice"]'); const d = view.querySelector('[data-k="dock-voice"]');
     if (a) { a.textContent = `VOICE · ${VOICE_TEXT[st.phase] || st.phase.toUpperCase()}`; a.className = st.on ? 'c-cyan' : 'c-muted'; }
-    if (d) d.textContent = st.on ? 'TALK · VOICE ON' : 'TALK · BY TEXT';
+    if (d) d.textContent = st.on ? 'VOICE ON' : 'TALK';
   };
   drawVoice();
   const offVoice = voice.onChange(drawVoice);
