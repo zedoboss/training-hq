@@ -146,12 +146,11 @@ function suppLine(s) {
   const supps = s.list('supplements'); const log = s.list('supp-log');
   const groups = checklist({ supps, log, date: s.today, dayKind: suppDayKind(s, s.today) });
   const items = groups.flatMap((g) => g.items);
-  if (!items.length) return 'Supplements today: none scheduled.';
   const taken = items.filter((i) => i.entry?.status === 'taken').length;
   const skipped = items.filter((i) => i.entry?.status === 'skipped').length;
   const open = items.filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
   const outs = outOfStock(supps, log, s.today);
-  return `Supplements today: ${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out): ${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
+  return `Supplements today: ${items.length ? `${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}` : 'none scheduled'}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out): ${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
 }
 
 function foodLine(s) {
@@ -243,6 +242,9 @@ export function contextLine({ store, tz, now, screen = null }) {
   const active = s.active();
   if (active) lines.push(activeText(s, active));
   lines.push(moodLine(s));
+  // Thu 10/22: asked "what's up?" he repeated a wrong 2:13 PM notification ("0 of 4 taken") as today's supplements; the
+  // live count is here with every message, ahead of what the notifications said.
+  lines.push(`Now: ${suppLine(s)}`);
   lines.push(...recoveryContext(s));
   lines.push(...noticeLines(s));
   lines.push(...situationLines(s));
@@ -305,7 +307,7 @@ function noticeLines(s) {
     || s.list('body-scans').some((x) => x.date === s.today && isDone(x));
   const slept = Boolean(health?.sleep || s.one('sleep-log', s.today));
   return [
-    recent.length ? `Your notifications to him in the last 3 hours, newest first (he may be answering one): ${recent.map((m) => `${formatTime(new Date(m.at), s.tz)} "${m.text}"`).join('; ')}.` : '',
+    recent.length ? `Your notifications to him in the last 3 hours, newest first (he may be answering one; their numbers were true when sent, possibly wrong, and the "Now:" lines are what's true now): ${recent.map((m) => `${formatTime(new Date(m.at), s.tz)} "${m.text}"`).join('; ')}.` : '',
     `Today: weigh-in ${weighed ? 'logged' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
   ].filter(Boolean);
 }

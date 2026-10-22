@@ -720,6 +720,8 @@ test('supplement_plan kind out (Thu 10/22): ordered with a date, arrived puts it
   const { logEntry } = await import('../app/js/lib/supplements.js');
   // Ran out of both test supplements yesterday.
   for (const id of ['supp.powder', 'supp.caps']) { const sp = list('supplements').find((x) => x.id === id); store.writeLocal('supp-log', `2026-01-19.${id}`, logEntry({ supp: sp, date: '2026-01-19', dayKind: 'train', status: 'skipped', reason: 'Ran out', at: at('2026-01-19') })); }
+  // The live count is in every message (he asked "what's up?" and heard a stale notification's "0 of 4").
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /\nNow: Supplements today: none scheduled\. Out of stock [^\n]*powder since Monday 1\/19/);
   const o = await call('supplement_plan', { kind: 'out', supplement: 'powder', answer: 'ordered', arrives: '2026-01-23' });
   assert.match(o.text, /^powder: ordered, arriving Friday 1\/23\./);
   assert.deepEqual(list('supp-answers').map((x) => [x.kind, x.suppId, x.arrives]), [['out', 'supp.powder', '2026-01-23']]);
