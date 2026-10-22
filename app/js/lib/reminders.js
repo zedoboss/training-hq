@@ -13,6 +13,7 @@ import { mealReminders, suppReminders, planReminders, saunaReminders } from './f
 import { fastingOn } from './fast.js';
 import { scanReminders, planFor } from './scans.js';
 import { recoveryReminders } from './recovery.js';
+import { activityReminders, activityDays } from './activities.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -28,6 +29,8 @@ export const KINDS = [
   ['recovery', 'Recovery: the weekly check-in until the checkup, things to do, photos every few weeks'],
   ['dishes', 'The dishes: 2 minutes after you log a meal, get up and wash up'],
   ['walk', 'Walks: asked through the day until your step goal is done; no answer in 5 minutes, it asks when you\'ll go'],
+  ['flex', 'Flexibility: your stretch routine after a workout (or at your evening time) and the weekly kick test'],
+  ['combat', 'Boxing / kickboxing: before each class, and how it went after'],
   ['rest', 'Rest over: when the rest timer reaches zero (sent by the Mac, so it comes with the screen locked too)'],
 ];
 
@@ -84,7 +87,7 @@ const holdText = (s) => (s.ask ? `${s.label}: the gym for the ${s.restHold || s.
  * @param {object} [o.recovery]  A13: {plan, state, notes, photos} (lib/recovery.js), when he has a recovery record
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null }) {
+export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null, flexPlan = null, combatPlan = null, activity = undefined, flexTests = [] }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -192,6 +195,8 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   if (on('recovery') && recovery?.plan) out.push(...recoveryReminders({ date, tz, ...recovery, hm: n.recoveryHm }));
   // Meals (6.3): his meal times with nothing logged, and the after photo.
   if (on('meals') && !fasting) out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
+  // Thu 10/22: flexibility (after a workout or his evening time, the weekly kick test) and boxing / kickboxing classes.
+  out.push(...activityReminders({ date, tz, flex: flexPlan, combat: combatPlan, done: activity, tests: flexTests, on }));
   return out.sort((a, b) => a.at - b.at);
 }
 
@@ -212,7 +217,7 @@ export function sessionStartAt(r, sessionStarts, tz) {
 }
 
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
-export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [] }, tz) {
+export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [], flexPlan = null, combatPlan = null, coachNotes = [] }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
   return {
     tz,
@@ -237,5 +242,9 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     scanPlan,
     coachReminders,
     recovery: recoveryPlan ? { plan: recoveryPlan, state: recoveryState, notes, photos } : null,
+    flexPlan,
+    combatPlan,
+    activity: activityDays({ sessions, sets, tz }),
+    flexTests: coachNotes.filter((x) => /^flex/i.test(x?.topic || '')).map((x) => x.date || isoDate(new Date(x.at), tz)),
   };
 }

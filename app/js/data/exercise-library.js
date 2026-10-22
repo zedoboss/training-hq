@@ -49,6 +49,10 @@ const ROWS = [
   // Isometric holds as their own exercises (Tue 10/20, his list): a weight and a time, the full-screen countdown.
   ['Lateral Raise Hold (Cable)', WD, 'shoulders', '', 'cable'],
   ['Lateral Raise Hold (Dumbbell)', WD, 'shoulders', '', 'dumbbell'],
+  // Thu 10/22, his words: "Why is there no leg extension hold? I didn't see it as an exercise": his knee hold at the gym
+  // (full stack) and his grip hold, both with demos already.
+  ['Leg Extension Hold (Machine)', WD, 'quadriceps', '', 'machine'],
+  ['Cupping Hold', WD, 'forearms', '', 'cable'],
   ['Front Raise (Dumbbell)', W, 'shoulders', '', 'dumbbell'],
   ['Rear Delt Reverse Fly (Machine)', W, 'shoulders', 'upper_back', 'machine'],
   ['Rear Delt Reverse Fly (Dumbbell)', W, 'shoulders', 'upper_back', 'dumbbell'],
@@ -168,6 +172,23 @@ const ROWS = [
   ['Rowing Machine', DD, 'cardio', 'full_body', 'machine'],
   ['Stair Machine', D, 'cardio', '', 'machine'],
   ['Jump Rope', D, 'cardio', '', 'other'],
+  // Flexibility (Thu 10/22, his goal: high kicks): stretches and active kick holds, timed. Muscle 'other', so they never
+  // count as training sets for a muscle group.
+  ['Leg Swing Front to Back', B, 'other', '', 'bodyweight'],
+  ['Leg Swing Side to Side', B, 'other', '', 'bodyweight'],
+  ['Kneeling Hip Flexor Stretch', D, 'other', '', 'bodyweight'],
+  ['Lying Hamstring Stretch (Strap)', D, 'other', '', 'band'],
+  ['Butterfly Stretch', D, 'other', '', 'bodyweight'],
+  ['Seated Straddle Stretch', D, 'other', '', 'bodyweight'],
+  ['Lying Figure-4 Stretch', D, 'other', '', 'bodyweight'],
+  ['Standing Front Leg Raise Hold', D, 'other', '', 'bodyweight'],
+  ['Standing Side Leg Raise Hold', D, 'other', '', 'bodyweight'],
+  // Combat sports (Thu 10/22, his goal: boxing and kickboxing): a class or a round, timed.
+  ['Boxing (Class)', D, 'cardio', 'full_body', 'other'],
+  ['Kickboxing (Class)', D, 'cardio', 'full_body', 'other'],
+  ['Muay Thai (Class)', D, 'cardio', 'full_body', 'other'],
+  ['Shadow Boxing', D, 'cardio', 'shoulders', 'bodyweight'],
+  ['Heavy Bag', D, 'cardio', 'shoulders', 'other'],
 ];
 
 export const slug = (name) => name.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');

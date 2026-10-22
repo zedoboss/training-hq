@@ -33,6 +33,7 @@ import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../.
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 import { newChange, COL as CHANGES, KINDS as CHANGE_KINDS } from './changes.mjs';
 import { activeBridge } from '../../app/js/lib/history.js';
+import { WEEKDAYS, DISCIPLINE, FLEX_ROUTINE } from '../../app/js/lib/activities.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -1080,6 +1081,53 @@ async function requestChange(a, ctx) {
   return wrote(`Sent to the Mac${open.length ? ` (${open.length} ahead of it)` : ''} [id ${c.id}]. Tell him in one short line that it's sent and he gets a message when it's done. From now on, follow his wish yourself in this chat.`, 'sent to the Mac');
 }
 
+// ---- flexibility and boxing / kickboxing (Thu 10/22) --------------------------------------------------------------
+
+const dayName = (i) => WEEKDAYS[i].charAt(0).toUpperCase() + WEEKDAYS[i].slice(1);
+
+/**
+ * His words: "box and kickbox in the future... proper flexibility... so I can do high kicks", and "make sure smart
+ * notifications are also built for this". The plans he agrees to ('schedule' flex and combat) drive the reminders
+ * (lib/activities.js); a class he tells you about is logged as a finished workout with one timed exercise.
+ */
+async function activityPlan(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  if (a.what === 'flex') {
+    if (a.clear) { del(s, 'schedule', 'flex'); return wrote('Flexibility reminders are off.', 'flex reminders off'); }
+    const cur = s.one('schedule', 'flex') || {};
+    const test = a.testDay ? WEEKDAYS.indexOf(String(a.testDay).toLowerCase()) : -1;
+    const doc = { id: 'flex', kind: 'flex', when: a.when || cur.when || 'after-workout', hm: a.time || cur.hm || '20:00', testWeekday: test >= 0 ? test : cur.testWeekday ?? 0, since: cur.since || s.today, at: s.now, said: a.said ? String(a.said).slice(0, 200) : cur.said || '' };
+    put(s, 'schedule', 'flex', doc);
+    return wrote(`Flexibility · Legs (routine ${FLEX_ROUTINE}): ${doc.when === 'after-workout' ? `a reminder 10 minutes after each workout ends, and at ${formatHm(doc.hm)} on days without one` : `a reminder every day at ${formatHm(doc.hm)}`}, never once it's done that day. Kick test reminder on ${dayName(doc.testWeekday)}s. Tell him in one line.`, `flex: ${doc.when}, ${doc.hm}`);
+  }
+  if (a.what === 'combat') {
+    if (a.clear) { del(s, 'schedule', 'combat'); return wrote('Class reminders are off.', 'class reminders off'); }
+    const cur = s.one('schedule', 'combat') || {};
+    const days = a.days ? a.days.map((d) => WEEKDAYS.indexOf(String(d).toLowerCase())).filter((i) => i >= 0) : cur.days || [];
+    const doc = { id: 'combat', kind: 'combat', discipline: a.discipline || cur.discipline || 'boxing', gym: a.gym ?? cur.gym ?? '', days, hm: a.time || cur.hm || null, durationMin: a.minutes || cur.durationMin || 60, trial: a.trialDate ?? cur.trial ?? null, since: cur.since || s.today, at: s.now };
+    if (!doc.hm) return refuse('What time are the classes? (time, HH:MM)');
+    put(s, 'schedule', 'combat', doc);
+    const name = DISCIPLINE[doc.discipline];
+    return wrote(`${name}${doc.gym ? ` at ${doc.gym}` : ''}, ${formatHm(doc.hm)}${days.length ? ` on ${days.map(dayName).join(', ')}` : ''}${doc.trial ? `; trial ${dayText(doc.trial, s.today)}` : ''}: a reminder 90 minutes before each class, and "how was it?" 30 minutes after it ends unless he logged it. Tell him in one line.`, `${doc.discipline} ${doc.hm}`);
+  }
+  if (a.what === 'log_class') {
+    const name = DISCIPLINE[a.discipline || s.one('schedule', 'combat')?.discipline || 'boxing'];
+    const minutes = Number(a.minutes);
+    if (!(minutes > 0)) return refuse('How many minutes was the class?');
+    const date = a.date || s.today;
+    const end = date === s.today ? s.now : zonedTime(date, a.time || '20:00', s.tz) + minutes * 60000;
+    const startedAt = end - minutes * 60000;
+    const exId = `${(a.discipline || 'boxing')}-class`;
+    const id = newId('session'); const key = 'k0';
+    const session = { id, kind: 'workout', title: name, routineId: null, dayType: null, week: null, startedAt, endedAt: end, pausedMs: 0, pausedAt: null, status: 'done', note: a.note ? String(a.note).slice(0, 500) : '', photos: [], gym: a.gym || s.one('schedule', 'combat')?.gym || null, bodyweightKg: null, source: 'training-hq',
+      exercises: [{ key, exerciseId: exId, name: `${name} (Class)`, type: 'duration', capClass: null, barKg: null, restSeconds: null, notes: '', role: null, supersetId: null, target: null }] };
+    const set = { id: newSetId(), sessionId: id, exKey: key, order: 0, done: true, doneAt: end, rpe: null, note: '', type: 'normal', kg: null, reps: null, durationS: minutes * 60, target: null };
+    s.store.writeLocalMany([{ col: 'sets', id: set.id, data: set }, { col: 'sessions', id, data: zoned(s, 'sessions', id, session) }]);
+    return wrote(`Logged: ${name}, ${minutes} min, ${dayText(date, s.today)}${session.note ? ` (${session.note})` : ''}. It's on his calendar.`, `${name} ${minutes} min`);
+  }
+  return refuse('what: flex, combat or log_class.');
+}
+
 const write = (name, title, description, inputSchema, run) => ({ name, title, description, inputSchema, run });
 
 export const WRITE_TOOLS = [
@@ -1113,4 +1161,5 @@ export const WRITE_TOOLS = [
   write('recovery_log', 'Recovery', "His recovery record (A13): save his weekly check-in answers in his words (check_in: one answer per question; for choice questions one of the choices the recovery tool lists; 'anything new' in his words, empty if nothing), tick or untick a thing he had to do (task_done / task_undo), or set the checkup date he booked (set_checkup). Only what he says: no advice.", obj({ action: { type: 'string', enum: ['check_in', 'task_done', 'task_undo', 'set_checkup'] }, answers: { type: 'array', items: obj({ question: { type: 'string' }, answer: { type: 'string' } }, ['question', 'answer']) }, task: { type: 'string' }, date: ISO }, ['action']), recoveryLog),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
   write('request_change', 'Change the coach', "He doesn't like how you or the app's own messages talk or behave (tone, a line, the timing or order of a message, something said that makes no sense), asks to change your personality, or reports a bug: the Mac rebuilds it and tells him in Talk when it's done. Don't ask first: call it at once. said = his words, verbatim. about = the exact message(s) he means, quoted with their time, and what was wrong. want = what he wants instead, one line in his terms. kind: personality (how you talk), behaviour (what or when you or the app say things), bug (something broken). followsOn: the id of an earlier request this answers or extends. cancel: an id still waiting.", obj({ said: { type: 'string' }, about: { type: 'string' }, want: { type: 'string' }, kind: { type: 'string', enum: CHANGE_KINDS }, followsOn: { type: 'string' }, cancel: { type: 'string' } }), requestChange),
+  write('activity_plan', 'Flexibility and classes', "His plans for leg flexibility and boxing / kickboxing (his goals, Thu 10/22), which drive smart reminders. what: flex = when he does the routine 'Flexibility · Legs' (when: after-workout = 10 minutes after each workout ends, and at time on days without one; evening = every day at time) and the kick-test weekday (testDay); combat = his classes (discipline boxing, kickboxing or muay-thai; gym; days as weekday names; time HH:MM; minutes; trialDate for a one-off trial); log_class = a class he did (discipline, minutes, date, note). clear: true turns that plan's reminders off. Set it only with what he agreed.", obj({ what: { type: 'string', enum: ['flex', 'combat', 'log_class'] }, when: { type: 'string', enum: ['after-workout', 'evening'] }, time: HM, testDay: { type: 'string', enum: WEEKDAYS }, discipline: { type: 'string', enum: Object.keys(DISCIPLINE) }, gym: { type: 'string' }, days: { type: 'array', items: { type: 'string', enum: WEEKDAYS } }, minutes: { type: 'integer', minimum: 5, maximum: 240 }, trialDate: ISO, date: ISO, note: { type: 'string' }, said: { type: 'string' }, clear: { type: 'boolean' } }, ['what']), activityPlan),
 ];

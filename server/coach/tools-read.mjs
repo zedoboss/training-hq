@@ -31,6 +31,7 @@ import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
+import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -256,8 +257,23 @@ function situationLines(s) {
   const holds = activeHolds(s.list('coach-holds'), s.now);
   if (holds.length) out.push(`He asked the app to hold off (it does): ${holds.map((h) => `${h.areas.join(', ')} until ${dayText(s.date(h.until), s.today)} ${timeText(h.until, s.tz)}${h.reason ? ` (${h.reason})` : ''} [id ${h.id}]`).join('; ')}.`);
   out.push(...changeLines(s));
+  out.push(...activityLines(s));
   const notes = s.list('coach-notes').sort((a, b) => b.at - a.at).slice(0, 15);
   if (notes.length) out.push(`Your notes on him (your memory; use them, never ask again what they answer): ${notes.map((n) => `[${dayText(n.date || s.date(n.at), s.today)}${n.topic ? `, ${n.topic}` : ''}] ${String(n.text).slice(0, 160)}`).join(' | ')}`);
+  return out;
+}
+
+/** Thu 10/22: his flexibility and boxing / kickboxing plans (activity_plan), what he did, his last kick test. */
+function activityLines(s) {
+  const flex = s.one('schedule', 'flex'); const combat = s.one('schedule', 'combat');
+  const done = activityDays({ sessions: s.list('sessions'), sets: s.list('sets'), tz: s.tz });
+  const lastOf = (set) => [...set].sort().at(-1) || null;
+  const test = s.list('coach-notes').filter((n) => /^flex/i.test(n.topic || '')).sort((a, b) => b.at - a.at)[0];
+  const day = (d) => (d ? dayText(d, s.today) : 'never');
+  const out = [];
+  if (flex) out.push(`Flexibility plan: ${flex.when === 'after-workout' ? `after each workout (else ${formatHm(flex.hm)})` : `every day at ${formatHm(flex.hm)}`}; last done ${day(lastOf(done.flex))}; last kick test ${test ? `${day(test.date)}: ${String(test.text).slice(0, 120)}` : 'none yet'}.`);
+  else out.push('Flexibility: no plan yet (the open question flex-plan asks when it fits; set it with activity_plan).');
+  if (combat) out.push(`Classes: ${DISCIPLINE[combat.discipline]}${combat.gym ? ` at ${combat.gym}` : ''}, ${(combat.days || []).map((i) => WEEKDAYS[i].slice(0, 3)).join('/') || 'no fixed days'} at ${formatHm(combat.hm)}${combat.trial ? `, trial ${day(combat.trial)}` : ''}; last class ${day(lastOf(done.combat))}.`);
   return out;
 }
 

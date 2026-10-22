@@ -17,6 +17,8 @@ export const HOLD_AREAS = {
   health: ['health'],
   evening: ['evening'],
   questions: ['questions'],
+  flex: ['flex', 'flex-test'],
+  combat: ['combat', 'combat-after'],
   all: ['*'],
 };
 export const AREA_NAMES = Object.keys(HOLD_AREAS);

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 // A13: his recovery record (data/coach/recovery.md, also private) is read the same way and added after the profile.
 export const PROFILE_FILE = ['coach', 'profile.md'];
 export const RECOVERY_FILE = ['coach', 'recovery.md'];
-export const MAX_PROFILE = 24000;
+export const MAX_PROFILE = 48000;
 
 const cache = new Map();
 
