@@ -640,6 +640,12 @@ test('human coach (Wed 10/21): fast, hold_off, neck_plan, sauna later and the do
   assert.match((await call('fast', { action: 'end' })).text, /^Fast ended at 3:00 AM/);
   const h = await call('hold_off', { areas: ['walk', 'sauna'], untilTime: '18:00', reason: 'wedding' });
   assert.match(h.text, /^Holding off walk, sauna until Tuesday 1\/20 6:00 PM \(wedding\)/);
+  assert.match(h.text, /in plain words, like a person/, 'a daytime hold is said plainly');
+  assert.doesNotMatch(h.text, /good night/);
+  clock = Date.UTC(2026, 0, 20, 22, 40);
+  const night = await call('hold_off', { areas: ['holds'], untilDate: '2026-01-20', reason: 'no tendons tonight' });
+  assert.match(night.text, /no cutoff time or date: "Have a good night, catch you in the morning when you wake up\."/, 'an evening hold that ends overnight is a good night, not a midnight cutoff (Thu 10/22)');
+  clock = NOW;
   const hold = list('coach-holds')[0];
   assert.match((await call('hold_off', { cancel: hold.id })).text, /^Hold lifted/);
   assert.match((await call('hold_off', { areas: ['nothing'] })).text, /^Which areas\?/);

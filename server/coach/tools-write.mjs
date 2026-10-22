@@ -707,7 +707,12 @@ async function holdOff(a, ctx) {
   if (!until) return refuse('Until when? forMinutes, untilTime (HH:MM) or untilDate (the whole day included).');
   const id = newId('hold');
   put(s, 'coach-holds', id, { id, areas, until, reason: a.reason ? String(a.reason).slice(0, 160) : '', at: s.now, by: 'coach' });
-  return wrote(`Holding off ${areas.join(', ')} until ${t(until)}${a.reason ? ` (${a.reason})` : ''} [id ${id}]. The app's reminders and nudges for that leave him alone until then; safety alarms and his own reminders still come.`, `hold ${areas.join(', ')} until ${t(until)}`);
+  // Said in the evening and over by the morning (his words, Thu 10/22): he's going to sleep, so no cutoff time, just good night.
+  const night = Number(hmOf(new Date(s.now), s.tz).slice(0, 2)) >= 18 && until - s.now <= 16 * 3600000;
+  const tell = night
+    ? 'Tell him like a human coach, with no cutoff time or date: "Have a good night, catch you in the morning when you wake up."'
+    : 'Tell him in plain words, like a person ("I\'ll leave the walks alone until 6:00 PM"), not "reminders are off until".';
+  return wrote(`Holding off ${areas.join(', ')} until ${t(until)}${a.reason ? ` (${a.reason})` : ''} [id ${id}]. The app's reminders and nudges for that leave him alone until then; safety alarms and his own reminders still come. ${tell}`, `hold ${areas.join(', ')} until ${t(until)}`);
 }
 
 /** His answer to a walk question (Tue 10/20): a time, going now, done, or not now. */
