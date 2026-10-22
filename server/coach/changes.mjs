@@ -19,6 +19,11 @@ export const KINDS = ['personality', 'behaviour', 'bug'];
 export const MODEL = { model: 'claude-opus-5-5', effort: 'high' };
 export const TIMEOUT_MS = 60 * 60000;
 export const MAX_TRIES = 2;
+/**
+ * A build doesn't start while the code or his private folder has unsaved edits (Thu 10/22: Claude in a chat on the Mac
+ * may be mid-change; a builder would test, commit or push half of it). It waits, at most this long.
+ */
+export const EDITS_WAIT_MS = 45 * 60000;
 const OPEN = new Set(['queued', 'working']);
 
 const rand = () => randomBytes(3).toString('hex');
@@ -114,13 +119,14 @@ export function guardSettings({ node = process.execPath, guard, codeDir, private
  * @param {() => void} [o.restart] the server restarts itself (a builder changed server code)
  * @param {() => boolean} [o.busy] a workout is running: the restart waits for it to end
  */
-export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, log = () => {}, now = () => Date.now(), tz = () => 'UTC', timeoutMs = TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)) }) {
+export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, dirty = () => [], log = () => {}, now = () => Date.now(), tz = () => 'UTC', timeoutMs = TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)) }) {
   const dir = join(privateDir, 'logs', 'coach-changes');
   const all = () => store.listRecords(COL).map((r) => r.data).filter(Boolean).sort((a, b) => a.at - b.at);
   const put = (c) => { store.writeLocal(COL, c.id, c); return c; };
   const files = (id) => ({ logFile: join(dir, `${id}.log`), resultFile: join(dir, `${id}.result.json`) });
   let ticking = false;
   let restartDue = false;
+  let editsSince = 0; // when the folders were first seen with unsaved edits while a request waited
   // When this server started: a change built before it is live now (Thu 10/22, his words, "fix the not fixed part":
   // "done" used to come before the restart that makes server changes live).
   const bootAt = now();
@@ -219,7 +225,14 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
       if (all().some((c) => c.status === 'working')) return;
       // No daily limit (Thu 10/22, his words: "Don't have a daily build limit. Make it unlimited"): one at a time.
       const next = all().find((c) => c.status === 'queued');
-      if (!next) return;
+      if (!next) { editsSince = 0; return; }
+      const edits = dirty();
+      if (edits.length) {
+        if (!editsSince) { editsSince = now(); log(`coach change ${next.id}: waits, unsaved edits in ${edits.join(', ')}`); put({ ...next, waitingFor: edits, waitingSince: editsSince }); }
+        if (now() - editsSince < EDITS_WAIT_MS) return;
+        log(`coach change ${next.id}: edits still unsaved after ${Math.round(EDITS_WAIT_MS / 60000)} minutes; starting anyway`);
+      }
+      editsSince = 0;
       try { start(next); } catch (e) {
         log(`coach change ${next.id}: ${e.message}`);
         await finish(next, { status: 'failed', said: `I couldn't start the change on the Mac: ${e.message}.` });

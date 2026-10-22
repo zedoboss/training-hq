@@ -1,5 +1,6 @@
 // Starts the Training HQ server on the Mac: opens the database, refreshes the app's offline file list,
 // and listens on 127.0.0.1. Run by launchd at login (see scripts/install-mac-service.mjs).
+import { execFileSync } from 'node:child_process';
 import { paths, loadConfig, APP_DIR, CODE_DIR } from './config.mjs';
 import { openStore } from './store.mjs';
 import { createApp } from './app.mjs';
@@ -106,9 +107,12 @@ const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.data
 // Changes he asks the coach for (Thu 10/22): a Claude Code builder on this Mac makes each one, then the coach tells
 // him in Talk. A builder that changed server code makes the server restart itself (launchd starts it again).
 // config.coachChanges: false switches it off; changesCodeDir points a dev copy's builder at a scratch clone.
+// Unsaved edits to tracked files in the code or private folder (new untracked files, like an imported PDF, don't count).
+const unsaved = (dir) => { try { return execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: dir, encoding: 'utf8', timeout: 10000 }).trim() !== ''; } catch { return false; } };
 const changes = config.coachChanges === false ? null : openChanges({
   store, push, codeDir: config.changesCodeDir || CODE_DIR, privateDir: p.privateDir, tz: () => phoneZone(store), log,
   restart: () => setTimeout(() => shutdown('a coach change updated the server'), 2000).unref(),
+  dirty: () => [[config.changesCodeDir || CODE_DIR, 'the code folder'], [p.privateDir, 'the private folder']].filter(([d]) => unsaved(d)).map(([, name]) => name),
   // Mid-workout is fine (his words: "even mid workout it can restart... as long as it saves"); a coach answer isn't.
   busy: () => Boolean(coach?.talking?.()),
 });

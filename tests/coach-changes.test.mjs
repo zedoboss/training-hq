@@ -146,3 +146,24 @@ test('the guard refuses the read-only folders, the keys, the real database and s
   assert.equal(no('Bash', { command: 'git push origin main && mkdir -p $D/config' }), '');
   assert.equal(no('Bash', { command: 'npm test' }), '');
 });
+
+test('a build waits while the code or private folder has unsaved edits (Claude in a chat on the Mac), at most 45 minutes', async () => {
+  let edits = ['the code folder'];
+  const { q, launched } = queue({ dirty: () => edits });
+  const c = q.request({ said: 'Shorter replies' });
+  await q.tick();
+  assert.equal(launched.length, 0, 'waits');
+  assert.deepEqual(store.getRecord(COL, c.id).data.waitingFor, ['the code folder'], 'the coach can say why');
+  clock += 10 * 60000; await q.tick();
+  assert.equal(launched.length, 0);
+  edits = [];
+  await q.tick();
+  assert.equal(launched.length, 1, 'saved: it starts');
+  // Edits left for good: it starts after 45 minutes anyway.
+  const { q: q2, launched: l2 } = queue({ dirty: () => ['the private folder'] });
+  store.writeLocal(COL, c.id, { ...store.getRecord(COL, c.id).data, status: 'done' });
+  q2.request({ said: 'Another one' });
+  await q2.tick(); assert.equal(l2.length, 0);
+  clock += 46 * 60000; await q2.tick();
+  assert.equal(l2.length, 1);
+});
