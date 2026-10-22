@@ -136,3 +136,17 @@ test('a round on the hold timer: every hold with its GET READY, rest between hol
   assert.equal(roundSeconds({ getReadyS: 0 }), 330, 'his count: 3 × 30 s with 2:00 between = 5:30');
   assert.equal(roundLength(375), 'about 6 min');
 });
+
+test('his knee hold logged with the hold exercise counts (Thu 10/22): "Leg Extension Hold (Machine)", timed sets', async () => {
+  const { roundsByDate, holdBase, isHoldSet } = await import('../app/js/lib/holds.js');
+  assert.equal(holdBase('Leg Extension Hold (Machine)'), 'Leg Extension (Machine)');
+  assert.equal(holdBase('Cupping Hold'), 'Cupping');
+  const areas = [{ kind: 'area', id: 'knees', holds: [{ exercise: 'Leg Extension (Machine)', where: 'gym' }] }, { kind: 'area', id: 'wrist', holds: [{ exercise: 'Cupping' }] }];
+  const s = { id: 's', status: 'done', startedAt: Date.parse('2026-10-22T03:16:00Z'), exercises: [{ key: 'h', name: 'Leg Extension Hold (Machine)' }, { key: 'e', name: 'Leg Extension (Machine)' }] };
+  const sets = [1, 2, 3].map((i) => ({ sessionId: 's', exKey: 'h', type: 'normal', kg: 104, durationS: 30, done: true }))
+    .concat([{ sessionId: 's', exKey: 'e', type: 'normal', kg: 50, reps: 12, done: true }]);
+  const r = roundsByDate(areas, [s], sets);
+  assert.deepEqual(Object.values(r.knees), [1]);
+  assert.deepEqual(r.wrist, {}, 'cupping still open');
+  assert.equal(isHoldSet({ type: 'normal', kg: 50, reps: 12, done: true }, { name: 'Leg Extension (Machine)' }), false, 'a working set is not a hold');
+});

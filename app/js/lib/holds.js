@@ -4,6 +4,13 @@ import { isoDate } from './time.js';
 import { activeBridge } from './history.js';
 
 /**
+ * Thu 10/22 (he did his knee holds with the new "Leg Extension Hold (Machine)" and the app still asked for them): a
+ * hold exercise is the hold of its base exercise, and its timed sets are holds whatever their set type.
+ */
+export const holdBase = (name) => String(name || '').replace(/\s+Hold\b/i, '').replace(/\s+/g, ' ').trim();
+export const isHoldSet = (set, ex) => Boolean(set?.done) && (set.type === 'hold' || (/\bhold\b/i.test(ex?.name || '') && (set.durationS || 0) > 0));
+
+/**
  * Rounds per area logged on each date: {areaId: {'YYYY-MM-DD': count}}.
  * Hold sets on an area's hold exercises or on the exercises that load it count for that area.
  * bridge: Hevy history (hold sets marked hold:true), used until Hevy history is imported.
@@ -14,9 +21,10 @@ export function roundsByDate(areas, sessions, sets, rawBridge = null) {
   const byArea = Object.fromEntries(areas.map((a) => [a.id, {}]));
   const exToArea = new Map();
   for (const a of areas) {
-    for (const n of a.loadsArea?.exercises || []) exToArea.set(n, a.id);
-    for (const h of a.holds || []) exToArea.set(h.exercise, a.id);
+    for (const n of a.loadsArea?.exercises || []) { exToArea.set(n, a.id); exToArea.set(holdBase(n), a.id); }
+    for (const h of a.holds || []) { exToArea.set(h.exercise, a.id); exToArea.set(holdBase(h.exercise), a.id); }
   }
+  const areaOf = (name) => exToArea.get(name) || exToArea.get(holdBase(name));
   const own = new Set();
   for (const [name, list] of Object.entries(bridge?.exercises || {})) {
     const area = exToArea.get(name);
@@ -38,9 +46,9 @@ export function roundsByDate(areas, sessions, sets, rawBridge = null) {
     // Hold sets logged inside a workout count as one round for their area.
     const counted = new Set();
     for (const ex of s.exercises || []) {
-      const area = exToArea.get(ex.name);
+      const area = areaOf(ex.name);
       if (!area || counted.has(area)) continue;
-      if (sets.some((x) => x.sessionId === s.id && x.exKey === ex.key && x.done && x.type === 'hold')) {
+      if (sets.some((x) => x.sessionId === s.id && x.exKey === ex.key && isHoldSet(x, ex))) {
         byArea[area][date] = (byArea[area][date] || 0) + 1;
         counted.add(area);
       }
