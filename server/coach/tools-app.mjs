@@ -123,6 +123,17 @@ async function workout(a, ctx) {
     return wrote(`Saved ${done.title}: ${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}, ${plural(ticked.length, 'set')}, ${sum.volume.toLocaleString('en-US')} kg volume${sets.length > ticked.length ? `; ${plural(sets.length - ticked.length, 'unticked set')} dropped` : ''}. The summary (records, what's next) is open on his phone.`, `${done.title} saved`);
   }
 
+  // Thu 10/22, his words: "skip hip thrust today, because of my lower back pain". The exercise greys out on his phone,
+  // its sets aren't owed today, and it comes back in his next workout of this kind with the reason.
+  if (a.action === 'skip' || a.action === 'unskip') {
+    const q = String(a.exercise || '').toLowerCase().trim();
+    const ex = q && active.exercises.find((e) => e.name.toLowerCase() === q) || (q && active.exercises.find((e) => e.name.toLowerCase().includes(q)));
+    if (!ex) return refuse(`Which exercise? In this workout: ${active.exercises.map((e) => e.name).join('; ')}.`);
+    const skipped = a.action === 'skip' ? { at: s.now, reason: String(a.note || '').trim().slice(0, 300) } : null;
+    save({ ...active, exercises: active.exercises.map((e) => (e.key === ex.key ? { ...e, skipped } : e)) });
+    return wrote(a.action === 'skip' ? `Skipped ${ex.name} today${skipped.reason ? ` (${skipped.reason})` : ''}: greyed out on his phone, back in his next workout of this kind with the reason.` : `${ex.name} is back in today's workout.`, `${a.action} ${ex.name}`);
+  }
+
   if (a.action === 'discard') {
     // Deletes every set logged in it: always his yes to this exact question first.
     const key = `discard:${active.id}`;
@@ -250,8 +261,8 @@ const tool = (name, title, description, inputSchema, run) => ({ name, title, des
 export const APP_TOOLS = [
   tool('open_screen', 'Open a screen', `Open a screen of the app on his phone, at once, when he asks to open, show or go to something ("open the chat", "show me my supplements", "go to the session"). Screens: ${SCREENS.map((x) => `${x.id} (${x.label}${x.needs ? `; needs ${x.needs === 'session' ? 'a workout in progress' : x.needs === 'date' ? 'date, default today' : x.needs === 'meal' ? 'name: a meal id, or none for his latest meal' : `name of the ${x.needs}`}` : ''})`).join(', ')}.`,
     obj({ screen: { type: 'string', enum: SCREEN_IDS }, name: { type: 'string' }, date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } }, ['screen']), openScreen),
-  tool('workout', 'The workout in progress', 'The workout in progress: status; pause or resume its clock; finish it (saved like the phone\'s Finish screen, unticked sets dropped; optional title and note; then its summary opens); discard it (deletes its sets). Finish needs his yes unless he told you to finish it; discard always needs his yes to your question.',
-    obj({ action: { type: 'string', enum: ['status', 'pause', 'resume', 'finish', 'discard'] }, title: { type: 'string' }, note: { type: 'string' } }, ['action']), workout),
+  tool('workout', 'The workout in progress', 'The workout in progress: status; pause or resume its clock; finish it (saved like the phone\'s Finish screen, unticked sets dropped; optional title and note; then its summary opens); discard it (deletes its sets); skip an exercise today (exercise = its name, note = his reason; it comes back next time) or unskip it. Finish needs his yes unless he told you to finish it; discard always needs his yes to your question.',
+    obj({ action: { type: 'string', enum: ['status', 'pause', 'resume', 'finish', 'discard', 'skip', 'unskip'] }, title: { type: 'string' }, note: { type: 'string' }, exercise: { type: 'string' } }, ['action']), workout),
   tool('app_settings', 'App settings', 'Read or change his app settings (the Settings screen), only when he asks for the change. No setting: lists every setting with its current value. With setting (its path) and value: changes it.',
     obj({ setting: { type: 'string', enum: [...SETTING.keys()] }, value: { type: 'string' } }), appSettings),
   tool('phone', 'His phone', 'Things only his phone can do: mic_off (stop listening; only he can switch it back on), reload (load the newest version of the app), sync (sync with the Mac now). Only when he asks.',

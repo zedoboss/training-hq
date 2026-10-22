@@ -41,7 +41,9 @@ const DAY_TYPE = { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] };
 
 /** The exercise he is on: the one he ticked last if it still has sets left, else the first with sets left. */
 export function currentExercise(session, sets) {
-  const open = (key) => sets.some((x) => x.exKey === key && !x.done);
+  // Thu 10/22: an exercise he skipped today is never "next".
+  const skipped = new Set((session.exercises || []).filter((e) => e.skipped).map((e) => e.key));
+  const open = (key) => !skipped.has(key) && sets.some((x) => x.exKey === key && !x.done);
   const lastTicked = [...sets].filter((x) => x.done && x.doneAt).sort((a, b) => b.doneAt - a.doneAt)[0];
   if (lastTicked && open(lastTicked.exKey)) return session.exercises.find((e) => e.key === lastTicked.exKey) || null;
   return session.exercises.find((e) => open(e.key)) || null;

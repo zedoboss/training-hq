@@ -362,6 +362,16 @@ export function render(view, params = []) {
     const groups = supersetGroups(session.exercises);
     const g = ex.supersetId ? groups.get(ex.supersetId) : null;
     const gi = g ? [...groups.keys()].indexOf(ex.supersetId) : -1;
+    // Thu 10/22, his words: "there should be an option in the exercise where I can skip it... grayed out... add a note:
+    // skipped this workout, do it next time, because of X". Skipped: greyed, the reason, undo; it comes back next time.
+    if (ex.skipped) {
+      return `<section class="card s-ex is-skipped" data-ex="${esc(ex.key)}">
+        <div class="ex-head"><span class="ex-title"><button class="ex-demo" data-a="demo" type="button" aria-label="Demo: ${esc(ex.name)}">${DEMO_ICON}</button><span class="ex-name">${esc(ex.name)}</span></span>
+          <span class="btn-row tight"><span class="tag tag-skip">SKIPPED</span><button class="icon-mini" data-a="ex-more" type="button" aria-label="Exercise options">···</button></span></div>
+        <div class="hint">${ex.skipped.reason ? `${esc(ex.skipped.reason)}. ` : ''}It comes back in your next ${esc(DAY[session.dayType] ? DAY[session.dayType][0] + DAY[session.dayType].slice(1).toLowerCase() : 'workout')}.</div>
+        <div class="btn-row tight"><button class="btn-ghost small" data-a="skip-note" type="button">${ex.skipped.reason ? 'Edit the reason' : 'Add a reason'}</button><button class="btn-ghost small" data-a="unskip" type="button">Undo skip</button></div>
+      </section>`;
+    }
     return `<section class="card s-ex ${g ? 'in-superset' : ''}" data-ex="${esc(ex.key)}" ${g ? `style="--ss:${SS_COLORS[gi % SS_COLORS.length]}"` : ''}>
       ${g ? `<div class="hud ss-label">SUPERSET ${g.letter} · ${g.keys.indexOf(ex.key) + 1} OF ${g.keys.length}</div>` : ''}
       <div class="ex-head"><span class="ex-title"><button class="ex-demo" data-a="demo" type="button" aria-label="Demo: ${esc(ex.name)}">${DEMO_ICON}</button><a class="ex-name plain" href="#/exercise/${esc(ex.exerciseId)}">${esc(ex.name)}</a></span>
@@ -461,6 +471,14 @@ export function render(view, params = []) {
     }
   };
 
+  /** Skip an exercise today, with his reason (asked; Cancel keeps it as it was). */
+  const skipExercise = async (ex) => {
+    const reason = await promptText(`Skip ${ex.name} today? Why (it shows next time)`, ex.skipped?.reason ?? '', { placeholder: 'e.g. lower back pain', ok: 'Skip' });
+    if (reason == null) return;
+    await saveSession({ exercises: session.exercises.map((e) => (e.key === ex.key ? { ...e, skipped: { at: ex.skipped?.at ?? Date.now(), reason: reason.trim().slice(0, 300) } } : e)) });
+    drawCards();
+  };
+
   /** The exercise's demo (the animation and its explanation) over the workout. */
   const openDemo = (ex) => {
     let offDemo = () => {};
@@ -474,6 +492,8 @@ export function render(view, params = []) {
     // Thu 10/22, his words: "just like Hevy at the name... a very small icon of the animation; when I tap on that, it
     // opens the demo".
     if (action === 'demo') { openDemo(ex); return; }
+    if (action === 'unskip') { await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, skipped: null } : e)) }); drawCards(); return; }
+    if (action === 'skip-note') { await skipExercise(ex); return; }
     if (action === 'add-set') {
       const all = exSets(key);
       const last = all.filter((x) => x.type !== 'warmup').pop() || all[all.length - 1];
@@ -497,6 +517,7 @@ export function render(view, params = []) {
       actionSheet(ex.name, [
         ...(!editing && isSquatExercise(ex) ? [{ label: 'Squat Depth camera (fills reps and depth)', run: () => { location.hash = `#/squat/set/${session.id}/${ex.key}`; } }] : []),
         { label: 'Demo', run: () => openDemo(ex) },
+        ex.skipped ? { label: 'Undo skip', run: () => onExAction(key, 'unskip') } : { label: 'Skip today (with a reason)', run: () => skipExercise(ex) },
         { label: lib.pinnedNote ? 'Edit pinned note' : 'Pin a note (shows every time)', run: async () => {
           const t = await promptText('Pinned note for this exercise', lib.pinnedNote?.text ?? lib.pinnedNote ?? '');
           if (t == null) return;
@@ -688,6 +709,7 @@ export function render(view, params = []) {
    */
   const showNow = ({ smooth = false } = {}) => {
     for (const ex of session.exercises) {
+      if (ex.skipped) continue;
       const next = exSets(ex.key).find((s) => !s.done);
       if (!next) continue;
       const card = view.querySelector(`[data-ex="${CSS.escape(ex.key)}"]`);

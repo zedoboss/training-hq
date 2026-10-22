@@ -1,6 +1,6 @@
 // Finishing a session: records, the "update routine?" check, and turning a session into a routine.
 import { heaviestOf } from './history.js';
-import { isoDate } from './time.js';
+import { isoDate, formatDay } from './time.js';
 import { newId, newKey } from './routines.js';
 import { sessionPoints, setRecordKinds } from './records.js';
 import { setValueText } from './calendar.js';
@@ -88,7 +88,7 @@ export function workoutDetail(session, sets, records = new Map()) {
   let holds = 0;
   for (const ex of session.exercises || []) {
     const mine = done.filter((s) => s.exKey === ex.key);
-    if (!mine.length) { skipped.push(ex.name); continue; }
+    if (!mine.length) { skipped.push(ex.skipped?.reason ? `${ex.name} (skipped: ${ex.skipped.reason})` : ex.name); continue; }
     let working = 0; let held = 0;
     const rows = mine.map((s) => {
       if (s.type === 'hold') held++;
@@ -194,9 +194,12 @@ export function routineFromLast(routine, last, lastSets) {
     if (re) used.add(re.key);
     const copied = mine.filter((s) => !(re?.warmup && s.type === 'warmup'))
       .map((s) => ({ type: s.type, kg: s.kg ?? null, reps: s.reps != null ? [s.reps, s.reps] : null, durationS: s.durationS ?? null }));
+    // Skipped last time with a reason (Thu 10/22, his words: "skipped this workout, do it next time, because of X"):
+    // it comes back, with the reason on the card.
+    const why = e.skipped && !mine.length ? `Skipped last time${last.startedAt ? ` (${formatDay(new Date(last.startedAt))})` : ''}${e.skipped.reason ? `: ${e.skipped.reason}` : ''}.` : '';
     return {
       key: newKey(), exerciseId: e.exerciseId, name: re?.name ?? e.name, restSeconds: re?.restSeconds ?? e.restSeconds ?? null,
-      notes: re?.notes ?? e.notes ?? '', plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,
+      notes: [re?.notes ?? e.notes ?? '', why].filter(Boolean).join('\n'), plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,
       warmup: re?.warmup ?? false, sets: copied.length ? copied : re?.sets ?? [],
     };
   });

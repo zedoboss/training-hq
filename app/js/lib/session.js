@@ -146,9 +146,12 @@ export function clock(ms) {
 /** Volume and set counts. Warm-ups and holds don't count toward volume or the set count. Bodyweight: the session's. */
 export function summarize(session, sets, bodyweightKg = session.bodyweightKg ?? null) {
   const types = new Map(session.exercises.map((e) => [e.key, e.type]));
+  const skipped = new Set(session.exercises.filter((e) => e.skipped).map((e) => e.key));
   let volume = 0; let done = 0; let total = 0;
   for (const s of sets) {
     if (s.type === 'warmup' || s.type === 'hold') continue;
+    // Thu 10/22: a skipped exercise's sets aren't owed today.
+    if (skipped.has(s.exKey) && !s.done) continue;
     total++;
     if (!s.done) continue;
     done++;
@@ -289,7 +292,9 @@ const rangeText = (r) => (Array.isArray(r) ? (r[0] === r[1] ? `${r[0]}` : `${r[0
 
 /** The next set to do: "Hip Thrust (Machine) · set 2 of 2 · 45 kg × 10-12", or '' when every set is ticked. */
 export function nextSetText(session, sets) {
-  const ordered = [...sets].sort((a, b) => a.order - b.order);
+  // Thu 10/22: an exercise he skipped today is passed over.
+  const skipped = new Set((session.exercises || []).filter((e) => e.skipped).map((e) => e.key));
+  const ordered = [...sets].filter((s) => !skipped.has(s.exKey)).sort((a, b) => a.order - b.order);
   const next = ordered.find((s) => !s.done);
   if (!next) return '';
   const ex = (session.exercises || []).find((e) => e.key === next.exKey);
