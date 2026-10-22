@@ -689,7 +689,7 @@ export function render(view, params = []) {
     }
   };
   // A tapped notification for this same screen ("Rest over"): no hash change, so it asks here.
-  const onReopen = (e) => { if (e.detail?.url === location.hash) showNow({ smooth: true }); };
+  const onReopen = (e) => { if (e.detail?.url === location.hash) showNow(); };
 
   ready.then(async (r) => {
     repo = r;
