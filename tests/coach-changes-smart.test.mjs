@@ -231,6 +231,7 @@ test('records from before today\'s change still work: one ask from said/want/abo
   const old = { id: 'chg.old', at: at('09:00'), tz: TZ, said: 'Say good morning first', want: 'good morning', about: '9:15 AM', status: 'done', doneAt: at('09:10'), answer: 'Done.' };
   assert.deepEqual(asksOf(old).map((a) => [a.kind, a.said, a.want]), [['ask', 'Say good morning first', 'good morning']]);
   assert.match(builderPrompt(old, { codeDir: '/c', privateDir: '/p', resultFile: '/r' }), /His words: "Say good morning first"\nWhat it is about: 9:15 AM\nWhat he wants instead: good morning/);
+  assert.match(builderPrompt(old, { codeDir: '/c', privateDir: '/p', resultFile: '/r' }), /node scripts\/memory\.mjs timeline <YYYY-MM-DD>/, 'builders can read the day to the minute');
   const n = newChange({ said: 'x', at: at('09:20'), tz: TZ });
   assert.equal(n.by, 'coach');
   assert.equal(n.asks.length, 1);

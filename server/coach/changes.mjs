@@ -167,6 +167,7 @@ WHERE THINGS ARE
 - Code, the public repo (every push to main deploys the app after its tests pass): ${codeDir}. No personal details there, ever (no name, city, programme numbers or dates).
 - His private folder (you are in it): ${privateDir}. His profile for the coach: data/coach/profile.md. A wish about how the coach talks to him goes there, in the section "## His corrections" (make it if missing, newest last): the date, his words in short, then the rule. The coach re-reads the profile on its next message; nothing to restart.
 - The coach's general rules: server/coach/prompt.mjs (RULES). What the coach sees with every message: server/coach/tools-read.mjs (contextLine). Messages the app sends by itself in the coach's name: server/notify.mjs, app/js/lib/reminders.js, app/js/lib/nudges.js, app/js/lib/walks.js, app/js/lib/initiatives.js, app/js/lib/coach-talk.js and the line bank in data/seed/.
+- What happened when (every message, meal, set, reminder, to the minute; read only): \`node scripts/memory.mjs timeline <YYYY-MM-DD> [--kinds meals,reminders]\` and \`node scripts/memory.mjs recall "<words>"\` in the code repo.
 - PROGRESS.md "How to run and test" (search for that heading; don't read the whole file): tests, the dev copy, precache.
 
 HOW
