@@ -31,7 +31,7 @@ export const KINDS = [
   ['walk', 'Walks: asked through the day until your step goal is done; no answer in 5 minutes, it asks when you\'ll go'],
   ['flex', 'Flexibility: your stretch routine after a workout (or at your evening time) and the weekly kick test'],
   ['combat', 'Boxing / kickboxing: before each class, and how it went after'],
-  ['rest', 'Rest over: when the rest timer reaches zero (sent by the Mac, so it comes with the screen locked too)'],
+  ['rest', 'Timers: rest over, and a hold\'s go and stop (sent by the Mac, so they come with the screen locked too)'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };

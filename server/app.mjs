@@ -298,12 +298,30 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       return push.unsubscribe(device);
     },
 
+    // Thu 10/22: how the phone's timer sounds went (lib/diag.js), into this log, so a silent beep can be traced.
+    'POST /api/diag': async (req) => {
+      const device = auth(req);
+      const b = await readJson(req);
+      for (const e of (Array.isArray(b?.events) ? b.events : []).slice(0, 100)) {
+        const t = new Date(Number(e.at) || now()).toISOString().slice(11, 19);
+        log(`phone ${String(device.name || device.id).slice(0, 20)} ${t}Z ${JSON.stringify(e).slice(0, 220)}`);
+      }
+      return { ok: true };
+    },
+
     // Thu 10/22: the phone's rest timer, so the Mac sends "Rest over" when it ends (server/rest-push.mjs).
     'POST /api/rest': async (req) => {
       const device = auth(req);
       if (!restPush) throw new HttpError(404, 'rest notifications not available');
       const b = await readJson(req);
       return { alarm: restPush.set(device.id, b || {}) };
+    },
+    // A hold's go and stop moments (kind 'hold', items [{at, title, body, url}]); an empty list cancels them.
+    'POST /api/alarms': async (req) => {
+      const device = auth(req);
+      if (!restPush) throw new HttpError(404, 'timer notifications not available');
+      const b = await readJson(req);
+      return { alarms: restPush.setAlarms(device.id, String(b?.kind || ''), Array.isArray(b?.items) ? b.items : []) };
     },
 
     'POST /api/push/test': async (req) => {

@@ -1,7 +1,7 @@
 // SESSION: start (#/session/start/<routineId|empty>) and log (#/session/<id>).
 import { setQuiet } from '../lib/quiet.js';
 import { currentBodyweight } from '../lib/health.js';
-import { ready, syncNow } from '../lib/data.js';
+import { ready, syncNow, macPost } from '../lib/data.js';
 import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
@@ -67,6 +67,12 @@ function stopwatchSheet() {
 }
 // A small figure in motion: the demo button beside each exercise's name.
 const DEMO_ICON = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="M8 21l3-6 3 2v4"/><path d="M6 12l3-4h5l3 4"/><path d="M11 15l1-7"/></svg>';
+/** A hold's go and stop moments to the Mac, which sends them as notifications (server/rest-push.mjs); [] cancels. */
+function sendTimerAlarms(items) {
+  if (!getState().paired) return;
+  const url = location.hash;
+  macPost('/api/alarms', { kind: 'hold', items: items.map((x) => ({ ...x, url })) }).catch(() => {});
+}
 const minPlate = () => smallestPlate(getState().equipment);
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -419,13 +425,23 @@ export function render(view, params = []) {
       setTimer = { setId: s.id, startedAt: now, targetS, cued: false, readyUntil: getReadyS ? now + getReadyS * 1000 : 0 };
       storeSetTimer(setTimer);
       const script = holdScript({ getReadyS, holdS: targetS, bank: ctx.bank, ...talk.talkPrefs(), calm: ctx.calm || talk.isCalm(), avoid: new Set(talk.recentLines()) });
-      talk.prepare(script);
-      talkRun = talk.run(script, { t0: now }); scriptFor = s.id; upcoming = null;
+      // A hold is counted down out loud even with the coach muted (Thu 10/22, his words).
+      const force = holdLike(s, ex);
+      talk.prepare(script, { force });
+      talkRun = talk.run(script, { t0: now, force }); scriptFor = s.id; upcoming = null;
+      // Thu 10/22, his words: "send a notification when I'm supposed to start... and when I need to stop, when zero
+      // appears... I want both": the Mac sends both, heard even when this page's ding isn't.
+      if (getReadyS || targetS) sendTimerAlarms([
+        ...(getReadyS ? [{ at: now + getReadyS * 1000, title: 'Hold: go', body: `${ex.name}: hold ${targetS} s now.` }] : []),
+        { at: now + (getReadyS + targetS) * 1000, title: 'Hold: stop', body: `${ex.name}: ${targetS} s done. Stop.` },
+      ]);
       redrawCard(ex.key);
       runSetTimer();
       return;
     }
     if (action === 'timer-stop' || (action === 'tick' && setTimer?.setId === s.id)) {
+      // Stopped before its end: the Mac's go / stop notifications still waiting are cancelled.
+      if (setTimer && !setTimer.cued) sendTimerAlarms([]);
       const secs = setTimerResult(setTimer);
       setTimer = null; storeSetTimer(null); clearInterval(setTimerTick); setQuiet('set-timer', false); fullScreen();
       talkRun?.stop(); scriptFor = null;

@@ -76,11 +76,11 @@ self.addEventListener('push', (event) => {
   try { m = event.data ? event.data.json() : {}; } catch { m = { body: event.data ? event.data.text() : '' }; }
   // Thu 10/22, "Rest over": each one must sound, so it gets a fresh tag (a reused tag may replace the last one
   // silently); the one before it is closed so they don't pile up.
-  const rest = /^rest$/.test(m.tag || '');
+  const rest = /^(rest|hold)$/.test(m.tag || '');
   event.waitUntil((async () => {
-    if (rest) { try { for (const n of await self.registration.getNotifications()) if (/^rest-/.test(n.tag || '')) n.close(); } catch { /* not supported */ } }
+    if (rest) { try { for (const n of await self.registration.getNotifications()) if (/^(rest|hold)-/.test(n.tag || '')) n.close(); } catch { /* not supported */ } }
     await self.registration.showNotification(m.title || 'Training HQ', {
-      body: m.body || '', tag: rest ? `rest-${Date.now()}` : m.tag || undefined, data: { url: m.url || '#/today' }, icon: scopeUrl('icons/icon-192.png'),
+      body: m.body || '', tag: rest ? `${m.tag}-${Date.now()}` : m.tag || undefined, data: { url: m.url || '#/today' }, icon: scopeUrl('icons/icon-192.png'),
     });
   })());
 });

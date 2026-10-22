@@ -10,9 +10,14 @@
 // restarting it needs a tap. So timer sounds (alarm) now play as a short sound file through an audio element that a
 // tap has unlocked (iPhone lets that element play again later without a tap); Web Audio stays for the rest and as
 // the fallback. The Mac also sends a "Rest over" notification (rest-push), which iPhone sounds on its own.
+import { audioContext as sharedContext } from './voice-mic.js';
+import { diag } from './diag.js';
+
 let audio = null;
 let mic = false;
 let el = null; let elReady = false;
+// Thu 10/22: the beeps used an audio context of their own beside the coach's voice; iPhone can leave a second one
+// silent. They now share the voice's (lib/voice-mic.js), which a tap unlocks for both.
 const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
 
 /** The audio element, unlocked inside a tap (a silent play), so later timer sounds play without one. */
@@ -28,7 +33,7 @@ function unlockElement() {
 
 function ready() {
   try {
-    if (!audio || audio.state === 'closed') audio = new (window.AudioContext || window.webkitAudioContext)();
+    audio = sharedContext();
     if (audio.state !== 'running') audio.resume().catch(() => {});
   } catch { /* no audio */ }
   return audio;
@@ -84,7 +89,8 @@ export function play(id = 'beeps', volume = 80, { alarm = false } = {}) {
   const n = /^beeps-(\d)$/.exec(id);
   const notes = n ? Array.from({ length: +n[1] }, (_, i) => [i * 0.28, i === +n[1] - 1 ? 1320 : 880, 0.22]) : PATTERNS[id] || PATTERNS.beeps;
   if (alarm) loudFor(Math.max(...notes.map(([at, , len]) => at + len)));
-  if (alarm && elReady && playFile(notes, volume, a)) return;
+  if (alarm && elReady && playFile(notes, volume, a, id)) return;
+  if (alarm) diag({ what: 'sound', id, path: 'webaudio', ctx: a.state, el: elReady });
   if (a.state === 'running') { schedule(a, notes, volume); return; }
   // Stopped: play once it runs again (or anyway after a moment, if iPhone never says so).
   let done = false;
@@ -95,16 +101,23 @@ export function play(id = 'beeps', volume = 80, { alarm = false } = {}) {
 
 const files = new Map();
 /** A timer sound as a sound file in the unlocked element; Web Audio when the element refuses. */
-function playFile(notes, volume, a) {
+function playFile(notes, volume, a, id = '') {
   try {
     const key = `${JSON.stringify(notes)}@${volume}`;
     if (!files.has(key)) files.set(key, URL.createObjectURL(new Blob([wavOf(notes, volume)], { type: 'audio/wav' })));
     el.src = files.get(key);
     el.currentTime = 0;
+    const t = Date.now();
     const p = el.play();
-    if (p?.catch) p.catch(() => { elReady = false; if (a.state === 'running') schedule(a, notes, volume); else a.resume().then(() => schedule(a, notes, volume)).catch(() => {}); });
+    if (p?.then) {
+      p.then(() => diag({ what: 'sound', id, path: 'file', ok: true, ms: Date.now() - t, ctx: a.state, session: navigator.audioSession?.type }))
+        .catch((e) => {
+          diag({ what: 'sound', id, path: 'file', ok: false, err: e?.name || String(e), ctx: a.state });
+          elReady = false; if (a.state === 'running') schedule(a, notes, volume); else a.resume().then(() => schedule(a, notes, volume)).catch(() => {});
+        });
+    }
     return true;
-  } catch { return false; }
+  } catch (e) { diag({ what: 'sound', id, path: 'file', ok: false, err: e?.name || String(e) }); return false; }
 }
 
 const WAVES = {

@@ -165,3 +165,9 @@ ready.then(async () => {
     macPost('/api/rest', p ? { endsAt: p.endsAt, label: p.label, url } : { endsAt: null }).catch(() => {});
   });
 }).catch(() => {});
+// Thu 10/22: how the timer sounds went on this phone, into the Mac's log (lib/diag.js).
+ready.then(async () => {
+  const { setDiagSink } = await import('./lib/diag.js');
+  const { macPost } = await import('./lib/data.js');
+  setDiagSink((events) => (getState().paired ? macPost('/api/diag', { events }) : Promise.resolve()));
+}).catch(() => {});

@@ -58,3 +58,24 @@ test('timer sounds as a sound file: a 16-bit mono WAV of the notes, loud, silent
   assert.equal(v.getInt16(44 + (n - 1) * 2, true), 0, 'ends silent');
   assert.equal(wavOf([[0, 880, 0.2]], 0).byteLength > 44, true);
 });
+
+test('a hold: "go" when GET READY ends and "stop" at zero, sent to that phone; an early stop cancels both (Thu 10/22)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-hold-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    let clock = 1_800_000_000_000;
+    const sent = [];
+    const r = openRestPush({ store, push: { notify: async (m, o) => { sent.push(`${m.title}|${m.tag}|${o.deviceId}`); return { sent: 1 }; } }, now: () => clock });
+    r.set('phone', { endsAt: clock + 120000, label: 'Squat' });
+    r.setAlarms('phone', 'hold', [{ at: clock + 15000, title: 'Hold: go', body: 'Leg Extension Hold (Machine): hold 30 s now.' }, { at: clock + 45000, title: 'Hold: stop', body: 'Leg Extension Hold (Machine): 30 s done. Stop.' }]);
+    clock += 15500; await r.tick();
+    clock += 30000; await r.tick();
+    assert.deepEqual(sent, ['Hold: go|hold|phone', 'Hold: stop|hold|phone']);
+    assert.ok(r.list().phone.rest, 'the rest is still waiting');
+    r.setAlarms('phone', 'hold', [{ at: clock + 15000, title: 'Hold: go', body: 'x' }]);
+    r.setAlarms('phone', 'hold', []);
+    clock += 20000; await r.tick();
+    assert.equal(sent.length, 2, 'cancelled');
+    assert.deepEqual(r.setAlarms('phone', 'sauna', [{ at: clock + 1000, title: 'x' }]), [], 'only known kinds');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

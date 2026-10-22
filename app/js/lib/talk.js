@@ -10,6 +10,7 @@ import { play, loudFor } from './sounds.js';
 import { getState } from './store.js';
 import { withDefaults } from './settings.js';
 import { scriptTexts } from './coach-talk.js';
+import { diag } from './diag.js';
 
 const CACHE = 'voice-lines-v1';
 const RATE = 24000;
@@ -77,9 +78,10 @@ async function fetchLine(text) {
   return b;
 }
 
-/** Fetch the clips of a script now (before it starts). Resolves when they are ready or have failed. */
-export function prepare(script) {
-  if (!talkOn()) return Promise.resolve();
+/** Fetch the clips of a script now (before it starts). Resolves when they are ready or have failed. force: a hold's
+ *  count, voiced even with the coach muted (Thu 10/22, his words). */
+export function prepare(script, { force = false } = {}) {
+  if (!force && !talkOn()) return Promise.resolve();
   return Promise.all(scriptTexts(script).map((text) => {
     if (bufs.has(text)) return bufs.get(text);
     if (!pending.has(text)) pending.set(text, fetchLine(text).catch(() => null).finally(() => pending.delete(text)));
@@ -113,7 +115,7 @@ function playBuffer(run, buf) {
  * Play a script from `t0` (ms; default now). Returns {stop()}. A later run replaces an earlier one.
  * Count and end cues cut off a line still playing; a push is skipped when something is still being said.
  */
-export function run(script, { t0 = Date.now(), onCue = null } = {}) {
+export function run(script, { t0 = Date.now(), onCue = null, force = false } = {}) {
   stop();
   const r = { timers: [], sources: new Set(), stopped: false };
   current = r;
@@ -124,7 +126,9 @@ export function run(script, { t0 = Date.now(), onCue = null } = {}) {
     r.timers.push(setTimeout(() => {
       if (r.stopped) return;
       const buf = cue.text ? bufs.get(cue.text) : null;
-      const voice = buf && talkOn();
+      // Thu 10/22, his words: "Even if the coach is off, just for this specific exercise, I want him to talk and count me
+      // down": a hold's script is voiced whether or not the coach is muted.
+      const voice = buf && (force || talkOn());
       if (voice) {
         if (r.sources.size) {
           if (cue.kind === 'push' || cue.kind === 'mid') return;
@@ -138,6 +142,7 @@ export function run(script, { t0 = Date.now(), onCue = null } = {}) {
       // What the coach says shows on screen too (the caption), voice or not: counts excepted.
       if (cue.text && cue.kind !== 'count' && cue.kind !== 'record' && talkOn()) window.dispatchEvent(new CustomEvent('thq:coach-say', { detail: { text: cue.text } }));
       const how = voice ? 'voice' : cue.sound ? 'sound' : 'none';
+      diag({ what: 'cue', kind: cue.kind, how, late: Math.round(Date.now() - (t0 + cue.at * 1000)), ctx: audioContext().state });
       fired.push({ kind: cue.kind, how, text: cue.text || '', at: Date.now(), perf: performance.now(), durMs: voice ? Math.round(buf.duration * 1000) : 0 });
       if (fired.length > 60) fired.shift();
       onCue?.(cue, how);
