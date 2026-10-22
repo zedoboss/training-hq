@@ -62,6 +62,7 @@ function prefsHtml(st, eq) {
     <div class="card opt-list">
       ${opt('Rest after main lifts', 'Used when an exercise has no rest time of its own', sel('rest.mainS', restOptions, st.rest.mainS))}
       ${opt('Rest after light work', 'Isolation, grip and abs', sel('rest.lightS', restOptions, st.rest.lightS))}
+      ${opt('Rest after warm-up sets', 'Every exercise, whatever its own rest time', sel('rest.warmupS', restOptions, st.rest.warmupS))}
       ${opt('Rest between holds', '', sel('rest.holdS', restOptions, st.rest.holdS))}
       ${opt('Bodyweight', 'For pull-ups and other bodyweight exercises. Apple Health weigh-ins (Body) are used when they are newer than this', `<span class="row-fields"><input class="input mini num" data-s="bodyweight.kg" inputmode="decimal" value="${st.bodyweight.kg ?? ''}" placeholder="78" aria-label="Bodyweight in kg"><span class="hint">kg</span></span>`)}
       ${opt('Keep the screen awake', 'During a session', sw('keepAwake', st.keepAwake))}

@@ -21,7 +21,8 @@ export const PLATE_CHOICES = [25, 20, 15, 10, 5, 2.5, 2, 1.25, 1, 0.5];
 
 export const DEFAULT_SETTINGS = {
   units: { weight: 'kg', distance: 'km', body: 'cm' },
-  rest: { mainS: 180, lightS: 90, holdS: 120 },
+  // Thu 10/22, his words: 1 minute 30 seconds after a warm-up set, whatever the exercise; the other defaults stay.
+  rest: { mainS: 180, lightS: 90, holdS: 120, warmupS: 90 },
   sounds: { restEnd: 'beeps', timerVolume: 80, tickVolume: 40, recordVolume: 80 },
   firstDayOfWeek: 1,
   keepAwake: true,
@@ -122,9 +123,11 @@ export function restDefault(ex, settings) {
   return ex?.capClass === 'main' ? r.mainS : r.lightS;
 }
 
-/** Rest after a ticked set: the exercise's own time (0 = off), else the default. Holds use the hold rest. */
+/** Rest after a ticked set: the exercise's own time (0 = off), else the default. Holds use the hold rest; warm-up
+ *  sets the warm-up rest, for every exercise. */
 export function restFor(ex, setType, settings) {
   if (setType === 'hold') return withDefaults(settings).rest.holdS;
+  if (setType === 'warmup') return withDefaults(settings).rest.warmupS;
   return ex?.restSeconds ?? restDefault(ex, settings);
 }
 

@@ -51,6 +51,12 @@ test('rest: own time wins (0 = off), else main or light default; holds use the h
   assert.equal(restFor({ capClass: 'main', restSeconds: 0 }, 'normal', s), 0);
   assert.equal(restFor({ capClass: 'main', restSeconds: null }, 'normal', s), 180);
   assert.equal(restFor({ capClass: 'main', restSeconds: 150 }, 'hold', s), 120);
+  // Thu 10/22: a warm-up set rests 1:30 whatever the exercise's own time; working sets keep theirs.
+  assert.equal(restFor({ capClass: 'main', restSeconds: 150 }, 'warmup', null), 90);
+  assert.equal(restFor({ capClass: 'light', restSeconds: 60 }, 'warmup', null), 90);
+  assert.equal(restFor({ capClass: 'main', restSeconds: 150 }, 'warmup', { rest: { warmupS: 120 } }), 120);
+  assert.equal(restFor({ capClass: 'main', restSeconds: 150 }, 'normal', null), 150);
+  assert.equal(restFor({ capClass: 'main' }, 'dropset', null), 180);
 });
 
 test('units: stored in kg and metres, shown in lb, km or miles', () => {

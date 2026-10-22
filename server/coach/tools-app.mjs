@@ -157,6 +157,7 @@ export const SETTINGS = [
   ['rest.mainS', 'enum', REST_CHOICES, 'Default rest after main lifts, seconds'],
   ['rest.lightS', 'enum', REST_CHOICES, 'Default rest after light exercises, seconds'],
   ['rest.holdS', 'enum', REST_CHOICES, 'Default rest after holds, seconds'],
+  ['rest.warmupS', 'enum', REST_CHOICES, 'Rest after a warm-up set, every exercise, seconds'],
   ['sounds.restEnd', 'enum', SOUNDS.map((x) => x.id), 'Sound when a rest ends'],
   ['sounds.timerVolume', 'int', [0, 100], 'Timer volume %'],
   ['sounds.tickVolume', 'int', [0, 100], 'Tick volume %'],
