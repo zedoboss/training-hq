@@ -417,7 +417,7 @@ async function logMeal(a, ctx) {
   put(s, 'meals', id, meal);
   const t = itemTotals(items);
   const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
-  return wrote(`Logged ${meal.name}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+  return wrote(`Logged ${meal.name}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.today ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
 }
 
 async function correctMeal(a, ctx) {
@@ -705,7 +705,8 @@ async function fastDay(a, ctx) {
 /**
  * His answer to "eaten, cooking, or skipping?" by talking (Thu 10/22, his words: "I'm going to start cooking... bump me
  * again in 5 minutes to see whether you're cooking... if I say I'm cooking... I'll check back in 15 minutes to see if
- * you have eaten it so you can log it"). The same record as the buttons on his phone; the meal nearest now by default.
+ * you have eaten it so you can log it"; 1:03 PM: "check back within 10 minutes"). The same record as the buttons on his
+ * phone; the meal nearest now by default.
  */
 async function mealCheck(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
@@ -722,10 +723,25 @@ async function mealCheck(a, ctx) {
     return wrote(`${name}: about to cook. The app asks again at ${timeText(s.now + MEAL_NUDGE.soonMin * 60000, s.tz)}, in ${MEAL_NUDGE.soonMin} minutes: cooking yet? Tell him in one line, like "OK, I'll bump you in 5 minutes to see if you're cooking."`, `${name.toLowerCase()}: about to cook`);
   }
   if (a.answer === 'cooking') {
-    return wrote(`${name}: cooking. The app checks back at ${timeText(s.now + MEAL_NUDGE.cookingMin * 60000, s.tz)}, in ${MEAL_NUDGE.cookingMin} minutes, to see if he has eaten so he logs it. Tell him in one line, like "Noted. I'll check back in 15 minutes to see if you've eaten, so you can log it."`, `${name.toLowerCase()}: cooking`);
+    return wrote(`${name}: cooking. The app checks back at ${timeText(s.now + MEAL_NUDGE.cookingMin * 60000, s.tz)}, in ${MEAL_NUDGE.cookingMin} minutes, to see if he has eaten so he logs it. Tell him in one line, like "Noted. I'll check back in ${MEAL_NUDGE.cookingMin} minutes to see if you've eaten, so you can log it."${planLeftText(s)}`, `${name.toLowerCase()}: cooking`);
   }
   if (a.answer === 'skipped') return wrote(`${name} skipped: no more asks about it today.`, `${name.toLowerCase()} skipped`);
-  return wrote(`${name}: eaten, no more asks about it. If he said what he ate, log it now with log_meal; else ask for the before photo or what he ate.`, `${name.toLowerCase()}: eaten`);
+  return wrote(`${name}: eaten, no more asks about it. If he said what he ate, log it now with log_meal; else ask for the before photo or what he ate.${planLeftText(s)}`, `${name.toLowerCase()}: eaten`);
+}
+
+/**
+ * What of his planned day isn't logged yet today, for the add-ons to put on the plate (Thu 10/22, his words: "when I
+ * tell you that I cooked the eggs for example you should remind me... add chia... Greek yogurt and don't forget
+ * almonds"). Which foods are add-ons and how to say them: his profile.
+ */
+function planLeftText(s) {
+  const items = s.list('meals').filter((m) => m.date === s.today).flatMap((m) => m.before?.items || []);
+  const left = (s.one('fuel', 'plan')?.foods || []).filter((f) => Number(f.gramsPerDay) > 0).map((f) => {
+    const had = items.filter((x) => (f.fdcId && Number(x.fdcId) === Number(f.fdcId)) || sameFood(f.name, x.name || '')).reduce((n, x) => n + (Number(x.grams) || 0), 0);
+    return { f, g: Math.round(Number(f.gramsPerDay) - had) };
+  }).filter((x) => x.g >= Math.max(5, Number(x.f.gramsPerDay) * 0.1));
+  if (!left.length) return '';
+  return `\nNot logged yet today from his planned day: ${left.map((x) => `${x.f.name} ${x.g} g${x.f.usual?.text ? ` (usually ${x.f.usual.text})` : ''}`).join('; ')}. In the same answer, remind him of the add-ons still open here, with amounts, the way his profile says.`;
 }
 
 /** What he wants the app to leave alone for a while (Wed 10/21): areas, until when, his reason. */
@@ -1177,7 +1193,7 @@ export const WRITE_TOOLS = [
   write('tendon_phase', 'Tendon phase', "Move a tendon area (knees, shoulder, wrist...) to another phase of his Tendons note, only on his answer: heal = 3 holds twice a day while it hurts (pain can go in a week or two); fix = 3-4 times a week for at least 4-8 weeks, to fix it for good; maintenance = 5-10 minutes after a workout or one day a week; none. Ask how it feels first; pain = his 0-10 if he says. No other rehab advice.", obj({ area: { type: 'string' }, phase: { type: 'string', enum: ['heal', 'fix', 'maintenance', 'none'] }, pain: { type: 'number', minimum: 0, maximum: 10 }, reason: { type: 'string' } }, ['area', 'phase']), tendonPhase),
   write('neck_plan', 'Neck in the rotation', "Where his Neck routine goes: after-pull, after-push, after-legs or rest-day (Train offers it on those days), not-yet (asked again in a week), or off; and where he does it: gym or home (ask his preference). At home he has NO plates: the load is a water bottle filled by volume (1 ml = 1 g; 0.9 kg = 1 L bottle filled to 900 ml), on a folded towel; ask what else he has at home (homeGear). Only what he chooses; you may suggest a better fit once, with the reason (e.g. after a gym session the plates are right there; on a rest day home saves a trip).", obj({ place: { type: 'string', enum: [...NECK_PLACES.map(([k]) => k), 'not-yet', 'off'] }, where: { type: 'string', enum: ['gym', 'home'] }, homeGear: { type: 'string', description: 'what he has at home for it, his words' }, reason: { type: 'string' } }, ['place']), neckPlan),
   write('fast', 'Fasting day', "He says he's fasting (today by default, or a date): record it so the app stops cooking, meal-time, food and supplement prompts that day and skips today's open supplements ('fasting'); end when he breaks it (a meal logged also ends it). Acknowledge in one line. Never argue his fast or count his kcal against him; no lecture.", obj({ action: { type: 'string', enum: ['start', 'end'] }, date: ISO, said: { type: 'string' } }, ['action']), fastDay),
-  write('meal_check', 'Meal answer', "His answer about a meal he hasn't logged yet (the app's 'Eaten, cooking, or skipping?', or him saying so): soon = about to start cooking (the app asks again in 5 minutes), cooking (it checks back in 15 minutes so he logs it), eaten (then log_meal what he ate), skipped. Unanswered, the app asks every 5 minutes. meal: its name or HH:MM when it isn't the meal time nearest now. Say in one line when you'll check back.", obj({ answer: { type: 'string', enum: ['soon', 'cooking', 'eaten', 'skipped'] }, meal: { type: 'string' } }, ['answer']), mealCheck),
+  write('meal_check', 'Meal answer', "His answer about a meal he hasn't logged yet (the app's 'Eaten, cooking, or skipping?', or him saying so): soon = about to start cooking (the app asks again in 5 minutes), cooking (it checks back in 10 minutes so he logs it), eaten (then log_meal what he ate), skipped. cooking and eaten list what of his planned day isn't logged yet today: remind him of the add-ons. Unanswered, the app asks every 5 minutes. meal: its name or HH:MM when it isn't the meal time nearest now. Say in one line when you'll check back.", obj({ answer: { type: 'string', enum: ['soon', 'cooking', 'eaten', 'skipped'] }, meal: { type: 'string' } }, ['answer']), mealCheck),
   write('hold_off', 'Hold off', "When he tells you to leave something alone for a while ('no sauna this week', 'busy until 3', 'stop the walk questions today', 'no food reminders tonight'): the app's reminders and nudges for those areas stay quiet until then. Areas: food, supps, walk, holds, sauna, scan, training, sleep, recovery, health, evening, all. Until: forMinutes, untilTime (HH:MM, today or tomorrow), or untilDate (through that whole day). His reason in his words. cancel: an id to lift it. Safety alarms and reminders he asked for always come.", obj({ areas: { type: 'array', items: { type: 'string', enum: AREA_NAMES } }, forMinutes: { type: 'integer', minimum: 5, maximum: 20160 }, untilTime: HM, untilDate: ISO, reason: { type: 'string' }, cancel: { type: 'string' } }), holdOff),
   write('walk', 'Walk', "His answer to a walk question (the app asks him to walk through the day until his step goal, and asks again 5 minutes after no answer). plan: when he'll go (inMinutes for 'in an hour', or time HH:MM; said = his words); vague ('later', 'after dinner', 'in a bit'): pick a time yourself and say it. going: he is out now. done: he walked (minutes, steps if he says). skip: not now, with his reason and when to ask again (askAgainInMinutes, default 60). clear: forget the time. Always say the time back: 'Okay, I'll message you at 6:10 PM.'", obj({ action: { type: 'string', enum: ['plan', 'going', 'done', 'skip', 'clear'] }, inMinutes: { type: 'integer', minimum: 1, maximum: 1440 }, time: HM, said: { type: 'string' }, minutes: { type: 'integer', minimum: 1, maximum: 600 }, steps: { type: 'integer', minimum: 0, maximum: 100000 }, reason: { type: 'string' }, askAgainInMinutes: { type: 'integer', minimum: 5, maximum: 720 } }, ['action']), walkAnswer),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),

@@ -677,7 +677,7 @@ test('tendon_phase (Wed 10/21): knees from heal to fix on his answer; the wall s
   assert.match((await call('tendon_phase', { area: 'elbows', phase: 'fix' })).text, /^Which area/);
 });
 
-test('meal_check (Thu 10/22): about to cook = asked again in 5 minutes, cooking = checked back in 15, the meal nearest now', async () => {
+test('meal_check (Thu 10/22): about to cook = asked again in 5 minutes, cooking = checked back in 10, the meal nearest now; what of his planned day is still open', async () => {
   store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }, { name: 'Last meal', time: '16:30' }] } });
   clock = Date.UTC(2026, 0, 20, 12, 40);
   const soon = await call('meal_check', { answer: 'soon' });
@@ -685,7 +685,14 @@ test('meal_check (Thu 10/22): about to cook = asked again in 5 minutes, cooking 
   assert.deepEqual(list('meal-checks').map((c) => [c.id, c.answer, c.by]), [['2026-01-20.1230', 'soon', 'coach']]);
   clock = Date.UTC(2026, 0, 20, 12, 46);
   const cooking = await call('meal_check', { answer: 'cooking' });
-  assert.match(cooking.text, /^First meal: cooking\. The app checks back at 1:01 PM, in 15 minutes, to see if he has eaten so he logs it\./);
+  assert.match(cooking.text, /^First meal: cooking\. The app checks back at 12:56 PM, in 10 minutes, to see if he has eaten so he logs it\./);
   assert.match((await call('meal_check', { answer: 'skipped', meal: 'last' })).text, /^Last meal skipped/);
   assert.deepEqual(list('meal-checks').map((c) => [c.id, c.answer]).sort(), [['2026-01-20.1230', 'cooking'], ['2026-01-20.1630', 'skipped']]);
+  // "When I tell you that I cooked the eggs... remind me... chia... Greek yogurt... almonds": what is still open today.
+  const plan = store.getRecord('fuel', 'plan').data;
+  store.writeLocal('fuel', 'plan', { ...plan, foods: [{ name: 'Greek yogurt', gramsPerDay: 200, usual: { text: 'about 7 tablespoons' } }, { name: 'Chia seeds', gramsPerDay: 50 }, { name: 'Almonds', gramsPerDay: 100 }] });
+  store.writeLocal('meals', 'm-chia', { id: 'm-chia', date: '2026-01-20', at: Date.UTC(2026, 0, 20, 9), name: 'Snack', before: { items: [{ name: 'Chia seeds', grams: 50 }, { name: 'Almonds', grams: 40 }] } });
+  const eaten = await call('meal_check', { answer: 'eaten' });
+  assert.match(eaten.text, /\nNot logged yet today from his planned day: Greek yogurt 200 g \(usually about 7 tablespoons\); Almonds 60 g\. In the same answer, remind him of the add-ons/);
+  store.writeLocal('fuel', 'plan', plan);
 });

@@ -8,7 +8,7 @@ import { addDays } from './rotation.js';
 import { ladderState, stepText, plannedHm, OVERDUE_MIN } from './sauna.js';
 
 /** Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. */
-export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, soonMin: 5, cookingMin: 15, againMin: 5, againForMin: 120 };
+export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, soonMin: 5, cookingMin: 10, againMin: 5, againForMin: 120 };
 
 const hmId = (hm) => hm.replace(':', '');
 
@@ -71,8 +71,8 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
       });
     }
     // His answer, then (Thu 10/22, his words): about to cook ("soon") asks again in 5 minutes whether he's cooking;
-    // cooking checks back in 15 to see if he has eaten, so he logs it. Unanswered, every 5 minutes after that, until a
-    // meal is logged or he answers again.
+    // cooking checks back in 10 (1:03 PM: "within 10 minutes", not 15) to see if he has eaten, so he logs it.
+    // Unanswered, every 5 minutes after that, until a meal is logged or he answers again.
     if (check?.answer === 'soon' || check?.answer === 'cooking') {
       const soon = check.answer === 'soon';
       const first = check.at + (soon ? MEAL_NUDGE.soonMin : MEAL_NUDGE.cookingMin) * 60000;

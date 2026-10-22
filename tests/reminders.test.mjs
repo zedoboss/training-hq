@@ -196,10 +196,10 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   assert.equal(items.find((i) => i.id === `meal:${date}:1230`).due, false);
   assert.ok(items.filter((i) => i.group === `meal-again:${date}:1230`).every((i) => !i.due), 'answered: no more repeats');
   const cooking = items.find((i) => i.id.startsWith('meal-cooking'));
-  assert.equal(cooking.at, at(date, '13:31'));
+  assert.equal(cooking.at, at(date, '13:26'));
   assert.equal(cooking.title, 'Lunch: eaten?');
   assert.equal(cooking.due, true);
-  assert.deepEqual(items.filter((i) => i.group === `meal-cooking:${date}:1230`).slice(1, 3).map((i) => i.at), [at(date, '13:36'), at(date, '13:41')]);
+  assert.deepEqual(items.filter((i) => i.group === `meal-cooking:${date}:1230`).slice(1, 3).map((i) => i.at), [at(date, '13:31'), at(date, '13:36')]);
   // About to cook: asked again in 5 minutes, "cooking yet?".
   const soon = mealReminders({ date, tz: TZ, meals: [breakfast], checks: [{ ...checks[0], answer: 'soon' }], mealTimes: settings.fuel.mealTimes }).find((i) => i.id.startsWith('meal-soon'));
   assert.deepEqual([soon.at, soon.title, soon.due], [at(date, '13:21'), 'Lunch: cooking yet?', true]);

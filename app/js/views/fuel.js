@@ -3,7 +3,7 @@
 // Supplements and the sauna join this screen later in step 6.
 import { ready, saveSettings } from '../lib/data.js';
 import { withDefaults } from '../lib/settings.js';
-import { mealTimesOf } from '../lib/fuel-reminders.js';
+import { mealTimesOf, MEAL_NUDGE } from '../lib/fuel-reminders.js';
 import { MEAL_NAMES } from '../lib/meals.js';
 import { actionSheet, overlay } from '../ui/sheet.js';
 import { formatHm } from '../lib/time.js';
@@ -113,7 +113,7 @@ async function answerCheck(repo, date, hmId) {
     { label: 'Eaten: take the photo now', run: () => { document.querySelector('#f-cam')?.click(); save('eaten'); } },
     { label: 'Eaten: log it without a photo', run: () => { document.querySelector('#f-manual')?.click(); save('eaten'); } },
     { label: 'About to cook: ask me in 5 minutes', run: async () => { await save('soon'); toast('Asking again in 5 minutes.'); } },
-    { label: 'Cooking: check back in 15 minutes', run: async () => { await save('cooking'); toast('Checking back in 15 minutes.'); } },
+    { label: `Cooking: check back in ${MEAL_NUDGE.cookingMin} minutes`, run: async () => { await save('cooking'); toast(`Checking back in ${MEAL_NUDGE.cookingMin} minutes.`); } },
     { label: 'Skipping it', run: async () => { await save('skipped'); toast(`${name} skipped.`); } },
   ]);
 }
