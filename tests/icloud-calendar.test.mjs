@@ -57,6 +57,7 @@ test('answers and errors read plainly', () => {
   assert.equal(readAnswer('', 'execution error: Not authorized to send Apple events to Calendar. (-1743)').why, 'not-allowed');
   assert.equal(readAnswer('', 'Command failed: osascript (SIGTERM)').why, 'timeout');
   assert.equal(readAnswer('', 'boom').why, 'error');
+  assert.equal(readAnswer('', "43:92: execution error: Calendar got an error: Application isn’t running. (-600)").why, 'not-running');
 });
 
 test('the Mac keeps the calendar in line: a run when something changed, a sent reminder removed at once, retries after a failure', async () => {
@@ -120,4 +121,18 @@ test('only the real server writes his calendar: his private folder, not a dev co
   assert.equal(isRealFolder('/Users/x/Documents/training-hq-private/', '/Users/x'), true);
   assert.equal(isRealFolder('/private/tmp/claude-501/abc/scratchpad/devprivate', '/Users/x'), false);
   assert.equal(isRealFolder('', '/Users/x'), false);
+});
+
+test('Calendar not running: the Mac starts it hidden and tries once more (Thu 10/22, 7:01 PM)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-icloud-run-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    const answers = [{ out: '', err: 'execution error: Calendar got an error: Application isn’t running. (-600)' }, { out: 'OK 0 0 0\n', err: '' }];
+    let launched = 0; const logs = [];
+    const ic = openICloudCalendar({ store, tz: () => TZ, now: () => at('2026-03-18', '14:00'), log: (m) => logs.push(m), launch: async () => { launched++; }, run: async () => answers.shift() });
+    const st = await ic.sync();
+    assert.equal(launched, 1);
+    assert.equal(st.ok, true);
+    assert.ok(logs.some((l) => /starting the Calendar app \(hidden\)/.test(l)));
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

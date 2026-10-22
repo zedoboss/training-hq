@@ -108,6 +108,7 @@ export function readAnswer(out = '', err = '') {
   if (/NO_CALENDAR/.test(out)) return { ok: false, why: 'no-calendar', text: `No calendar named "${CALENDAR_NAME}" on the Mac: make one in iCloud (iPhone: Calendar, Calendars, Add Calendar).` };
   const e = String(err || out);
   if (/-1743|not authori[sz]ed|Not allowed/i.test(e)) return { ok: false, why: 'not-allowed', text: 'macOS hasn\'t allowed the server to use Calendar (System Settings, Privacy & Security, Automation).' };
+  if (/\(-600\)|isn.t running/i.test(e)) return { ok: false, why: 'not-running', text: 'The Mac\'s Calendar app isn\'t running.' };
   if (/timed out|ETIMEDOUT|SIGTERM/i.test(e)) return { ok: false, why: 'timeout', text: 'Calendar didn\'t answer in time.' };
   return { ok: false, why: 'error', text: oneLine(e, 300) || 'osascript failed' };
 }
@@ -125,7 +126,12 @@ export function osascript(script, { timeoutMs = TIMEOUT_MS } = {}) {
  * @param {() => string} o.tz   his time zone (the reminders' days)
  * @param {(script: string) => Promise<{out, err}>} [o.run]  tests pass a fake
  */
-export function openICloudCalendar({ store, tz, run = osascript, now = () => Date.now(), log = () => {} }) {
+/** Starts the Mac's Calendar app hidden, in the background (it must run for the AppleScript; nothing comes to the front). */
+export function startCalendar() {
+  return new Promise((resolve) => { execFile('open', ['-g', '-j', '-a', 'Calendar'], { timeout: 20000 }, () => setTimeout(resolve, 5000)); });
+}
+
+export function openICloudCalendar({ store, tz, run = osascript, launch = startCalendar, now = () => Date.now(), log = () => {} }) {
   let busy = false;
   let lastSig = null; let lastOkAt = 0; let lastFailAt = 0; let lastWhy = null;
 
@@ -141,8 +147,15 @@ export function openICloudCalendar({ store, tz, run = osascript, now = () => Dat
     if (!force && lastFailAt && t - lastFailAt < (lastWhy === 'no-calendar' ? 60000 : RETRY_MS)) return null;
     busy = true;
     try {
-      const { out, err } = await run(syncScript(events));
-      const r = readAnswer(out, err);
+      let { out, err } = await run(syncScript(events));
+      let r = readAnswer(out, err);
+      // Thu 10/22, 7:01 PM: Calendar had been quit and the AppleScript didn't start it: start it hidden, try once more.
+      if (r.why === 'not-running') {
+        log('icloud calendar: starting the Calendar app (hidden)');
+        await launch();
+        ({ out, err } = await run(syncScript(events)));
+        r = readAnswer(out, err);
+      }
       const status = { ...r, at: t, events: events.length };
       store.setMeta(STATUS, status);
       if (r.ok) {
