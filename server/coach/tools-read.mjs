@@ -30,6 +30,7 @@ import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/nec
 import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
+import { afterMeals, mealSpansFor } from '../notify.mjs';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
 import { pathsOf, stageText } from '../../app/js/lib/hold-path.js';
@@ -711,7 +712,11 @@ function notesText(s, { limit = 20 }) {
   const rem = s.list('coach-reminders').filter((r) => !r.cancelledAt).sort((a, b) => a.at - b.at);
   const lines = [notes.length ? 'Notes, newest first:' : 'No notes yet.', ...notes.map((n) => `- ${whenText(n.at, s.tz, s.today)}${n.topic ? ` [${n.topic}]` : ''} [id ${n.id}]: ${n.text}`)];
   const upcoming = rem.filter((r) => (r.trigger ? !r.firedAt : r.at >= s.now - 3600000));
-  if (upcoming.length) lines.push('Reminders set:', ...upcoming.map((r) => `- ${r.trigger ? `when he starts his workout log, ${dayText(r.date, s.today)} or later` : whenText(r.at, s.tz, s.today)} [id ${r.id}]: ${r.text}`));
+  // One that lands in a meal waits for its collagen and dishes (notify.mjs, afterMeals).
+  const moved = new Map(afterMeals(upcoming.filter((r) => !r.trigger).map((r) => ({ id: `coach:${r.id}`, kind: 'coach', at: r.at })), mealSpansFor(s.store, s.now, s.tz), upcoming)
+    .filter((i) => i.afterMeal).map((i) => [i.id.slice('coach:'.length), i]));
+  const after = (m) => (m ? `, lands in his ${m.afterMeal.toLowerCase()}: it waits for that meal's collagen and dishes, ${m.waiting ? `${timeText(m.at, s.tz)} at the latest` : `then ${timeText(m.at, s.tz)}`}` : '');
+  if (upcoming.length) lines.push('Reminders set:', ...upcoming.map((r) => `- ${r.trigger ? `when he starts his workout log, ${dayText(r.date, s.today)} or later` : `${whenText(r.at, s.tz, s.today)}${after(moved.get(r.id))}`} [id ${r.id}]: ${r.text}`));
   return lines.join('\n');
 }
 

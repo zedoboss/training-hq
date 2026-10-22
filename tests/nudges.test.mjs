@@ -505,3 +505,83 @@ test('Thu 10/22: the dishes are not sent late, nor after the coach already said 
     assert.equal(sessionBusy([{ kind: 'workout', status: 'active', startedAt: at(D, '08:00') }], at(D, '13:40')), false);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Thu 10/22: a reminder set earlier that lands while he cooks or eats waits for the collagen and dishes; the rest come on time', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick, plan, mealSpans, startNotifier, MEAL_HOLD } = await import('../server/notify.mjs');
+  const { calendarItems } = await import('../server/calendar.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-mealhold-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    const mealTimes = [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
+    store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
+    const rem = (id, hm, createdHm, extra = {}) => store.writeLocal('coach-reminders', id, { id, at: at(D, hm), date: D, hm, text: id, createdAt: at(D, createdHm), by: 'coach', ...extra });
+    rem('errand-1', '17:00', '12:06');
+    rem('errand-2', '17:15', '12:10');
+    rem('errand-3', '17:30', '12:47');
+    rem('home', '16:30', '16:20'); // set 10 minutes before: about the moment, on time
+    rem('later', '18:30', '12:00'); // outside the meal: on time
+    rem('pan', '17:10', '12:00', { meal: 'on-time' });
+    rem('shop', '17:05', '16:50', { meal: 'wait' });
+    rem('during', '17:20', '16:40'); // set while cooking, for 40 minutes on: on time
+    const atOf = (t) => Object.fromEntries(plan(store, t, TZ).filter((i) => i.kind === 'coach').map((i) => [i.id.slice(6), i.at]));
+    const push = { list: () => [{}], notify: async () => ({ sent: 1, failed: 0 }) };
+    await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [] } });
+    await dishesTick({ store, push, now: at(D, '13:15'), tz: TZ });
+    await dishesTick({ store, push, now: at(D, '13:17'), tz: TZ });
+
+    // Not cooking yet and nothing said: the last meal runs to 30 minutes past its latest (5:30 PM).
+    let a = atOf(at(D, '15:00'));
+    assert.equal(a['errand-1'], at(D, '17:30'));
+    assert.equal(a['errand-2'], at(D, '17:30'));
+    assert.equal(a['errand-3'], at(D, '17:30'), 'at the end of the span: not in it, on time');
+    for (const id of ['home', 'later', 'pan', 'during']) assert.equal(a[id], at(D, id === 'home' ? '16:30' : id === 'later' ? '18:30' : id === 'pan' ? '17:10' : '17:20'), id);
+    assert.equal(a.shop, at(D, '17:30'));
+
+    // He says he'll finish by 5:30 PM: all three errands wait, at most until 6:00 PM.
+    store.writeLocal('meal-checks', `${D}.1630`, { id: `${D}.1630`, date: D, slot: '16:30', name: 'Last meal', answer: 'soon', until: '17:30', at: at(D, '16:20'), by: 'coach' });
+    a = atOf(at(D, '17:00'));
+    assert.deepEqual([a['errand-1'], a['errand-2'], a['errand-3']], [at(D, '18:00'), at(D, '18:00'), at(D, '18:00')]);
+    assert.equal(a.home, at(D, '16:30'));
+    assert.equal(a['errand-1'] > at(D, '17:00'), true, 'not due mid-meal');
+
+    // Logged at 5:25 PM: collagen is asked; the errands wait for it (45 minutes at most).
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '17:25'), name: 'Last meal', source: 'manual', before: { items: [] } });
+    assert.equal((await dishesTick({ store, push, now: at(D, '17:25'), tz: TZ }))?.key, 'supps-after-meal-2');
+    a = atOf(at(D, '17:26'));
+    assert.equal(a['errand-1'], at(D, '17:25') + MEAL_HOLD.chainMaxMin * 60000);
+    // Collagen ticked at 5:31 PM, the dishes prompt at once: the errands 10 minutes after it.
+    store.writeLocal('supp-log', `${D}:supp.co`, { id: `${D}:supp.co`, date: D, suppId: 'supp.co', status: 'taken', at: at(D, '17:31') });
+    assert.equal((await dishesTick({ store, push, now: at(D, '17:31') + 10000, tz: TZ }))?.key, 'dishes');
+    const after = at(D, '17:41') + 10000;
+    a = atOf(at(D, '17:32'));
+    assert.deepEqual([a['errand-1'], a['errand-2'], a['errand-3'], a.shop], [after, after, after, after]);
+    assert.equal(a.later, at(D, '18:30'));
+    // The backup calendar rings them after the meal too.
+    const cal = Object.fromEntries(calendarItems(store, TZ, at(D, '17:32')).map((i) => [i.id, i.at]));
+    assert.equal(cal['coach:errand-1'], after);
+
+    // The Mac sends them then, not before.
+    const sent = [];
+    const push2 = { list: () => [{}], notify: async (m) => { sent.push(m.tag); return { sent: 1, failed: 0 }; } };
+    let t = at(D, '17:40');
+    const n = startNotifier({ store, push: push2, tz: TZ, now: () => t, everyMs: 3600000 });
+    try {
+      store.setMeta('notify:sent', Object.fromEntries(['home', 'pan', 'during'].map((id) => [`coach:${id}`, at(D, '17:20')])));
+      await n.tick();
+      assert.deepEqual(sent.filter((x) => /^coach-/.test(x)), []);
+      t = after + 250;
+      await n.tick();
+      assert.deepEqual(sent.filter((x) => /^coach-/.test(x)).sort(), ['coach-errand-1', 'coach-errand-2', 'coach-errand-3', 'coach-shop']);
+    } finally { n.stop(); }
+
+    // A skipped meal holds nothing; a meal with no times set holds nothing.
+    assert.deepEqual(mealSpans({ date: D, tz: TZ, now: at(D, '16:00'), mealTimes, checks: [{ id: `${D}.1630`, answer: 'skipped' }] }).map((x) => x.name), ['First meal']);
+    assert.deepEqual(mealSpans({ date: D, tz: TZ, now: at(D, '16:00'), mealTimes: [] }), []);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

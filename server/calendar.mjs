@@ -7,7 +7,7 @@
 // cancelled drops off at the next refresh. The link carries its own secret (no device token in a subscription).
 import { linkSecret } from './link-secret.mjs';
 import { fixedReminders, icsFor } from '../app/js/lib/backup-reminders.js';
-import { stateFrom, SENT } from './notify.mjs';
+import { stateFrom, SENT, afterMeals, mealSpansFor } from './notify.mjs';
 import { isoDate } from '../app/js/lib/time.js';
 
 export const KEY = 'calendar:secret';
@@ -19,7 +19,9 @@ export const REFRESH_MIN = 15;
 export function calendarItems(store, tz, now) {
   const st = stateFrom(store, tz);
   const sent = store.getMeta(SENT) || {};
-  return fixedReminders(st, isoDate(new Date(now), tz), 7, now - ALERT_AFTER_MIN * 60000)
+  // A reminder he set that lands in a meal rings after it, like the Mac's (notify.mjs, afterMeals): all of today's are
+  // looked at, since one moved there may have been planned hours before; the filter below drops the old ones.
+  return afterMeals(fixedReminders(st, isoDate(new Date(now), tz), 7, 0), mealSpansFor(store, now, tz), st.coachReminders)
     .filter((r) => r.due !== false && !sent[r.id] && r.at + ALERT_AFTER_MIN * 60000 > now);
 }
 

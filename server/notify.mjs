@@ -7,6 +7,7 @@ import { addDays, rotationDay } from '../app/js/lib/rotation.js';
 import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack } from '../app/js/lib/meals.js';
+import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
@@ -87,8 +88,79 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
     const w = zonedTime(d, wakeOn(d), tz);
     return w > at ? w : zonedTime(addDays(d, 1), n.wakeHm, tz);
   };
-  return [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }))
+  const items = [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }))
     .map((i) => (WAIT_FOR_WAKE.has(i.kind) && !SESSION_TIMED.test(i.id || '') && !awake(i.at) ? { ...i, at: toWake(i.at) } : i));
+  return afterMeals(items, mealSpansFor(store, now, tz), st.coachReminders);
+}
+
+// ---- Reminders he set that land in a meal (Thu 10/22, his words: "check those reminders if they are within the frame
+// that I told you that I'm going to finish by 5:30. So I don't need to get reminded before I finish eating... After I
+// log the meal... collagen and then cleaning the dishes. And only then"; then: "not that it has to test that they're
+// held until the meal is logged. This is just specific right now, because of how the time frame fits"). Not a rule for
+// every errand: only one whose time falls while he cooks or eats moves, to after that meal's collagen and dishes.
+// Outside his meals every reminder fires on time; so does one he set during the meal or for within 30 minutes (about the
+// meal or the moment: "take a shower now", "clean the dishes", "are you home? cooking?"). The coach can say which way
+// when he says (meal: 'wait' | 'on-time' on the reminder).
+export const MEAL_HOLD = { graceMin: 30, washMin: 10, chainMaxMin: 45, nearMin: 30 };
+
+/**
+ * Today's meals as the spans he is busy with them: from the start-cooking time (or his "about to cook" / "cooking"
+ * answer) until the dishes are done: the dishes prompt plus 10 minutes, after the second meal's collagen is ticked; at
+ * most 45 minutes after he ate. Not logged yet: until 30 minutes past the latest he set, or past the time he said he'd
+ * finish by, whichever is later. Skipped: none. [{name, start, end, open}]; open = still on, end is the most it waits.
+ */
+export function mealSpans({ date, tz, now, mealTimes = [], meals = [], checks = [], dishes = {}, dishesOn = true }) {
+  const slots = mealTimesOf(mealTimes);
+  const win = MEAL_NUDGE.windowMin * 60000;
+  const eaten = meals.filter((m) => m.date === date && m.at && !isSnack(m)).sort((a, b) => a.at - b.at);
+  return slots.map((slot, k) => {
+    const slotAt = zonedTime(date, slot.time, tz);
+    const check = checks.find((c) => c.id === `${date}.${slot.time.replace(':', '')}`);
+    if (check?.answer === 'skipped') return null;
+    const nextFrom = slots[k + 1] ? zonedTime(date, slots[k + 1].time, tz) - win : Infinity;
+    const meal = eaten.find((m) => m.at >= slotAt - win && m.at < nextFrom);
+    const said = check && (check.answer === 'soon' || check.answer === 'cooking') ? check.at : Infinity;
+    const start = Math.min(slotAt - (slot.cookMin || 0) * 60000, said, meal?.at ?? Infinity);
+    if (meal) {
+      const ate = mealEatenAt(meal, dishes.seen?.[meal.id] ?? meal.at);
+      const w = dishes.after2?.[date];
+      const collagen = w?.id === meal.id && w.asked ? w.done : ate;
+      const washed = !dishesOn ? ate : dishes.sent?.[meal.id] != null ? dishes.sent[meal.id] + MEAL_HOLD.washMin * 60000 : null;
+      const cap = ate + MEAL_HOLD.chainMaxMin * 60000;
+      const end = collagen != null && washed != null ? Math.min(Math.max(collagen, washed), cap) : cap;
+      return { name: slot.name, start, end, open: now < end && (collagen == null || washed == null) };
+    }
+    if (check?.answer === 'eaten') return { name: slot.name, start, end: check.at, open: false };
+    const finish = Math.max(slot.latest ? zonedTime(date, slot.latest, tz) : slotAt + MEAL_NUDGE.afterMin * 60000,
+      /^\d{2}:\d{2}$/.test(check?.until || '') ? zonedTime(date, check.until, tz) : 0);
+    const end = finish + MEAL_HOLD.graceMin * 60000;
+    return { name: slot.name, start, end, open: now < end };
+  }).filter(Boolean);
+}
+
+/** The spans from the Mac's database. */
+export function mealSpansFor(store, now, tz) {
+  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const st = withDefaults(store.getRecord('settings', 'main')?.data);
+  const date = isoDate(new Date(now), tz);
+  return mealSpans({ date, tz, now, mealTimes: st.fuel.mealTimes, meals: list('meals'), checks: list('meal-checks'), dishes: store.getMeta(DISHES) || {}, dishesOn: st.notify.kinds?.dishes !== false });
+}
+
+/**
+ * Reminders he set (kind 'coach', at a clock time) that land in a meal span move to its end: not due until then while
+ * the meal is still on. Unless set during that meal or for within 30 minutes, or the coach set it 'on-time'.
+ */
+export function afterMeals(items, spans, reminders = []) {
+  if (!spans.length) return items;
+  const byId = new Map(reminders.map((r) => [`coach:${r.id}`, r]));
+  return items.map((i) => {
+    const r = i.kind === 'coach' && !i.trigger ? byId.get(i.id) : null;
+    if (!r || r.meal === 'on-time') return i;
+    const set = r.createdAt ?? 0;
+    const s = spans.find((x) => i.at >= x.start && i.at < x.end
+      && (r.meal === 'wait' || (set < x.start && i.at - set > MEAL_HOLD.nearMin * 60000)));
+    return s ? { ...i, at: s.end, afterMeal: s.name, waiting: s.open, plannedAt: i.at } : i;
+  });
 }
 
 /**
