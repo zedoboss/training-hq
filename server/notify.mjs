@@ -2,7 +2,7 @@
 // planner the phone uses, app/js/lib/reminders.js) and sends the ones whose time has come as push notifications.
 // Sent ids are remembered in the server's meta table, so nothing is sent twice; a reminder more than 30 minutes
 // late (the Mac was asleep or off) is skipped rather than sent late.
-import { remindersFor, dueNow, reminderState } from '../app/js/lib/reminders.js';
+import { remindersFor, dueNow, reminderState, afterGym } from '../app/js/lib/reminders.js';
 import { addDays, rotationDay } from '../app/js/lib/rotation.js';
 import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
@@ -155,6 +155,7 @@ export function nudgeInputs(store, now, tz) {
       sleepLogged: Boolean(health?.sleep || one('sleep-log', date)),
       wokeAt: one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && isoDate(new Date(x.endedAt), tz) === date).map((x) => x.endedAt)) || null,
+      mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan })?.mealAt ?? null,
       lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === date && m.at).map((m) => m.at)) || null,
       morning: n.morning || null,
       eaten: { kcal: eaten.kcal, protein: eaten.protein },

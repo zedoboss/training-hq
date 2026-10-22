@@ -193,6 +193,9 @@ test('after the workout (Tue 10/20): 20 minutes of quiet, then the first meal be
   const later = nudgeCandidates({ ...base, now: at(D, '13:40') });
   assert.ok(later.findIndex((x) => x.key === 'supps-untimed') > later.findIndex((x) => x.key === 'meal-after'), 'supplements after the meal');
   assert.equal(nudgeCandidates({ ...base, now: at(D, '13:10'), lastMealAt: at(D, '13:00') }).some((x) => x.key === 'meal-after'), false, 'ate: done');
+  // Thu 10/22: and not before the after-gym order lets meals in (Evolt, then "head home", then 5 minutes).
+  assert.deepEqual(nudgeCandidates({ ...base, now: at(D, '12:55'), mealAfterGymAt: at(D, '13:05') }), [], 'Evolt and home first');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '13:05'), mealAfterGymAt: at(D, '13:05') })[0].key, 'meal-after');
 });
 
 test('the dishes (Tue 10/20): 2 minutes after a meal is logged, or after its after photo; once; never for old meals', async () => {

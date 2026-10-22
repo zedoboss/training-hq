@@ -3,7 +3,7 @@
 // fixed ones to an iPhone Shortcut (Reminders). Each item carries `due`: whether it still applies right now
 // (a check-in already done or holds already logged switch it off).
 import { rotationDay, LABEL, addDays, lastRotationSession, daysByDate } from './rotation.js';
-import { holdSlots, roundsByDate, restChoices, openSlots, roundSeconds, roundLength } from './holds.js';
+import { holdSlots, roundsByDate, restChoices, openSlots, roundSeconds, roundLength, holdsAfter } from './holds.js';
 import { isoDate } from './time.js';
 import { weekColumn } from './programme.js';
 import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
@@ -150,12 +150,12 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
     const sp = planFor(scanPlan || {}, { scans, today: date, last, days });
     out.push(...scanReminders({ date, tz, plan: sp, scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin }));
     // Thu 10/22, his words: "if I miss one before the workout, after the workout you should ask whether I did it or
-    // not. If I did it, I should be able to attach it": 10 minutes after the workout ends, unless a scan is saved.
-    const end = activity?.workoutEnd?.[date];
-    // (Once the workout is saved the planner's next scan is tomorrow: a scan day is every training day, or the date set.)
-    if (end && (cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date) && !scans.some((s) => s.date === date && isDone(s))) {
-      out.push({ id: `scan-after:${date}`, kind: 'scan', at: end + 10 * 60000, url: '#/body/scan', tag: `scan-after-${date}`, fixed: false,
-        title: 'Evolt scan?', body: 'Did you do the Evolt scan today? If yes, add the results (photo or PDF).', due: true });
+    // not. If I did it, I should be able to attach it": first thing once the gym is done (afterGym), unless a scan is
+    // saved.
+    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan });
+    if (ag?.scanAskAt) {
+      out.push({ id: `scan-after:${date}`, kind: 'scan', at: ag.scanAskAt, url: '#/body/scan', tag: `scan-after-${date}`, fixed: false,
+        title: 'Evolt scan?', body: 'Before you leave the gym: the Evolt scan, then add the results (photo or PDF).', due: true });
     }
   }
   if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday }));
@@ -205,13 +205,55 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   // A13: his recovery record: the weekly check-in, things to do, photos.
   if (on('recovery') && recovery?.plan) out.push(...recoveryReminders({ date, tz, ...recovery, hm: n.recoveryHm }));
   // Meals (6.3): his meal times with nothing logged, and the after photo.
-  if (on('meals') && !fasting) out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
+  if (on('meals') && !fasting) {
+    out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
+    // After the gym: the soft "head home" first, then meal prompts that fell in the gym time wait 5 minutes more.
+    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan });
+    if (ag) {
+      const fed = meals.some((m) => m.date === date && m.at >= ag.doneAt);
+      out.push({ id: `home:${date}`, kind: 'meals', at: ag.homeAt, url: '#/fuel', tag: `home-${date}`, fixed: false,
+        title: 'Head home', body: 'Gym done. Head home and get settled. Food is next.', due: !fed });
+      const from = activity.workoutStart?.[date] ?? ag.doneAt;
+      const moved = out.filter((i) => (i.kind === 'meals' || i.kind === 'cook') && i.id !== `home:${date}` && i.at >= from && i.at < ag.mealAt);
+      // One prompt per meal at that moment: the later one (the meal itself over "start cooking").
+      for (const i of moved) {
+        if (moved.some((j) => j !== i && j.tag === i.tag && j.at > i.at && j.due)) i.due = false;
+      }
+      for (const i of moved) i.at = ag.mealAt;
+    }
+  }
   // Thu 10/22: flexibility (after a workout or his evening time, the weekly kick test) and boxing / kickboxing classes.
   out.push(...activityReminders({ date, tz, flex: flexPlan, combat: combatPlan, done: activity, tests: flexTests, on }));
   return out.sort((a, b) => a.at - b.at);
 }
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// Thu 10/22, his words after Legs: "the first notification I got prompted was the meal. Wrong. It should be the Evolt
+// scan... After I do that, don't immediately prompt me with the meal. Wait 5 minutes, bare minimum... a softer prompt
+// first: get home now... And then 5 minutes after that one, the first meal."
+export const AFTER_GYM = { holdsMaxMin: 40, scanAskMin: 1, scanWaitMin: 10, homeMin: 5, mealMin: 5 };
+
+/**
+ * After a workout, in order: the gym is done when the workout is and the holds due after it are too (their round
+ * saved; 40 minutes at most); the Evolt ask a minute later (a scan day with no scan saved); the "head home" nudge 5
+ * minutes after the scan is saved (10 minutes for it when asked and not saved); meals 5 minutes after that.
+ * {doneAt, scanAskAt, homeAt, mealAt} in ms, or null with no workout done that day.
+ */
+export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], scanPlan = null }) {
+  const end = activity?.workoutEnd?.[date];
+  if (!end) return null;
+  const open = (activity.dayTypes?.[date] || []).flatMap((t) => holdsAfter(areas, t))
+    .some((h) => { const a = areas.find((x) => x.label === h.area); return a && !(rounds[a.id]?.[date] > 0); });
+  const doneAt = open ? end + AFTER_GYM.holdsMaxMin * 60000 : Math.max(end, ...(activity.holdsEnd?.[date] || []));
+  // (Once the workout is saved the planner's next scan is tomorrow: a scan day is every training day, or the date set.)
+  const scanDay = cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date;
+  const scan = scans.find((s) => s.date === date && isDone(s));
+  const scanAskAt = scanDay && !scan ? doneAt + AFTER_GYM.scanAskMin * 60000 : null;
+  const base = scanAskAt ? scanAskAt + AFTER_GYM.scanWaitMin * 60000 : Math.max(doneAt, scan?.confirmedAt ?? scan?.at ?? 0);
+  const homeAt = base + AFTER_GYM.homeMin * 60000;
+  return { doneAt, scanAskAt, homeAt, mealAt: homeAt + AFTER_GYM.mealMin * 60000 };
+}
 
 /** Items to send now: due, their time has come, not older than the grace window, not sent before. */
 export function dueNow(items, now, sent = {}, graceMs = 30 * 60000) {
