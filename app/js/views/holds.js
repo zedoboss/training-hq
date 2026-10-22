@@ -1,8 +1,8 @@
 // TENDON HOLDS: checklist (#/holds) and the hold timer (#/holds/<area>/<holdIndex>).
 // Rules come from the owner's tendon note; the app adds no rehab advice of its own.
-import { ready, saveSettings } from '../lib/data.js';
+import { ready, saveSettings, macPost } from '../lib/data.js';
 import { setQuiet } from '../lib/quiet.js';
-import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES } from '../lib/holds.js';
+import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase } from '../lib/holds.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
@@ -153,13 +153,18 @@ function renderRun(view, repo, areaId, index) {
   // A14/A15: the next hold's lines are worked out and fetched while he gets in position or rests, so they play on time.
   const plan = () => {
     script = holdScript({ getReadyS: getReadyS(), holdS: secs(), setNo, bank, ...talk.talkPrefs(), calm: calm || talk.isCalm(), avoid: new Set(talk.recentLines()) });
-    talk.prepare(script);
+    talk.prepare(script, { force: true });
   };
+  // Thu 10/22, his words: the count out loud even with the coach off, and a notification at go and at stop.
+  const alarms = (items) => { if (getState().paired) macPost('/api/alarms', { kind: 'hold', items: items.map((x) => ({ ...x, url: location.hash })) }).catch(() => {}); };
   const begin = () => {
     rest.unlockAudio(); talk.unlock();
     if (!script || script.setNo !== setNo) plan();
     const t0 = Date.now();
-    playing = talk.run(script, { t0 });
+    playing = talk.run(script, { t0, force: true });
+    const gr = script.getReadyS || 0;
+    alarms([...(gr ? [{ at: t0 + gr * 1000, title: 'Hold: go', body: `${hold.exercise}: hold ${secs()} s now. Set ${setNo} of ${total()}.` }] : []),
+      { at: t0 + (gr + secs()) * 1000, title: 'Hold: stop', body: `${hold.exercise}: set ${setNo} of ${total()} done. Stop.` }]);
     setQuiet('hold', true);
     if (script.getReadyS > 0) { phase = 'getready'; endsAt = t0 + script.getReadyS * 1000; } else { phase = 'holding'; startedSet = t0; endsAt = t0 + secs() * 1000; }
     script = null;
@@ -289,9 +294,15 @@ function renderRun(view, repo, areaId, index) {
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/holds">Back</a><span class="hud c-muted">${esc(area.label.toUpperCase())} · ${esc((PHASE_TEXT[area.phase] || '').split(':')[0].toUpperCase())}</span><button class="pill" id="h-mute" type="button" aria-pressed="false">Coach on</button></div>
       <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${index === 'other' ? `${secs()} s` : `<button class="link-btn" id="h-secs" type="button">${secs()} s</button>`} · ${restText(holdRestS())} between</div></div>
+      <div class="pinned small" id="h-note" hidden></div>
       <div id="h-body"></div>
       <p class="hint">Next-day check: ${esc(tomorrow())}${area.phase === 'heal' ? ', with the morning round' : ''}.</p>
       <button class="btn-ghost" id="h-stop" type="button">End round</button>`;
+    // Thu 10/22, his words: "my cupping hold notes aren't here": the exercise's pinned note, as on the workout card.
+    const exs = await repo.list('exercises');
+    const ex = exs.find((e) => e.name === hold.exercise) || exs.find((e) => holdBase(e.name) === holdBase(hold.exercise));
+    const note = ex?.pinnedNote?.text ?? ex?.pinnedNote ?? hold.note ?? '';
+    if (note) { const n = view.querySelector('#h-note'); n.textContent = note; n.hidden = false; }
     const muteBtn = view.querySelector('#h-mute');
     const showMute = () => { muteBtn.textContent = talk.isMuted() ? 'Coach muted' : 'Coach on'; muteBtn.setAttribute('aria-pressed', String(talk.isMuted())); muteBtn.classList.toggle('is-on', !talk.isMuted()); };
     muteBtn.onclick = () => { talk.setMuted(!talk.isMuted()); showMute(); };
@@ -314,6 +325,7 @@ function renderRun(view, repo, areaId, index) {
       toast(`${hold.exercise}: ${v} s holds.`);
     });
     view.querySelector('#h-stop').onclick = async () => {
+      if (phase === 'getready' || phase === 'holding') alarms([]);
       if (phase === 'holding' && !(await confirmSheet('End the round now? The hold in progress is not saved.', { ok: 'End round' }))) return;
       finishRound();
     };
