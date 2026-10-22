@@ -320,6 +320,10 @@ test('walk tick (Tue 10/20): asks, 5 minutes later asks for a time, stays quiet 
     assert.equal(await tick('15:30'), null);
     assert.equal((await tick('15:36')).key, 'walk:plan');
     assert.equal(store.listRecords('coach-messages').filter((r) => r.data.kind === 'nudge').length, 3, 'each one is in Talk too');
+    // Goal done late (Thu 10/22): well done and good night, no push line after it.
+    store.writeLocal('health', D, { date: D, steps: 8295, fileAt: at(D, '23:20') });
+    assert.equal((await tick('23:23')).key, 'walk:goal');
+    assert.equal(sent.at(-1).body, "8,295 steps: today's 8,000 is done. Well done. Have a good night, catch you in the morning.");
     // Walks off in Settings: nothing.
     store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00', kinds: { walk: false } }, body: { stepGoal: 8000 } });
     assert.equal(await tick('16:30'), null);

@@ -220,7 +220,7 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
   const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather') });
   if (!due) return null;
-  const v = coachVoice(due.text, voiceOpts(store));
+  const v = coachVoice(due.text, { ...voiceOpts(store), calm: due.calm });
   const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };
   sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `walk:${due.kind}` });
   // Too hot or bright: the coach planned (or moved) the walk itself; quiet until then.

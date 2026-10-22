@@ -43,7 +43,8 @@ test('walks: "I\'ll go in an hour": quiet until then, walk time, then the follow
   doc = withAnswer(doc, D, { action: 'done', minutes: 35 }, at('16:20'));
   assert.equal(due('17:30'), null, 'a walk done: the step count catches up first');
   assert.equal(due('17:51').kind, 'ask');
-  assert.equal(due('17:51', { steps: steps(8100, '17:45') }).kind, 'goal');
+  assert.deepEqual(due('17:51', { steps: steps(8100, '17:45') }), { kind: 'goal', calm: true, text: "8,100 steps: today's 8,000 is done. Well done." });
+  assert.equal(due('23:23', { steps: steps(8295, '23:20') }).text, "8,295 steps: today's 8,000 is done. Well done. Have a good night, catch you in the morning.", 'late: a good night, no cutoff');
   doc = withAsk(doc, D, 'goal', at('17:51'));
   assert.equal(due('19:00', { steps: steps(8400, '18:55') }), null, 'goal met: no more asks today');
 });

@@ -114,17 +114,20 @@ export function usualWalkHm(docs = [], { today, tz } = {}) {
  * @param {number} o.goal            his daily step goal
  * @param {number} o.lastUserAt      when he last wrote or spoke to the coach
  * @param {string|null} [o.usualHm]  his usual walk hour (usualWalkHm)
- * @returns {{kind: 'ask'|'follow'|'nag'|'plan'|'plan-follow'|'back'|'goal', text: string}|null}
+ * @returns {{kind: 'ask'|'follow'|'nag'|'plan'|'plan-follow'|'back'|'goal', text: string, calm?: boolean}|null}
  */
 export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, weather = null, cfg = WALK }) {
   const d = doc || emptyWalk(isoDate(new Date(now), tz));
-  if (goal && steps?.steps != null && steps.steps >= goal) {
-    return d.goalAt ? null : { kind: 'goal', text: `${nf(steps.steps)} steps: today's ${nf(goal)} is done. Walks are off until tomorrow.` };
-  }
-  if (d.goalAt) return null;
   const nowMin = minOf(hmOf(new Date(now), tz));
   const wake = minOf(wakeHm); let bed = minOf(bedHm); if (bed <= wake) bed += 1440;
   const at = nowMin < wake && bed > 1440 ? nowMin + 1440 : nowMin;
+  // Goal done (Thu 10/22, his words: "Why would I want a notification after 12 am? ... he should say: Have a good night,
+  // catch you up in the morning"): a short well done, a good night when it's late, no cutoff and no push line (calm).
+  if (goal && steps?.steps != null && steps.steps >= goal) {
+    const late = at < wake || at > bed - cfg.stopBeforeBedMin;
+    return d.goalAt ? null : { kind: 'goal', calm: true, text: `${nf(steps.steps)} steps: today's ${nf(goal)} is done. Well done.${late ? ' Have a good night, catch you in the morning.' : ''}` };
+  }
+  if (d.goalAt) return null;
   if (at < wake + cfg.startAfterWakeMin || at > bed - cfg.stopBeforeBedMin) return null;
   if (busy) return null;
   const st = stepsText({ steps, goal, now, tz });
