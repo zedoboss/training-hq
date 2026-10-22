@@ -69,6 +69,18 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
       entry.target = t;
       entry.capClass = pe.capClass ?? entry.capClass;
       planned = Array.from({ length: t.sets }, () => ({ type: 'normal', kg: t.bodyweight ? null : t.kg, reps: null, target: { kg: t.kg, reps: t.reps } }));
+      // Thu 10/22, a copy of his last workout (routineFromLast): its warm-ups, drop sets and set count stay, never
+      // fewer sets than the table's; the working weight is still the table's (under the 30% cap).
+      if (re.sets?.length) {
+        const work = re.sets.filter((x) => x.type !== 'warmup' && x.type !== 'hold');
+        const warm = re.sets.filter((x) => x.type === 'warmup');
+        const rows = Array.from({ length: Math.max(t.sets, work.length) }, (_, i) => {
+          const type = work[i]?.type === 'dropset' || work[i]?.type === 'failure' ? work[i].type : 'normal';
+          const kg = type === 'dropset' ? work[i].kg ?? null : t.bodyweight ? null : t.kg;
+          return { type, kg, reps: null, target: { kg: type === 'dropset' ? kg : t.kg, reps: t.reps } };
+        });
+        planned = [...(re.warmup ? [] : warm.map((w) => ({ type: 'warmup', kg: w.kg ?? null, reps: null, target: { kg: w.kg ?? null, reps: w.reps } }))), ...rows];
+      }
     } else {
       const base = re.sets?.length ? re.sets : defaultSets(entry.type);
       // P11: weights follow the last session (decision 10), set by set, unless the routine is switched to its own weights.

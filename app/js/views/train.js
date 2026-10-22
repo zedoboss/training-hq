@@ -101,6 +101,7 @@ export function render(view) {
           <span class="btn-row"><a class="pill is-on" href="#/progression/${esc(next)}">Review</a><button class="pill" id="normal-later" type="button">Not yet</button></span></div>` : ''}
         <div class="btn-row next-btns">
           ${nextRoutine ? `<a class="${t.kind === 'train' ? 'btn-primary' : 'btn-ghost'} center" href="#/session/start/${esc(nextRoutine.id)}">${t.kind === 'train' ? `Start ${esc(LABEL[next])}` : `${esc(LABEL[next])} now`}</a>` : ''}
+          ${nextRoutine ? `<a class="btn-ghost center" href="#/session/start/${esc(nextRoutine.id)}/template" title="Start from the ${esc(nextRoutine.title)} template instead of a copy of your last one">Template</a>` : ''}
           <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
         </div>
         ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">${esc(neckTodayText(neck.place, neck.where))} (your plan) ›</a>` : ''}

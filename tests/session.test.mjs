@@ -230,6 +230,33 @@ test('records on a tick, as Hevy (Thu 10/22): weight, 1RM and volume, each all-t
   assert.deepEqual(setRecord({ ...o, set: set('b', 72.5, 6), otherSets: [set('a', 70, 6)] }).kinds.map((x) => x.previous), [70, 84]);
 });
 
+test('a new workout copies his last one of its kind (Thu 10/22): its exercises, set counts and holds; the table still sets the weight', async () => {
+  const { routineFromLast } = await import('../app/js/lib/finish.js');
+  const template = { id: 'legs-gbi', title: 'Legs', dayType: 'legs', exercises: [
+    { key: 'r1', exerciseId: 'squat', name: 'Squat (Smith Machine)', plan: { routine: 'legs-gbi', name: 'Squat (Smith Machine)' }, sets: [] },
+    { key: 'r2', exerciseId: 'rdl', name: 'RDL (Dumbbell)', plan: { routine: 'legs-gbi', name: 'RDL (Dumbbell)' }, sets: [] },
+    { key: 'r3', exerciseId: 'abd', name: 'Hip Abduction (Machine)', sets: [{ type: 'normal', kg: 29, reps: [15, 15] }] },
+    { key: 'r4', exerciseId: 'ext', name: 'Leg Extension (Machine)', plan: { routine: 'legs-gbi', name: 'Leg Extension (Machine)' }, sets: [] },
+  ] };
+  const last = { id: 'hevy.1', dayType: 'legs', exercises: [
+    { key: 'k0', exerciseId: 'squat', name: 'Squat (Smith Machine)' }, { key: 'k2', exerciseId: 'abd', name: 'Hip Abduction (Machine)' },
+    { key: 'k4', exerciseId: 'ext', name: 'Leg Extension (Machine)' }, { key: 'k8', exerciseId: 'ext', name: 'Leg Extension (Machine)' }] };
+  const st = (exKey, order, type, kg, reps, durationS = null) => ({ id: `${exKey}${order}`, sessionId: 'hevy.1', exKey, order, type, kg, reps, durationS, done: true });
+  const lastSets = [st('k0', 0, 'warmup', 31.3, 8), st('k0', 1, 'normal', 51.8, 8), st('k0', 2, 'normal', 51.8, 8), st('k0', 3, 'normal', 51.8, 6),
+    st('k2', 4, 'normal', 32, 15), st('k2', 5, 'normal', 32, 15), st('k4', 6, 'normal', 41, 12), st('k8', 7, 'hold', 104, null, 30), st('k8', 8, 'hold', 104, null, 30), st('k8', 9, 'hold', 104, null, 30)];
+  const r = routineFromLast(template, last, lastSets);
+  assert.equal(r.id, 'legs-gbi');
+  assert.equal(r.copiedFrom, 'hevy.1');
+  assert.deepEqual(r.exercises.map((e) => `${e.name}${e.plan ? ' (plan)' : ''}: ${e.sets.map((x) => x.type[0]).join('')}`),
+    ['Squat (Smith Machine) (plan): wnnn', 'Hip Abduction (Machine): nn', 'Leg Extension (Machine) (plan): n', 'Leg Extension (Machine): hhh'], 'RDL was not in his last Legs');
+  const plan = [{ kind: 'routine', id: 'legs-gbi', exercises: [{ name: 'Squat (Smith Machine)', capClass: 'main', weeks: [{ kg: 50, reps: [8, 10], sets: 2 }] }] }];
+  const { session, sets } = buildSession({ routine: r, meta: null, programmeRoutines: plan, lib: new Map(), history: buildHistory({}), today: '2026-10-22' });
+  const squat = sets.filter((x) => x.exKey === session.exercises[0].key);
+  assert.ok(squat.length >= 4 && squat[0].type === 'warmup', `his warm-up and 3 working sets (${squat.map((x) => x.type).join(',')})`);
+  assert.equal(sets.filter((x) => x.exKey === session.exercises[1].key).length, 2, 'two abduction sets, as last time');
+  assert.deepEqual(sets.filter((x) => x.exKey === session.exercises[3].key).map((x) => `${x.type} ${x.durationS}`), ['hold 30', 'hold 30', 'hold 30']);
+});
+
 test('routine weights follow the last session set by set, or the routine own weights when switched off (P11)', () => {
   const s1 = { id: 's1', status: 'done', routineId: 'mine', dayType: 'push', startedAt: Date.parse('2026-10-18T04:30:00Z'), exercises: [{ key: 'a', name: 'Bench Press (Smith Machine)' }] };
   const done = [{ sessionId: 's1', exKey: 'a', order: 0, done: true, type: 'normal', kg: 60, reps: 8 }, { sessionId: 's1', exKey: 'a', order: 1, done: true, type: 'normal', kg: 55, reps: 10 }];

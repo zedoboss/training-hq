@@ -16,7 +16,7 @@ import { pickExercises } from '../ui/picker.js';
 import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
 import { warmupSets } from '../lib/plates.js';
-import { setRecord, comebackStartOf } from '../lib/finish.js';
+import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../lib/finish.js';
 import { demoPanel } from '../ui/demo-panel.js';
 import { actionSheet, confirmSheet, promptText, overlay } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
@@ -82,7 +82,15 @@ async function context(repo, excludeSessionId) {
   return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, comebackStart: comebackStartOf(meta), fullHistory, bank, ceilings, calm };
 }
 
-async function startSession(view, routineId, logFor = null) {
+/** The template as his last workout of its kind (routineFromLast), or the template when there is none since the comeback. */
+async function copyOfLast(repo, routine, sessions, comebackStart) {
+  const last = previousSame({ id: null, dayType: routine.dayType, routineId: routine.id, title: routine.title, startedAt: Date.now() }, sessions);
+  if (!last || (comebackStart && isoDate(new Date(last.startedAt)) < comebackStart)) return routine;
+  const lastSets = (await repo.list('sets')).filter((s) => s.sessionId === last.id);
+  return routineFromLast(routine, last, lastSets);
+}
+
+async function startSession(view, routineId, logFor = null, from = null) {
   const repo = await ready;
   const active = (await repo.list('sessions')).find((s) => s.status === 'active' && s.kind !== 'holds');
   if (active) {
@@ -90,8 +98,10 @@ async function startSession(view, routineId, logFor = null) {
     location.replace(resume ? `#/session/${active.id}` : '#/train');
     return;
   }
-  const routine = routineId === 'empty' ? null : await repo.get('routines', routineId);
+  let routine = routineId === 'empty' ? null : await repo.get('routines', routineId);
   const [meta, progDocs, ctx, progress, todayDoc, healthDocs, measurements] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null), repo.list('progression'), repo.get('days', isoDate(new Date())), repo.list('health'), repo.list('measurements')]);
+  // Thu 10/22: a copy of his last workout of this kind since the comeback, unless he asked for the template.
+  if (routine && from !== 'template') routine = await copyOfLast(repo, routine, ctx.sessions, comebackStartOf(meta));
   // Today's check-in said "go lighter" for this day type: the session's targets follow it (readiness table rules 4 and 5).
   const rd = todayDoc?.readiness;
   const lighter = rd && routine && rd.dayType === routine.dayType && (rd.action === 'lighter-all' || rd.action === 'lighter-area')
@@ -113,7 +123,8 @@ async function startSession(view, routineId, logFor = null) {
 }
 
 export function render(view, params = []) {
-  if (params[0] === 'start') { view.innerHTML = '<p class="view-sub">Starting…</p>'; startSession(view, params[1], params[2]); return () => {}; }
+  // #/session/start/<routine>[/<date to log for>][/template]
+  if (params[0] === 'start') { view.innerHTML = '<p class="view-sub">Starting…</p>'; startSession(view, params[1], /^\d{4}-/.test(params[2] || '') ? params[2] : null, params.includes('template') ? 'template' : null); return () => {}; }
   const id = params[0];
   const editing = params[1] === 'edit';
   let repo; let session; let sets = []; let ctx; let timer; let wakeLock = null; let offRest = () => {}; let offRepo = () => {};

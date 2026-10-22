@@ -177,6 +177,32 @@ export function routineFromSession(session, sets, routine = null) {
   };
 }
 
+/**
+ * A new workout as a copy of his last one of its kind (Thu 10/22, his words: "when I start a new workout, whether that
+ * being pull, push, or legs, it should copy the last workout I did. And if I wanted to copy the default template for
+ * each workout, then I can specify so"). The last workout's exercises in its order, each with the sets he ticked
+ * (type, count, kg); programme lifts keep their table targets, with at least as many sets as last time (buildSession);
+ * an entry of only holds stays holds (his leg extension holds after Legs); an exercise he skipped comes with the
+ * template's sets. Id, title and settings stay the template's, so the rotation and "update routine?" still work.
+ */
+export function routineFromLast(routine, last, lastSets) {
+  const used = new Set();
+  const exercises = (last.exercises || []).map((e) => {
+    const mine = lastSets.filter((s) => s.exKey === e.key && s.done).sort((a, b) => a.order - b.order);
+    const holdsOnly = mine.length > 0 && mine.every((s) => s.type === 'hold');
+    const re = holdsOnly ? null : (routine?.exercises || []).find((x) => !used.has(x.key) && (x.exerciseId === e.exerciseId || x.name === e.name));
+    if (re) used.add(re.key);
+    const copied = mine.filter((s) => !(re?.warmup && s.type === 'warmup'))
+      .map((s) => ({ type: s.type, kg: s.kg ?? null, reps: s.reps != null ? [s.reps, s.reps] : null, durationS: s.durationS ?? null }));
+    return {
+      key: newKey(), exerciseId: e.exerciseId, name: re?.name ?? e.name, restSeconds: re?.restSeconds ?? e.restSeconds ?? null,
+      notes: re?.notes ?? e.notes ?? '', plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,
+      warmup: re?.warmup ?? false, sets: copied.length ? copied : re?.sets ?? [],
+    };
+  });
+  return { ...routine, exercises, copiedFrom: last.id };
+}
+
 /** The last finished workout before this one of the same kind: same day type, else same routine, else same title. */
 export function previousSame(session, sessions) {
   const same = session.dayType ? (s) => s.dayType === session.dayType
