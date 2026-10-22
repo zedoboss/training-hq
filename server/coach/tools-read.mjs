@@ -323,10 +323,45 @@ function situationLines(s) {
   if (holds.length) out.push(`He asked the app to hold off (it does): ${holds.map((h) => `${h.areas.join(', ')} until ${dayText(s.date(h.until), s.today)} ${timeText(h.until, s.tz)}${h.reason ? ` (${h.reason})` : ''} [id ${h.id}]`).join('; ')}.`);
   out.push(...changeLines(s));
   out.push(...activityLines(s));
-  const notes = s.list('coach-notes').filter((n) => !n.expiredAt).sort((a, b) => b.at - a.at).slice(0, 15);
+  out.push(...diaryLines(s));
+  const notes = s.list('coach-notes').filter((n) => !n.expiredAt && n.topic !== 'learned').sort((a, b) => b.at - a.at).slice(0, 15);
   // Thu 10/22: with their ids, so a note he corrects is replaced (write_note replace), not added to.
   if (notes.length) out.push(`Your notes on him (your memory; use them, never ask again what they answer; when he corrects one, write_note replace: its id): ${notes.map((n) => `[${dayText(n.date || s.date(n.at), s.today)}${n.topic ? `, ${n.topic}` : ''}] ${String(n.text).slice(0, 160)} [id ${n.id}]`).join(' | ')}`);
   return out;
+}
+
+/**
+ * Thu 10/22: the nightly review's memory: what you learned about him (dated facts, current only) and the last 7 days
+ * in a line each (the 'diary' tool has a whole day).
+ */
+function diaryLines(s) {
+  const learned = s.list('coach-notes').filter((n) => n.topic === 'learned' && !n.expiredAt).sort((a, b) => b.at - a.at).slice(0, 25);
+  const days = s.list('coach-diary').filter((d) => d.status === 'done' && d.date < s.today && d.date >= addDays(s.today, -7)).sort((a, b) => b.date.localeCompare(a.date));
+  return [
+    learned.length ? `What you learned about him (the nightly review, dated; current only; true unless he says otherwise): ${learned.map((n) => `[from ${dayText(n.from || n.date, s.today)}] ${String(n.text).slice(0, 200)} [id ${n.id}]`).join(' | ')}` : '',
+    days.length ? `Your diary, the last days (the diary tool has more): ${days.map((d) => `${dayText(d.date, s.today)}: ${String(d.line || d.summary).slice(0, 240)}`).join(' | ')}` : '',
+  ].filter(Boolean);
+}
+
+/** The 'diary' tool: one day's diary in full, or the last 7 days' lines. */
+function diaryText(s, { date = null }) {
+  const all = s.list('coach-diary').filter((d) => d.status === 'done').sort((a, b) => b.date.localeCompare(a.date));
+  if (!date) {
+    const last = all.filter((d) => d.date >= addDays(s.today, -14)).slice(0, 14);
+    return last.length ? ['The nightly diary, newest first:', ...last.map((d) => `- ${dayText(d.date, s.today)}: ${d.line || d.summary}`)].join('\n') : 'No diary yet: the nightly review writes one each night after a day ends (1:30 AM).';
+  }
+  const d = all.find((x) => x.date === date);
+  if (!d) { const x = s.one('coach-diary', date); return x?.status === 'empty' ? `Nothing happened on ${dayText(date, s.today)} to write about.` : `No diary for ${dayText(date, s.today)}${date >= s.today ? ': the day isn\'t over' : ''}. The timeline tool has the day to the minute.`; }
+  const notes = new Map(s.list('coach-notes').map((n) => [n.id, n]));
+  const changes = new Map(s.list('coach-changes').map((c) => [c.id, c]));
+  return [`Diary for ${dayText(d.date, s.today)} (written ${whenText(d.at, s.tz, s.today)}):`, d.summary,
+    d.words?.length ? `His words that mattered: ${d.words.map((w) => `${w.at} "${w.text}"`).join(' | ')}` : '',
+    d.decisions?.length ? `His decisions: ${d.decisions.join(' | ')}` : '',
+    d.open?.length ? `Left open: ${d.open.join(' | ')}` : '',
+    d.facts?.length ? `Learned: ${d.facts.map((id) => notes.get(id)).filter(Boolean).map((n) => `${n.text}${n.expiredAt ? ' (since expired)' : ''}`).join(' | ')}` : '',
+    d.expired?.length ? `Facts it expired: ${d.expired.map((id) => notes.get(id)?.text).filter(Boolean).join(' | ')}` : '',
+    d.fixes?.length ? `Fixes it filed: ${d.fixes.map((id) => changes.get(id)).filter(Boolean).map((c) => `"${String(c.said).slice(0, 160)}" -> ${c.status}${c.answer ? `: ${c.answer}` : ''}`).join(' | ')}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /** Thu 10/22: his flexibility and boxing / kickboxing plans (activity_plan), what he did, his last kick test. */
@@ -383,7 +418,7 @@ function changesText(s, { days = 2 }) {
 /** Mon 10/19: what the app (as the coach) sent him lately, so a short reply ("done", "yes", "82.4") makes sense, and
  * whether today's weigh-in and last night's sleep are in. */
 function noticeLines(s) {
-  const recent = s.list('coach-messages').filter((m) => (m.kind === 'nudge' || m.kind === 'reminder' || m.kind === 'initiative') && s.now - (m.at || 0) <= 3 * 3600000)
+  const recent = s.list('coach-messages').filter((m) => (m.kind === 'nudge' || m.kind === 'reminder' || m.kind === 'initiative' || m.kind === 'nightly') && s.now - (m.at || 0) <= 3 * 3600000)
     .sort((a, b) => b.at - a.at).slice(0, 4);
   const health = s.one('health', s.today);
   const weighed = s.list('measurements').some((m) => m.date === s.today && m.weightKg != null) || Boolean(health?.weights?.length)
@@ -761,9 +796,12 @@ function squatText(s, { limit = 5 }) {
 // ---- notes --------------------------------------------------------------------------------------------------------
 
 function notesText(s, { limit = 20 }) {
-  const notes = s.list('coach-notes').sort((a, b) => b.at - a.at).slice(0, Math.min(Number(limit) || 20, 60));
+  const notes = s.list('coach-notes').filter((n) => !n.expiredAt).sort((a, b) => b.at - a.at).slice(0, Math.min(Number(limit) || 20, 60));
+  const gone = s.list('coach-notes').filter((n) => n.expiredAt).sort((a, b) => b.expiredAt - a.expiredAt).slice(0, 10);
   const rem = s.list('coach-reminders').filter((r) => !r.cancelledAt).sort((a, b) => a.at - b.at);
-  const lines = [notes.length ? 'Notes, newest first:' : 'No notes yet.', ...notes.map((n) => `- ${whenText(n.at, s.tz, s.today)}${n.topic ? ` [${n.topic}]` : ''} [id ${n.id}]: ${n.text}`)];
+  const lines = [notes.length ? 'Notes, newest first:' : 'No notes yet.', ...notes.map((n) => `- ${whenText(n.at, s.tz, s.today)}${n.topic ? ` [${n.topic}]` : ''}${n.from ? ` (from ${dayText(n.from, s.today)})` : ''} [id ${n.id}]: ${n.text}`)];
+  // Thu 10/22: facts the nightly review expired stay, marked, never as current.
+  if (gone.length) lines.push('Expired (kept for the record, NOT true now):', ...gone.map((n) => `- ${n.text} (expired ${whenText(n.expiredAt, s.tz, s.today)}${n.replacedBy ? `, replaced by ${n.replacedBy}` : ''}${n.why ? `: ${n.why}` : ''})`));
   const upcoming = rem.filter((r) => (r.trigger ? !r.firedAt : r.at >= s.now - 3600000));
   // One that lands in a meal waits for its collagen and dishes (notify.mjs, afterMeals).
   const moved = new Map(afterMeals(upcoming.filter((r) => !r.trigger).map((r) => ({ id: `coach:${r.id}`, kind: 'coach', at: r.at })), mealSpansFor(s.store, s.now, s.tz), upcoming)
@@ -797,6 +835,7 @@ export const READ_TOOLS = [
   read('notes', 'Notes', 'Notes the coach wrote for him, and reminders set.', obj({ limit: { type: 'integer', minimum: 1, maximum: 60 } }), (s, a) => notesText(s, a)),
   read('timeline', 'Timeline', "Everything that happened, to the minute, read live from the app's records: sleep and waking, his messages and your replies, the notifications sent, meals (items, grams, kcal, protein, notes) and his meal answers, supplements taken or skipped with his reasons, workouts set by set (kg x reps or seconds, type, RPE, pain, notes), skipped exercises with reasons, holds rounds (pain, shaking), check-ins, steps, walks, scans and weigh-ins, sauna, Squat Depth, your notes, reminders set, fired and cancelled, hold-offs, fasting, rest days, changes he asked for. date = one whole day; or from/to (YYYY-MM-DD, or 'YYYY-MM-DD HH:MM' for a time window; at most 7 days). A busy day is long: narrow it with kinds or a window (for 'what did I eat at 3 PM last Tuesday?': that date with kinds ['meals']). For any question about what he did, ate, said or was told on a day or at a time.", obj({ date: ISO, from: WHEN, to: WHEN, kinds: { type: 'array', items: { type: 'string', enum: TIMELINE_KINDS } } }), (s, a) => timelineText(s, a)),
   read('recall', 'Recall', "Searches everything he wrote and was told: his messages and your replies, notifications, your notes (and their old wordings), set, exercise, session and meal notes, skip reasons, reminder texts, the changes he asked for, the nightly diary. Case and accents don't matter; Macedonian in Latin letters matches its spellings (č, ch and c alike). All words must match; newest first, each with its day, time and where it was said. from/to (YYYY-MM-DD) narrow it. For 'when did I say...', 'what did I write about...', 'did I tell you...', 'what was that note about...'.", obj({ query: { type: 'string' }, from: ISO, to: ISO, limit: { type: 'integer', minimum: 1, maximum: 80 } }, ['query']), (s, a) => recallText(s, a)),
+  read('diary', 'Diary', "The nightly review's diary: with date, that day in full (summary, his words that mattered, his decisions, what was left open, what was learned and expired, the fixes it filed); without, the last two weeks in a line each. For 'what happened last week?', 'what did we decide on Monday?'. The timeline has the minutes.", obj({ date: ISO }), (s, a) => diaryText(s, a)),
   read('changes', 'Changes on the Mac', "The changes he asked for (request_change): the ones waiting or being built with their place in line and about when they're done, and the ones finished in the last days (default 2): every one of his words in order, the answer he got, what the check verified, the commits. For 'is it done?', 'what's being built?', 'did you fix X?'.", obj({ days: { type: 'integer', minimum: 1, maximum: 14 } }), (s, a) => changesText(s, a)),
 ];
 

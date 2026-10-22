@@ -11,7 +11,7 @@ import { openImports } from './imports.mjs';
 import { openImportInbox } from './import-inbox.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
-import { startNotifier, phoneZone } from './notify.mjs';
+import { startNotifier, phoneZone, sessionBusy } from './notify.mjs';
 import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
 import { openCalendar } from './calendar.mjs';
@@ -20,6 +20,7 @@ import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
 import { findClaude } from './claude.mjs';
 import { openChanges } from './coach/changes.mjs';
+import { openNightly, fixedOnMacFrom } from './coach/nightly.mjs';
 import { openRestPush } from './rest-push.mjs';
 import { openHealth, defaultHealthDir } from './health.mjs';
 import { openCoach } from './coach/index.mjs';
@@ -119,6 +120,19 @@ const changes = config.coachChanges === false ? null : openChanges({
 const changesTimer = changes ? setInterval(() => { changes.tick().catch((e) => log(`coach changes: ${e.stack || e}`)); }, 15000) : null;
 changesTimer?.unref();
 
+// The nightly review (Thu 10/22): each day after it ends (1:30 AM; missed days caught up on wake, 3 at most), one Claude
+// run writes the day's diary, keeps dated facts (expiring old ones), files at most 3 missed fixes (built quietly), and
+// one morning message tells him once he's up. config.nightly: false switches it off.
+const nightly = config.nightly === false ? null : openNightly({
+  store, privateDir: p.privateDir, profile: () => readProfile(p.dataDir), push, tz: () => phoneZone(store), log,
+  fixedOnMac: (date) => { try { return fixedOnMacFrom(readFileSync(join(p.privateDir, 'PROGRESS.md'), 'utf8'), date); } catch { return ''; } },
+  busy: () => Boolean(coach?.talking?.()) || sessionBusy(store.listRecords('sessions').map((r) => r.data).filter(Boolean), Date.now()),
+});
+const nightlyTick = () => nightly?.tick().catch((e) => log(`nightly: ${e.stack || e}`));
+if (nightly) setTimeout(nightlyTick, 60000).unref();
+const nightlyTimer = nightly ? setInterval(nightlyTick, 5 * 60000) : null;
+nightlyTimer?.unref();
+
 // Voice (step 9): the voice lock runs here (speaker check, music check), his voiceprint stays in data/voice.
 const engine = openEngine({ modelsDir: config.voiceModelsDir || p.voiceModelsDir, log });
 let voiceConfig = {};
@@ -141,6 +155,7 @@ const shutdown = (sig) => {
   clearInterval(visionTimer);
   clearInterval(healthTimer);
   if (changesTimer) clearInterval(changesTimer);
+  if (nightlyTimer) clearInterval(nightlyTimer);
   clearInterval(restTimer);
   coach.close().catch(() => {});
   whisper.stop('server stopping');

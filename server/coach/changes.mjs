@@ -66,7 +66,7 @@ export const lineAtOf = (c) => c.lineAt ?? c.at;
  * A new request, queued: his words, what it is about, what he wants instead, and the conversation up to it.
  * asks: earlier asks it carries on from (a correction of a request being built, a check of a finished one).
  */
-export function newChange({ said, about = '', want = '', kind = 'behaviour', at = Date.now(), tz = 'UTC', earlier = [], messages = [], asks = [], verify = false, auto = false, by = 'coach', corrects = null, checkOf = null, fixOf = null, followsOn = null, lineAt = null, review = null }) {
+export function newChange({ said, about = '', want = '', kind = 'behaviour', at = Date.now(), tz = 'UTC', earlier = [], messages = [], asks = [], verify = false, auto = false, by = 'coach', corrects = null, checkOf = null, fixOf = null, followsOn = null, lineAt = null, review = null, quiet = false }) {
   const words = clip(said, 2000);
   if (!words) throw new Error('His words are missing.');
   const askKind = corrects ? 'amend' : checkOf ? 'verify' : fixOf ? 'review' : 'ask';
@@ -78,7 +78,7 @@ export function newChange({ said, about = '', want = '', kind = 'behaviour', at 
     context: excerptOf(messages, { tz, at: at + 1 }), status: 'queued', tries: 0,
     ...(verify ? { verify: true } : {}), ...(auto ? { auto: true } : {}), by,
     ...(corrects ? { corrects } : {}), ...(checkOf ? { checkOf } : {}), ...(fixOf ? { fixOf } : {}), ...(followsOn ? { followsOn } : {}),
-    ...(lineAt != null ? { lineAt } : {}), ...(review ? { review } : {}),
+    ...(lineAt != null ? { lineAt } : {}), ...(review ? { review } : {}), ...(quiet ? { quiet: true } : {}),
   };
 }
 
@@ -309,15 +309,17 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     const status = ['done', 'failed', 'question'].includes(result?.status) ? result.status : 'failed';
     const answer = clip(result?.said, 300) || (status === 'done' ? 'Done: the change you asked for is in.' : 'That change didn\'t go through.');
     const reload = Boolean(result?.reload);
-    const afterRestart = status === 'done' && reload;
+    // Filed by the nightly review: built while he sleeps, told in the morning message (nightly.mjs), not at 2 AM.
+    const quiet = c.by === 'nightly' || Boolean(c.quiet);
+    const afterRestart = status === 'done' && reload && !quiet;
     const commits = Array.isArray(result?.commits) ? result.commits.slice(0, 10).map((x) => clip(x, 120)) : [];
     const checked = clip(extra.checked ?? result?.checked, 300);
     const { checked: _, ...more } = extra;
-    put({ ...c, status, stage: null, doneAt: now(), answer, reload, ...(afterRestart ? { announce: 'after-restart' } : {}), commits, ...(checked ? { checked } : {}), ...more });
+    put({ ...c, status, stage: null, doneAt: now(), answer, reload, ...(quiet ? { announce: 'morning' } : afterRestart ? { announce: 'after-restart' } : {}), commits, ...(checked ? { checked } : {}), ...more });
     // Server code: he hears it once the restart has made it live (announced()); the rest is live now.
-    if (!afterRestart) await tell(c, answer);
-    log(`coach change ${c.id}: ${status}${extra.reviewed === false ? ' (not reviewed)' : extra.review ? ` (review: ${extra.review.status})` : ''}${reload ? ', server restarts' : ''}${afterRestart ? ', then he hears it' : ''}`);
-    if (reload && (afterRestart || extra.review)) restartDue = true;
+    if (!afterRestart && !quiet) await tell(c, answer);
+    log(`coach change ${c.id}: ${status}${extra.reviewed === false ? ' (not reviewed)' : extra.review ? ` (review: ${extra.review.status})` : ''}${reload ? ', server restarts' : ''}${afterRestart ? ', then he hears it' : quiet ? ', told in the morning' : ''}`);
+    if (reload && (status === 'done' || extra.review)) restartDue = true;
   }
 
   /** The build is done: a second chat checks it against his words before he hears it. */
@@ -355,7 +357,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     const said = review.said || 'The check on the Mac found the change isn\'t right yet.';
     await finish(c, { ...merged, status: 'failed', said: again ? `${said.replace(/[.\s]+$/, '')}. Fixing it now.` : `Still not right after a second try: ${said}` }, { review, checked, reviewed: true });
     if (again) {
-      const n = put(newChange({ said: c.said, want: c.want, about: c.about, kind: c.kind === 'check' ? 'bug' : c.kind, at: now(), tz: c.tz || tz(), asks: asksOf(c), auto: true, by: 'review', fixOf: c.id, followsOn: c.id, lineAt: lineAtOf(c) + 1, verify: c.verify, review: { said: review.said, checked: review.checked }, messages: messages() }));
+      const n = put(newChange({ said: c.said, want: c.want, about: c.about, kind: c.kind === 'check' ? 'bug' : c.kind, at: now(), tz: c.tz || tz(), asks: asksOf(c), auto: true, by: 'review', fixOf: c.id, followsOn: c.id, lineAt: lineAtOf(c) + 1, verify: c.verify, review: { said: review.said, checked: review.checked }, quiet: c.by === 'nightly' || Boolean(c.quiet), messages: messages() }));
       log(`coach change ${c.id}: review failed, fix ${n.id} queued first in line`);
     }
   }
