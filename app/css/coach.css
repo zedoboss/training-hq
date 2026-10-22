@@ -24,9 +24,10 @@
 @media (prefers-reduced-motion: reduce) { .c-dots i { animation: none; opacity: .7; } }
 .coach-empty .hint { margin: 0; }
 
-.coach-compose { position: sticky; bottom: 0; display: flex; align-items: flex-end; gap: 8px; padding: 8px 0 calc(8px + var(--safe-bottom)); background: var(--bg); z-index: 5; }
-.coach-input { flex: 1 1 auto; min-height: 48px; max-height: 160px; resize: none; padding: 12px 14px; font: 400 16px/1.4 var(--sans); }
-.coach-send { flex: 0 0 52px; width: 52px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.coach-compose { position: sticky; bottom: 0; display: flex; align-items: flex-end; gap: 6px; padding: 8px 0 calc(8px + var(--safe-bottom)); background: var(--bg); z-index: 5; }
+/* Thu 10/22, his screenshot: every control in the row the same 46 px; the box one line high until he types more. */
+.coach-input { flex: 1 1 auto; min-width: 0; height: 46px; min-height: 46px; max-height: 160px; resize: none; padding: 11px 12px; font: 400 16px/22px var(--sans); }
+.coach-send { flex: 0 0 46px; width: 46px; height: 46px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .coach-send.is-stop { background: var(--amber); }
 .coach-send.is-stop svg { display: none; }
 .coach-send.is-stop::before { content: ''; width: 14px; height: 14px; border-radius: 2px; background: var(--bg); }
@@ -38,9 +39,9 @@ a.mic-btn { text-decoration: none; }
 /* Thu 10/22: a "New conversation" mid-day, drawn as a line between messages. */
 .coach-line { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 11px; }
 .coach-line::before, .coach-line::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--border); }
-.coach-back { flex: 0 0 44px; width: 44px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--cyan); border-color: var(--cyan); text-decoration: none; }
+.coach-back { flex: 0 0 46px; width: 46px; height: 46px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--cyan); border-color: var(--cyan); text-decoration: none; }
 .coach-back[hidden] { display: none; }
-.coach-mic { flex: 0 0 48px; width: 48px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.coach-mic { flex: 0 0 46px; width: 46px; height: 46px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .coach-mic.is-rec { background: var(--red, #ff5c5c); color: #fff; border-color: transparent; animation: coach-rec 1s ease-in-out infinite; }
 .coach-mic.is-busy { opacity: .5; pointer-events: none; }
 @keyframes coach-rec { 50% { opacity: .55; } }

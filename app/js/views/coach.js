@@ -73,7 +73,7 @@ function renderChat(view) {
     <form class="coach-compose" id="c-form" autocomplete="off">
       <a class="btn-ghost coach-back" id="c-back" href="#/train" aria-label="Back to the workout" hidden>${BACK_ICON}</a>
       <button class="btn-ghost coach-mic" id="c-mic" type="button" aria-label="Dictate into the box" aria-pressed="false">${MIC_ICON}</button>
-      <textarea class="input coach-input" id="c-text" rows="1" placeholder="Ask, or tell it what you did: 80 for 8" aria-label="Message to the coach"></textarea>
+      <textarea class="input coach-input" id="c-text" rows="1" placeholder="Message the coach" aria-label="Message to the coach"></textarea>
       <button class="btn-primary coach-send" id="c-send" type="submit" aria-label="Send">${SEND}</button>
     </form>
     <p class="hint coach-foot" id="c-foot">The coach runs on your Mac with your programme, history and rules. To talk instead of typing: <a href="#/voice">Settings > Voice</a>, then the mic at the top.</p>`;
@@ -92,7 +92,8 @@ function renderChat(view) {
     const m = modelOf();
     view.querySelectorAll('[data-model]').forEach((b) => { const on = b.dataset.model === m; b.classList.toggle('is-on', on); b.setAttribute('aria-pressed', String(on)); });
   };
-  const fit = () => { box.style.height = 'auto'; box.style.height = `${Math.min(160, box.scrollHeight)}px`; };
+  // The borders aren't in scrollHeight: without them the last line was cut (Thu 10/22, his screenshot).
+  const fit = () => { box.style.height = 'auto'; box.style.height = `${Math.min(160, box.scrollHeight + box.offsetHeight - box.clientHeight)}px`; };
 
   // Tue 10/20, his words: "the chat there... is just an endless scroll from multiple days' history... make it only one
   // per day and have a calendar there where I can click the arrows". One day at a time; today by default.
@@ -246,8 +247,14 @@ function renderChat(view) {
     const load = async () => { stored = (await repo.list('coach-messages')); live = live.filter((m) => !stored.some((x) => x.id === m.id)); };
     // Thu 10/22, his words: "if I want to talk and type, I have to go to homepage, click the chat, and then go back to
     // Train, and then resume": with a workout running, one tap back to it.
+    // Only when Talk was opened from the workout (his words: "if I go from homepage and click the chat, there should be
+    // no arrow there"); Notes and back keep that.
+    let prev = '';
+    try { prev = sessionStorage.getItem('thq.prevHash') || ''; } catch { /* private mode */ }
+    let back = '';
+    try { back = /^#\/coach/.test(prev) ? sessionStorage.getItem('thq.talk.back') || '' : /^#\/session\/[^/]+$/.test(prev) ? prev : ''; sessionStorage.setItem('thq.talk.back', back); } catch { /* private mode */ }
     const drawWorkout = async () => {
-      const act = (await repo.list('sessions')).find((s) => s.status === 'active');
+      const act = back && (await repo.list('sessions')).find((s) => s.status === 'active' && back === `#/session/${encodeURIComponent(s.id)}`);
       // Thu 10/22: and an arrow at the bottom left, beside the box ("so I can go back directly to the workout").
       for (const b of [$('#c-workout'), $('#c-back')]) {
         if (!b || gone) continue;
