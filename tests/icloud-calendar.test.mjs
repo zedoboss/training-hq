@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
-import { desiredEvents, syncScript, readAnswer, openICloudCalendar, CALENDAR_NAME, STATUS, KEY_PREFIX } from '../server/icloud-calendar.mjs';
+import { desiredEvents, syncScript, readAnswer, openICloudCalendar, isRealFolder, CALENDAR_NAME, STATUS, KEY_PREFIX } from '../server/icloud-calendar.mjs';
 import { backupStatusText, BACKUP_CALENDAR } from '../app/js/lib/backup-reminders.js';
 
 const TZ = 'Asia/Bangkok';
@@ -99,4 +99,11 @@ test('Settings shows how the backup stands, and what to do when it waits', () =>
   assert.match(backupStatusText({ ok: false, why: 'not-allowed' }).text, /Click OK on the Mac/);
   assert.match(backupStatusText(null).text, /^Not set up yet/);
   assert.equal(backupStatusText(null, { enabled: false }).text, 'The backup is off on this Mac.');
+});
+
+test('only the real server writes his calendar: his private folder, not a dev copy', () => {
+  assert.equal(isRealFolder('/Users/x/Documents/training-hq-private', '/Users/x'), true);
+  assert.equal(isRealFolder('/Users/x/Documents/training-hq-private/', '/Users/x'), true);
+  assert.equal(isRealFolder('/private/tmp/claude-501/abc/scratchpad/devprivate', '/Users/x'), false);
+  assert.equal(isRealFolder('', '/Users/x'), false);
 });

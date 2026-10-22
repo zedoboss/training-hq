@@ -8,6 +8,8 @@
 // macOS asks once whether the server may control Calendar; he creates the iCloud calendar once on his iPhone.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { calendarItems, ALERT_AFTER_MIN } from './calendar.mjs';
 
 export const CALENDAR_NAME = 'Training HQ Backup';
@@ -21,6 +23,12 @@ export const TIMEOUT_MS = 120000;
 
 const hash = (s) => createHash('sha1').update(String(s)).digest('hex').slice(0, 8);
 const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+
+/**
+ * Is this server his real one (his private folder), not a dev copy in a scratch folder that would overwrite his
+ * calendar with test data? (The login service sets TRAINING_HQ_PRIVATE to the real folder, so that can't tell.)
+ */
+export const isRealFolder = (privateDir, home = homedir()) => resolve(String(privateDir || '')) === resolve(join(home, 'Documents', 'training-hq-private'));
 
 /** The events the iCloud calendar should hold now: {key, title, notes, at}. The key changes when time or words do. */
 export function desiredEvents(items, now = Date.now(), hours = HOURS) {
