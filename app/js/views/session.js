@@ -552,6 +552,7 @@ export function render(view, params = []) {
         <div class="s-row1">
           <div class="hud c-amber s-title">${esc(DAY[session.dayType] || session.title.toUpperCase())}${session.week ? ` · WK ${session.week}` : ''} <span data-k="paused" hidden>· PAUSED</span></div>
           ${editing ? '' : '<button class="pill" id="s-talk" type="button" aria-pressed="false">Coach</button>'}
+          ${editing ? '' : '<a class="pill" id="s-chat" href="#/coach">Chat</a>'}
           <button class="pill" id="s-more" type="button" aria-label="Session options">···</button>
           <a class="pill is-on" href="#/finish/${esc(session.id)}">${editing ? 'Done' : 'Finish'}</a>
         </div>
