@@ -18,6 +18,8 @@ import { stepsToday, healthAsOf } from './body.js';
 import { runShortcutUrl } from './body-health.js';
 import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
 import * as voice from '../lib/voice.js';
+import { elapsedMs, nextSetText } from '../lib/session.js';
+import { planFor, isDone } from '../lib/scans.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -75,9 +77,26 @@ async function trainToday(repo) {
   const at = hm ? ` at ${formatHm(hm)}` : '';
   const lead = hm ? checkInLead(daysByDate(dayList)[rot.next.date], rot.next.date, deviceTimeZone(), withDefaults(getState().settings).notify.readinessMin) : null;
   const check = hm ? (lead == null ? ' Check-in before you leave.' : ` Check-in at ${formatHm(addMinutesHm(hm, -lead))}.`) : ' No time set yet.';
-  if (t.kind === 'train') return { holds, readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, line: `Today: ${next}${at}${wk ? `, week ${wk} column` : ''}.${check}` };
+  // Thu 10/22, his words: "I'm mid-workout right now, so I should track that. And since I haven't logged the Evolt scan
+  // today, it should be there as well. It should ask." A workout in progress comes first; then a scan day with no scan.
+  const scans = await repo.list('body-scans');
+  const scanPlan = planFor((await repo.get('scan-plan', 'main')) || {}, { scans, today, last: lastRotationSession(sessions, bridge), days: daysByDate(dayList) });
+  const trainsToday = t.kind === 'train' || t.kind === 'done';
+  const scanOpen = trainsToday && scanPlan?.next?.date === today && !scans.some((x) => x.date === today && isDone(x));
+  const scanAsk = scanOpen ? ' Evolt scan not logged today: did you do it?' : '';
+  const active = sessions.find((x) => x.status === 'active' && x.kind !== 'holds');
+  if (active) {
+    const mine = sets.filter((x) => x.sessionId === active.id);
+    const nextText = nextSetText(active, mine);
+    const min = Math.floor(elapsedMs(active) / 60000);
+    return {
+      holds, readout: `${LABEL[active.dayType] || active.title || 'Workout'} · LIVE`, progress: mine.length ? mine.filter((x) => x.done).length / mine.length : 0, scan: scanOpen, live: active.id,
+      line: `${LABEL[active.dayType] || active.title || 'Workout'} in progress, ${min} min. ${nextText ? `Next: ${nextText}.` : 'Every set ticked: finish it.'}${scanAsk}`,
+    };
+  }
+  if (t.kind === 'train') return { holds, readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, scan: scanOpen, line: `Today: ${next}${at}${wk ? `, week ${wk} column` : ''}.${check}${scanAsk}` };
   const nextText = `Next: ${next}${at}, ${dayOf(rot.next.date)}${wk ? `, week ${wk} column` : ''}.${hm ? check : ''}`;
-  if (t.kind === 'done') return { holds, readout: `${LABEL[t.dayType]} DONE`, progress: 1, line: `${LABEL[t.dayType]} done today. ${nextText}` };
+  if (t.kind === 'done') return { holds, readout: `${LABEL[t.dayType]} DONE`, progress: 1, scan: scanOpen, line: `${LABEL[t.dayType]} done today.${scanAsk} ${nextText}` };
   return { holds, readout: 'REST', progress: null, line: `${REST_TEXT[t.reason] || 'Rest day'}. ${nextText}` };
 }
 
@@ -218,7 +237,8 @@ export function render(view) {
     set('mac', `<span class="${m.cls}">${m.text}</span>`);
     set('tz', Intl.DateTimeFormat().resolvedOptions().timeZone.toUpperCase().replace('_', ' '));
     set('spoke', s.paired && s.programme && train ? train.line : spokeText(s));
-    set('spoke-actions', s.paired ? '' : '<a class="btn-ghost spoke-btn" href="#/settings">PAIR WITH MAC</a>');
+    set('spoke-actions', !s.paired ? '<a class="btn-ghost spoke-btn" href="#/settings">PAIR WITH MAC</a>'
+      : [train?.live ? `<a class="btn-primary spoke-btn" href="#/session/${encodeURIComponent(train.live)}">BACK TO THE WORKOUT</a>` : '', train?.scan ? '<a class="btn-ghost spoke-btn" href="#/body/scan">LOG THE SCAN</a>' : ''].join(''));
     set('core', coreSvg({ train: train?.progress ?? null, fuel: fuel?.progress ?? null, steps: steps?.goal ? Math.min(1, steps.steps / steps.goal) : null, tendons: train?.holds.progress ?? null },
       `AI core. ${train ? train.line : 'Nothing logged yet today.'}`));
   };
@@ -229,14 +249,17 @@ export function render(view) {
   const unsub = subscribe(draw);
   let off = () => {};
   let gone = false;
+  let minuteTimer = null;
   ready.then((repo) => {
     const refresh = async () => {
       train = await trainToday(repo); fuel = await fuelToday(repo); steps = await stepsToday(repo); healthAt = await healthAsOf(repo);
       talk = todayCounts(await repo.list('coach-messages'), isoDate(new Date()), (ms) => isoDate(new Date(ms)));
       if (!gone) draw(getState());
     };
-    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages'].includes(c))) refresh(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages', 'body-scans', 'scan-plan'].includes(c))) refresh(); });
     refresh();
+    // The workout's minutes in the status line.
+    minuteTimer = setInterval(() => { if (!gone && train?.live) refresh(); }, 60000);
   });
   // Voice (step 9): whether this device is listening, under the core and in the dock.
   const VOICE_TEXT = { off: 'OFF', listening: 'LISTENING', hearing: 'HEARING', thinking: 'THINKING', speaking: 'SPEAKING', paused: 'PAUSED', tap: 'TAP THE MIC', error: 'MIC ERROR' };
@@ -247,5 +270,5 @@ export function render(view) {
   };
   drawVoice();
   const offVoice = voice.onChange(drawVoice);
-  return () => { gone = true; clearInterval(timer); unsub(); off(); offVoice(); };
+  return () => { gone = true; clearInterval(timer); clearInterval(minuteTimer); unsub(); off(); offVoice(); };
 }
