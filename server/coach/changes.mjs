@@ -76,7 +76,7 @@ HOW
 7. If his words can be read two ways that would do opposite things, change nothing and ask him one short question in your answer (status "question"). Otherwise take the most sensible reading and do it.
 
 WHEN YOU FINISH, write ${resultFile} with this JSON and nothing else, then end the chat:
-{"status": "done" | "failed" | "question", "said": "<what he reads in the chat: one or two short, blunt sentences in plain words, starting with what changes for him; e.g. Done: after you log your sleep I say good morning and name today's session; the check-in waits until you're about to leave.>", "reload": <true if you changed anything under server/, else false>, "commits": ["<short sha> <subject>"]}`;
+{"status": "done" | "failed" | "question", "said": "<what he reads, also as a phone notification: ONE short sentence, at most 120 characters, so the lock screen shows it whole; plain, blunt, starting with what changes for him; e.g. Done: after you log sleep I say good morning first; the check-in waits till you leave.>", "reload": <true if you changed anything under server/, else false>, "commits": ["<short sha> <subject>"]}`;
 }
 
 /** Was this process started and is it still running? */
@@ -154,7 +154,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
 
   async function finish(c, result) {
     const status = ['done', 'failed', 'question'].includes(result?.status) ? result.status : 'failed';
-    const answer = clip(result?.said, 600) || (status === 'done' ? 'Done: the change you asked for is in.' : 'That change didn\'t go through.');
+    const answer = clip(result?.said, 300) || (status === 'done' ? 'Done: the change you asked for is in.' : 'That change didn\'t go through.');
     put({ ...c, status, doneAt: now(), answer, reload: Boolean(result?.reload), commits: Array.isArray(result?.commits) ? result.commits.slice(0, 6).map((x) => clip(x, 120)) : [] });
     await tell(c, answer);
     log(`coach change ${c.id}: ${status}${result?.reload ? ', server restarts' : ''}`);
