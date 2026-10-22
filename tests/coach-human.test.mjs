@@ -97,3 +97,17 @@ test('tendon cycle (Wed 10/21): heal with holds done for a week asks if the pain
   assert.match(fix.facts, /fix phase \(3-4x a week\) since 2026-01-15, 8 weeks now/);
   assert.equal(openItems({ today: D, areas: [area({ phase: 'fix', phaseSince: '2026-03-01' })], dayOf }).some((i) => i.key === 'phase-knees'), false);
 });
+
+test('holds: one message with every open hold (Thu 10/22: shoulder behind this week AND the cupping hold after Legs)', () => {
+  const dayOf = (ms) => new Date(ms + 7 * 3600000).toISOString().slice(0, 10);
+  const areas = [
+    { kind: 'area', id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Lateral Raise (Cable)', timing: ['after Push', 'rest days'] }] },
+    { kind: 'area', id: 'wrist', label: 'Wrist', phase: 'fix', holds: [{ exercise: 'Cupping', timing: ['after Legs'] }] },
+  ];
+  const sessions = [{ id: 'l', status: 'done', dayType: 'legs', startedAt: at('10:16'), exercises: [] }];
+  const items = openItems({ today: D, sessions, areas, dayOf });
+  const holds = items.filter((i) => /^holds/.test(i.key));
+  assert.equal(holds.length, 1);
+  assert.match(holds[0].facts, /Wrist: the Cupping hold after Legs today is still open/);
+  assert.match(holds[0].facts, /Shoulder \(fix phase: 3-4 rounds a week\): 0 rounds in the last 7 days/);
+});

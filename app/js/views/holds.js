@@ -47,6 +47,10 @@ function renderList(view, repo) {
     const dayType = rot.today.kind === 'rest' ? null : rot.today.dayType;
     const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today) });
     const areaOf = (id) => areas.find((a) => a.id === id);
+    // Thu 10/22, his words: "the shoulder should be there in this tendons": an area behind its weekly count (fix or
+    // maintenance) with nothing planned today is listed under today too, to do any day.
+    const weekly = areas.filter((a) => a.holds?.length && (a.phase === 'fix' || a.phase === 'maintenance') && !slots.some((x) => x.area === a.id))
+      .map((a) => ({ a, st: areaStatus(a, rounds[a.id] || {}, today) })).filter(({ st }) => st.due);
     // A2: the rest-day question (the gym for this hold, another hold he names, or skip today). No hold is suggested.
     const lastText = (x) => (x.last ? `<div class="hint">Last rest day (${esc(formatDay(new Date(`${x.last.date}T12:00:00`)))}): ${esc(restChoiceText(x.last, areaOf(x.area)))}.</div>` : '');
     const askRow = (x) => `<div class="hold-row slot-row rest-ask" data-slot="${esc(x.area)}:rest"><div><span class="hud c-amber">REST DAY · ${esc(formatHm(x.time))} · WHAT TODAY?</span>
@@ -72,7 +76,9 @@ function renderList(view, repo) {
       <p class="hint">Your rules: hold at least 30 seconds, 3 sets, using the movement that hurts. Pain up to 3-4 out of 10 is fine if it isn't worse the next day; if it is, use less weight or push less hard.</p>
       <section class="card pad-card hold-today">
         <div class="hud c-muted">TODAY · ${esc(formatDay(new Date()).toUpperCase())} · ${rot.today.kind === 'rest' ? 'REST DAY' : `${esc(LABEL[dayType]).toUpperCase()} DAY`}</div>
-        ${slots.length ? slots.map(slotRow).join('') : '<p class="hint">Nothing scheduled today.</p>'}
+        ${slots.length ? slots.map(slotRow).join('') : weekly.length ? '' : '<p class="hint">Nothing scheduled today.</p>'}
+        ${weekly.map(({ a, st }) => `<div class="hold-row slot-row" data-slot="${esc(a.id)}:week"><div><span class="hud c-amber">THIS WEEK · ${st.done} OF ${st.target[0] === st.target[1] ? st.target[0] : `${st.target[0]}-${st.target[1]}`} · ANY DAY</span>
+          <div><b>${esc(a.label)}</b> · ${esc(a.holds[0].exercise)}${a.holds[0].where ? ` <span class="hint">(${esc(a.holds[0].where)})</span>` : ''}${a.holds.length > 1 ? `<div class="hint">then ${esc(a.holds.slice(1).map((h) => h.exercise).join(', '))}</div>` : ''}</div></div><a class="pill is-on" href="#/holds/${esc(a.id)}/0">Start</a></div>`).join('')}
       </section>
       ${unconfirmed.length || timesOpen ? `<section class="card pad-card confirm-card"><div class="hud c-amber">CONFIRM YOUR HOLD TIMES (FIRST TIME)</div>
         ${unconfirmed.map((a) => `<p class="hint c-text"><b>${esc(a.label)}:</b> ${esc(timingOf(a))}</p>`).join('')}

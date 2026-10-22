@@ -5,7 +5,7 @@
 // started; the coach (Claude) writes the opening message itself, in the same conversation, so his reply continues it.
 // Pure: facts in, open items out. Each item: {key, priority, facts}. The facts are for the coach, not for him.
 import { addDays } from './rotation.js';
-import { areaStatus, roundsByDate } from './holds.js';
+import { areaStatus, roundsByDate, holdsAfter } from './holds.js';
 import { placeLabel } from './neck.js';
 
 const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
@@ -42,6 +42,14 @@ export function openItems({ today, sessions = [], sets = [], neck = null, areas 
   // heal = 3 sets twice a day while it hurts ("pain can go away in a week or two"); fix = 3-4x a week for 4-8 weeks;
   // maintenance = 5-10 min after a workout or one day a week. The clock runs from the holds he actually does.
   const rounds = roundsByDate(areas, sessions, sets, bridge);
+  // Thu 10/22, his words: "I got a notification regarding shoulder holds... it also should notify me about the cupping
+  // hold. Make it smarter": every hold still open goes into ONE message, not one per area.
+  const holdLines = []; let holdPri = 0;
+  const doneToday = [...new Set(sessions.filter((x) => x.status === 'done' && x.kind !== 'holds' && x.dayType && dayOf(x.startedAt) === today).map((x) => x.dayType))];
+  for (const h of doneToday.flatMap((t) => holdsAfter(areas, t).map((x) => ({ ...x, after: t })))) {
+    const a = areas.find((x) => x.label === h.area);
+    if (a && !(rounds[a.id]?.[today] > 0)) { holdLines.push(`${a.label}: the ${h.exercise} hold after ${h.after.charAt(0).toUpperCase() + h.after.slice(1)} today is still open (${h.sets} × ${h.seconds} s, at the gym)`); holdPri = Math.max(holdPri, 60); }
+  }
   for (const a of areas) {
     if (!a.holds?.length || a.phase === 'none' || a.phase === 'unknown') continue;
     const st = areaStatus(a, rounds[a.id] || {}, today);
@@ -63,8 +71,12 @@ export function openItems({ today, sessions = [], sets = [], neck = null, areas 
       out.push({ key: `phase-${a.id}`, priority: 50, facts: `Tendon holds, ${a.label}: fix phase (3-4x a week) since ${since}, 8 weeks now (his note: at least 4-8 weeks). Ask whether to move to maintenance: 5-10 minutes after a workout, or one day a week (tendon_phase maintenance).` });
       continue;
     }
-    if (st.due && (a.phase !== 'heal' || count(7) < 7)) out.push({ key: `holds-${a.id}`, priority: a.phase === 'heal' ? 70 : 55, facts: `Tendon holds, ${a.label} (${a.phase} phase: ${a.phase === 'heal' ? '3 holds twice a day' : '3-4 rounds a week'}): ${count(7)} round${count(7) === 1 ? '' : 's'} in the last 7 days; today ${st.text}. ${holdsText}` });
+    if (st.due && (a.phase !== 'heal' || count(7) < 7) && !holdLines.some((l) => l.startsWith(`${a.label}:`))) {
+      holdLines.push(`${a.label} (${a.phase} phase: ${a.phase === 'heal' ? '3 holds twice a day' : '3-4 rounds a week'}): ${count(7)} round${count(7) === 1 ? '' : 's'} in the last 7 days; today ${st.text}. ${holdsText}`);
+      holdPri = Math.max(holdPri, a.phase === 'heal' ? 70 : 55);
+    }
   }
+  if (holdLines.length) out.push({ key: 'holds', priority: holdPri, facts: `Tendon holds still open, ALL of them in one short message (name each, the quickest first, then ask when): ${holdLines.join(' | ')}` });
   // The readiness table: still a draft, so check-ins can't run.
   if (readiness && readiness.status !== 'confirmed') out.push({ key: 'readiness', priority: 45, facts: 'His readiness table (the check-in before a session) is still a DRAFT: he confirms or edits it once on the check-in screen, then check-ins work. Takes about 2 minutes.' });
   // Sauna: never started, or nothing planned for the coming week.
