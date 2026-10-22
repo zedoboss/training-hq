@@ -35,10 +35,12 @@ import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
 import { pathsOf, stageText } from '../../app/js/lib/hold-path.js';
 import { asksOf, isOpen, isFinished, lineAtOf, whereText, buildMs } from './changes.mjs';
+import { timelineText, recallText, TIMELINE_KINDS } from './memory.mjs';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
 const DAY_TYPE = { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] };
+const WHEN = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}([ T]\\d{2}:\\d{2})?$', description: 'YYYY-MM-DD, or YYYY-MM-DD HH:MM (24-hour, his time zone)' };
 
 // ---- the active session -------------------------------------------------------------------------------------------
 
@@ -793,6 +795,8 @@ export const READ_TOOLS = [
   read('squat_sessions', 'Squat Depth', 'Recent Squat Depth runs: good and shallow reps, the lowest angle, each rep.', obj({ limit: { type: 'integer', minimum: 1, maximum: 20 } }), (s, a) => squatText(s, a)),
   read('recovery', 'Recovery', "His recovery record's state in the app: days since it started, the weekly check-in (due or not, his past answers), what he still has to do, the checkup date, the photos. His record itself (what is CURRENT, what EXPIRED) is in your instructions.", obj(), (s) => recoveryText(s)),
   read('notes', 'Notes', 'Notes the coach wrote for him, and reminders set.', obj({ limit: { type: 'integer', minimum: 1, maximum: 60 } }), (s, a) => notesText(s, a)),
+  read('timeline', 'Timeline', "Everything that happened, to the minute, read live from the app's records: sleep and waking, his messages and your replies, the notifications sent, meals (items, grams, kcal, protein, notes) and his meal answers, supplements taken or skipped with his reasons, workouts set by set (kg x reps or seconds, type, RPE, pain, notes), skipped exercises with reasons, holds rounds (pain, shaking), check-ins, steps, walks, scans and weigh-ins, sauna, Squat Depth, your notes, reminders set, fired and cancelled, hold-offs, fasting, rest days, changes he asked for. date = one whole day; or from/to (YYYY-MM-DD, or 'YYYY-MM-DD HH:MM' for a time window; at most 7 days). A busy day is long: narrow it with kinds or a window (for 'what did I eat at 3 PM last Tuesday?': that date with kinds ['meals']). For any question about what he did, ate, said or was told on a day or at a time.", obj({ date: ISO, from: WHEN, to: WHEN, kinds: { type: 'array', items: { type: 'string', enum: TIMELINE_KINDS } } }), (s, a) => timelineText(s, a)),
+  read('recall', 'Recall', "Searches everything he wrote and was told: his messages and your replies, notifications, your notes (and their old wordings), set, exercise, session and meal notes, skip reasons, reminder texts, the changes he asked for, the nightly diary. Case and accents don't matter; Macedonian in Latin letters matches its spellings (č, ch and c alike). All words must match; newest first, each with its day, time and where it was said. from/to (YYYY-MM-DD) narrow it. For 'when did I say...', 'what did I write about...', 'did I tell you...', 'what was that note about...'.", obj({ query: { type: 'string' }, from: ISO, to: ISO, limit: { type: 'integer', minimum: 1, maximum: 80 } }, ['query']), (s, a) => recallText(s, a)),
   read('changes', 'Changes on the Mac', "The changes he asked for (request_change): the ones waiting or being built with their place in line and about when they're done, and the ones finished in the last days (default 2): every one of his words in order, the answer he got, what the check verified, the commits. For 'is it done?', 'what's being built?', 'did you fix X?'.", obj({ days: { type: 'integer', minimum: 1, maximum: 14 } }), (s, a) => changesText(s, a)),
 ];
 
