@@ -11,7 +11,7 @@ import { openCalendar } from '../server/calendar.mjs';
 const TZ = 'Asia/Bangkok';
 const at = (d, hm) => Date.parse(`${d}T${hm}:00+07:00`);
 
-test('the calendar: open fixed reminders after the Mac\'s 45 minutes; a cancelled one drops off; a wrong link is refused', () => {
+test('the calendar (Thu 10/22: "it can miss info by 15 mins?"): open reminders the Mac hasn\'t sent, alert 20 minutes after; nothing lost when the Mac is off', () => {
   const dir = mkdtempSync(join(tmpdir(), 'thq-cal-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
@@ -26,12 +26,19 @@ test('the calendar: open fixed reminders after the Mac\'s 45 minutes; a cancelle
     const ics = cal.ics(k);
     assert.match(ics, /^BEGIN:VCALENDAR\r\n/);
     assert.match(ics, /REFRESH-INTERVAL;VALUE=DURATION:PT15M/);
+    assert.match(ics, /SUMMARY:Reminder soon/, 'not sent yet: it stays, nothing is lost if the Mac goes off');
     assert.match(ics, /SUMMARY:Reminder later\r\nDESCRIPTION:Reminder later/);
-    assert.doesNotMatch(ics, /Reminder soon/, 'the Mac sends that one itself');
+    assert.match(ics, /TRIGGER:PT20M/, 'the alert 20 minutes after its time');
     assert.doesNotMatch(ics, /Reminder gone/, 'cancelled');
     assert.throws(() => cal.ics('nope'), /wrong link/);
-    // Later in the day: the 5 PM one is inside the Mac's window now and leaves the calendar.
-    clock = at('2026-03-18', '16:30');
+    // 14:30: the Mac sends it; the next refresh drops it before its 14:50 alert.
+    clock = at('2026-03-18', '14:31');
+    store.setMeta('notify:sent', { 'coach:soon': at('2026-03-18', '14:30') });
+    assert.doesNotMatch(cal.ics(k), /Reminder soon/);
+    // The Mac was off at 17:00: the 17:00 one stays until its 17:20 alert has rung, then goes.
+    clock = at('2026-03-18', '17:10');
+    assert.match(cal.ics(k), /Reminder later/);
+    clock = at('2026-03-18', '17:21');
     assert.doesNotMatch(cal.ics(k), /Reminder later/);
     // A new link stops the old one.
     const renewed = new URL(cal.link({ renew: true }).path, 'http://x').searchParams.get('k');

@@ -18,7 +18,7 @@ import { protocolOf, isDone, planFor, scanTakenOn } from '../app/js/lib/scans.js
 import { zonedTime, hmOf } from '../app/js/lib/time.js';
 import { healthSendsText } from './health.mjs';
 
-const SENT = 'notify:sent';
+export const SENT = 'notify:sent';
 
 /** Everything the planner needs, read from the Mac's database. */
 export function stateFrom(store, tz) {

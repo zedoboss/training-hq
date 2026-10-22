@@ -65,13 +65,13 @@ function fold(line) {
  * A calendar file with one short event and an alert per reminder (for Calendar, without a Shortcut). refreshMin: for
  * a subscribed calendar (server/calendar.mjs), how often the iPhone should fetch it again.
  */
-export function icsFor(items, now = Date.now(), { refreshMin = null } = {}) {
+export function icsFor(items, now = Date.now(), { refreshMin = null, alertAfterMin = 0 } = {}) {
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Training HQ//Backup reminders//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', `X-WR-CALNAME:${LIST_NAME}`,
     ...(refreshMin ? [`REFRESH-INTERVAL;VALUE=DURATION:PT${refreshMin}M`, `X-PUBLISHED-TTL:PT${refreshMin}M`] : [])];
   for (const r of items) {
     lines.push('BEGIN:VEVENT', `UID:${r.id.replace(/[^\w.-]/g, '-')}@training-hq`, `DTSTAMP:${icsTime(now)}`, `DTSTART:${icsTime(r.at)}`, 'DURATION:PT10M',
       // A reminder he asked the coach for is titled by its words, not "Reminder".
-      `SUMMARY:${icsText(r.kind === 'coach' && r.body ? r.body : r.title)}`, `DESCRIPTION:${icsText(r.body)}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', `DESCRIPTION:${icsText(r.kind === 'coach' && r.body ? r.body : r.title)}`, 'END:VALARM', 'END:VEVENT');
+      `SUMMARY:${icsText(r.kind === 'coach' && r.body ? r.body : r.title)}`, `DESCRIPTION:${icsText(r.body)}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', `TRIGGER:PT${alertAfterMin}M`, `DESCRIPTION:${icsText(r.kind === 'coach' && r.body ? r.body : r.title)}`, 'END:VALARM', 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   return `${lines.map(fold).join('\r\n')}\r\n`;

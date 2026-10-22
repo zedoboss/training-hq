@@ -46,7 +46,7 @@ function backupHtml(items) {
   const first = items[0]; const last = items[items.length - 1];
   return `<div class="hud c-muted rem-head">BACKUP REMINDERS ON THIS IPHONE</div>
     <section class="card pad-card" id="backup">
-      <p class="hint c-text">If your Mac is off or offline, notifications stop. Subscribe once and your iPhone's Calendar keeps the next 7 days' fixed reminders (check-ins and sessions you set a time for, reminders you asked the coach for) and rings them when the Mac can't. It updates itself: what you've done drops off, and while the Mac is up it never rings on top of its notifications.</p>
+      <p class="hint c-text">If your Mac is off or offline, notifications stop. Subscribe once and your iPhone's Calendar keeps the next 7 days' fixed reminders (check-ins and sessions you set a time for, reminders you asked the coach for) and rings them, 20 minutes late, when the Mac couldn't send them. It updates itself: what you've done, or the Mac already sent, drops off before it rings.</p>
       <div class="btn-row"><button class="btn-primary" id="bk-copy" type="button">Copy link</button></div>
       <p class="hint">Then iPhone Settings, Apps, Calendar, Calendar Accounts, Add Account, Subscribed Calendar: paste, Next, Remove Alerts off, Save. Then Fetch New Data: every 15 minutes. (Thu 10/22: a calendar link opened from here lands in iCloud, whose servers can't reach your Mac, so it never updated.)</p>
       <p class="hint" id="backup-count">${items.length ? `${items.length} reminders, ${esc(formatDay(new Date(first.at)))} to ${esc(formatDay(new Date(last.at)))}.` : 'Nothing to add for the next 7 days.'}</p>
