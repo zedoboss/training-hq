@@ -18,19 +18,23 @@ const seq = (...xs) => { let i = 0; return () => xs[i++ % xs.length]; };
 test('hold script (A14): GET READY 15 s, 3-2-1, the hold, 3-2-1, done; sounds mark every point', () => {
   const s = holdScript({ getReadyS: 15, holdS: 30, bank: BANK, every: 'steady', rng: seq(0.1) });
   const at = s.cues.map((c) => `${c.at}:${c.kind}`);
-  assert.deepEqual(at, ['0:ready', '12:count', '13:count', '14:count', '15:go', '30:mid', '42:count', '43:count', '44:count', '45:end']);
+  assert.deepEqual(at, ['0:ready', '12:count', '13:count', '14:count', '15:go', '30:mid', '35:limit', '42:count', '43:count', '44:count', '45:end']);
+  // Thu 10/22, his words: halfway is only "15 seconds left" or "halfway there"; the pain limit alone at 10 s left.
+  assert.equal(s.cues.find((c) => c.kind === 'mid').text, '15 seconds left.');
+  assert.equal(holdScript({ getReadyS: 15, holdS: 30, rng: seq(0.9) }).cues.find((c) => c.kind === 'mid').text, 'Halfway there.');
+  assert.equal(s.cues.find((c) => c.kind === 'limit').text, 'Only stop if the pain goes over four out of ten.');
   assert.deepEqual(s.cues.filter((c) => c.kind === 'count').map((c) => c.text), ['Three.', 'Two.', 'One.', 'Three.', 'Two.', 'One.']);
-  assert.ok(s.cues.every((c) => c.kind === 'mid' || c.sound), 'every point has a sound for when the voice is off');
+  assert.ok(s.cues.every((c) => c.kind === 'mid' || c.kind === 'limit' || c.sound), 'every point has a sound for when the voice is off');
   assert.equal(s.cues.find((c) => c.kind === 'go').sound, 'go');
   assert.equal(s.cues.find((c) => c.kind === 'end').sound, 'beeps-3');
   assert.equal(s.cues.find((c) => c.kind === 'ready').text, 'W ready.', 'holds: disciplined Warrior');
-  // Often: pushes too, never in the last 8 s of the hold or within 4 s of halfway.
+  // Often: pushes too, never in the last 8 s of the hold or within 4 s of halfway or the pain-limit line.
   const o = holdScript({ getReadyS: 15, holdS: 30, bank: BANK, every: 'often', rng: seq(0.1) });
-  assert.deepEqual(o.cues.filter((c) => c.kind === 'push').map((c) => c.at), [22, 36]);
+  assert.deepEqual(o.cues.filter((c) => c.kind === 'push').map((c) => c.at), [22]);
   assert.deepEqual(holdScript({ getReadyS: 15, holdS: 30, every: 'once' }).cues.filter((c) => c.kind === 'push'), []);
   // A longer hold he set; no get-ready (a timed set in a session).
   const t = holdScript({ getReadyS: 0, holdS: 45, every: 'steady', rng: seq(0.1) });
-  assert.deepEqual(t.cues.map((c) => `${c.at}:${c.kind}`), ['0:go', '12:push', '23:mid', '36:push', '42:count', '43:count', '44:count', '45:end']);
+  assert.deepEqual(t.cues.map((c) => `${c.at}:${c.kind}`), ['0:go', '12:push', '23:mid', '35:limit', '42:count', '43:count', '44:count', '45:end']);
   assert.equal(t.cues[0].text, 'Hold.', 'the plain bank fills in');
   assert.deepEqual(scriptTexts(s).slice(0, 3), ['W ready.', 'Three.', 'Two.']);
 });

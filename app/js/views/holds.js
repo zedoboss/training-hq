@@ -152,6 +152,17 @@ function renderRun(view, repo, areaId, index) {
   // Phases: ready (waiting for Start) -> getready (A14: 15 s to set up, then 3, 2, 1) -> holding -> rate -> rest -> ...
   let area; let hold; let session = null; let setNo = 1; let phase = 'ready'; let endsAt = 0; let timer = null; let startedSet = 0; let endedSet = 0;
   let bank = null; let script = null; let playing = null; let calm = false; let offTalk = () => {};
+  // Thu 10/22, his words: "I'm doing one arm at a time... per round it should have two timers": a hold with sides
+  // (cupping: right arm, then left) runs each side in turn inside one set. Then: "2 minutes rest time per arm... in
+  // between, it should be only 5 seconds", and "after it's done, it should prompt me... the pain, and then 5 seconds for
+  // the other arm". So each arm is rated when it stops, then 5 s to switch; each arm's rest runs from the moment that
+  // arm stops (the right arm's is already going while the left one holds), and the next set's GET READY starts on its
+  // own inside the right arm's rest, so that arm holds again 2:00 after it stopped.
+  const SWITCH_S = 5;
+  let side = 0; let readyOf = 0; let armEnds = []; let restTo = 0;
+  const sides = () => (hold?.sides?.length > 1 ? hold.sides : null);
+  const sideLabel = () => (sides() ? sides()[side] : '');
+  const moreSides = () => Boolean(sides()) && side < sides().length - 1;
   const total = () => hold.sets || 3;
   const secs = () => hold.seconds || 30;
   const getReadyS = () => withDefaults(getState().settings).holds.getReadyS ?? 15;
@@ -163,14 +174,32 @@ function renderRun(view, repo, areaId, index) {
   };
   // Thu 10/22, his words: the count out loud even with the coach off, and a notification at go and at stop.
   const alarms = (items) => { if (getState().paired) macPost('/api/alarms', { kind: 'hold', items: items.map((x) => ({ ...x, url: location.hash })) }).catch(() => {}); };
+  const sideAlarms = (t0, gr) => {
+    const who = sideLabel() ? ` ${sideLabel().toLowerCase()}` : '';
+    const last = !sides() || side === sides().length - 1;
+    alarms([...(gr ? [{ at: t0 + gr * 1000, title: 'Hold: go', body: `${hold.exercise}${who}: hold ${secs()} s now. Set ${setNo} of ${total()}.` }] : []),
+      { at: t0 + (gr + secs()) * 1000, title: 'Hold: stop', body: last ? `${hold.exercise}${who}: set ${setNo} of ${total()} done. Stop.` : `${hold.exercise}: ${sideLabel().toLowerCase()} done. Stop, rate it, then the ${sides()[side + 1].toLowerCase()}.` }]);
+  };
+  /** One arm is done and rated: the next one after a short switch, voiced and notified the same way. */
+  const nextSide = () => {
+    side++;
+    const t0 = Date.now();
+    const sc = holdScript({ getReadyS: SWITCH_S, holdS: secs(), setNo, bank, ...talk.talkPrefs(), calm: calm || talk.isCalm(), avoid: new Set(talk.recentLines()) });
+    sc.cues[0] = { ...sc.cues[0], text: `Switch. ${sideLabel()}.` };
+    talk.prepare(sc, { force: true });
+    playing = talk.run(sc, { t0, force: true });
+    sideAlarms(t0, SWITCH_S);
+    setQuiet('hold', true);
+    readyOf = SWITCH_S; phase = 'getready'; endsAt = t0 + SWITCH_S * 1000;
+    tickLoop(); draw();
+  };
   const begin = () => {
     rest.unlockAudio(); talk.unlock();
     if (!script || script.setNo !== setNo) plan();
+    side = 0; armEnds = []; readyOf = script.getReadyS || 0;
     const t0 = Date.now();
     playing = talk.run(script, { t0, force: true });
-    const gr = script.getReadyS || 0;
-    alarms([...(gr ? [{ at: t0 + gr * 1000, title: 'Hold: go', body: `${hold.exercise}: hold ${secs()} s now. Set ${setNo} of ${total()}.` }] : []),
-      { at: t0 + (gr + secs()) * 1000, title: 'Hold: stop', body: `${hold.exercise}: set ${setNo} of ${total()} done. Stop.` }]);
+    sideAlarms(t0, script.getReadyS || 0);
     setQuiet('hold', true);
     if (script.getReadyS > 0) { phase = 'getready'; endsAt = t0 + script.getReadyS * 1000; } else { phase = 'holding'; startedSet = t0; endsAt = t0 + secs() * 1000; }
     script = null;
@@ -186,9 +215,10 @@ function renderRun(view, repo, areaId, index) {
       };
       await repo.put('sessions', session.id, session);
     }
+    // One set per arm for a hold with sides ("Right arm" in its note), in the order held.
     const set = {
-      id: newId('set'), sessionId: session.id, exKey: session.exercises[0].key, order: setNo, type: 'hold', kg: hold.loadKg ?? null,
-      durationS: Math.round(((endedSet || now) - startedSet) / 1000), done: true, doneAt: now, pain, shaking, note: '',
+      id: newId('set'), sessionId: session.id, exKey: session.exercises[0].key, order: setNo + (sides() ? side / 10 : 0), type: 'hold', kg: hold.loadKg ?? null,
+      durationS: Math.round(((endedSet || now) - startedSet) / 1000), done: true, doneAt: now, pain, shaking, note: sideLabel(),
     };
     await repo.put('sets', set.id, set);
   };
@@ -207,30 +237,40 @@ function renderRun(view, repo, areaId, index) {
       <circle cx="120" cy="120" r="104" stroke="var(--cyan)" stroke-width="10" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${(c * (1 - left / of)).toFixed(1)}" transform="rotate(-90 120 120)"/></svg>`;
   };
 
+  // The other arms' rests, running while this arm switches and holds (his "the 2-minute timer would be at 1:30").
+  const armRestText = () => {
+    if (!sides() || !(phase === 'rate' || (side > 0 && (phase === 'getready' || phase === 'holding')))) return '';
+    const upTo = phase === 'rate' ? side + 1 : side;
+    return armEnds.slice(0, upTo).map((t, i) => (t ? `${sides()[i].toUpperCase()} REST ${clockText(Math.max(0, (t + holdRestS() * 1000 - Date.now()) / 1000), false)}` : '')).filter(Boolean).join(' · ');
+  };
+  const armRestHtml = () => (armRestText() ? `<span class="hud c-muted" data-k="armrest">${esc(armRestText())}</span>` : '');
+
   const draw = () => {
     const left = Math.max(0, (endsAt - Date.now()) / 1000);
     const body = view.querySelector('#h-body');
     if (!body) return;
     if (phase === 'ready' || phase === 'getready' || phase === 'holding' || phase === 'rest') {
-      const of = phase === 'rest' ? holdRestS() : phase === 'getready' ? getReadyS() : secs();
-      const shown = phase === 'ready' ? secs() : left;
+      const of = phase === 'rest' ? holdRestS() : phase === 'getready' ? readyOf || getReadyS() : secs();
+      const shown = phase === 'ready' ? secs() : phase === 'rest' && sides() ? Math.max(0, (restTo - Date.now()) / 1000) : left;
       body.innerHTML = `
         <div class="hold-ring ${phase === 'getready' ? 'is-getready' : phase === 'holding' ? 'is-holding' : ''}">${ring(shown, of)}<div class="hold-ring-text">${phase === 'getready' || phase === 'holding' ? `<span class="hold-phase">${phase === 'getready' ? 'GET READY' : 'HOLD'}</span>` : ''}<b>${clockText(shown, phase !== 'rest' && phase !== 'ready')}</b>
-          <span class="hud c-muted">${phase === 'rest' ? 'REST' : `SET ${setNo} OF ${total()}`}</span></div></div>
-        <div class="btn-row">${phase === 'ready' ? `<button class="btn-primary big" data-h="go" type="button">Start set ${setNo}</button>`
+          <span class="hud c-muted">${phase === 'rest' ? (sides() ? `REST · ${esc(sides()[0].toUpperCase())} NEXT` : 'REST') : `SET ${setNo} OF ${total()}`}</span>${sides() && (phase === 'getready' || phase === 'holding') ? `<span class="hud c-cyan">${esc(sideLabel().toUpperCase())}${phase === 'getready' && side > 0 ? ' · SWITCH' : ''}</span>` : ''}${armRestHtml()}</div></div>
+        <div class="btn-row">${phase === 'ready' ? `<button class="btn-primary big" data-h="go" type="button">Start set ${setNo}${sides() ? ` · ${esc(sides()[0].toLowerCase())} first` : ''}</button>`
           : phase === 'getready' ? '<button class="btn-ghost big" data-h="cancel" type="button">Not yet</button>'
-          : phase === 'holding' ? '<button class="btn-primary big" data-h="end" type="button">End set</button>'
+          : phase === 'holding' ? `<button class="btn-primary big" data-h="end" type="button">${sides() ? `End ${esc(sideLabel().toLowerCase())}` : 'End set'}</button>`
           : `<button class="btn-primary big" data-h="next" type="button">Start set ${setNo} now</button>`}</div>
-        ${phase === 'ready' || phase === 'rest' ? `<p class="hint">Start gives you ${getReadyS()} s to get in position, then 3, 2, 1 and the ${secs()} s hold.</p>` : ''}`;
+        ${phase === 'rest' && sides() ? `<p class="hint">Each arm rests ${restText(holdRestS())} from when it stopped. GET READY starts on its own ${getReadyS()} s before the ${esc(sides()[0].toLowerCase())}'s rest ends.</p>`
+          : phase === 'ready' || phase === 'rest' ? `<p class="hint">Start gives you ${getReadyS()} s to get in position, then 3, 2, 1 and the ${secs()} s hold${sides() ? ` with the ${esc(sides()[0].toLowerCase())}. Rate it, then ${SWITCH_S} s and the ${esc(sides().slice(1).join(', ').toLowerCase())}. Each arm rests ${restText(holdRestS())} from when it stops` : ''}.</p>` : ''}`;
     } else if (phase === 'rate') {
       body.innerHTML = `
         <section class="card pad-card">
-          <div class="hud c-muted">SET ${setNo} · PAIN DURING THE HOLD <span class="c-green">· LIMIT 3-4 / 10</span></div>
+          <div class="hud c-muted">SET ${setNo}${sides() ? ` · ${esc(sideLabel().toUpperCase())}` : ''} · PAIN DURING THE HOLD <span class="c-green">· LIMIT 3-4 / 10</span></div>
           <div class="pain-grid" role="group" aria-label="Pain out of 10">${Array.from({ length: 11 }, (_, i) => `<button class="pain ${i > 4 ? 'over' : ''}" data-p="${i}" type="button">${i}</button>`).join('')}</div>
           <div class="hud c-muted">SHAKING</div>
           <div class="btn-row" role="group" aria-label="Shaking">${['none', 'some', 'a lot'].map((x) => `<button class="pill" data-s="${x}" type="button">${x}</button>`).join('')}</div>
           <p class="hint c-amber" data-k="over" hidden>Over your 3-4 limit. Your note: next time use less weight or push less hard.</p>
-          <button class="btn-primary big" data-h="save" type="button" disabled>Save set ${setNo}</button>
+          <button class="btn-primary big" data-h="save" type="button" disabled>${moreSides() ? `Save, ${SWITCH_S} s to the ${esc(sides()[side + 1].toLowerCase())}` : `Save set ${setNo}`}</button>
+          ${armRestHtml()}
         </section>`;
       let pain = null; let shaking = null;
       const upd = () => {
@@ -241,12 +281,21 @@ function renderRun(view, repo, areaId, index) {
       };
       body.querySelectorAll('[data-p]').forEach((b) => b.addEventListener('click', () => { pain = Number(b.dataset.p); upd(); }));
       body.querySelectorAll('[data-s]').forEach((b) => b.addEventListener('click', () => { shaking = b.dataset.s; upd(); }));
+      // The rated arm's rest keeps counting while he rates.
+      if (sides()) { clearInterval(timer); timer = setInterval(() => { const ar = view.querySelector('[data-k="armrest"]'); if (ar) ar.textContent = armRestText(); }, 500); }
       body.querySelector('[data-h="save"]').addEventListener('click', async () => {
         await saveSet(pain, shaking);
-        if (setNo >= total()) { await finishRound(); return; }
         // Over his 3-4 limit: Calm for the rest of the round (A15).
         if (!painOk(pain)) calm = true;
-        setNo++; phase = 'rest'; endsAt = Date.now() + holdRestS() * 1000; plan(); tickLoop(); draw();
+        if (moreSides()) { nextSide(); return; }
+        if (setNo >= total()) { await finishRound(); return; }
+        setNo++; plan();
+        if (sides()) {
+          restTo = (armEnds[0] || endedSet) + holdRestS() * 1000;
+          if (restTo - Date.now() <= getReadyS() * 1000) { begin(); return; }
+          phase = 'rest'; endsAt = restTo - getReadyS() * 1000;
+        } else { phase = 'rest'; endsAt = Date.now() + holdRestS() * 1000; }
+        tickLoop(); draw();
       });
     }
     body.querySelectorAll('[data-h]').forEach((b) => {
@@ -254,7 +303,10 @@ function renderRun(view, repo, areaId, index) {
       // Not in position yet: back to Start, nothing saved.
       if (b.dataset.h === 'cancel') b.onclick = () => { clearInterval(timer); playing?.stop(); setQuiet('hold', false); phase = 'ready'; plan(); draw(); };
       // Stopped early: the seconds actually held are saved.
-      if (b.dataset.h === 'end') b.onclick = () => { clearInterval(timer); playing?.stop(); setQuiet('hold', false); endedSet = Date.now(); rest.beep(1); phase = 'rate'; draw(); };
+      if (b.dataset.h === 'end') b.onclick = () => {
+        clearInterval(timer); playing?.stop(); setQuiet('hold', false); endedSet = Date.now(); armEnds[side] = endedSet; rest.beep(1);
+        alarms([]); phase = 'rate'; draw();
+      };
     });
   };
 
@@ -265,9 +317,10 @@ function renderRun(view, repo, areaId, index) {
         // GET READY is over: the hold starts now (the voice or the sound says so). The hold's time starts here.
         if (phase === 'getready') { startedSet = endsAt; endsAt = startedSet + secs() * 1000; phase = 'holding'; draw(); return; }
         clearInterval(timer);
+        if (phase === 'rest' && sides()) { begin(); return; }
         // The end of a hold is marked by the script (voice, else its beeps); the end of a rest by two beeps.
         if (phase !== 'holding') rest.beep(2);
-        if (phase === 'holding') endedSet = endsAt;
+        if (phase === 'holding') { endedSet = endsAt; armEnds[side] = endedSet; }
         setQuiet('hold', false);
         phase = phase === 'holding' ? 'rate' : 'ready';
         if (phase === 'ready' && script?.setNo !== setNo) plan();
@@ -275,10 +328,12 @@ function renderRun(view, repo, areaId, index) {
         return;
       }
       const t = view.querySelector('.hold-ring-text b');
-      const left = Math.max(0, (endsAt - Date.now()) / 1000);
+      const left = Math.max(0, ((phase === 'rest' && sides() ? restTo : endsAt) - Date.now()) / 1000);
       if (t) t.textContent = clockText(left, phase === 'getready' || phase === 'holding');
+      const ar = view.querySelector('[data-k="armrest"]');
+      if (ar) ar.textContent = armRestText();
       const svg = view.querySelector('.hold-ring');
-      if (svg) svg.firstElementChild.outerHTML = ring(left, phase === 'rest' ? holdRestS() : phase === 'getready' ? getReadyS() : secs());
+      if (svg) svg.firstElementChild.outerHTML = ring(left, phase === 'rest' ? holdRestS() : phase === 'getready' ? readyOf || getReadyS() : secs());
     }, 200);
   };
 
@@ -299,7 +354,7 @@ function renderRun(view, repo, areaId, index) {
     calm = (todayDoc?.readiness?.easeHolds || []).includes(areaId);
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/holds">Back</a><span class="hud c-muted">${esc(area.label.toUpperCase())} · ${esc((PHASE_TEXT[area.phase] || '').split(':')[0].toUpperCase())}</span><button class="pill" id="h-mute" type="button" aria-pressed="false">Coach on</button></div>
-      <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${index === 'other' ? `${secs()} s` : `<button class="link-btn" id="h-secs" type="button">${secs()} s</button>`} · ${restText(holdRestS())} between</div></div>
+      <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${index === 'other' ? `${secs()} s` : `<button class="link-btn" id="h-secs" type="button">${secs()} s</button>`}${sides() ? ' per arm' : ''} · ${restText(holdRestS())} ${sides() ? 'rest per arm' : 'between'}</div></div>
       <div class="pinned small" id="h-note" hidden></div>
       <div id="h-body"></div>
       <p class="hint">Next-day check: ${esc(tomorrow())}${area.phase === 'heal' ? ', with the morning round' : ''}.</p>

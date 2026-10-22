@@ -120,11 +120,15 @@ export function holdScript({ getReadyS = 15, holdS = 30, setNo = 1, bank = null,
   else if (g > 0) cues.push({ at: 0, kind: 'ready', sound: 'beeps-1' });
   if (g >= 3) for (const n of [3, 2, 1]) cues.push({ at: g - n, kind: 'count', text: COUNT[n], sound: 'count' });
   say(g, 'go', 'hold-go', 'go');
-  // During the hold: the halfway line, and pushes at his rhythm (none in the last 8 s: the count-out is there).
+  // During the hold: the halfway line, the pain limit at 10 s left, and pushes at his rhythm (none in the last 8 s: the
+  // count-out is there). Thu 10/22, his words: halfway is only "15 seconds left" or "halfway there", picked at random,
+  // nothing added; the "only stop if..." line on its own at about 10 s left.
   const mid = g + Math.round(holdS / 2);
+  const limitAt = g + holdS - 10;
   const step = EVERY[every] ?? EVERY.steady;
-  const pushes = rhythm(g, g + holdS - 8, step).filter((t) => Math.abs(t - mid) >= 4 && t >= g + 4);
-  if (holdS >= 16) say(mid, 'mid', 'hold-mid');
+  const pushes = rhythm(g, g + holdS - 8, step).filter((t) => Math.abs(t - mid) >= 4 && t >= g + 4 && (holdS < 20 || Math.abs(t - limitAt) >= 4));
+  if (holdS >= 16) cues.push({ at: mid, kind: 'mid', text: rng() < 0.5 ? `${g + holdS - mid} seconds left.` : 'Halfway there.' });
+  if (holdS >= 20) cues.push({ at: limitAt, kind: 'limit', text: 'Only stop if the pain goes over four out of ten.' });
   for (const t of pushes) say(t, 'push', 'hold-push');
   for (const n of [3, 2, 1]) if (holdS - n > 0) cues.push({ at: g + holdS - n, kind: 'count', text: COUNT[n], sound: 'count' });
   say(g + holdS, 'end', 'hold-end', 'beeps-3');
