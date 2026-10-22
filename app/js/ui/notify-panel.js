@@ -41,7 +41,7 @@ function backupHtml(items) {
         <li>On your iPhone: Calendar, Calendars, Add Calendar, name it ${esc(BACKUP_CALENDAR)}, account iCloud, Done.</li>
         <li>On the Mac: when macOS asks whether "node" may control Calendar, click OK.</li>
         <li>If you subscribed to the old Training HQ link: iPhone Settings, Apps, Calendar, Calendar Accounts, the subscribed Training HQ, Delete Account. Your iPhone stopped refreshing it, so its alerts rang at old times.</li>
-        <li>Calendar alerts through Do Not Disturb: in the Focus, allow Calendar or Time Sensitive notifications.</li>
+        <li>Nothing to change in Do Not Disturb: with it on, a backup alert lands quietly in Notification Center, and only when the Mac couldn't send it (Thu 10/22, his choice: only Training HQ comes through).</li>
       </ol></details>
     </section>`;
 }
