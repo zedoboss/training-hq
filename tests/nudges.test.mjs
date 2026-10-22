@@ -277,6 +277,35 @@ test('the Mac asks for his after-meal supplements the moment the first meal is l
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('Thu 10/22: a mark left by the morning snack and a holds round left open block neither the supplements nor the dishes', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick, nudgeInputs } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-supps2-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('supplements', 'supp.o3', { id: 'supp.o3', kind: 'supplement', name: 'Omega-3', short: 'O3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
+    store.writeLocal('meals', 'm0', { id: 'm0', date: D, at: at(D, '10:20'), name: 'Snack', source: 'manual', before: { items: [] } });
+    // What the Mac held that day: the snack marked the day's prompt as done, before snacks stopped counting.
+    store.setMeta('dishes:state', { seen: { m0: at(D, '10:21') }, sent: { m0: at(D, '10:23') }, suppsFor: { [D]: at(D, '10:21') } });
+    // A wrist holds round opened at 11:32 AM and never finished.
+    store.writeLocal('sessions', 's1', { id: 's1', kind: 'holds', status: 'active', startedAt: at(D, '11:32') });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'Breakfast', source: 'manual', before: { items: [] } });
+    assert.equal((await dishesTick({ store, push, now: at(D, '13:30'), tz: TZ }))?.key, 'supps-after-meal');
+    assert.equal(nudgeInputs(store, at(D, '13:31'), TZ).busy, false, 'a holds round open two hours is not busy');
+    assert.equal((await dishesTick({ store, push, now: at(D, '13:32'), tz: TZ }))?.key, 'dishes');
+    assert.deepEqual(sent.map((m) => m.tag), ['supps-after-meal', 'dishes']);
+    // A holds round just started still keeps him undisturbed.
+    store.writeLocal('sessions', 's2', { id: 's2', kind: 'holds', status: 'active', startedAt: at(D, '13:40') });
+    assert.equal(nudgeInputs(store, at(D, '13:45'), TZ).busy, true);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('holds an hour past their time say so; a late morning round: one now, the evening one at its time', () => {
   const reminders = [
     { id: `holds-morning:${D}`, kind: 'holds', tag: 'holds-morning', at: at(D, '10:30'), due: true, title: 'Morning holds', body: 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.' },

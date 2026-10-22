@@ -119,6 +119,14 @@ function sayInTalk(store, { text, at, tz, kind, ref }) {
   store.writeLocal(MSGS, id, { id, role: 'assistant', text, at, tz, kind, ref });
 }
 
+/**
+ * A workout or the sauna running. A holds session counts only for its first 30 minutes: a round takes a few (Thu 10/22:
+ * a wrist round left open at 11:32 AM kept the dishes after his first meal from ever coming).
+ */
+const HOLDS_BUSY_MIN = 30;
+const busyNow = (list, now) => list('sessions').some((x) => x.status === 'active' && !(x.kind === 'holds' && now - (x.startedAt || 0) > HOLDS_BUSY_MIN * 60000))
+  || list('sauna').some((x) => x.status === 'active');
+
 /** What the nudges need, read from the Mac's database. */
 export function nudgeInputs(store, now, tz) {
   const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
@@ -140,7 +148,7 @@ export function nudgeInputs(store, now, tz) {
   const fasting = fastingOn(st.days || {}, date, list('meals'));
   return {
     date, n, fasting,
-    busy: list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active'),
+    busy: busyNow(list, now),
     lastUserAt: Math.max(0, ...list(MSGS).filter((m) => m.role === 'user').map((m) => m.at || 0)),
     args: {
       now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm, fasting,
@@ -193,17 +201,18 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     if (!st) state.sent[m.id] = now; // first run: nothing from before
   }
   for (const [id, at] of Object.entries(state.seen)) if (now - at > 2 * 86400000) { delete state.seen[id]; delete state.sent[id]; }
-  const busy = list('sessions').some((x) => x.status === 'active') || list('sauna').some((x) => x.status === 'active');
+  const busy = busyNow(list, now);
   let out = null;
   // The first meal of the day, the moment it is logged (Tue 10/20, his words): "take your supplements" at once, with
   // the ones he takes after it that aren't ticked yet. A snack isn't his first meal (Thu 10/22, his words: "I take them
   // after the first and the second meal, not after the snack"). Then the dishes, two minutes later, as below.
+  // Once a day, kept as the meal it was for (Thu 10/22: a mark left by the morning snack blocked it after breakfast).
   const first = meals.filter((m) => m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[0];
   const holds = holdsOf(store);
-  if (first && st && !state.suppsFor?.[date] && state.seen[first.id] === now && !heldOff('supps-after-meal', holds, now)) {
+  if (first && st && state.suppsFor?.[date] !== first.id && state.seen[first.id] === now && !heldOff('supps-after-meal', holds, now)) {
     const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' });
     const open = groups.filter((g) => g.afterMeal).flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.name);
-    state.suppsFor = { [date]: now };
+    state.suppsFor = { [date]: first.id };
     if (open.length) {
       const opts = voiceOpts(store);
       const line = pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
