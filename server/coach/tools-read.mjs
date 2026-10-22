@@ -524,6 +524,26 @@ function programmeText(s, { dayType = null, week = null } = {}) {
 
 // ---- tendons ------------------------------------------------------------------------------------------------------
 
+/**
+ * His tendon rules from his data (the seed, private): his note's rules, the three phases in the wording he chose (Thu
+ * 10/22, his words: "I like this wording specifically... so the coach can pull this information"), and the context he
+ * sent with them, dated. Without the data: the note's rules in short.
+ */
+export function tendonRuleLines(rules) {
+  const items = rules?.items || [];
+  if (!items.length) return ['Rules (his note): hold at least 30 s, 3 sets; pain during a hold may reach 3-4 out of 10 if it is not worse the next day; if it is, less weight or push less hard. Heal: 3 sets twice a day, then 3-4 times a week for 4-8 weeks. Maintenance: 5-10 minutes after a workout or one day a week.'];
+  const phases = items.filter((r) => /^phase-/.test(r.id));
+  const out = [`Rules (his note): ${items.filter((r) => !/^phase-/.test(r.id)).map((r) => r.text).join(' ')}`];
+  if (phases.some((r) => r.title)) {
+    out.push('The three phases in his own chosen wording (when he asks about the phases, give them like this; the app\'s "heal" is his Phase 1: Relief):');
+    for (const r of phases) out.push(`- ${r.title || r.text}${r.details?.length ? `\n${r.details.map((x) => `  * ${x}`).join('\n')}` : ''}`);
+  } else out.push(`Phases (his note): ${phases.map((r) => r.text).join(' ')}`);
+  for (const c of rules.contexts || []) {
+    out.push(`Context he sent (${c.date}, ${c.area}; ${c.source}): he asked: "${c.his}"\n  The answer he got: ${(c.answer || []).join(' ')}${c.escalate ? `\n  ${c.escalate.text} (${c.escalate.use})` : ''}`);
+  }
+  return out;
+}
+
 function tendonsText(s) {
   const areas = s.list('tendons').filter((a) => a.kind === 'area');
   const rounds = roundsByDate(areas, s.list('sessions'), s.list('sets'), s.one('bridge', 'last-loads'));
@@ -539,7 +559,7 @@ function tendonsText(s) {
     if (a.loadsArea?.exercises?.length) lines.push(`  loads this area: ${a.loadsArea.exercises.join(', ')}.`);
   }
   lines.push(...holdLines(s));
-  lines.push('Rules (his note): hold at least 30 s, 3 sets; pain during a hold may reach 3-4 out of 10 if it is not worse the next day; if it is, less weight or push less hard. Heal: 3 sets twice a day, then 3-4 times a week for 4-8 weeks. Maintenance: 5-10 minutes after a workout or one day a week.');
+  lines.push(...tendonRuleLines(s.one('tendons', 'rules')));
   const table = s.one('tendons', 'readiness');
   if (table) lines.push(`Readiness table: ${table.status === 'confirmed' ? `confirmed${table.confirmedOn ? ` ${dayText(table.confirmedOn, s.today)}` : ''}` : 'a DRAFT he has not confirmed yet (he confirms it on the check-in screen before its first use)'}. Asked: ${askedAreas(areas).map((a) => a.label).join(', ')}, legs/back by day type, energy.`);
   const rd = s.days()[s.today]?.readiness;
@@ -822,7 +842,7 @@ export const READ_TOOLS = [
   read('weather', 'Weather', "The weather at his place now and the next hours: what he said he sees, the nearest weather station's observation, the forecast models (with how many agree): raining or not now, chance of rain, UV and how hot it feels, and today's safe walking windows. For 'is it raining?', 'should I walk now?'.", obj(), (s) => weatherText(s)),
   read('today', 'Today', "Everything about today: the rotation (today's day type, week column, or why it's a rest day, and the next session), the session time and check-in, the session in progress with the next set, tendon holds due, supplements, food so far, the next body scan. Call it first for any question about today or tomorrow.", obj(), (s) => todayText(s)),
   read('programme', 'Programme', "A day's routine with each exercise's target for the next session (exactly what Start gives: total kg with the bar and plates per side, reps, sets, and why: table, 30% cap, check-in), plus last time. dayType defaults to the next session; week shows another week's column.", obj({ dayType: DAY_TYPE, week: { type: 'integer', minimum: 1, maximum: 12 } }), (s, a) => programmeText(s, a)),
-  read('tendons', 'Tendons', 'His tendon areas with their phase, holds (load, sets, seconds, where, when), what is done and due, his note\'s rules, the readiness table and today\'s check-in.', obj(), (s) => tendonsText(s)),
+  read('tendons', 'Tendons', 'His tendon areas with their phase, holds (load, sets, seconds, where, when), what is done and due, his note\'s rules, the three phases (relief, fix, maintenance) in his own chosen wording, the context he sent about his knees, the readiness table and today\'s check-in. For any question about the phases or what dose fits.', obj(), (s) => tendonsText(s)),
   read('history', 'History', "His training history (Strong, Hevy and Training HQ, all imported). With exercise: that exercise's sessions set by set, its records and best weight per rep count. Without: the sessions in a date range (default the last 14 days), set by set.", obj({ exercise: { type: 'string', description: 'what he calls it, e.g. "squat", "cable row"' }, from: ISO, to: ISO, dayType: DAY_TYPE, limit: { type: 'integer', minimum: 1, maximum: 40 } }), (s, a) => historyText(s, a)),
   read('calendar', 'Calendar', 'Day by day what happened: sessions, holds, meals, supplements, squat depth, sauna, body scans, rest days, plus the week streak. A month (YYYY-MM, default this month) or a date range.', obj({ month: { type: 'string', pattern: '^\\d{4}-\\d{2}$' }, from: ISO, to: ISO }), (s, a) => calendarText(s, a)),
   read('health', 'Apple Health', 'Steps, sleep, weight and workouts per day from Apple Health (the iPhone Shortcut), the bodyweight used for pull-ups, and his latest body measurements.', obj({ days: { type: 'integer', minimum: 1, maximum: 120 } }), (s, a) => healthText(s, a)),

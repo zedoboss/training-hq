@@ -94,10 +94,12 @@ export function holdsAfter(areas, dayType) {
 /** Pain rule from the tendon note: up to 3-4 out of 10 is fine if it isn't worse the next day. */
 export const painOk = (pain) => pain == null || pain <= 4;
 
+// Thu 10/22: the phases in the wording he chose (Phase 1: Relief; Phase 2: Fix it for good; Maintenance). The key 'heal'
+// stays in the data.
 export const PHASE_TEXT = {
-  heal: 'Heal phase: 3 holds twice a day, morning and evening',
-  fix: 'Fix phase: 3-4 times a week for 4-8 weeks',
-  maintenance: 'Maintenance: after a workout, or one day a week',
+  heal: 'Relief phase: 3 holds twice a day, morning and evening, every day until the pain goes away (about 1-2 weeks)',
+  fix: 'Fix phase: 3-4 times a week for at least 4-8 weeks',
+  maintenance: 'Maintenance: 5-10 minutes after every workout, or one day a week',
   none: 'Nothing reported',
   unknown: 'Phase not set yet',
 };

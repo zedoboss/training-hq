@@ -671,7 +671,7 @@ test('human coach (Wed 10/21): fast, hold_off, neck_plan, sauna later and the do
 test('tendon_phase (Wed 10/21): knees from heal to fix on his answer; the wall squat gets rest days, the cycle is logged', async () => {
   store.writeLocal('tendons', 'area.knees', { kind: 'area', id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Leg Extension (Machine)', timing: ['after Legs'], where: 'gym' }, { exercise: 'Toes Wall Squat Hold', when: 'the second session on Legs days; both sessions on every other day', where: 'home' }] });
   const r = await call('tendon_phase', { area: 'knees', phase: 'fix', pain: 0, reason: 'random pain gone' });
-  assert.match(r.text, /^Knees: Fix phase: 3-4 times a week for 4-8 weeks, from Tuesday 1\/20\. Holds: Leg Extension \(Machine\) after Legs; Toes Wall Squat Hold rest days\./);
+  assert.match(r.text, /^Knees: Fix phase: 3-4 times a week for at least 4-8 weeks, from Tuesday 1\/20\. Holds: Leg Extension \(Machine\) after Legs; Toes Wall Squat Hold rest days\./);
   const k = store.getRecord('tendons', 'area.knees').data;
   assert.deepEqual([k.phase, k.phaseSince, k.phaseLog.at(-1).from, k.phaseLog.at(-1).pain], ['fix', '2026-01-20', 'heal', 0]);
   assert.match((await call('tendon_phase', { area: 'elbows', phase: 'fix' })).text, /^Which area/);
@@ -775,4 +775,18 @@ test('weather (Thu 10/22): a forecast is said as one, the station and his word c
   writeFileSync(join(dir, 'weather.json'), JSON.stringify({ lat: 1, lon: 2 }));
   await openWeather({ configDir: dir, store, fetchFn: fake, now: () => clock }).refresh({ force: true });
   assert.equal(store.getMeta('weather').seen.said, 'clouds, some sky, no rain');
+});
+
+test('the tendons tool gives the three phases in his chosen wording and the context he sent, from his data (Thu 10/22)', async () => {
+  const { tendonRuleLines } = await import('../server/coach/tools-read.mjs');
+  const rules = { items: [
+    { id: 'hold-dose', text: 'Hold at least 30 seconds, 3 sets.' },
+    { id: 'phase-heal', text: 'Phase 1 short', title: 'Phase 1: Relief (about 1–2 weeks)', details: ['3 sets, twice a day: once in the morning and once in the evening.'] },
+    { id: 'phase-fix', text: 'Phase 2 short', title: 'Phase 2: Fix it for good (at least 4–8 weeks)', details: ['3–4 sessions a week.'] },
+    { id: 'phase-maintenance', text: 'Maintenance short', title: 'Maintenance (ongoing)', details: ['Option A is 5–10 minutes after every workout.'] },
+  ], contexts: [{ date: '2026-03-17', area: 'knees', source: 'a chat', his: 'Random pain when I bend down?', answer: ['Not quite.'], escalate: { text: 'When to escalate: the knee swells.', use: 'Repeat only if he reports one of these.' } }] };
+  const text = tendonRuleLines(rules).join('\n');
+  assert.match(text, /^Rules \(his note\): Hold at least 30 seconds, 3 sets\.\nThe three phases in his own chosen wording \(when he asks about the phases, give them like this; the app's "heal" is his Phase 1: Relief\):\n- Phase 1: Relief \(about 1–2 weeks\)\n  \* 3 sets, twice a day: once in the morning and once in the evening\.\n- Phase 2: Fix it for good/);
+  assert.match(text, /Context he sent \(2026-03-17, knees; a chat\): he asked: "Random pain when I bend down\?"\n  The answer he got: Not quite\.\n  When to escalate: the knee swells\. \(Repeat only if he reports one of these\.\)/);
+  assert.match(tendonRuleLines(null)[0], /^Rules \(his note\): hold at least 30 s/, 'without his data: the note in short');
 });
