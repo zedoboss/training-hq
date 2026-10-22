@@ -5,8 +5,26 @@
 //   microphone changes; a sound scheduled on that stopped clock is never heard. Every sound now restarts it first.
 // - With the coach's microphone off, iPhone's silent switch mutes web audio (with it on, the phone is in a mode that
 //   ignores the switch). Timer sounds (the rest end, the hold's beeps) switch to playback, as the Clock app does.
+// Thu 10/22 at the gym, again: "My rest time just finished. And no sound... volume to the max, not on silent, no sleep
+// mode". Web Audio can stay stopped after iPhone interrupts it (the coach's voice, the microphone, another app) and
+// restarting it needs a tap. So timer sounds (alarm) now play as a short sound file through an audio element that a
+// tap has unlocked (iPhone lets that element play again later without a tap); Web Audio stays for the rest and as
+// the fallback. The Mac also sends a "Rest over" notification (rest-push), which iPhone sounds on its own.
 let audio = null;
 let mic = false;
+let el = null; let elReady = false;
+const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
+
+/** The audio element, unlocked inside a tap (a silent play), so later timer sounds play without one. */
+function unlockElement() {
+  try {
+    if (!el) { el = new Audio(); el.preload = 'auto'; el.setAttribute('playsinline', ''); }
+    if (elReady) return;
+    el.src = SILENT;
+    const p = el.play();
+    if (p?.then) p.then(() => { elReady = true; }).catch(() => {}); else elReady = true;
+  } catch { /* no audio element */ }
+}
 
 function ready() {
   try {
@@ -16,7 +34,7 @@ function ready() {
   return audio;
 }
 
-export function unlockAudio() { ready(); }
+export function unlockAudio() { ready(); unlockElement(); }
 
 /** The coach's microphone is open (its audio mode already ignores the silent switch; playback must not override it). */
 export function micActive(on) { mic = !!on; }
@@ -66,12 +84,58 @@ export function play(id = 'beeps', volume = 80, { alarm = false } = {}) {
   const n = /^beeps-(\d)$/.exec(id);
   const notes = n ? Array.from({ length: +n[1] }, (_, i) => [i * 0.28, i === +n[1] - 1 ? 1320 : 880, 0.22]) : PATTERNS[id] || PATTERNS.beeps;
   if (alarm) loudFor(Math.max(...notes.map(([at, , len]) => at + len)));
+  if (alarm && elReady && playFile(notes, volume, a)) return;
   if (a.state === 'running') { schedule(a, notes, volume); return; }
   // Stopped: play once it runs again (or anyway after a moment, if iPhone never says so).
   let done = false;
   const go = () => { if (!done) { done = true; schedule(a, notes, volume); } };
   a.resume().then(go).catch(go);
   setTimeout(go, 800);
+}
+
+const files = new Map();
+/** A timer sound as a sound file in the unlocked element; Web Audio when the element refuses. */
+function playFile(notes, volume, a) {
+  try {
+    const key = `${JSON.stringify(notes)}@${volume}`;
+    if (!files.has(key)) files.set(key, URL.createObjectURL(new Blob([wavOf(notes, volume)], { type: 'audio/wav' })));
+    el.src = files.get(key);
+    el.currentTime = 0;
+    const p = el.play();
+    if (p?.catch) p.catch(() => { elReady = false; if (a.state === 'running') schedule(a, notes, volume); else a.resume().then(() => schedule(a, notes, volume)).catch(() => {}); });
+    return true;
+  } catch { return false; }
+}
+
+const WAVES = {
+  sine: (x) => Math.sin(2 * Math.PI * x),
+  triangle: (x) => (2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * x)),
+  square: (x) => (Math.sin(2 * Math.PI * x) >= 0 ? 1 : -1),
+};
+
+/** The notes as a 16-bit mono WAV file, with the same shape as schedule(): a quick rise, then a fade to nothing. */
+export function wavOf(notes, volume = 80, rate = 22050) {
+  // Louder than the Web Audio level: a timer sound has to cut through gym music, as the Clock app's does.
+  const level = Math.min(1, Math.max(0, volume / 100)) * 0.9;
+  const total = Math.max(...notes.map(([at, , len]) => at + len)) + 0.05;
+  const n = Math.ceil(total * rate);
+  const pcm = new Float32Array(n);
+  for (const [at, freq, len, wave = 'sine', loud = 1] of notes) {
+    const peak = Math.max(0.0002, level * loud); const fn = WAVES[wave] || WAVES.sine;
+    const s0 = Math.floor(at * rate); const s1 = Math.min(n, Math.ceil((at + len) * rate));
+    for (let i = s0; i < s1; i++) {
+      const t = (i - s0) / rate;
+      const env = t < 0.015 ? 0.0001 * (peak / 0.0001) ** (t / 0.015) : peak * (0.0001 / peak) ** ((t - 0.015) / Math.max(0.001, len - 0.015));
+      pcm[i] += fn(freq * t) * env;
+    }
+  }
+  const buf = new ArrayBuffer(44 + n * 2); const v = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 32767, true);
+  return buf;
 }
 
 function schedule(audio, notes, volume) {

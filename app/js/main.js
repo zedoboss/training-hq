@@ -152,3 +152,14 @@ ready.then(async () => {
 registerServiceWorker();
 // Squat Depth's pose files (about 19 MB) are fetched once in the background so it works at the gym with no signal.
 autoKeepOffline();
+// "Rest over" from the Mac (Thu 10/22): it learns when each rest ends and sends a notification at that moment, heard
+// even when this page's sound is not (screen locked, another app in front, iPhone audio stuck).
+ready.then(async () => {
+  const rest = await import('./lib/rest-timer.js');
+  const { macPost } = await import('./lib/data.js');
+  rest.onPlan((p) => {
+    if (!getState().paired) return;
+    const url = /^#\/session\//.test(location.hash) ? location.hash : '#/train';
+    macPost('/api/rest', p ? { endsAt: p.endsAt, label: p.label, url } : { endsAt: null }).catch(() => {});
+  });
+}).catch(() => {});

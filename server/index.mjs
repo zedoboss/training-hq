@@ -18,6 +18,7 @@ import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
 import { findClaude } from './claude.mjs';
 import { openChanges } from './coach/changes.mjs';
+import { openRestPush } from './rest-push.mjs';
 import { openHealth, defaultHealthDir } from './health.mjs';
 import { openCoach } from './coach/index.mjs';
 import { readProfile, readRecovery } from './coach/profile.mjs';
@@ -58,6 +59,11 @@ const push = openPush({ store, vapidFile: join(p.configDir, 'vapid.json'), subje
 const weather = openWeather({ configDir: p.configDir, store, log });
 weather.refresh().catch(() => {});
 setInterval(() => { weather.refresh().catch(() => {}); }, 15 * 60000).unref();
+
+// "Rest over" (Thu 10/22): the phone says when each rest ends; checked every second, sent to that phone.
+const restPush = openRestPush({ store, push, log });
+const restTimer = setInterval(() => { restPush.tick().catch((e) => log(`rest over: ${e.stack || e}`)); }, 1000);
+restTimer.unref();
 
 // Reminders (step 4): checked once a minute, sent as push notifications.
 // The coach is made further down; the notifier asks for it when it needs it (coach initiatives).
@@ -117,7 +123,7 @@ const voice = openVoice({ store, dataDir: p.dataDir, engine, whisper, coach, log
 const tts = openTts({ configDir: p.configDir, log });
 log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, evolt, onSync, log });
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, evolt, restPush, onSync, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });
@@ -129,6 +135,7 @@ const shutdown = (sig) => {
   clearInterval(visionTimer);
   clearInterval(healthTimer);
   if (changesTimer) clearInterval(changesTimer);
+  clearInterval(restTimer);
   coach.close().catch(() => {});
   whisper.stop('server stopping');
   server.close(() => { store.close(); process.exit(0); });

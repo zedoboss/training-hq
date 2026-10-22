@@ -88,7 +88,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, evolt = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, evolt = null, restPush = null, onSync = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -296,6 +296,14 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       const device = auth(req);
       if (!push) throw new HttpError(404, 'push not available');
       return push.unsubscribe(device);
+    },
+
+    // Thu 10/22: the phone's rest timer, so the Mac sends "Rest over" when it ends (server/rest-push.mjs).
+    'POST /api/rest': async (req) => {
+      const device = auth(req);
+      if (!restPush) throw new HttpError(404, 'rest notifications not available');
+      const b = await readJson(req);
+      return { alarm: restPush.set(device.id, b || {}) };
     },
 
     'POST /api/push/test': async (req) => {
