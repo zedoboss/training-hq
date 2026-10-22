@@ -35,6 +35,7 @@ import { MODEL_LABEL } from './lib/coach.js';
 import { autoKeepOffline } from './lib/squat-offline.js';
 import { mountVoiceHud } from './ui/voice-hud.js';
 import { mountCoachCaption } from './ui/coach-caption.js';
+import { mountWorkoutBar } from './ui/workout-bar.js';
 import { resume as resumeVoice, watchNudges } from './lib/voice.js';
 
 const VIEWS = {
@@ -140,6 +141,7 @@ route();
 // Voice (step 9): the header chip, and listening again if it was on for this device.
 mountVoiceHud(document.getElementById('voice-chip'));
 mountCoachCaption();
+mountWorkoutBar();
 resumeVoice();
 ready.then((repo) => watchNudges(repo)).catch(() => {});
 // Notifications stay connected: the Mac gets this phone's subscription at every start; if it was lost, one tap.

@@ -728,3 +728,17 @@ body.timer-open { overflow: hidden; }
 /* Tue 10/20: scrolled, the mic chip and the settings button showed through the iPhone's status bar (time, signal,
    battery). The status bar area is always solid. */
 body::after { content: ''; position: fixed; top: 0; left: 0; right: 0; height: var(--safe-top); background: var(--bg); z-index: 35; pointer-events: none; }
+
+/* Thu 10/22: the workout in progress on every other screen (ui/workout-bar.js); the page keeps room for it. */
+.wbar { position: fixed; z-index: 25; left: 12px; right: 12px; bottom: calc(8px + var(--safe-bottom)); max-width: 560px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; border: 1px solid var(--cyan); border-radius: 12px;
+  background: var(--surface-2); color: var(--text); text-decoration: none; box-shadow: 0 6px 24px rgba(0, 0, 0, .45); }
+.wbar[hidden] { display: none; }
+.wbar-top { display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: 0.14em; }
+.wbar-top > :first-child { flex: 1 1 auto; min-width: 0; }
+.wbar-rest { font-size: 13px; font-weight: 600; }
+.wbar-go { color: var(--cyan); font-size: 20px; line-height: 1; }
+.wbar-next { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.has-wbar .app { padding-bottom: calc(76px + var(--safe-bottom)); }
+body.has-wbar .coach-compose { bottom: calc(64px + var(--safe-bottom)); padding-bottom: 8px; }
+body.has-wbar .toast { bottom: calc(86px + var(--safe-bottom)); }

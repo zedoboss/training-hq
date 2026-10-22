@@ -280,3 +280,19 @@ export function setTimerResult({ startedAt, targetS = 0, readyUntil = 0 }, now =
   const s = Math.max(1, Math.round((now - Math.max(startedAt, readyUntil || 0)) / 1000));
   return targetS > 0 ? Math.min(targetS, s) : s;
 }
+
+const rangeText = (r) => (Array.isArray(r) ? (r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`) : r ?? '');
+
+/** The next set to do: "Hip Thrust (Machine) · set 2 of 2 · 45 kg × 10-12", or '' when every set is ticked. */
+export function nextSetText(session, sets) {
+  const ordered = [...sets].sort((a, b) => a.order - b.order);
+  const next = ordered.find((s) => !s.done);
+  if (!next) return '';
+  const ex = (session.exercises || []).find((e) => e.key === next.exKey);
+  const mine = ordered.filter((s) => s.exKey === next.exKey);
+  const kg = next.kg ?? next.target?.kg;
+  const reps = rangeText(next.target?.reps);
+  const what = next.type === 'hold' ? `hold ${next.durationS ?? 30} s` : [kg != null ? `${kg} kg` : '', reps ? `× ${reps}` : ''].filter(Boolean).join(' ');
+  const kind = next.type === 'warmup' ? 'warm-up' : next.type === 'hold' ? 'hold' : 'set';
+  return [ex?.name || 'Next', `${kind} ${mine.indexOf(next) + 1} of ${mine.length}`, what].filter(Boolean).join(' · ');
+}
