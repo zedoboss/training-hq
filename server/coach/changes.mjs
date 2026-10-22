@@ -17,7 +17,6 @@ export const COL = 'coach-changes';
 export const MSGS = 'coach-messages';
 export const KINDS = ['personality', 'behaviour', 'bug'];
 export const MODEL = { model: 'claude-opus-5-5', effort: 'high' };
-export const MAX_PER_DAY = 10;
 export const TIMEOUT_MS = 60 * 60000;
 export const MAX_TRIES = 2;
 const OPEN = new Set(['queued', 'working']);
@@ -115,7 +114,7 @@ export function guardSettings({ node = process.execPath, guard, codeDir, private
  * @param {() => void} [o.restart] the server restarts itself (a builder changed server code)
  * @param {() => boolean} [o.busy] a workout is running: the restart waits for it to end
  */
-export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, log = () => {}, now = () => Date.now(), tz = () => 'UTC', maxPerDay = MAX_PER_DAY, timeoutMs = TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)) }) {
+export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, log = () => {}, now = () => Date.now(), tz = () => 'UTC', timeoutMs = TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)) }) {
   const dir = join(privateDir, 'logs', 'coach-changes');
   const all = () => store.listRecords(COL).map((r) => r.data).filter(Boolean).sort((a, b) => a.at - b.at);
   const put = (c) => { store.writeLocal(COL, c.id, c); return c; };
@@ -204,11 +203,9 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
       // but the voice coach would drop out).
       if (restartDue && !busy()) { restartDue = false; restart(); return; }
       if (all().some((c) => c.status === 'working')) return;
+      // No daily limit (Thu 10/22, his words: "Don't have a daily build limit. Make it unlimited"): one at a time.
       const next = all().find((c) => c.status === 'queued');
       if (!next) return;
-      const today = isoDate(new Date(now()), tz());
-      const startedToday = all().filter((c) => c.startedAt && isoDate(new Date(c.startedAt), tz()) === today).reduce((n, c) => n + (c.tries || 1), 0);
-      if (startedToday >= maxPerDay) return;
       try { start(next); } catch (e) {
         log(`coach change ${next.id}: ${e.message}`);
         await finish(next, { status: 'failed', said: `I couldn't start the change on the Mac: ${e.message}.` });

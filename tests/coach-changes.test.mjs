@@ -90,8 +90,8 @@ test('the builder: started detached in the private folder with the guard; its an
   assert.match(contextLine({ store, tz: TZ, now: clock }), /Changes finished in the last day[^\n]*\[Thursday 3\/19 9:32 AM, done\] "Stop the supplement message after a snack" -> Done: no supplement/);
 });
 
-test('a builder that stops without an answer runs once more, then he hears it failed; the day has a limit', async () => {
-  const { q, launched, alive } = queue({ maxPerDay: 2 });
+test('a builder that stops without an answer runs once more, then he hears it failed; no daily limit', async () => {
+  const { q, launched, alive } = queue();
   const c = q.request({ said: 'Talk less robotic' });
   await q.tick();
   alive.clear();
@@ -103,10 +103,8 @@ test('a builder that stops without an answer runs once more, then he hears it fa
   await q.tick();
   assert.equal(store.getRecord(COL, c.id).data.status, 'failed');
   assert.match(talk()[0].text, /didn't finish on the Mac \(the builder stopped twice\)/);
+  // Thu 10/22, his words: "Don't have a daily build limit": the next one starts straight away.
   q.request({ said: 'Another one' });
-  await q.tick();
-  assert.equal(launched.length, 2, 'two starts today already: waits for tomorrow');
-  clock = at('09:00', '2026-03-20');
   await q.tick();
   assert.equal(launched.length, 3);
   assert.equal(existsSync(q.files(c.id).logFile), true);
