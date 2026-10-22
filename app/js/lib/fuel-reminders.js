@@ -92,7 +92,7 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
     if (!m.before?.photoId || m.source !== 'photo') continue;
     out.push({
       id: `meal-after:${m.id}`, kind: 'meals', at: afterPhotoAt(m), url: `#/meal/${m.id}`, tag: `meal-after-${m.id}`, fixed: false,
-      title: `${m.name}: after photo`, body: 'Take the after photo of what is left, or tap Ate it all.', due: !m.after,
+      title: `${m.name}: after photo`, body: 'Take the after photo of what is left, or tap Ate it all.', again: false, due: !m.after,
     });
   }
   return out;
@@ -173,7 +173,8 @@ export function planReminders({ date, tz, supps = [], log = [], answers = [], ev
   const out = [];
   for (const s of supps.filter((x) => statusOn(x, date) === 'active')) {
     const st = stockStatus(s, log);
-    if (!st?.low) continue;
+    // Already out: the restock question covers it, not "running low" too (Thu 10/22 audit).
+    if (!st?.low || outOf(s, log)) continue;
     out.push({
       id: `supps-low:${s.id}:${date}`, kind: 'supps', at: zonedTime(date, addMinutesHm(eveningHm, 10), tz), url: `#/supps/plan/${s.id}`, tag: `supps-low-${s.id}`, fixed: false,
       title: `${s.name}: running low`, body: `${cap1(shortName(s))}: ${st.left} serving${st.left === 1 ? '' : 's'} left, ${lastsText(st.days)}. Restocking?`, due: !lowAnswered(s, answers),

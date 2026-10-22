@@ -122,7 +122,7 @@ export function recoveryReminders({ date, tz, plan, state = null, notes = [], ph
   const cu = state?.checkup?.date;
   if (cu && date === addDays(cu, -1)) {
     const qs = plan.checkupQuestions || [];
-    out.push({ ...base, id: `recovery-checkup:${cu}`, at: zonedTime(date, hm, tz), tag: 'recovery-checkup', title: 'Checkup tomorrow', body: `${dayText(cu)}.${qs.length ? ` Your list for it: ${qs.join('; ')}.` : ''}`, due: true });
+    out.push({ ...base, id: `recovery-checkup:${cu}`, at: zonedTime(date, hm, tz), tag: 'recovery-checkup', title: 'Checkup tomorrow', body: `${dayText(cu)}.${qs.length ? ` Your list for it: ${qs.join('; ')}.` : ''}`, again: false, due: true });
   }
   return out;
 }

@@ -11,10 +11,11 @@ import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
 import { mealReminders, suppReminders, planReminders, saunaReminders } from './fuel-reminders.js';
 import { fastingOn } from './fast.js';
-import { scanReminders, planFor, isDone, cadenceOf } from './scans.js';
+import { scanReminders, planFor, isDone, cadenceOf, scanTakenOn } from './scans.js';
 import { recoveryReminders } from './recovery.js';
 import { activityReminders, activityDays } from './activities.js';
 import { pathsOf } from './hold-path.js';
+import { heldOff } from './holdoffs.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -88,7 +89,7 @@ const holdText = (s) => (s.ask ? `${s.label}: the gym for the ${s.restHold || s.
  * @param {object} [o.recovery]  A13: {plan, state, notes, photos} (lib/recovery.js), when he has a recovery record
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ paths = [], date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null, flexPlan = null, combatPlan = null, activity = undefined, flexTests = [] }) {
+export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null, flexPlan = null, combatPlan = null, activity = undefined, flexTests = [] }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -146,14 +147,15 @@ export function remindersFor({ paths = [], date, tz, last, days = {}, areas = []
   const fasting = fastingOn(days, date, meals);
   const supps = on('supps') && !fasting ? suppReminders({ date, tz, supps: supplements, log: suppLog, dayKind: rot.today.kind === 'rest' ? 'rest' : 'train', follow: { everyMin: n.suppFollowMin, max: n.suppFollowMax } }) : { items: [], open: [] };
   out.push(...supps.items);
-  if (on('sauna')) out.push(...saunaReminders({ date, tz, sessions: sauna, plan: saunaPlan || {} }));
+  // A sauna planned before he said he's fasting: no "sauna today" (its checklist wants food); the safety ones stay (Thu 10/22 audit).
+  if (on('sauna')) out.push(...saunaReminders({ date, tz, sessions: sauna, plan: saunaPlan || {} }).filter((i) => !(fasting && i.id.startsWith('sauna-day:'))));
   if (on('scan')) {
     const sp = planFor(scanPlan || {}, { scans, today: date, last, days });
-    out.push(...scanReminders({ date, tz, plan: sp, scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin }));
+    out.push(...scanReminders({ date, tz, plan: sp, scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin, photoScanIds, started: trainedDates }));
     // Thu 10/22, his words: "if I miss one before the workout, after the workout you should ask whether I did it or
     // not. If I did it, I should be able to attach it": first thing once the gym is done (afterGym), unless a scan is
     // saved.
-    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan });
+    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds });
     if (ag?.scanAskAt) {
       out.push({ id: `scan-after:${date}`, kind: 'scan', at: ag.scanAskAt, url: '#/body/scan', tag: `scan-after-${date}`, fixed: false,
         title: 'Evolt scan?', body: 'Do it before you leave the gym, then add the results (photo or PDF).', due: true });
@@ -170,9 +172,11 @@ export function remindersFor({ paths = [], date, tz, last, days = {}, areas = []
     }
   }
 
-  // Evening: holds and supplements still open today, and tomorrow's session (or a nudge to set its time).
+  // Evening: holds and supplements still open today, and tomorrow's session (or a nudge to set its time). What he put on
+  // hold isn't listed (Thu 10/22 audit).
   if (on('evening')) {
-    const open = openSlots(slots);
+    const eveningAt = zonedTime(date, n.eveningCheck, tz);
+    const open = heldOff('holds', holdoffs, eveningAt) ? [] : openSlots(slots);
     const tomorrow = addDays(date, 1);
     const rot2 = rotationDay({ last, today: tomorrow, days });
     let next = '';
@@ -183,7 +187,7 @@ export function remindersFor({ paths = [], date, tz, last, days = {}, areas = []
         : `Tomorrow: ${LABEL[rot2.today.dayType]}. No time set yet.`;
     }
     const still = open.length ? `Still open: ${open.map((s) => `${s.label.toLowerCase()} (${s.exercise})`).join(', ')}.` : '';
-    const suppText = supps.open.length ? `Supplements still open: ${supps.open.join(', ')}.` : '';
+    const suppText = supps.open.length && !heldOff('supps', holdoffs, eveningAt) ? `Supplements still open: ${supps.open.join(', ')}.` : '';
     if (still || suppText || next) {
       out.push({
         id: `evening:${date}`, kind: 'evening', at: zonedTime(date, n.eveningCheck, tz), url: open.length ? '#/holds' : suppText ? '#/supps' : '#/train', tag: `evening-${date}`, fixed: false,
@@ -212,7 +216,7 @@ export function remindersFor({ paths = [], date, tz, last, days = {}, areas = []
       if (!st.ready || !(st.quietDays.at(-1) < date)) continue;
       out.push({
         id: `hold-path:${area.id}:${st.at}:${date}`, kind: 'holds', at: zonedTime(date, addMinutesHm(n.wakeHm, 30), tz), url: '#/holds', tag: `hold-path-${area.id}`, fixed: false,
-        title: `${area.label}: ready for ${st.next.label.toLowerCase()}?`, body: `${st.need} quiet Push days on ${st.stage.label}. Not worse this morning? Step up on Holds, or tell me.`, due: true,
+        title: `${area.label}: ready for ${st.next.label.toLowerCase()}?`, body: `${st.need} quiet Push days on ${st.stage.label}. Not worse this morning? Step up on Holds, or tell me.`, again: false, due: true,
       });
     }
   }
@@ -220,11 +224,12 @@ export function remindersFor({ paths = [], date, tz, last, days = {}, areas = []
   if (on('meals') && !fasting) {
     out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
     // After the gym: the soft "head home" first, then meal prompts that fell in the gym time wait 5 minutes more.
-    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan });
+    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds });
     if (ag) {
-      const fed = meals.some((m) => m.date === date && m.at >= ag.doneAt);
+      // A meal logged, or his answer to the meal question, since the gym: no "head home" (Thu 10/22 audit).
+      const fed = meals.some((m) => m.date === date && m.at >= ag.doneAt) || mealChecks.some((c) => c.date === date && c.at >= ag.doneAt);
       out.push({ id: `home:${date}`, kind: 'meals', at: ag.homeAt, url: '#/fuel', tag: `home-${date}`, fixed: false,
-        title: 'Head home', body: 'Gym done. Get settled, food is next.', calm: true, due: !fed });
+        title: 'Head home', body: 'Gym done. Get settled, food is next.', calm: true, again: false, due: !fed });
       const from = activity.workoutStart?.[date] ?? ag.doneAt;
       const inGym = (i) => (i.kind === 'meals' || i.kind === 'cook') && i.id !== `home:${date}` && i.at >= from && i.at < ag.mealAt;
       // Repeats (every 5 minutes until he answers) that fell in the gym time: none; the moved prompt asks once.
@@ -255,7 +260,7 @@ export const AFTER_GYM = { holdsMaxMin: 40, scanAskMin: 1, scanWaitMin: 10, home
  * minutes after the scan is saved (10 minutes for it when asked and not saved); meals 5 minutes after that.
  * {doneAt, scanAskAt, homeAt, mealAt} in ms, or null with no workout done that day.
  */
-export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], scanPlan = null }) {
+export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], scanPlan = null, photoScanIds = [] }) {
   const end = activity?.workoutEnd?.[date];
   if (!end) return null;
   const open = (activity.dayTypes?.[date] || []).flatMap((t) => holdsAfter(areas, t))
@@ -264,7 +269,7 @@ export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], 
   // (Once the workout is saved the planner's next scan is tomorrow: a scan day is every training day, or the date set.)
   const scanDay = cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date;
   const scan = scans.find((s) => s.date === date && isDone(s));
-  const scanAskAt = scanDay && !scan ? doneAt + AFTER_GYM.scanAskMin * 60000 : null;
+  const scanAskAt = scanDay && !scanTakenOn(scans, date, photoScanIds) ? doneAt + AFTER_GYM.scanAskMin * 60000 : null;
   const base = scanAskAt ? scanAskAt + AFTER_GYM.scanWaitMin * 60000 : Math.max(doneAt, scan?.confirmedAt ?? scan?.at ?? 0);
   const homeAt = base + AFTER_GYM.homeMin * 60000;
   return { doneAt, scanAskAt, homeAt, mealAt: homeAt + AFTER_GYM.mealMin * 60000 };
@@ -285,8 +290,9 @@ export function sessionStartAt(r, sessionStarts, tz) {
 }
 
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
-export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [], flexPlan = null, combatPlan = null, coachNotes = [] }, tz) {
+export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [], flexPlan = null, combatPlan = null, coachNotes = [], scanPhotos = [], coachHolds = [] }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
+  const activity = activityDays({ sessions, sets, tz });
   return {
     tz,
     last: lastRotationSession(sessions, bridge, tz),
@@ -296,9 +302,10 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     settings,
     meta,
     table: tendons.find((d) => d?.kind === 'readiness') ?? null,
-    trainedDates: new Set(sessions.filter((s) => s.kind !== 'holds' && s.startedAt && s.status !== 'discarded').map((s) => isoDate(new Date(s.startedAt), tz))),
+    // Gym workouts only: a stretch, a class or a home neck session isn't a trained day (Thu 10/22 audit).
+    trainedDates: activity.workoutDays,
     paths: pathsOf({ areas, sessions, sets, dayOf: (ms) => isoDate(new Date(ms), tz) }),
-    sessionStarts: sessions.filter((s) => s.kind !== 'holds' && s.startedAt && s.status !== 'discarded').map((s) => s.startedAt).sort((a, b) => a - b),
+    sessionStarts: activity.workoutStarts,
     neck,
     meals,
     mealChecks,
@@ -313,7 +320,9 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     recovery: recoveryPlan ? { plan: recoveryPlan, state: recoveryState, notes, photos } : null,
     flexPlan,
     combatPlan,
-    activity: activityDays({ sessions, sets, tz }),
+    activity,
+    photoScanIds: scanPhotos.map((p) => p?.scanId).filter(Boolean),
+    holdoffs: coachHolds,
     flexTests: coachNotes.filter((x) => /^flex/i.test(x?.topic || '')).map((x) => x.date || isoDate(new Date(x.at), tz)),
   };
 }

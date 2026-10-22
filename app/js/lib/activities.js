@@ -20,6 +20,8 @@ export function activityDays({ sessions = [], sets = [], tz }) {
   const doneSets = new Map();
   for (const s of sets) if (s?.done) (doneSets.get(s.sessionId) || doneSets.set(s.sessionId, []).get(s.sessionId)).push(s);
   const flex = new Set(); const combat = new Set(); const workoutEnd = {}; const workoutStart = {}; const dayTypes = {}; const holdsEnd = {};
+  // The gym days (Thu 10/22 audit): a stretch, a class or a home neck session doesn't make a day trained.
+  const workoutDays = new Set(); const workoutStarts = [];
   for (const x of sessions) {
     if (!x?.startedAt || x.status === 'discarded') continue;
     const day = isoDate(new Date(x.startedAt), tz);
@@ -29,13 +31,15 @@ export function activityDays({ sessions = [], sets = [], tz }) {
     const isCombat = [...ids].some((id) => COMBAT_IDS.has(id));
     if (isFlex && (x.status === 'done' || ids.size)) flex.add(day);
     if (isCombat) combat.add(day);
-    if (x.status === 'done' && x.endedAt && !isFlex && !isCombat && x.routineId !== FLEX_ROUTINE) {
+    const gym = !isFlex && !isCombat && x.routineId !== FLEX_ROUTINE && x.dayType !== 'neck';
+    if (gym) { workoutDays.add(day); workoutStarts.push(x.startedAt); }
+    if (x.status === 'done' && x.endedAt && gym) {
       workoutEnd[day] = Math.max(workoutEnd[day] || 0, x.endedAt);
       workoutStart[day] = Math.min(workoutStart[day] || Infinity, x.startedAt);
       if (x.dayType) (dayTypes[day] ||= []).push(x.dayType);
     }
   }
-  return { flex, combat, workoutEnd, workoutStart, dayTypes, holdsEnd };
+  return { flex, combat, workoutEnd, workoutStart, dayTypes, holdsEnd, workoutDays, workoutStarts: workoutStarts.sort((a, b) => a - b) };
 }
 
 const weekday = (date) => new Date(`${date}T12:00:00Z`).getUTCDay();

@@ -92,7 +92,7 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, fasting = false }) {
+  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, fasting = false }) {
   const out = [];
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
   // A fasting day (Wed 10/21): nothing about food or supplements.
@@ -107,9 +107,10 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Thu 10/22: and not before the after-gym order lets meals in (the Evolt scan, then "head home", lib/reminders.js).
   const quietTo = Math.max(workoutEndedAt ? workoutEndedAt + AFTER_WORKOUT_QUIET_MIN * 60000 : 0, mealAfterGymAt || 0);
   if (workoutEndedAt && now >= workoutEndedAt && now < quietTo) return [];
-  if (workoutEndedAt && now - workoutEndedAt < 4 * 3600000 && !(lastMealAt > workoutEndedAt)) {
+  // His answer to the meal question (cooking, skipping...) counts as much as a logged meal (Thu 10/22 audit).
+  if (workoutEndedAt && now - workoutEndedAt < 4 * 3600000 && !(lastMealAt > workoutEndedAt) && !(mealAnsweredAt > workoutEndedAt)) {
     out.push({ key: 'meal-after', priority: 89, gapMin: 30, url: '#/fuel',
-      text: `Workout done at ${formatHm(hmOf(new Date(workoutEndedAt), tz))}. Time for your first meal${targets?.protein ? `: ${nf(eaten.protein)} of ${targets.protein} g protein so far today` : ''}. Tell me what you eat.` });
+      text: `Workout done at ${formatHm(hmOf(new Date(workoutEndedAt), tz))}. Time for your first meal${targets?.protein && !eaten.unread ? `: ${nf(eaten.protein)} of ${targets.protein} g protein so far today` : ''}. Tell me what you eat.` });
   }
   const nowHm = formatHm(hmOf(new Date(now), tz));
   const sinceWake = ((minOf(hmOf(new Date(now), tz)) - minOf(wakeHm)) + 1440) % 1440;
@@ -153,14 +154,17 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       out.push({ key: 'session', priority: 65, gapMin: 90, url: '#/train', text: `${label} today and no time set. When are you going?${gymText ? ` Your plan: ${gymText}.` : ''} Evolt first when you get there.` });
     }
   }
-  if (gymDay && (session.started || session.done) && !weighedToday) {
+  // Not all evening: up to 3 hours after the workout (Thu 10/22 audit: every 40 minutes until bed, with no way to say no).
+  if (gymDay && (session.started || session.done) && !weighedToday && !(workoutEndedAt && now - workoutEndedAt > 3 * 3600000)) {
     out.push({ key: 'evolt', priority: 75, gapMin: 40, url: '#/coach', text: 'Evolt number from today? Tell me the weight (and body fat if you have it).' });
   }
 
   // Planned reminders that already went out and are still open.
   for (const r of reminders) {
     const a = AGAIN[r.kind];
-    if (!a || !r.due || r.at > now || r.at < now - 16 * 3600000) continue;
+    // A one-off message (again: false) is not nudged again (Thu 10/22 audit: "Head home", the step-up question and the
+    // after photo came back every half hour or hour); repeats the planner sends itself (group) aren't doubled.
+    if (!a || !r.due || r.again === false || r.group || r.at > now || r.at < now - 16 * 3600000) continue;
     let title = String(r.title || '').replace(/[.:]?\s*$/, '');
     let body = r.body;
     let tail = '';
@@ -188,7 +192,8 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     out.push({ key: 'supps-untimed', priority: 58, gapMin: 60, url: '#/supps',
       text: `Supplements: ${suppsUntimed.taken ?? suppsUntimed.total - o.length} of ${suppsUntimed.total} taken today. Still open: ${o.slice(0, 4).join(', ')}${o.length > 4 ? ` and ${o.length - 4} more` : ''}. Take them and tell me.` });
   }
-  if (targets?.kcal && frac >= 0.15) {
+  // A meal still being read counts as nothing yet: no "you're behind" until it's read (Thu 10/22 audit).
+  if (targets?.kcal && frac >= 0.15 && !eaten.unread) {
     const expect = targets.kcal * frac;
     if (eaten.kcal < expect * 0.7 && expect - eaten.kcal >= 400) {
       out.push({ key: 'food', priority: 55, gapMin: 60, url: '#/fuel',

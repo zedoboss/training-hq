@@ -14,7 +14,7 @@ import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
-import { protocolOf, isDone, planFor } from '../app/js/lib/scans.js';
+import { protocolOf, isDone, planFor, scanTakenOn } from '../app/js/lib/scans.js';
 import { zonedTime, hmOf } from '../app/js/lib/time.js';
 import { healthSendsText } from './health.mjs';
 
@@ -28,7 +28,7 @@ export function stateFrom(store, tz) {
     sessions: list('sessions'), sets: list('sets'), tendons: list('tendons'), bridge: one('bridge', 'last-loads'),
     settings: one('settings', 'main'), meta: one('programme', 'meta'), days: list('days'), neck: one('schedule', 'neck'),
     meals: list('meals'), mealChecks: list('meal-checks'), supplements: list('supplements'), suppLog: list('supp-log'), suppAnswers: list('supp-answers'), sauna: list('sauna'), saunaPlan: one('sauna-plan', 'main'),
-    scans: list('body-scans'), scanPlan: one('scan-plan', 'main'), coachReminders: list('coach-reminders'),
+    scans: list('body-scans'), scanPhotos: list('scan-photos'), coachHolds: list('coach-holds'), scanPlan: one('scan-plan', 'main'), coachReminders: list('coach-reminders'),
     flexPlan: one('schedule', 'flex'), combatPlan: one('schedule', 'combat'), coachNotes: list('coach-notes'),
     ...recoveryFrom(one, list),
   }, tz);
@@ -170,14 +170,16 @@ export function nudgeInputs(store, now, tz) {
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
-        || list('body-scans').some((x) => x.date === date && isDone(x)),
+        || scanTakenOn(list('body-scans'), date, list('scan-photos').map((p) => p.scanId)),
       sleepLogged: Boolean(health?.sleep || one('sleep-log', date)),
       wokeAt: one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && isoDate(new Date(x.endedAt), tz) === date).map((x) => x.endedAt)) || null,
       mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan })?.mealAt ?? null,
       lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === date && m.at).map((m) => m.at)) || null,
+      // His last answer to a meal question (eaten, about to cook, cooking, skipping): the after-workout meal nudge stops on it.
+      mealAnsweredAt: Math.max(0, ...list('meal-checks').filter((c) => c.date === date && c.at).map((c) => c.at)) || null,
       morning: n.morning || null,
-      eaten: { kcal: eaten.kcal, protein: eaten.protein },
+      eaten: { kcal: eaten.kcal, protein: eaten.protein, unread: eaten.unread || 0 },
       targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
       steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,
       healthAt: Math.max(0, ...list('health').map((d) => d?.fileAt || 0)) || null,

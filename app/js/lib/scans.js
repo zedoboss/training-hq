@@ -45,6 +45,8 @@ export const STAFF_QUESTIONS = ['How do you want me to prepare for the Evolt 360
 
 export const protocolOf = (plan) => (plan?.protocol?.items?.length ? plan.protocol.items : PROTOCOL);
 export const isDone = (s) => s?.status === 'done';
+/** A scan taken that day: saved, or its results in and not confirmed yet (a PDF being read, photos added). */
+export const scanTakenOn = (scans = [], date, photoScanIds = []) => scans.some((s) => s.date === date && (isDone(s) || s.pdfPending || photoScanIds.includes(s.id)));
 export const scanId = (date) => `scan.${date}`;
 
 /** The latest scan with results, or null. */
@@ -216,10 +218,10 @@ const joinTexts = (items) => items.map((i) => i.text.replace(/^The day before: (
  * starts), the evening before (the list), the morning of (with his check-in, before he leaves), and at the gym (at his
  * session time, unless the iPhone arrival automation already asked: days[date].arrivedAt).
  */
-export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, eveningHm = '20:00', morningLeadMin = 30 }) {
+export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, eveningHm = '20:00', morningLeadMin = 30, photoScanIds = [], started = new Set() }) {
   const d = plan?.next?.date;
   if (!d) return [];
-  const due = !scans.some((s) => s.date === d && isDone(s));
+  const due = !scanTakenOn(scans, d, photoScanIds);
   const items = protocolOf(plan);
   const base = { kind: 'scan', url: '#/body/scan', tag: `scan-${d}`, fixed: true, due };
   const hm = days[d]?.sessionTime || null;
@@ -243,8 +245,9 @@ export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, even
   if (date === d && hm) {
     const on = items.filter((i) => i.when !== 'before');
     return [
-      { ...base, id: `scan-morning:${d}`, at: zonedTime(d, addMinutesHm(hm, -morningLeadMin), tz), title: 'Body scan this morning', body: `${joinTexts(on)}.` },
-      { ...base, id: `scan-arrive:${d}`, at: zonedTime(d, hm, tz), title: 'Body scan first', body: 'At the gym: scan before the workout. Tick the checklist.', due: due && !days[d]?.arrivedAt },
+      // Not once his workout has started (Thu 10/22 audit: "scan before the workout" while lifting); the after-gym ask covers it.
+      { ...base, id: `scan-morning:${d}`, at: zonedTime(d, addMinutesHm(hm, -morningLeadMin), tz), title: 'Body scan this morning', body: `${joinTexts(on)}.`, due: due && !started.has(d) },
+      { ...base, id: `scan-arrive:${d}`, at: zonedTime(d, hm, tz), title: 'Body scan first', body: 'At the gym: scan before the workout. Tick the checklist.', due: due && !days[d]?.arrivedAt && !started.has(d) },
     ];
   }
   return [];
@@ -254,8 +257,10 @@ export function scanReminders({ date, tz, plan = {}, scans = [], days = {}, even
  * What the Mac sends when the iPhone says he arrived at the gym (A10): the scan first, on a scan day; else nothing.
  * Every training day: at the gym means training, so a scan unless one is saved today.
  */
-export function arrivalMessage({ plan = {}, scans = [], date }) {
-  if ((cadenceOf(plan) !== 'training' && plan?.next?.date !== date) || scans.some((s) => s.date === date && isDone(s))) return null;
+export function arrivalMessage({ plan = {}, scans = [], date, trainingDay = true, trained = false, photoScanIds = [] }) {
+  // Only on a training day not trained yet (Thu 10/22 audit: a rest-day hold or after the workout isn't a scan).
+  if (!trainingDay || trained) return null;
+  if ((cadenceOf(plan) !== 'training' && plan?.next?.date !== date) || scanTakenOn(scans, date, photoScanIds)) return null;
   const on = protocolOf(plan).filter((i) => i.when !== 'before');
   return { title: 'Body scan first', body: `You're at the gym: scan before the workout. ${joinTexts(on)}. Tick the checklist.`, url: '#/body/scan', tag: `scan-${date}` };
 }

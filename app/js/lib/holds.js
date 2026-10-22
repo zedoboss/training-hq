@@ -17,7 +17,12 @@ export const isHoldSet = (set, ex) => Boolean(set?.done) && (set.type === 'hold'
  */
 export function roundsByDate(areas, sessions, sets, rawBridge = null) {
   const bridge = activeBridge(rawBridge, sessions);
-  const holdSessions = sessions.filter((s) => s.status === 'done');
+  // A holds round left open with sets saved counts too (Thu 10/22: the 11:52 AM wrist round, left when he restarted it),
+  // unless a finished round of that area the same day already does.
+  const dayKey = (s) => `${s.area}|${isoDate(new Date(s.startedAt))}`;
+  const doneRounds = new Set(sessions.filter((s) => s.kind === 'holds' && s.status === 'done' && s.startedAt).map(dayKey));
+  const holdSessions = sessions.filter((s) => s.status === 'done' || (s.kind === 'holds' && s.status === 'active' && s.startedAt
+    && !doneRounds.has(dayKey(s)) && sets.some((x) => x.sessionId === s.id && x.done)));
   const byArea = Object.fromEntries(areas.map((a) => [a.id, {}]));
   const exToArea = new Map();
   for (const a of areas) {

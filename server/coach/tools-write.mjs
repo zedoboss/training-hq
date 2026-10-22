@@ -457,9 +457,11 @@ async function correctMeal(a, ctx) {
   if (a.name) next.name = String(a.name).slice(0, 40);
   if (a.time) { next.at = zonedTime(meal.date, a.time, s.tz); }
   if (a.note !== undefined) next.note = String(a.note).slice(0, 300);
+  // "Ate it all" by talking (Thu 10/22 audit: only the phone's button could stop the after-photo prompt).
+  if (a.ateAll) next.after = { photoId: null, at: s.now, none: true, leftovers: [], confirmedAt: s.now, by: 'coach' };
   put(s, 'meals', meal.id, next);
   const t = itemTotals(next.before?.items || []);
-  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map(itemText).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${meal.after && !meal.after.none ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
+  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map(itemText).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${next.after?.none ? ', all eaten' : meal.after ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
 }
 
 // ---- supplements --------------------------------------------------------------------------------------------------
@@ -778,7 +780,14 @@ async function mealCheck(a, ctx) {
   if (!slots.length) return refuse('He has no meal times set (Settings > Fuel), so nothing asks about meals.');
   const q = String(a.meal || '').toLowerCase().trim();
   const at = (t) => zonedTime(s.today, t.time, s.tz);
+  // No meal named: the earliest meal time that has come with nothing logged and no answer yet (Thu 10/22 audit: after
+  // 2:30 PM "skipping" for a late 12:30 meal landed on the 4:30 PM one), else the one nearest now.
+  const meals = s.list('meals').filter((m) => m.date === s.today);
+  const checks = s.list('meal-checks').filter((c) => c.date === s.today);
+  const open = slots.filter((t) => at(t) <= s.now + 60 * 60000 && !checks.some((c) => c.id === `${s.today}.${t.time.replace(':', '')}`)
+    && !meals.some((m) => m.at >= at(t) - MEAL_NUDGE.windowMin * 60000 && m.at <= s.now));
   const slot = (q && slots.find((t) => t.time === q || t.name.toLowerCase().includes(q) || q.includes(t.name.toLowerCase())))
+    || open.sort((x, y) => at(x) - at(y))[0]
     || [...slots].sort((x, y) => Math.abs(at(x) - s.now) - Math.abs(at(y) - s.now))[0];
   const id = `${s.today}.${slot.time.replace(':', '')}`;
   put(s, 'meal-checks', id, { id, date: s.today, slot: slot.time, name: slot.name, answer: a.answer, at: s.now, by: 'coach' });
@@ -1250,7 +1259,7 @@ export const WRITE_TOOLS = [
   write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
   write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
   write('meal_preset', 'Save a meal preset', 'Save a logged meal (its id from the meals tool) as one of his presets, under the name he says (default the meal\'s name). A preset of the same name is replaced. He then logs it with one tap on Fuel or by telling you.', obj({ meal: { type: 'string' }, name: { type: 'string' } }, ['meal']), mealPreset),
-  write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
+  write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, mark that he ate it all (ateAll: no after photo needed), or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, ateAll: { type: 'boolean' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
   write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
   write('supplement_setup', 'Set up a supplement', "Set up one of his supplements the way he says (what he'd enter on its page): time of day (24-hour HH:MM, or '' for no set time), with food or not, servings left in the pack, a different rest-day dose. Only what he asks for; it never adds or removes a supplement. afterMeal true = he takes it right after his first meal (the app asks the moment that meal is logged; a meal named Snack doesn't count); 'second' = right after his second meal (the app asks once it's eaten, again every 5 minutes until ticked, and that meal's dishes reminder waits for it); false = not tied to a meal.", obj({ supplement: { type: 'string' }, time: { type: 'string', pattern: '^(([01]\\d|2[0-3]):[0-5]\\d)?$' }, withFood: { type: 'string', enum: ['with', 'without', 'either'] }, servings: { type: 'number', minimum: 0 }, doseRest: { type: 'string' }, afterMeal: { enum: [true, false, 'second'] } }, ['supplement']), supplementSetup),
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), about ones out of stock (kind out: ordered with arrives YYYY-MM-DD when he says when they come, not-yet, arrived = back on his daily list, stop = no more restock questions; supplement: names, or all), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'out', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, arrives: ISO, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),

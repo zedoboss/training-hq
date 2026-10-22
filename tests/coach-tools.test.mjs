@@ -745,3 +745,11 @@ test('hold_path (Thu 10/22): start, step up after he confirms, not yet, back; th
   assert.match((await call('hold_path', { action: 'up' })).text, /last stage already/);
   assert.match((await call('hold_path', { action: 'back' })).text, /Stage 1 of 2: Flat Smith/);
 });
+
+test('meal_check with no meal named (Thu 10/22 audit): the earliest meal asked and not answered, not the nearest one', async () => {
+  store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }, { name: 'Last meal', time: '16:30' }] } });
+  clock = Date.UTC(2026, 0, 20, 14, 45);
+  assert.match((await call('meal_check', { answer: 'skipped' })).text, /^First meal skipped/);
+  clock = Date.UTC(2026, 0, 20, 16, 40);
+  assert.match((await call('meal_check', { answer: 'cooking' })).text, /^Last meal: cooking/);
+});

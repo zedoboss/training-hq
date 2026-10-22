@@ -152,6 +152,9 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   }
   const walked = lastOf(d.walks);
   if (walked && now - walked.at < cfg.afterWalkMin * 60000) return null;
+  // After a walk, wait for a step count that includes it (Thu 10/22 audit: "No step count... go for a walk now" right
+  // after one); 3 hours at most.
+  if (walked && !(steps?.asOf > walked.at) && now - walked.at < 3 * 3600000) return null;
   const skip = lastOf(d.skips);
   if (skip?.until && now < skip.until) return null;
   // He gave a time: quiet until then, then "walk time", then the same follow-ups.

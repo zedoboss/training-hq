@@ -5,6 +5,10 @@
 import { linkSecret } from './link-secret.mjs';
 import { isoDate } from '../app/js/lib/time.js';
 import { arrivalMessage } from '../app/js/lib/scans.js';
+import { rotationDay } from '../app/js/lib/rotation.js';
+import { withDefaults } from '../app/js/lib/settings.js';
+import { itemHeld } from '../app/js/lib/holdoffs.js';
+import { stateFrom } from './notify.mjs';
 
 const KEY = 'arrive:secret';
 const QUIET_MS = 30 * 60000; // a second arrival within 30 minutes (GPS jitter at the door) sends nothing new
@@ -26,7 +30,14 @@ export function openArrive({ store, push = null, tz, log = () => {}, now = () =>
       const cur = one('days', date) || { date };
       const repeat = cur.arrivedAt && t - cur.arrivedAt < QUIET_MS;
       if (!repeat) store.writeLocal('days', date, { ...cur, date, arrivedAt: t });
-      const msg = repeat ? null : arrivalMessage({ plan: one('scan-plan', 'main') || {}, scans: store.listRecords('body-scans').map((r) => r.data).filter(Boolean), date });
+      // A training day not trained yet, the scan notifications on and not held off (Thu 10/22 audit).
+      const st = stateFrom(store, zone);
+      const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+      const off = withDefaults(one('settings', 'main')).notify.kinds?.scan === false || itemHeld({ id: `scan-arrive:${date}`, kind: 'scan' }, list('coach-holds'), t);
+      const msg = repeat || off ? null : arrivalMessage({
+        plan: one('scan-plan', 'main') || {}, scans: list('body-scans'), date, photoScanIds: list('scan-photos').map((p) => p.scanId),
+        trainingDay: rotationDay({ last: st.last, today: date, days: st.days || {} }).today.kind === 'train', trained: st.trainedDates.has(date),
+      });
       let sent = 0;
       if (msg && push?.list().length) sent = (await push.notify(msg)).sent || 0;
       log(`arrive ${date}${repeat ? ' (again, quiet)' : ''}${msg ? `: ${msg.title} (${sent} sent)` : ''}`);
