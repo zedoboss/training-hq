@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
-import { openChanges, builderPrompt, excerptOf, guardSettings, COL } from '../server/coach/changes.mjs';
+import { openChanges, builderPrompt, excerptOf, guardSettings, COL, REVIEW_MODEL, MODEL, whereText, buildMs } from '../server/coach/changes.mjs';
 import { refusal } from '../server/coach/change-guard.mjs';
 import { WRITE_TOOLS } from '../server/coach/tools-write.mjs';
 import { contextLine } from '../server/coach/tools-read.mjs';
@@ -22,16 +22,18 @@ const ctx = () => ({ store, tz: TZ, now: () => clock, action: () => {} });
 const msg = (id, role, text, hm, extra = {}) => store.writeLocal('coach-messages', id, { id, role, text, at: at(hm), tz: TZ, ...extra });
 const talk = () => store.listRecords('coach-messages').map((r) => r.data).filter((m) => m.kind === 'change');
 
+let heads = { code: 'c0', private: 'p0' };
 function queue(o = {}) {
   const launched = []; const pushed = []; let restarts = 0; const alive = new Set(); let workout = false;
   const q = openChanges({
-    store, codeDir: '/code', privateDir: dir, tz: () => TZ, now: () => clock,
+    store, codeDir: '/code', privateDir: dir, tz: () => TZ, now: () => clock, heads: () => heads,
     push: { list: () => [{}], notify: async (n) => { pushed.push(n); return { sent: 1 }; } },
     launch: (a) => { launched.push(a); const pid = 1000 + launched.length; alive.add(pid); return pid; },
     isAlive: (pid) => alive.has(pid), restart: () => { restarts++; }, busy: () => workout, ...o,
   });
   return { q, launched, pushed, alive, restarts: () => restarts, training: (v) => { workout = v; } };
 }
+beforeEach(() => { heads = { code: 'c0', private: 'p0' }; });
 
 test('his complaint in Talk: the coach files it with his words and the conversation, and follows it already', async () => {
   msg('m1', 'user', 'Yo, I fell asleep before 12am and woke up before 9am', '09:15');
@@ -40,15 +42,17 @@ test('his complaint in Talk: the coach files it with his words and the conversat
   msg('m4', 'user', 'Why tell me the check-in right after I woke up? Say good morning first.', '09:24');
   const r = await tool('request_change').run({ said: 'Why tell me the check-in right after I woke up? Say good morning first.', about: '9:15 AM: check-in pushed right after logging sleep', want: 'good morning, name the session, one short question', kind: 'personality' }, ctx());
   assert.equal(r.wrote, true);
-  assert.match(r.text, /^Sent to the Mac \[id chg\./);
+  assert.match(r.text, /^Sent to the Mac \(next in line, about 6 minutes\) \[id chg\./);
   const c = store.listRecords(COL)[0].data;
   assert.equal(c.status, 'queued');
   assert.equal(c.kind, 'personality');
   assert.match(c.context, /9:15 AM He: Yo, I fell asleep[\s\S]*9:24 AM Coach \(reminder, sent by the app\): Sore, or good to go\?[\s\S]*9:24 AM He: Why tell me/);
   const line = contextLine({ store, tz: TZ, now: clock });
-  assert.match(line, /Changes he asked for, being built on the Mac \(follow them yourself already\): \[Thursday 3\/19 9:24 AM, waiting\] "Why tell me the check-in/);
-  assert.match(RULES, /call request_change at once, without asking first/);
-  assert.equal((await tool('request_change').run({ said: 'x' }, ctx())).text.startsWith('Sent to the Mac (1 ahead of it)'), true);
+  assert.match(line, /Changes he asked for, being built on the Mac \(follow them yourself already; the changes tool has the detail\): \[Thursday 3\/19 9:24 AM, next in line, about 6 minutes\] "Why tell me the check-in/);
+  assert.match(RULES, /call request_change at once, without asking first and without waiting for "send it to the Mac"/);
+  assert.match(RULES, /One wish = one request/);
+  assert.match((await tool('request_change').run({ said: 'x' }, ctx())).text, /^Not filed yet: a change is open or finished in the last hour[\s\S]*\[chg\.[^,]+, next in line, about 6 minutes\] his words: "Why tell me the check-in/, 'one wish, one request: the coach must say how it relates');
+  assert.match((await tool('request_change').run({ said: 'x', separate: true }, ctx())).text, /^Sent to the Mac \(2nd in line, about 12 minutes\)/);
   const second = store.listRecords(COL).map((x) => x.data).find((x) => x.said === 'x');
   assert.match((await tool('request_change').run({ cancel: second.id }, ctx())).text, /^Cancelled/);
   assert.equal(store.getRecord(COL, second.id).data.status, 'cancelled');
@@ -70,11 +74,36 @@ test('the builder: started detached in the private folder with the guard; its an
   await q.tick();
   assert.equal(launched.length, 1, 'one builder at a time, and no second start while it runs');
   clock += 8 * 60000;
-  writeFileSync(q.files(c.id).resultFile, JSON.stringify({ status: 'done', said: 'Done: no supplement message after a snack any more.', reload: true, commits: ['abc123 Supplements wait for a real meal'] }));
+  assert.equal(launched[0].model, MODEL);
+  assert.deepEqual(store.getRecord(COL, c.id).data.startHeads, { code: 'c0', private: 'p0' }, 'the heads it starts from');
+  writeFileSync(q.files(c.id).resultFile, JSON.stringify({ status: 'done', said: 'Done: no supplement message after a snack any more.', reload: true, commits: ['abc123 Supplements wait for a real meal'], checked: 'a snack, then the first meal' }));
+  heads = { code: 'c1', private: 'p1' };
+  alive.clear();
+  // Thu 10/22: a second chat checks the build against his words before he hears "done".
+  await q.tick();
+  const checking = store.getRecord(COL, c.id).data;
+  assert.equal(checking.status, 'working');
+  assert.equal(checking.stage, 'review');
+  assert.equal(launched.length, 2);
+  assert.equal(launched[1].model, REVIEW_MODEL);
+  assert.match(launched[1].prompt, /^COACH CHANGE REVIEW chg\./);
+  assert.match(launched[1].prompt, /His words: "Stop the supplement message after a snack"/);
+  assert.match(launched[1].prompt, /git diff c0\.\.HEAD[\s\S]*git diff p0\.\.HEAD/);
+  assert.match(launched[1].prompt, /WHAT THE BUILDER SAID: "Done: no supplement message after a snack any more\." \(it checked: a snack, then the first meal\); commits: abc123/);
+  assert.match(launched[1].prompt, /no safety rule got weaker/);
+  assert.equal(launched[1].logFile, q.files(c.id).reviewLog);
+  assert.match(whereText(checking, [checking], clock), /being checked/);
+  assert.deepEqual(talk(), [], 'nothing said while it is checked');
+  await q.tick();
+  assert.equal(launched.length, 2, 'no second reviewer while the first runs');
+  writeFileSync(q.files(c.id).reviewFile, JSON.stringify({ status: 'ok', said: 'Done: no supplement prompt after a snack.', reload: false, commits: [], checked: 'npm test; a snack at 9:20 AM, then the first meal' }));
   alive.clear();
   training(true); // the coach is answering him right now
   await q.tick();
   const done = store.getRecord(COL, c.id).data;
+  assert.equal(done.reviewed, true);
+  assert.equal(done.checked, 'npm test; a snack at 9:20 AM, then the first meal');
+  assert.equal(done.stage, null);
   assert.equal(done.status, 'done');
   assert.equal(done.said, 'Stop the supplement message after a snack', 'his words stay');
   assert.equal(done.answer, 'Done: no supplement message after a snack any more.');
@@ -94,7 +123,7 @@ test('the builder: started detached in the private folder with the guard; its an
   assert.deepEqual(talk().map((m) => m.text), ['Done: no supplement message after a snack any more.']);
   assert.equal(talk()[0].ref, `change:${c.id}`);
   assert.deepEqual(again.pushed.map((p) => [p.title, p.url]), [['Coach', '#/coach']]);
-  assert.match(contextLine({ store, tz: TZ, now: clock }), /Changes finished in the last day[^\n]*\[Thursday 3\/19 9:32 AM, done\] "Stop the supplement message after a snack" -> Done: no supplement/);
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /Changes finished in the last day[^\n]*\[Thursday 3\/19 9:32 AM, done, checked\] "Stop the supplement message after a snack" -> Done: no supplement/);
 });
 
 test('a builder that stops without an answer runs once more, then he hears it failed; no daily limit', async () => {

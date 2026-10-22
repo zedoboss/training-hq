@@ -8,7 +8,7 @@ import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatTimeSec, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
 import * as rest from '../lib/rest-timer.js';
-import { messagesOf, MODEL_LABEL, toolChips, runAction, textHtml } from '../lib/coach.js';
+import { messagesOf, MODEL_LABEL, toolChips, runAction, textHtml, changeView } from '../lib/coach.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { stop as voiceStop } from '../lib/voice.js';
@@ -253,9 +253,6 @@ function renderChat(view) {
   return () => { gone = true; busy?.abort(); unsub(); off(); dict?.cancel(); window.removeEventListener('thq:voice-event', onVoice); };
 }
 
-const CHANGE_LABEL = { queued: 'WAITING ON THE MAC', working: 'BEING BUILT ON THE MAC', done: 'DONE', failed: 'DIDN\'T GO THROUGH', question: 'QUESTION FOR YOU' };
-const CHANGE_CLS = { queued: 'c-muted', working: 'c-cyan', done: 'c-green', failed: 'c-amber', question: 'c-amber' };
-
 function renderNotes(view) {
   let gone = false;
   view.innerHTML = '<p class="view-sub">Loading…</p>';
@@ -277,9 +274,11 @@ function renderNotes(view) {
           <span class="hint">${r.trigger ? `When you start your workout log, ${esc(formatDay(new Date(`${r.date}T12:00:00Z`), 'UTC'))} or later` : `${esc(formatDay(new Date(r.at)))}, ${esc(formatTime(new Date(r.at)))}`}</span></div><span class="supp-btns"><button class="btn-ghost small" type="button" data-cancel>Cancel</button></span></div>`).join('')
           || '<p class="hint pad">None set.</p>'}</section>
         <div class="section-label">Changes you asked for · ${asked.length}</div>
-        <section class="card supp-group">${asked.map((c) => `<div class="supp-item"><div class="supp-main"><b>${textHtml(c.said)}</b>
-          <span class="hint"><span class="${CHANGE_CLS[c.status] || 'c-muted'}">${esc(CHANGE_LABEL[c.status] || c.status)}</span> · ${esc(dayAt(c.at, c))}, ${esc(timeAt(c.at, c))}</span>
-          ${c.answer ? `<span class="hint c-text">${textHtml(c.answer)}</span>` : ''}</div></div>`).join('')
+        <section class="card supp-group">${asked.map((c) => { const v = changeView(c); return `<div class="supp-item"><div class="supp-main"><b>${textHtml(c.said)}</b>
+          <span class="hint"><span class="${v.cls}">${esc(v.label)}</span> · ${esc(dayAt(c.at, c))}, ${esc(timeAt(c.at, c))}${v.by ? ` · ${esc(v.by)}` : ''}</span>
+          ${v.later.map((l) => `<span class="hint">${esc(timeAt(l.at, c))} ${textHtml(l.text)}</span>`).join('')}
+          ${c.answer ? `<span class="hint c-text">${textHtml(c.answer)}</span>` : ''}
+          ${v.checked ? `<span class="hint">${textHtml(v.checked)}</span>` : ''}</div></div>`; }).join('')
           || '<p class="hint pad">None yet. Tell the coach what you don\'t like about how it talks; the Mac changes it and the coach tells you when it\'s done.</p>'}</section>
         <div class="section-label">Notes · ${sorted.length}</div>
         <section class="card supp-group">${sorted.map((n) => `<div class="supp-item" data-note="${esc(n.id)}"><div class="supp-main"><b>${textHtml(n.text)}</b>

@@ -34,6 +34,7 @@ import { afterMeals, mealSpansFor } from '../notify.mjs';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
 import { pathsOf, stageText } from '../../app/js/lib/hold-path.js';
+import { asksOf, isOpen, isFinished, lineAtOf, whereText, buildMs } from './changes.mjs';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -320,8 +321,9 @@ function situationLines(s) {
   if (holds.length) out.push(`He asked the app to hold off (it does): ${holds.map((h) => `${h.areas.join(', ')} until ${dayText(s.date(h.until), s.today)} ${timeText(h.until, s.tz)}${h.reason ? ` (${h.reason})` : ''} [id ${h.id}]`).join('; ')}.`);
   out.push(...changeLines(s));
   out.push(...activityLines(s));
-  const notes = s.list('coach-notes').sort((a, b) => b.at - a.at).slice(0, 15);
-  if (notes.length) out.push(`Your notes on him (your memory; use them, never ask again what they answer): ${notes.map((n) => `[${dayText(n.date || s.date(n.at), s.today)}${n.topic ? `, ${n.topic}` : ''}] ${String(n.text).slice(0, 160)}`).join(' | ')}`);
+  const notes = s.list('coach-notes').filter((n) => !n.expiredAt).sort((a, b) => b.at - a.at).slice(0, 15);
+  // Thu 10/22: with their ids, so a note he corrects is replaced (write_note replace), not added to.
+  if (notes.length) out.push(`Your notes on him (your memory; use them, never ask again what they answer; when he corrects one, write_note replace: its id): ${notes.map((n) => `[${dayText(n.date || s.date(n.at), s.today)}${n.topic ? `, ${n.topic}` : ''}] ${String(n.text).slice(0, 160)} [id ${n.id}]`).join(' | ')}`);
   return out;
 }
 
@@ -341,17 +343,39 @@ function activityLines(s) {
 
 /**
  * Thu 10/22: changes he asked for (request_change). While the Mac builds one, follow it already; a finished one is
- * in your rules or the app now, so he can ask "is it done?".
+ * in your rules or the app now, so he can ask "is it done?". Where each one stands and about when it's done.
  */
 function changeLines(s) {
   const all = s.list('coach-changes');
-  const open = all.filter((c) => c.status === 'queued' || c.status === 'working').sort((a, b) => a.at - b.at);
-  const recent = all.filter((c) => ['done', 'failed', 'question'].includes(c.status) && s.now - (c.doneAt || 0) < 86400000).sort((a, b) => b.doneAt - a.doneAt).slice(0, 5);
+  const open = all.filter(isOpen).sort((a, b) => lineAtOf(a) - lineAtOf(b));
+  const recent = all.filter((c) => isFinished(c) && s.now - (c.doneAt || 0) < 86400000).sort((a, b) => b.doneAt - a.doneAt).slice(0, 5);
   const when = (ms) => `${dayText(s.date(ms), s.today)} ${timeText(ms, s.tz)}`;
+  const later = (c) => { const asks = asksOf(c); return asks.length > 1 ? ` (+${asks.length - 1} later: "${String(asks.at(-1).said).slice(0, 120)}")` : ''; };
   return [
-    open.length ? `Changes he asked for, being built on the Mac (follow them yourself already): ${open.map((c) => `[${when(c.at)}, ${c.status === 'working' ? 'building now' : 'waiting'}] "${String(c.said).slice(0, 200)}"${c.want ? ` -> wants: ${String(c.want).slice(0, 200)}` : ''} [id ${c.id}]`).join(' | ')}` : '',
-    recent.length ? `Changes finished in the last day (already in the app or your rules; the app told him): ${recent.map((c) => `[${when(c.doneAt)}, ${c.status}] "${String(c.said).slice(0, 120)}" -> ${String(c.answer || '').slice(0, 200)} [id ${c.id}]`).join(' | ')}` : '',
+    open.length ? `Changes he asked for, being built on the Mac (follow them yourself already; the changes tool has the detail): ${open.map((c) => `[${when(c.at)}, ${whereText(c, all, s.now)}] "${String(c.said).slice(0, 200)}"${later(c)}${c.want ? ` -> wants: ${String(c.want).slice(0, 200)}` : ''} [id ${c.id}]`).join(' | ')}` : '',
+    recent.length ? `Changes finished in the last day (already in the app or your rules; the app told him): ${recent.map((c) => `[${when(c.doneAt)}, ${c.status}${c.reviewed ? ', checked' : ''}] "${String(c.said).slice(0, 120)}" -> ${String(c.answer || '').slice(0, 200)} [id ${c.id}]`).join(' | ')}` : '',
   ].filter(Boolean);
+}
+
+const ASK_WORD = { ask: 'asked', amend: 'corrected', verify: 'asked to double-check', review: 'the check found' };
+const STAGE_TEXT = { queued: 'WAITING', working: 'BEING BUILT', done: 'DONE', failed: 'DIDN\'T GO THROUGH', question: 'QUESTION FOR HIM', cancelled: 'CANCELLED' };
+
+/** The 'changes' tool (Thu 10/22, "what's being built?"): open ones and the last days, with every ask and the result. */
+function changesText(s, { days = 2 }) {
+  const all = s.list('coach-changes');
+  const since = s.now - Math.min(Math.max(Number(days) || 2, 1), 14) * 86400000;
+  const list = all.filter((c) => isOpen(c) || (c.doneAt || c.at) >= since).sort((a, b) => (isOpen(b) - isOpen(a)) || lineAtOf(a) - lineAtOf(b));
+  if (!list.length) return `No changes open or finished in the last ${plural(Math.round((s.now - since) / 86400000), 'day')}.`;
+  const t = (ms) => whenText(ms, s.tz, s.today);
+  return [`Changes he asked for (open first, in line order; then finished, oldest first). Build time lately: about ${Math.round(buildMs(all) / 60000)} minutes each.`, ...list.map((c) => [
+    `- [id ${c.id}] ${t(c.at)}, ${c.kind}${c.auto ? `, filed on its own${c.by && c.by !== 'coach' ? ` (${c.by})` : ''}` : ''}: ${STAGE_TEXT[c.status] || c.status}${isOpen(c) ? ` (${whereText(c, all, s.now)})` : c.doneAt ? ` ${t(c.doneAt)}` : ''}.`,
+    ...asksOf(c).map((a) => `  ${timeText(a.at, s.tz)} he ${ASK_WORD[a.kind] || 'said'}: "${String(a.said).slice(0, 300)}"${a.want ? ` -> wants: ${String(a.want).slice(0, 200)}` : ''}`),
+    c.corrects ? `  Corrects ${c.corrects}.` : c.checkOf ? `  Checks ${c.checkOf}.` : c.fixOf ? `  Fixes what the check of ${c.fixOf} found.` : '',
+    c.verify && isOpen(c) ? '  Tested end to end before done (he asked to double-check).' : '',
+    c.answer ? `  Answer he got: "${c.answer}"` : '',
+    c.checked ? `  Checked: ${c.checked}${c.reviewed === false ? ' (the second check didn\'t run)' : ''}` : c.reviewed === false ? '  Not checked by the reviewer.' : '',
+    c.commits?.length ? `  Commits: ${c.commits.join('; ')}` : '',
+  ].filter(Boolean).join('\n'))].join('\n');
 }
 
 /** Mon 10/19: what the app (as the coach) sent him lately, so a short reply ("done", "yes", "82.4") makes sense, and
@@ -769,6 +793,7 @@ export const READ_TOOLS = [
   read('squat_sessions', 'Squat Depth', 'Recent Squat Depth runs: good and shallow reps, the lowest angle, each rep.', obj({ limit: { type: 'integer', minimum: 1, maximum: 20 } }), (s, a) => squatText(s, a)),
   read('recovery', 'Recovery', "His recovery record's state in the app: days since it started, the weekly check-in (due or not, his past answers), what he still has to do, the checkup date, the photos. His record itself (what is CURRENT, what EXPIRED) is in your instructions.", obj(), (s) => recoveryText(s)),
   read('notes', 'Notes', 'Notes the coach wrote for him, and reminders set.', obj({ limit: { type: 'integer', minimum: 1, maximum: 60 } }), (s, a) => notesText(s, a)),
+  read('changes', 'Changes on the Mac', "The changes he asked for (request_change): the ones waiting or being built with their place in line and about when they're done, and the ones finished in the last days (default 2): every one of his words in order, the answer he got, what the check verified, the commits. For 'is it done?', 'what's being built?', 'did you fix X?'.", obj({ days: { type: 'integer', minimum: 1, maximum: 14 } }), (s, a) => changesText(s, a)),
 ];
 
 export { suppDayKind };

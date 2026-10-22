@@ -34,7 +34,7 @@ import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods
 import { foodsDb, myFoods } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
-import { newChange, COL as CHANGES, KINDS as CHANGE_KINDS } from './changes.mjs';
+import { newChange, amendChange, asksOf, isOpen, lineAtOf, relatedTo, whereText, COL as CHANGES, KINDS as CHANGE_KINDS } from './changes.mjs';
 import { activeBridge } from '../../app/js/lib/history.js';
 import { WEEKDAYS, DISCIPLINE, FLEX_ROUTINE } from '../../app/js/lib/activities.js';
 
@@ -889,6 +889,14 @@ async function writeNote(a, ctx) {
     return wrote(`Deleted the note: ${n.text}`, 'note deleted');
   }
   if (!a.text) return refuse('What should the note say?');
+  // Thu 10/22: a note he corrected is replaced in place (same id); the old wording stays on it, dated, never lost.
+  if (a.replace) {
+    const n = s.one('coach-notes', a.replace);
+    if (!n) return refuse(`No note with id ${a.replace}.`);
+    const replaced = [...(n.replaced || []), { text: n.text, from: n.edited || n.at, until: s.now }].slice(-10);
+    put(s, 'coach-notes', n.id, { ...n, text: String(a.text).slice(0, 2000), topic: a.topic != null ? String(a.topic).slice(0, 40) : n.topic || '', edited: s.now, replaced });
+    return wrote(`Replaced note ${n.id}: ${a.text} (the old wording is kept on it, dated).`, 'note replaced');
+  }
   const id = newId('note');
   put(s, 'coach-notes', id, { id, at: s.now, date: s.today, text: String(a.text).slice(0, 2000), topic: a.topic ? String(a.topic).slice(0, 40) : '', by: 'coach' });
   return wrote(`Noted${a.topic ? ` (${a.topic})` : ''}: ${a.text}`, a.topic || 'note');
@@ -1193,19 +1201,53 @@ function logSleep(a, ctx) {
  */
 async function requestChange(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
-  const open = s.list(CHANGES).filter((c) => c.status === 'queued' || c.status === 'working');
+  const all = s.list(CHANGES).sort((x, y) => x.at - y.at);
+  const messages = s.list('coach-messages');
+  const t = (ms) => `${dayText(s.date(ms), s.today)} ${timeText(ms, s.tz)}`;
+  const brief = (c) => `[${c.id}, ${isOpen(c) ? whereText(c, all, s.now) : `${c.status} ${t(c.doneAt || c.at)}`}] his words: "${String(asksOf(c).at(-1)?.said || c.said).slice(0, 160)}"${c.want ? ` -> wants: ${String(c.want).slice(0, 160)}` : ''}`;
   if (a.cancel) {
-    const c = open.find((x) => x.id === a.cancel);
+    const c = all.find((x) => x.id === a.cancel && isOpen(x));
     if (!c) return refuse(`No change waiting with id ${a.cancel}.`);
     if (c.status === 'working') return refuse('That one is being built right now; it can\'t be stopped from here.');
     put(s, CHANGES, c.id, { ...c, status: 'cancelled', doneAt: s.now });
     return wrote(`Cancelled: "${c.said}".`, 'change cancelled');
   }
   if (!a.said) return refuse('Quote his words in said.');
+  if (a.amends && a.verify) return refuse('amends or verify, not both: amends = more of his words for that wish (a correction, more detail); verify = he wants it double-checked.');
+  const ask = { said: a.said, want: a.want || '', about: a.about || '', at: s.now };
+  const target = a.amends || a.verify;
+  if (target) {
+    const c = all.find((x) => x.id === target && x.status !== 'cancelled');
+    if (!c) return refuse(`No change with id ${target}.${relatedTo(all, s.now).length ? ` Open or recent: ${relatedTo(all, s.now).map(brief).join(' | ')}` : ''}`);
+    if (a.amends && c.status === 'queued') {
+      const merged = amendChange(c, { ...ask, messages });
+      put(s, CHANGES, c.id, merged);
+      return wrote(`Added his words to ${c.id} (same place: ${whereText(merged, all, s.now)}). The builder reads all his words in order; the latest win where they differ. Tell him in one short line that it's added, nothing more.`, 'added to a change');
+    }
+    if (a.amends) {
+      // Being built or already built: a correcting change, built right after it, on top of its commits.
+      const n = newChange({ ...ask, kind: c.kind === 'check' ? 'bug' : a.kind || c.kind, tz: s.tz, messages, asks: asksOf(c), corrects: c.id, followsOn: c.id, auto: Boolean(a.auto ?? c.auto), earlier: [`"${c.said}" -> ${c.answer || c.status}`], ...(c.status === 'working' ? { lineAt: lineAtOf(c) + 1 } : {}) });
+      put(s, CHANGES, n.id, n);
+      return wrote(`${c.status === 'working' ? `${c.id} is being built right now, so his correction is filed to build right after it, on top of it` : `Filed a correction of ${c.id}, built on top of it`} (${whereText(n, [...all, n], s.now)}) [id ${n.id}]. Tell him in one short line.`, 'correction filed');
+    }
+    if (isOpen(c)) {
+      const merged = amendChange(c, { ...ask, messages, kind: 'verify' });
+      put(s, CHANGES, c.id, merged);
+      return wrote(`${c.id} will be tested end to end before he hears it's done (${whereText(merged, all, s.now)}). Tell him in one short line.`, 'double-check added');
+    }
+    const n = newChange({ ...ask, want: a.want || `check that it works as he asked ("${String(c.want || c.said).slice(0, 200)}"); fix it if not`, kind: 'check', tz: s.tz, messages, asks: asksOf(c), checkOf: c.id, followsOn: c.id, verify: true, earlier: [`"${c.said}" -> ${c.answer || c.status}`] });
+    put(s, CHANGES, n.id, n);
+    return wrote(`A check of ${c.id} is queued (${whereText(n, [...all, n], s.now)}) [id ${n.id}]: the Mac tests it the way he'd meet it and fixes it if it doesn't work. Tell him in one short line.`, 'check queued');
+  }
+  // One wish = one request (Thu 10/22: a correction became a second build and "double check" a third).
+  const related = relatedTo(all, s.now);
+  if (related.length && !a.separate) {
+    return refuse(`Not filed yet: ${related.length === 1 ? 'a change is' : `${related.length} changes are`} open or finished in the last hour. Decide how his words relate and call request_change again with one of: amends: <id> (the same wish: a correction, "no, I meant", more detail; the latest words win), verify: <id> ("double check", "make sure it works", "test it"), separate: true (a different wish). ${related.map(brief).join(' | ')}`);
+  }
   const earlier = (a.followsOn ? [a.followsOn] : []).map((id) => s.one(CHANGES, id)).filter(Boolean).map((c) => `"${c.said}" -> ${c.answer || c.status}`);
-  const c = newChange({ said: a.said, about: a.about, want: a.want, kind: a.kind, at: s.now, tz: s.tz, earlier, messages: s.list('coach-messages') });
+  const c = newChange({ ...ask, kind: a.kind, tz: s.tz, earlier, messages, auto: Boolean(a.auto), followsOn: a.followsOn || null });
   put(s, CHANGES, c.id, c);
-  return wrote(`Sent to the Mac${open.length ? ` (${open.length} ahead of it)` : ''} [id ${c.id}]. Tell him in one short line that it's sent and he gets a message when it's done. From now on, follow his wish yourself in this chat.`, 'sent to the Mac');
+  return wrote(`Sent to the Mac (${whereText(c, [...all, c], s.now)}) [id ${c.id}]. Tell him in one short line that it's sent${a.auto ? ' (he didn\'t ask: say you sent it yourself)' : ''}, about when, and that he gets a message when it's done. From now on, follow his wish yourself in this chat.`, 'sent to the Mac');
 }
 
 // ---- flexibility and boxing / kickboxing (Thu 10/22) --------------------------------------------------------------
@@ -1283,7 +1325,7 @@ export const WRITE_TOOLS = [
   write('hold_off', 'Hold off', "When he tells you to leave something alone for a while ('no sauna this week', 'busy until 3', 'stop the walk questions today', 'no food reminders tonight'): the app's reminders and nudges for those areas stay quiet until then. Areas: food, supps, walk, holds, sauna, scan, training, sleep, recovery, health, evening, all. Until: forMinutes, untilTime (HH:MM, today or tomorrow), or untilDate (through that whole day). His reason in his words. cancel: an id to lift it. Safety alarms and reminders he asked for always come.", obj({ areas: { type: 'array', items: { type: 'string', enum: AREA_NAMES } }, forMinutes: { type: 'integer', minimum: 5, maximum: 20160 }, untilTime: HM, untilDate: ISO, reason: { type: 'string' }, cancel: { type: 'string' } }), holdOff),
   write('walk', 'Walk', "His answer to a walk question (the app asks him to walk through the day until his step goal, and asks again 5 minutes after no answer). plan: when he'll go (inMinutes for 'in an hour', or time HH:MM; said = his words); vague ('later', 'after dinner', 'in a bit'): pick a time yourself and say it. going: he is out now. done: he walked (minutes, steps if he says). skip: not now, with his reason and when to ask again (askAgainInMinutes, default 60). clear: forget the time. Always say the time back: 'Okay, I'll message you at 6:10 PM.'", obj({ action: { type: 'string', enum: ['plan', 'going', 'done', 'skip', 'clear'] }, inMinutes: { type: 'integer', minimum: 1, maximum: 1440 }, time: HM, said: { type: 'string' }, minutes: { type: 'integer', minimum: 1, maximum: 600 }, steps: { type: 'integer', minimum: 0, maximum: 100000 }, reason: { type: 'string' }, askAgainInMinutes: { type: 'integer', minimum: 5, maximum: 720 } }, ['action']), walkAnswer),
   write('weather_seen', 'What he sees outside', "He says what the weather is where he is ('no rain, just clouds', 'it's pouring'): raining = rain or drizzle falling on him now; said = his words. For the next hour it beats the forecast models and the station, for you and for the app's walk messages.", obj({ raining: { type: 'boolean' }, said: { type: 'string' } }, ['raining']), weatherSeen),
-  write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),
+  write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question). replace: a note\'s id (from the notes line) with the corrected text, when he corrects what a note says or it changed: keeps the id and the old wording, dated. remove: delete one by id (only when he asks).', obj({ text: { type: 'string' }, topic: { type: 'string' }, replace: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
   write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
   write('sauna_plan', 'Sauna days', "Plan sauna days WITH him: propose (from his rotation: rest days first, never before lifting, about two a week on separate days while building up, once a week at his level; at his usual sauna time), then plan the dates he agrees to, remove one, set his usual sauna time, later = he doesn't want to plan now (no planning questions for days, or until date), doctor = his answer to the one-time doctor question (yes, not-yet, no). The ladder decides each session's step. About food and drink say only his checklist line (eaten and drunk in the last few hours); never tell him to fast.", obj({ action: { type: 'string', enum: ['propose', 'plan', 'remove', 'set_time', 'later', 'doctor'] }, dates: { type: 'array', items: obj({ date: ISO, time: HM }, ['date']) }, date: ISO, time: HM, days: { type: 'integer', minimum: 1, maximum: 30 }, answer: { type: 'string', enum: ['yes', 'not-yet', 'no'] } }, ['action']), saunaPlan),
@@ -1291,6 +1333,6 @@ export const WRITE_TOOLS = [
   write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
   write('recovery_log', 'Recovery', "His recovery record (A13): save his weekly check-in answers in his words (check_in: one answer per question; for choice questions one of the choices the recovery tool lists; 'anything new' in his words, empty if nothing), tick or untick a thing he had to do (task_done / task_undo), or set the checkup date he booked (set_checkup). Only what he says: no advice.", obj({ action: { type: 'string', enum: ['check_in', 'task_done', 'task_undo', 'set_checkup'] }, answers: { type: 'array', items: obj({ question: { type: 'string' }, answer: { type: 'string' } }, ['question', 'answer']) }, task: { type: 'string' }, date: ISO }, ['action']), recoveryLog),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
-  write('request_change', 'Change the coach', "He doesn't like how you or the app's own messages talk or behave (tone, a line, the timing or order of a message, something said that makes no sense), asks to change your personality, or reports a bug: the Mac rebuilds it and tells him in Talk when it's done. Don't ask first: call it at once. said = his words, verbatim. about = the exact message(s) he means, quoted with their time, and what was wrong. want = what he wants instead, one line in his terms. kind: personality (how you talk), behaviour (what or when you or the app say things), bug (something broken). followsOn: the id of an earlier request this answers or extends. cancel: an id still waiting.", obj({ said: { type: 'string' }, about: { type: 'string' }, want: { type: 'string' }, kind: { type: 'string', enum: CHANGE_KINDS }, followsOn: { type: 'string' }, cancel: { type: 'string' } }), requestChange),
+  write('request_change', 'Change the coach', "Files a change to you or the app; the Mac builds it, checks it, and tells him in Talk when it's done. Call it at once, without asking, also when he didn't say 'send it to the Mac' (auto: true then): he doesn't like how you or the app's own messages talk or behave (tone, a line, the timing or order of a message, something that made no sense), corrects how you behaved, asks 'why did it...', says 'it should...', wants your personality different, reports a bug, or you catch your own mistake that would happen again. Not for a wrong number or log: fix that with its tool. said = his words, verbatim. about = the exact message(s) he means, quoted with their time, and what was wrong. want = what he wants instead, one line in his terms. kind: personality (how you talk), behaviour (what or when you or the app say things), bug (something broken). One wish = one request: more of his words about a wish already sent (a correction, 'no, I meant', more detail) = amends: <its id>; 'double check', 'make sure it works' = verify: <its id>; a different wish while others are open or finished in the last hour = separate: true (without one of these the tool refuses and lists them). followsOn: an older request this answers or extends. cancel: an id still waiting.", obj({ said: { type: 'string' }, about: { type: 'string' }, want: { type: 'string' }, kind: { type: 'string', enum: CHANGE_KINDS }, amends: { type: 'string' }, verify: { type: 'string' }, separate: { type: 'boolean' }, auto: { type: 'boolean' }, followsOn: { type: 'string' }, cancel: { type: 'string' } }), requestChange),
   write('activity_plan', 'Flexibility and classes', "His plans for leg flexibility and boxing / kickboxing (his goals, Thu 10/22), which drive smart reminders. what: flex = when he does the routine 'Flexibility · Legs' (when: after-workout = 10 minutes after each workout ends, and at time on days without one; evening = every day at time) and the kick-test weekday (testDay); combat = his classes (discipline boxing, kickboxing or muay-thai; gym; days as weekday names; time HH:MM; minutes; trialDate for a one-off trial); log_class = a class he did (discipline, minutes, date, note). clear: true turns that plan's reminders off. Set it only with what he agreed.", obj({ what: { type: 'string', enum: ['flex', 'combat', 'log_class'] }, when: { type: 'string', enum: ['after-workout', 'evening'] }, time: HM, testDay: { type: 'string', enum: WEEKDAYS }, discipline: { type: 'string', enum: Object.keys(DISCIPLINE) }, gym: { type: 'string' }, days: { type: 'array', items: { type: 'string', enum: WEEKDAYS } }, minutes: { type: 'integer', minimum: 5, maximum: 240 }, trialDate: ISO, date: ISO, note: { type: 'string' }, said: { type: 'string' }, clear: { type: 'boolean' } }, ['what']), activityPlan),
 ];

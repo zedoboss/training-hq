@@ -102,3 +102,24 @@ export function runAction(a, deps) {
  *  looked broken on the phone, Sun 10/18). */
 export const textHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
   .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+
+/**
+ * A change he asked for, as the Notes screen shows it (Thu 10/22): its state (being checked after the build, waiting on
+ * unsaved edits, filed by the coach on its own), his later words, and what the check verified.
+ */
+export function changeView(c) {
+  const LABEL = { queued: 'WAITING ON THE MAC', working: 'BEING BUILT ON THE MAC', done: 'DONE', failed: 'DIDN\'T GO THROUGH', question: 'QUESTION FOR YOU' };
+  const CLS = { queued: 'c-muted', working: 'c-cyan', done: 'c-green', failed: 'c-amber', question: 'c-amber' };
+  let label = LABEL[c.status] || String(c.status || '').toUpperCase();
+  if (c.status === 'working' && c.stage === 'review') label = 'BEING CHECKED ON THE MAC';
+  if (c.status === 'queued' && c.waitingFor?.length) label = 'WAITING: UNSAVED EDITS ON THE MAC';
+  if (c.kind === 'check' && c.status !== 'done') label = `CHECK · ${label}`;
+  const asks = Array.isArray(c.asks) ? c.asks : [];
+  const WORD = { amend: 'You added', verify: 'You asked to double-check', review: 'The check found' };
+  return {
+    label, cls: CLS[c.status] || 'c-muted',
+    by: c.by === 'nightly' ? 'Filed overnight from your day' : c.by === 'review' ? 'Filed by the check on the Mac' : c.auto ? 'Filed by the coach from what you said' : '',
+    later: asks.slice(1).map((a) => ({ at: a.at, text: `${WORD[a.kind] || 'You said'}: ${a.said}` })),
+    checked: c.status === 'done' && c.checked ? `Checked: ${c.checked}` : '',
+  };
+}
