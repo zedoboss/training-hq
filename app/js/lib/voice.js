@@ -45,7 +45,11 @@ const restPhase = () => (lent ? (listening() ? 'paused' : 'off') : mic ? (turnsI
 const player = createPlayer({
   context: audioContext,
   fetchSpeech: voiceSpeech,
-  onState: (speaking) => setPhase(speaking ? 'speaking' : restPhase()),
+  onState: (speaking) => {
+    setPhase(speaking ? 'speaking' : restPhase());
+    // The caption stays while he talks and goes a second after (ui/coach-caption.js).
+    window.dispatchEvent(new CustomEvent('thq:coach-speaking', { detail: { speaking } }));
+  },
 });
 
 /** What the header chip and the Voice screen show. */

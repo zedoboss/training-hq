@@ -732,6 +732,8 @@ body.timer-open { overflow: hidden; }
 }
 .coach-caption.is-on { opacity: 1; transform: none; }
 .coach-caption .cc-text { font-size: 15px; line-height: 1.4; color: var(--text); }
+.coach-caption .cc-head { display: flex; align-items: center; justify-content: space-between; margin: -6px -8px -2px 0; }
+.coach-caption .cc-x { width: 36px; height: 32px; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
 /* Tue 10/20: the cap in plain words on its own line ("Cap 23.4 kg: last time 18 kg + 30%. Plan says 27.5 kg."). */
 .target-why { font-size: 13px; line-height: 1.4; color: var(--muted); margin-top: 2px; }
 /* Tue 10/20: scrolled, the mic chip and the settings button showed through the iPhone's status bar (time, signal,
