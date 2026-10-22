@@ -47,6 +47,23 @@ export function messagesOf(stored = [], live = []) {
 /** Tool names as the design shows them: capitals, joined with a dot. */
 export const toolLabel = (t) => String(t?.title || t?.name || '').toUpperCase();
 
+/**
+ * The tools of one answer as chips, each tool once in the order first used, with how many times (Thu 10/22, his
+ * words: "Why are there multiple set a reminder... that's a glitch": three cancels showed as three chips).
+ * [{label, count, ok, summary}]: ok only when every call went through; summary: each call's own, one per line.
+ */
+export function toolChips(tools = []) {
+  const by = new Map();
+  for (const t of tools) {
+    const label = toolLabel(t);
+    if (!label) continue;
+    const c = by.get(label) || { label, count: 0, ok: true, summaries: [] };
+    c.count++; c.ok = c.ok && Boolean(t.ok); if (t.summary) c.summaries.push(t.summary);
+    by.set(label, c);
+  }
+  return [...by.values()].map(({ summaries, ...c }) => ({ ...c, summary: summaries.join('\n') }));
+}
+
 /** Today's numbers for the home screen corners: turns, tool calls, errors. */
 export function todayCounts(messages = [], date, dayOf) {
   const mine = messages.filter((m) => m.role === 'assistant' && dayOf(m.at) === date);

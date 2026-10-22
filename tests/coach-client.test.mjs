@@ -70,3 +70,12 @@ test('the coach works the app (Tue 10/20): screens, the microphone, an update; o
   assert.equal(screenOf('#/').id, 'today');
   assert.equal(new Set(SCREENS.map((s) => s.id)).size, SCREENS.length);
 });
+
+test('tool chips (Thu 10/22: "Why are there multiple set a reminder?"): each tool once, with how many times', async () => {
+  const { toolChips } = await import('../app/js/lib/coach.js');
+  const t = (name, ok = true, summary = '') => ({ name, title: name.replace('_', ' '), ok, summary });
+  const chips = toolChips([t('notes'), t('set_reminder', true, 'cancelled 5:00 PM'), t('set_reminder', true, 'cancelled 5:15 PM'), t('set_reminder', false, 'no such id'), t('write_note')]);
+  assert.deepEqual(chips.map((c) => [c.label, c.count, c.ok]), [['NOTES', 1, true], ['SET REMINDER', 3, false], ['WRITE NOTE', 1, true]]);
+  assert.equal(chips[1].summary, 'cancelled 5:00 PM\ncancelled 5:15 PM\nno such id');
+  assert.deepEqual(toolChips([]), []);
+});

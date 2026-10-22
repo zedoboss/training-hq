@@ -8,7 +8,7 @@ import { getState, subscribe } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatTimeSec, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
 import * as rest from '../lib/rest-timer.js';
-import { messagesOf, MODEL_LABEL, toolLabel, runAction, textHtml } from '../lib/coach.js';
+import { messagesOf, MODEL_LABEL, toolChips, runAction, textHtml } from '../lib/coach.js';
 import { actionSheet, confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { stop as voiceStop } from '../lib/voice.js';
@@ -52,7 +52,7 @@ function msgHtml(m, { live = false } = {}) {
   return `<article class="c-msg ${cls}${live ? ' is-live' : ''}" data-id="${esc(m.id || '')}">
     <div class="hud c-meta"><span>${esc(formatTimeSec(new Date(m.at || Date.now())))} · ${who}</span>${m.role === 'assistant' && m.model ? `<span class="c-faint">${esc(MODEL_LABEL[m.model] || '')}</span>` : ''}</div>
     <p class="c-words">${m.text ? textHtml(m.text) : live ? '<span class="c-dots" aria-label="Thinking"><i></i><i></i><i></i></span>' : ''}</p>
-    ${tools.length ? `<div class="hud c-tools">${tools.map((t) => `<span class="${t.ok ? '' : 'c-amber'}" title="${esc(t.summary || '')}">${esc(toolLabel(t))}${t.ok ? '' : ' !'}</span>`).join('<span class="c-faint"> · </span>')}</div>` : ''}
+    ${tools.length ? `<div class="hud c-tools">${toolChips(tools).map((t) => `<span class="${t.ok ? '' : 'c-amber'}" title="${esc(t.summary)}">${esc(t.label)}${t.count > 1 ? ` ×${t.count}` : ''}${t.ok ? '' : ' !'}</span>`).join('<span class="c-faint"> · </span>')}</div>` : ''}
     ${opens.length ? `<div class="c-acts">${opens.map((a) => `<a class="pill is-on" href="${esc(a.url)}">${esc(a.label || 'Open')}</a>`).join('')}</div>` : ''}
   </article>`;
 }
