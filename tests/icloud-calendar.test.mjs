@@ -68,27 +68,32 @@ test('the Mac keeps the calendar in line: a run when something changed, a sent r
     assert.equal(s1.why, 'no-calendar');
     assert.equal(store.getMeta(STATUS).why, 'no-calendar');
     assert.match(logs[0], /No calendar named "Training HQ Backup"/);
+    clock += 30000; await ic.sync();
+    assert.equal(scripts.length, 1, 'the calendar missing: again a minute later');
+    clock += 30000; answer = { out: '', err: 'Not authorized to send Apple events to Calendar. (-1743)' };
+    await ic.sync();
+    assert.equal(scripts.length, 2);
     clock += 60000; await ic.sync();
-    assert.equal(scripts.length, 1, 'after a failure: again in 5 minutes, not every minute');
+    assert.equal(scripts.length, 2, 'any other failure: again in 5 minutes, not every minute');
     clock += 5 * 60000; answer = { out: 'OK 2 0 0\n', err: '' };
     const s2 = await ic.sync();
     assert.equal(s2.ok, true);
     assert.equal(s2.events, 2);
     assert.match(scripts.at(-1), /"Buy water"[\s\S]*"Call home"/);
     clock += 60000; await ic.sync();
-    assert.equal(scripts.length, 2, 'nothing changed: no run');
+    assert.equal(scripts.length, 3, 'nothing changed: no run');
     // 14:30: the Mac sends "Buy water": the next minute's run takes it out of his iCloud calendar.
     clock = at('2026-03-18', '14:31');
     store.setMeta('notify:sent', { 'coach:r1': at('2026-03-18', '14:30') });
     answer = { out: 'OK 0 1 1\n', err: '' };
     await ic.sync();
-    assert.equal(scripts.length, 3);
+    assert.equal(scripts.length, 4);
     assert.doesNotMatch(scripts.at(-1), /Buy water/);
     assert.match(scripts.at(-1), /Call home/);
     assert.ok(logs.some((l) => /0 added, 1 removed, 1 kept/.test(l)));
     // Every 30 minutes it runs anyway (an event deleted by hand comes back).
     clock += 31 * 60000; await ic.sync();
-    assert.equal(scripts.length, 4);
+    assert.equal(scripts.length, 5);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

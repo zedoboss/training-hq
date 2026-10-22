@@ -126,7 +126,8 @@ export function openICloudCalendar({ store, tz, run = osascript, now = () => Dat
     const events = desiredEvents(calendarItems(store, typeof tz === 'function' ? tz() : tz, t), t);
     const sig = hash(events.map((e) => e.key).sort().join('\n'));
     if (!force && sig === lastSig && t - lastOkAt < HEAL_MS) return null;
-    if (!force && lastFailAt && t - lastFailAt < RETRY_MS) return null;
+    // After a failure: again in 5 minutes; while only the calendar is missing, every minute (he's making it now).
+    if (!force && lastFailAt && t - lastFailAt < (lastWhy === 'no-calendar' ? 60000 : RETRY_MS)) return null;
     busy = true;
     try {
       const { out, err } = await run(syncScript(events));
