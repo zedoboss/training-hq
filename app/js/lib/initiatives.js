@@ -71,7 +71,10 @@ export function openItems({ today, sessions = [], sets = [], neck = null, areas 
       out.push({ key: `phase-${a.id}`, priority: 50, facts: `Tendon holds, ${a.label}: fix phase (3-4x a week) since ${since}, 8 weeks now (his note: at least 4-8 weeks). Ask whether to move to maintenance: 5-10 minutes after a workout, or one day a week (tendon_phase maintenance).` });
       continue;
     }
-    if (st.due && (a.phase !== 'heal' || count(7) < 7) && !holdLines.some((l) => l.startsWith(`${a.label}:`))) {
+    // A weekly phase is one round a day at most (Thu 10/22, his words: "I literally did this hold today... Does it want
+    // me to do it twice?": the wrist round at 11:55 AM, and at 2:45 PM "wrist cupping is quickest").
+    const roundToday = (byDay[today] || 0) > 0;
+    if (st.due && !(a.phase !== 'heal' && roundToday) && (a.phase !== 'heal' || count(7) < 7) && !holdLines.some((l) => l.startsWith(`${a.label}:`))) {
       holdLines.push(`${a.label} (${a.phase} phase: ${a.phase === 'heal' ? '3 holds twice a day' : '3-4 rounds a week'}): ${count(7)} round${count(7) === 1 ? '' : 's'} in the last 7 days; today ${st.text}. ${holdsText}`);
       holdPri = Math.max(holdPri, a.phase === 'heal' ? 70 : 55);
     }
