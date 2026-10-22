@@ -34,7 +34,10 @@ export function registerServiceWorker() {
   let reloading = false;
   // A tapped notification asks the open app to show its screen.
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data?.type === 'open' && /^#\/[\w/.-]*$/.test(e.data.url || '')) location.hash = e.data.url;
+    if (e.data?.type !== 'open' || !/^#\/[\w/.-]*$/.test(e.data.url || '')) return;
+    // Already on that screen (the workout, when "Rest over" is tapped): tell it, since the hash doesn't change.
+    if (location.hash === e.data.url) window.dispatchEvent(new CustomEvent('thq:reopen', { detail: { url: e.data.url } }));
+    else location.hash = e.data.url;
   });
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (reloading) return;

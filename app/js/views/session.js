@@ -670,6 +670,26 @@ export function render(view, params = []) {
     try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch { /* not allowed */ }
   };
   const onVis = () => { if (document.visibilityState === 'visible') { if (!editing && prefs().keepAwake) keepAwake(); header(); } };
+  /**
+   * The exercise to do now, in the middle of the screen (Thu 10/22, his words: "it should automatically scroll down to
+   * the individual exercise that is supposed to be done now, and it should put it in the center of the screen"): the
+   * first exercise, in the session's order, with a set not ticked. A card taller than most of the screen centres on
+   * that set instead, so the set is never off screen.
+   */
+  const showNow = ({ smooth = false } = {}) => {
+    for (const ex of session.exercises) {
+      const next = exSets(ex.key).find((s) => !s.done);
+      if (!next) continue;
+      const card = view.querySelector(`[data-ex="${CSS.escape(ex.key)}"]`);
+      if (!card) return;
+      const row = card.querySelector(`[data-set="${CSS.escape(next.id)}"]`);
+      const fits = card.getBoundingClientRect().height <= window.innerHeight * 0.7;
+      (fits || !row ? card : row).scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' });
+      return;
+    }
+  };
+  // A tapped notification for this same screen ("Rest over"): no hash change, so it asks here.
+  const onReopen = (e) => { if (e.detail?.url === location.hash) showNow({ smooth: true }); };
 
   ready.then(async (r) => {
     repo = r;
@@ -699,10 +719,14 @@ export function render(view, params = []) {
     // The set being rested for when the screen opens mid-rest.
     if (restWas) { const last = [...sets].filter((x) => x.done && x.doneAt).sort((a, b) => b.doneAt - a.doneAt)[0]; const lex = last && session.exercises.find((e) => e.key === last.exKey); if (lex) planNext(lex); }
     // "Next exercise" said to the coach on the Talk screen in the last 5 minutes: open on that exercise.
+    let focused = false;
     try {
       const f = JSON.parse(sessionStorage.getItem('thq.coach.focus') || 'null');
-      if (f?.sessionId === id && Date.now() - f.at < 5 * 60000) { sessionStorage.removeItem('thq.coach.focus'); setTimeout(() => onFocus({ detail: f }), 50); }
+      if (f?.sessionId === id && Date.now() - f.at < 5 * 60000) { sessionStorage.removeItem('thq.coach.focus'); focused = true; setTimeout(() => onFocus({ detail: f }), 50); }
     } catch { /* private mode */ }
+    // Opened from a notification, the workout bar or Train: straight to the exercise to do now.
+    if (!editing && !focused) setTimeout(() => showNow(), 60);
+    window.addEventListener('thq:reopen', onReopen);
     if (setTimer && !sets.some((x) => x.id === setTimer.setId && !x.done)) { setTimer = null; storeSetTimer(null); }
     runSetTimer();
     timer = setInterval(header, 1000);
@@ -722,6 +746,7 @@ export function render(view, params = []) {
 
   return () => {
     window.removeEventListener('thq:coach-focus', onFocus);
+    window.removeEventListener('thq:reopen', onReopen);
     clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo(); offTalk();
     fullEl?.remove(); fullEl = null; document.body.classList.remove('timer-open');
     talk.stop(); talk.setMuted(false);
