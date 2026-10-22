@@ -30,6 +30,7 @@ import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods
 import { foodsDb, myFoods } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
+import { newChange, COL as CHANGES, KINDS as CHANGE_KINDS } from './changes.mjs';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -1036,6 +1037,30 @@ function logSleep(a, ctx) {
   return wrote(`Sleep saved for the night to ${dayText(date, s.today)}: ${formatHm(a.bed)} to ${formatHm(a.wake)}, ${hoursText(inBedMin - awake)} asleep${awake ? ` (${awake} min awake)` : ''}. It shows on Body as last night.`, 'sleep logged');
 }
 
+// ---- changes he asks for (Thu 10/22) ------------------------------------------------------------------------------
+
+/**
+ * His words: "every time I don't like it, I'm going to mention it in the chat. Then he should send the request over
+ * and get back with a new message... saying it's done". The request goes into 'coach-changes'; the Mac's builder
+ * (changes.mjs) picks it up within seconds and answers in Talk when it's done.
+ */
+async function requestChange(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const open = s.list(CHANGES).filter((c) => c.status === 'queued' || c.status === 'working');
+  if (a.cancel) {
+    const c = open.find((x) => x.id === a.cancel);
+    if (!c) return refuse(`No change waiting with id ${a.cancel}.`);
+    if (c.status === 'working') return refuse('That one is being built right now; it can\'t be stopped from here.');
+    put(s, CHANGES, c.id, { ...c, status: 'cancelled', doneAt: s.now });
+    return wrote(`Cancelled: "${c.said}".`, 'change cancelled');
+  }
+  if (!a.said) return refuse('Quote his words in said.');
+  const earlier = (a.followsOn ? [a.followsOn] : []).map((id) => s.one(CHANGES, id)).filter(Boolean).map((c) => `"${c.said}" -> ${c.answer || c.status}`);
+  const c = newChange({ said: a.said, about: a.about, want: a.want, kind: a.kind, at: s.now, tz: s.tz, earlier, messages: s.list('coach-messages') });
+  put(s, CHANGES, c.id, c);
+  return wrote(`Sent to the Mac${open.length ? ` (${open.length} ahead of it)` : ''} [id ${c.id}]. Tell him in one short line that it's sent and he gets a message when it's done. From now on, follow his wish yourself in this chat.`, 'sent to the Mac');
+}
+
 const write = (name, title, description, inputSchema, run) => ({ name, title, description, inputSchema, run });
 
 export const WRITE_TOOLS = [
@@ -1068,4 +1093,5 @@ export const WRITE_TOOLS = [
   write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
   write('recovery_log', 'Recovery', "His recovery record (A13): save his weekly check-in answers in his words (check_in: one answer per question; for choice questions one of the choices the recovery tool lists; 'anything new' in his words, empty if nothing), tick or untick a thing he had to do (task_done / task_undo), or set the checkup date he booked (set_checkup). Only what he says: no advice.", obj({ action: { type: 'string', enum: ['check_in', 'task_done', 'task_undo', 'set_checkup'] }, answers: { type: 'array', items: obj({ question: { type: 'string' }, answer: { type: 'string' } }, ['question', 'answer']) }, task: { type: 'string' }, date: ISO }, ['action']), recoveryLog),
   write('schedule', 'Schedule', "Set or clear the session time for a day (default: the next session's day), make today a rest day (his rule: skip, carry on with the next day type), or undo a rest day he added.", obj({ action: { type: 'string', enum: ['set_time', 'clear_time', 'rest_today', 'undo_rest'] }, date: ISO, time: HM }, ['action']), schedule),
+  write('request_change', 'Change the coach', "He doesn't like how you or the app's own messages talk or behave (tone, a line, the timing or order of a message, something said that makes no sense), asks to change your personality, or reports a bug: the Mac rebuilds it and tells him in Talk when it's done. Don't ask first: call it at once. said = his words, verbatim. about = the exact message(s) he means, quoted with their time, and what was wrong. want = what he wants instead, one line in his terms. kind: personality (how you talk), behaviour (what or when you or the app say things), bug (something broken). followsOn: the id of an earlier request this answers or extends. cancel: an id still waiting.", obj({ said: { type: 'string' }, about: { type: 'string' }, want: { type: 'string' }, kind: { type: 'string', enum: CHANGE_KINDS }, followsOn: { type: 'string' }, cancel: { type: 'string' } }), requestChange),
 ];

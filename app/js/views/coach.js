@@ -252,24 +252,34 @@ function renderChat(view) {
   return () => { gone = true; busy?.abort(); unsub(); off(); dict?.cancel(); window.removeEventListener('thq:voice-event', onVoice); };
 }
 
+const CHANGE_LABEL = { queued: 'WAITING ON THE MAC', working: 'BEING BUILT ON THE MAC', done: 'DONE', failed: 'DIDN\'T GO THROUGH', question: 'QUESTION FOR YOU' };
+const CHANGE_CLS = { queued: 'c-muted', working: 'c-cyan', done: 'c-green', failed: 'c-amber', question: 'c-amber' };
+
 function renderNotes(view) {
   let gone = false;
   view.innerHTML = '<p class="view-sub">Loading…</p>';
   ready.then((repo) => {
     const draw = async () => {
-      const [notes, rems] = await Promise.all([repo.list('coach-notes'), repo.list('coach-reminders')]);
+      const [notes, rems, changes] = await Promise.all([repo.list('coach-notes'), repo.list('coach-reminders'), repo.list('coach-changes')]);
       if (gone) return;
       const now = Date.now();
       const upcoming = rems.filter((r) => !r.cancelledAt && (r.trigger ? !r.firedAt : r.at > now - 3600000)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
       const sorted = notes.sort((a, b) => b.at - a.at);
+      // Thu 10/22: what he asked the coach to change about itself, built on the Mac; newest first.
+      const asked = changes.filter((c) => c.status !== 'cancelled').sort((a, b) => b.at - a.at).slice(0, 20);
       view.innerHTML = `
         <div class="lib-head"><a class="pill" href="#/coach">Talk</a></div>
         <h1 class="view-title">Coach notes</h1>
-        <p class="hint">What the coach wrote down for you, and the reminders it set. Ask it to note something, or to remind you at a time.</p>
+        <p class="hint">What the coach wrote down for you, the reminders it set, and the changes you asked for. Ask it to note something, to remind you at a time, or to talk or behave differently.</p>
         <div class="section-label">Reminders · ${upcoming.length}</div>
         <section class="card supp-group">${upcoming.map((r) => `<div class="supp-item" data-rem="${esc(r.id)}"><div class="supp-main"><b>${esc(r.text)}</b>
           <span class="hint">${r.trigger ? `When you start your workout log, ${esc(formatDay(new Date(`${r.date}T12:00:00Z`), 'UTC'))} or later` : `${esc(formatDay(new Date(r.at)))}, ${esc(formatTime(new Date(r.at)))}`}</span></div><span class="supp-btns"><button class="btn-ghost small" type="button" data-cancel>Cancel</button></span></div>`).join('')
           || '<p class="hint pad">None set.</p>'}</section>
+        <div class="section-label">Changes you asked for · ${asked.length}</div>
+        <section class="card supp-group">${asked.map((c) => `<div class="supp-item"><div class="supp-main"><b>${textHtml(c.said)}</b>
+          <span class="hint"><span class="${CHANGE_CLS[c.status] || 'c-muted'}">${esc(CHANGE_LABEL[c.status] || c.status)}</span> · ${esc(dayAt(c.at, c))}, ${esc(timeAt(c.at, c))}</span>
+          ${c.answer ? `<span class="hint c-text">${textHtml(c.answer)}</span>` : ''}</div></div>`).join('')
+          || '<p class="hint pad">None yet. Tell the coach what you don\'t like about how it talks; the Mac changes it and the coach tells you when it\'s done.</p>'}</section>
         <div class="section-label">Notes · ${sorted.length}</div>
         <section class="card supp-group">${sorted.map((n) => `<div class="supp-item" data-note="${esc(n.id)}"><div class="supp-main"><b>${textHtml(n.text)}</b>
           <span class="hint">${esc(dayAt(n.at, n))}, ${esc(timeAt(n.at, n))}${n.topic ? ` · ${esc(n.topic)}` : ''}</span></div><span class="supp-btns"><button class="btn-ghost small" type="button" data-del>Delete</button></span></div>`).join('')
@@ -286,7 +296,7 @@ function renderNotes(view) {
       }));
     };
     draw();
-    const off = repo.onChange((cols) => { if (cols.some((c) => ['coach-notes', 'coach-reminders'].includes(c))) draw(); });
+    const off = repo.onChange((cols) => { if (cols.some((c) => ['coach-notes', 'coach-reminders', 'coach-changes'].includes(c))) draw(); });
     view._off = off;
   });
   return () => { gone = true; view._off?.(); };

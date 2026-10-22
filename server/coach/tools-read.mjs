@@ -253,9 +253,25 @@ function situationLines(s) {
   if (fastingOn(s.days(), s.today, s.list('meals'))) out.push(`He is FASTING today (his decision, ${timeText(f.at, s.tz)}${f.said ? `: "${f.said}"` : ''}): the app sends no food, cooking or supplement prompts. Never argue it or count his kcal against him; walks are the push; no sauna today (his checklist wants food in the last few hours). If he eats, the fast ends.`);
   const holds = activeHolds(s.list('coach-holds'), s.now);
   if (holds.length) out.push(`He asked the app to hold off (it does): ${holds.map((h) => `${h.areas.join(', ')} until ${dayText(s.date(h.until), s.today)} ${timeText(h.until, s.tz)}${h.reason ? ` (${h.reason})` : ''} [id ${h.id}]`).join('; ')}.`);
+  out.push(...changeLines(s));
   const notes = s.list('coach-notes').sort((a, b) => b.at - a.at).slice(0, 15);
   if (notes.length) out.push(`Your notes on him (your memory; use them, never ask again what they answer): ${notes.map((n) => `[${dayText(n.date || s.date(n.at), s.today)}${n.topic ? `, ${n.topic}` : ''}] ${String(n.text).slice(0, 160)}`).join(' | ')}`);
   return out;
+}
+
+/**
+ * Thu 10/22: changes he asked for (request_change). While the Mac builds one, follow it already; a finished one is
+ * in your rules or the app now, so he can ask "is it done?".
+ */
+function changeLines(s) {
+  const all = s.list('coach-changes');
+  const open = all.filter((c) => c.status === 'queued' || c.status === 'working').sort((a, b) => a.at - b.at);
+  const recent = all.filter((c) => ['done', 'failed', 'question'].includes(c.status) && s.now - (c.doneAt || 0) < 86400000).sort((a, b) => b.doneAt - a.doneAt).slice(0, 5);
+  const when = (ms) => `${dayText(s.date(ms), s.today)} ${timeText(ms, s.tz)}`;
+  return [
+    open.length ? `Changes he asked for, being built on the Mac (follow them yourself already): ${open.map((c) => `[${when(c.at)}, ${c.status === 'working' ? 'building now' : 'waiting'}] "${String(c.said).slice(0, 200)}"${c.want ? ` -> wants: ${String(c.want).slice(0, 200)}` : ''} [id ${c.id}]`).join(' | ')}` : '',
+    recent.length ? `Changes finished in the last day (already in the app or your rules; the app told him): ${recent.map((c) => `[${when(c.doneAt)}, ${c.status}] "${String(c.said).slice(0, 120)}" -> ${String(c.answer || '').slice(0, 200)} [id ${c.id}]`).join(' | ')}` : '',
+  ].filter(Boolean);
 }
 
 /** Mon 10/19: what the app (as the coach) sent him lately, so a short reply ("done", "yes", "82.4") makes sense, and

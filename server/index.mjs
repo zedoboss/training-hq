@@ -1,6 +1,6 @@
 // Starts the Training HQ server on the Mac: opens the database, refreshes the app's offline file list,
 // and listens on 127.0.0.1. Run by launchd at login (see scripts/install-mac-service.mjs).
-import { paths, loadConfig, APP_DIR } from './config.mjs';
+import { paths, loadConfig, APP_DIR, CODE_DIR } from './config.mjs';
 import { openStore } from './store.mjs';
 import { createApp } from './app.mjs';
 import { writePrecache } from '../scripts/precache.mjs';
@@ -17,6 +17,7 @@ import { openEvoltImport } from './evolt-import.mjs';
 import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
 import { findClaude } from './claude.mjs';
+import { openChanges } from './coach/changes.mjs';
 import { openHealth, defaultHealthDir } from './health.mjs';
 import { openCoach } from './coach/index.mjs';
 import { readProfile, readRecovery } from './coach/profile.mjs';
@@ -94,6 +95,16 @@ log(`health: reading ${health.dir}`);
 // with its tools on a local MCP server. His profile is read from data/coach/profile.md in the private folder.
 const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.dataDir), recovery: () => readRecovery(p.dataDir), context: contextLine, log });
 
+// Changes he asks the coach for (Thu 10/22): a Claude Code builder on this Mac makes each one, then the coach tells
+// him in Talk. A builder that changed server code makes the server restart itself (launchd starts it again).
+// config.coachChanges: false switches it off; changesCodeDir points a dev copy's builder at a scratch clone.
+const changes = config.coachChanges === false ? null : openChanges({
+  store, push, codeDir: config.changesCodeDir || CODE_DIR, privateDir: p.privateDir, tz: () => phoneZone(store), log,
+  restart: () => setTimeout(() => shutdown('a coach change updated the server'), 2000).unref(),
+});
+const changesTimer = changes ? setInterval(() => { changes.tick().catch((e) => log(`coach changes: ${e.stack || e}`)); }, 15000) : null;
+changesTimer?.unref();
+
 // Voice (step 9): the voice lock runs here (speaker check, music check), his voiceprint stays in data/voice.
 const engine = openEngine({ modelsDir: config.voiceModelsDir || p.voiceModelsDir, log });
 let voiceConfig = {};
@@ -115,6 +126,7 @@ const shutdown = (sig) => {
   notifier.stop();
   clearInterval(visionTimer);
   clearInterval(healthTimer);
+  if (changesTimer) clearInterval(changesTimer);
   coach.close().catch(() => {});
   whisper.stop('server stopping');
   server.close(() => { store.close(); process.exit(0); });
