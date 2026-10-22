@@ -105,6 +105,7 @@ test('a build that breaks a test or misses half the ask is fixed before he hears
   const fix = changes().find((x) => x.fixOf === c.id);
   assert.equal(fix.status, 'working');
   heads = { code: 'c2', private: 'p0' };
+  clock = at('16:40');
   m.build(fix, { status: 'done', said: 'Done: collagen every 5 minutes until ticked, then the dishes.', commits: ['a2 Repeats and dishes'] });
   await m.q.tick();
   // This time the reviewer finds a broken test and fixes it itself: done, with the reviewer's sentence.
