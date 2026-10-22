@@ -694,5 +694,9 @@ test('meal_check (Thu 10/22): about to cook = asked again in 5 minutes, cooking 
   store.writeLocal('meals', 'm-chia', { id: 'm-chia', date: '2026-01-20', at: Date.UTC(2026, 0, 20, 9), name: 'Snack', before: { items: [{ name: 'Chia seeds', grams: 50 }, { name: 'Almonds', grams: 40 }] } });
   const eaten = await call('meal_check', { answer: 'eaten' });
   assert.match(eaten.text, /\nNot logged yet today from his planned day: Greek yogurt 200 g \(usually about 7 tablespoons\); Almonds 60 g\. In the same answer, remind him of the add-ons/);
+  // 1:04 PM, "before I cook eggs... remind me to first melt the butter": about to cook and cooking put his cooking reminder first.
+  for (const answer of ['soon', 'cooking']) {
+    assert.match((await call('meal_check', { answer })).text, /\nNot logged yet today from his planned day: Greek yogurt 200 g.*In the same answer, first his cooking reminder \(his profile\) for what he is about to cook from these, then remind him of the add-ons/);
+  }
   store.writeLocal('fuel', 'plan', plan);
 });
