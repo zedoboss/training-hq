@@ -48,7 +48,9 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
       const mine = ss.filter((x) => x.exKey === ex.key).map((x) => ({ type: x.type, kg: x.kg ?? null, reps: x.reps ?? null, durationS: x.durationS ?? null, distanceM: x.distanceM ?? null, hold: x.type === 'hold', ...(x.depth ? { depth: x.depth } : {}) }));
       if (!mine.length) continue;
       const date = isoDate(new Date(s.startedAt));
-      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine) });
+      // Thu 10/22: his notes that day (the exercise's and the sets'), so the next target can see "back pain" and such.
+      const note = [ex.notes, ...ss.filter((x) => x.exKey === ex.key && x.note).map((x) => x.note)].filter(Boolean).join(' | ');
+      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine), ...(note ? { note } : {}) });
       ownDates.set(`${ex.name}|${date}`, true);
     }
   }

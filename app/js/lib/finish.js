@@ -201,6 +201,7 @@ export function routineFromLast(routine, last, lastSets) {
       key: newKey(), exerciseId: e.exerciseId, name: re?.name ?? e.name, restSeconds: re?.restSeconds ?? e.restSeconds ?? null,
       notes: [re?.notes ?? e.notes ?? '', why].filter(Boolean).join('\n'), plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,
       warmup: re?.warmup ?? false, sets: copied.length ? copied : re?.sets ?? [],
+      ...(e.skipped && !mine.length ? { skippedLast: { reason: e.skipped.reason || '', date: last.startedAt ? isoDate(new Date(last.startedAt)) : null } } : {}),
     };
   });
   return { ...routine, exercises, copiedFrom: last.id };

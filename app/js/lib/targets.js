@@ -29,6 +29,38 @@ export function stepFor({ barKg = null, equipment = null, name = '', smallestPla
   return 2.5;
 }
 
+/**
+ * Pain written down for a session (Thu 10/22: "Lower back pain during set and after too..."), in his words: English, or
+ * Macedonian in Latin letters, with or without the č/š/ž marks (his words: "I write both in English and Macedonian,
+ * Latin alphabet"): boli, bolat, bolka, bolno, zabole, povreda, istegnato, ukočeno, pecka... A clause that says it
+ * didn't hurt ("no pain", "ne boli", "bez bolka", "doesn't hurt") doesn't count. The lines the app adds itself
+ * ("Skipped last time...") never count.
+ */
+export const PAIN_RE = /\b(pain\w*|hurt\w*|ach(e|es|ed|ing)|aching|sore\w*|tweak\w*|strain\w*|pinch\w*|injur\w*|cramp\w*|bol(i|at|ka|ki|ki|no|na|elo|ela|esh?e|eše|ev|e)?|zabol\w*|povred\w*|isteg\w*|uko(c|č|ch)\w*|pe(c|č|ch)k\w*|gr(c|č|ch)\w*|otok\w*|ote(c|č|ch)en\w*)\b/i;
+const NOT_RE = /\b(no|not|without|never|didn'?t|doesn'?t|don'?t|isn'?t|wasn'?t|ne|nema|nemase|nemaše|bez|nikako)\b/i;
+export function painIn(note) {
+  const lines = String(note || '').split(/\n| \| /).filter((l) => !/^Skipped last time/.test(l.trim()));
+  const hits = lines.flatMap((l) => l.split(/[.,;!?]+/)).map((c) => c.trim()).filter((c) => {
+    const m = PAIN_RE.exec(c);
+    return m && !NOT_RE.test(c.slice(0, m.index));
+  });
+  return hits.length ? lines.join(' ').trim() : '';
+}
+
+/**
+ * What last time says about today (Thu 10/22, his words: "check my previous work... if I had back pain for squats...
+ * you did 61 for the first set, and before that it was 51, so you added 10 kg: go lower... since you did 51 before the
+ * 61, add 2.5 and do 54... you skipped that exercise last time, so just go with the same weight you did before that").
+ * entries: history.all(name), newest first. skipped: {reason} when the last workout of this kind skipped it.
+ * Returns {pain: {note, kg, prevGood}|null, skipped} for targetFor.
+ */
+export function lastNotes(entries = [], { skipped = null } = {}) {
+  const [last, ...older] = entries;
+  const note = last ? painIn(last.note) : '';
+  const prevGood = older.find((e) => e.heaviest?.kg != null && !painIn(e.note))?.heaviest || null;
+  return { pain: note && last?.heaviest?.kg != null ? { note, kg: last.heaviest.kg, prevGood } : null, skipped: skipped || null };
+}
+
 /** The highest load allowed by the cap, before rounding to a loadable weight. */
 export const capOf = (lastKg) => Math.round(lastKg * (1 + CAP) * 100) / 100;
 
@@ -63,7 +95,7 @@ export function setCount(sets, doneBefore) {
  * @returns {{kg:number|null, approx:boolean, added:boolean, bodyweight:boolean, reps:[number,number]|null,
  *   sets:number, why:string, table:number|null, capKg:number|null, gated:string|null, week:number}}
  */
-export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25, progressKg = null, equipment = null, name = '' }) {
+export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25, progressKg = null, equipment = null, name = '', notes = null }) {
   const doneBefore = !!last;
   const gatedNotStarted = plan.weeks && plan.weeks.some((w) => w.gate) && !doneBefore;
   const cell = weekCell(plan, gatedNotStarted ? 1 : week, progressKg);
@@ -103,7 +135,24 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     return out;
   }
   if (plan.capClass === 'main') out.capKg = capOf(last.kg);
-  const up = short ? last.kg : r2(last.kg + step);
+  let up = short ? last.kg : r2(last.kg + step);
+  // Last time hurt: back to the last load that didn't plus a step if it was a jump that hurt, else no step at all.
+  // Skipped last time: the weight from before, no step.
+  const pain = notes?.pain; const skip = notes?.skipped;
+  if (pain) {
+    const good = pain.prevGood?.kg;
+    up = good != null && pain.kg > good + step + 1e-9 ? Math.min(r2(good + step), pain.kg) : Math.min(pain.kg, good ?? pain.kg);
+    out.kg = up;
+    out.why = `Last time ${pain.kg} kg hurt ("${pain.note.slice(0, 70)}"). ${good != null && pain.kg > good + step + 1e-9 ? `That was ${r2(pain.kg - good)} kg over ${good} kg: ${good} + ${step} = ${up} kg` : `Stay at ${up} kg, no step`}. Only if it doesn't hurt today; if it does, skip it`;
+    out.painLast = true;
+    return out;
+  }
+  if (skip) {
+    out.kg = last.kg;
+    out.why = `Skipped last time${skip.reason ? ` (${skip.reason})` : ''}: same as before, ${last.kg} kg`;
+    out.skippedLast = true;
+    return out;
+  }
   const ceiling = Math.min(table, out.capKg ?? Infinity);
   // A step on top of what he lifted is loadable as it is (1.25 a side more); a ceiling is rounded down to his plates.
   out.kg = up <= ceiling ? up : loadable(ceiling, { barKg, smallestPlate }) ?? ceiling;

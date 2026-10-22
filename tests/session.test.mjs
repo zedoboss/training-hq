@@ -314,3 +314,12 @@ test('check-in said lighter: previous week column, same sets, reps short; holds 
   const holds = sets.filter((x) => x.exKey === session.exercises[1].key);
   assert.ok(holds.every((x) => x.type === 'hold' && x.kg === 6.8));
 });
+
+test('holds never step up (Thu 10/22: his knee hold is the full stack, 104 kg)', () => {
+  const s1 = { id: 's1', status: 'done', routineId: 'legs', dayType: 'legs', startedAt: Date.parse('2026-10-22T04:00:00Z'), exercises: [{ key: 'h', name: 'Leg Extension Hold (Machine)' }] };
+  const done = [1, 2, 3].map((i) => ({ sessionId: 's1', exKey: 'h', order: i, done: true, type: 'normal', kg: 104, durationS: 30 }));
+  const h = buildHistory({ sessions: [s1], sets: done });
+  const r = { id: 'legs', title: 'Legs', dayType: 'legs', exercises: [{ key: 'k', exerciseId: 'leg-extension-hold-machine', name: 'Leg Extension Hold (Machine)', plan: null, sets: [1, 2, 3].map(() => ({ type: 'normal', kg: 104, durationS: 30 })) }] };
+  const lib = new Map([['leg-extension-hold-machine', { id: 'leg-extension-hold-machine', name: 'Leg Extension Hold (Machine)', type: 'weight_duration' }]]);
+  assert.deepEqual(buildSession({ routine: r, meta, lib, history: h, today: '2026-10-25' }).sets.map((x) => x.kg), [104, 104, 104]);
+});

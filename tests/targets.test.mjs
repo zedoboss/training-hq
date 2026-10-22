@@ -101,3 +101,33 @@ test('guard: an earlier session the same day counts', () => {
   const g = guardCheck({ kg: 80, capClass: 'main', history: [{ date: '2026-10-17', kg: 56.3 }, { date: '2026-10-10', kg: 43.8 }], today: '2026-10-17', barKg: 11.3 });
   assert.equal(g.basis.kg, 56.3);
 });
+
+test('smart targets (Thu 10/22): pain last time, in English or Macedonian (Latin), and a skip change today\'s number', async () => {
+  const { painIn, lastNotes } = await import('../app/js/lib/targets.js');
+  assert.ok(painIn('Lower back pain during set and after too just staying there hurts when bending'));
+  assert.ok(painIn('me boli krstot'), 'Macedonian: my lower back hurts');
+  assert.ok(painIn('Kolenoto bolat posle'));
+  assert.ok(painIn('ukočeno ramo'), 'stiff shoulder, with č');
+  assert.ok(painIn('ukoceno ramo'), 'and without');
+  assert.ok(painIn('malku bolka vo zglobot'));
+  assert.equal(painIn('Samo bar, da neom dodolu skroz tamu e cudnoto'), '', 'his hip thrust note: no pain');
+  assert.equal(painIn('ne boli vekje'), '', 'it doesn\'t hurt any more');
+  assert.equal(painIn('bez bolka denes'), '');
+  assert.equal(painIn('no pain today, felt strong'), '');
+  assert.equal(painIn('Skipped last time (Thursday 10/22): lower back pain.'), '', 'the app\'s own line');
+  const squat = { capClass: 'main', weeks: [w(40, [10, 12], { count: 1 }), w(50, [8, 10], { count: 2 }), w(65, [6, 8], { count: 2 }), w(80, [6, 8], { count: 2 })] };
+  const e = (date, kg, note = '') => ({ date, heaviest: { kg, reps: 8 }, ...(note ? { note } : {}) });
+  // His example: 51 before, 61 hurt -> back to 51 + one step.
+  const jumped = targetFor({ plan: squat, week: 4, barKg: 11.3, last: { kg: 61.3, reps: 8 }, notes: lastNotes([e('2026-10-22', 61.3, 'lower back pain'), e('2026-10-18', 51.8)]) });
+  assert.equal(jumped.kg, 54.3);
+  assert.match(jumped.why, /^Last time 61\.3 kg hurt \("lower back pain"\)\. That was 9\.5 kg over 51\.8 kg: 51\.8 \+ 2\.5 = 54\.3 kg\. Only if it doesn't hurt today; if it does, skip it$/);
+  // Today's real case: it hurt at the same load as before -> no step.
+  const same = targetFor({ plan: squat, week: 4, barKg: 11.3, last: { kg: 51.8, reps: 8 }, notes: lastNotes([e('2026-10-22', 51.8, 'Lower back pain during set'), e('2026-10-18', 51.8)]) });
+  assert.equal(same.kg, 51.8);
+  assert.match(same.why, /Stay at 51\.8 kg, no step/);
+  // Skipped last time: the weight from before, no step.
+  const hip = { capClass: 'main', weeks: [w(20, [10, 12], { count: 1 }), w(25, [10, 12], { count: 2 }), w(30, [8, 12], { count: 2 }), w(40, [8, 12], { count: 2 })] };
+  const sk = targetFor({ plan: hip, week: 4, last: { kg: 27.7, reps: 12 }, name: 'Hip Thrust (Machine)', notes: lastNotes([e('2026-10-18', 27.7)], { skipped: { reason: 'Lower back pain from squats' } }) });
+  assert.equal(sk.kg, 27.7);
+  assert.equal(sk.why, 'Skipped last time (Lower back pain from squats): same as before, 27.7 kg');
+});

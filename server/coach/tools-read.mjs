@@ -6,7 +6,7 @@ import { snapshot, dayText, whenText, timeText, loadText, repsText, mmss, plural
 import { LABEL, addDays } from '../../app/js/lib/rotation.js';
 import { weekColumn } from '../../app/js/lib/programme.js';
 import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js';
-import { targetFor } from '../../app/js/lib/targets.js';
+import { targetFor, lastNotes } from '../../app/js/lib/targets.js';
 import { confirmedKg, modeOf, isConfirmed } from '../../app/js/lib/progression.js';
 import { currentBodyweight, healthDays, hoursText, weightSeries, withSleepLog } from '../../app/js/lib/health.js';
 import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds } from '../../app/js/lib/holds.js';
@@ -392,7 +392,7 @@ function programmeText(s, { dayType = null, week = null } = {}) {
       const ex = lib.get(re.exerciseId) || { barKg: null };
       if (!pe) { lines.push(`${i + 1}. ${re.name}: not in the table (follows his last load).`); continue; }
       const last = history.last(re.name);
-      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date } : null, barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null, equipment: ex.equipment ?? null, name: re.name });
+      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date } : null, notes: lastNotes(history.all(re.name)), barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null, equipment: ex.equipment ?? null, name: re.name });
       const cell = pe.weeks?.find((w) => w.week === Math.min(4, wk));
       lines.push(`${i + 1}. ${re.name}: ${t.bodyweight ? 'bodyweight' : t.kg != null ? loadText(t.kg, ex.barKg) : '?'} × ${repsText(t.reps)}, ${plural(t.sets ?? 0, 'set')}. Why: ${t.why}.${cell ? ` Table: ${cell.text}.` : ''}`);
     }
