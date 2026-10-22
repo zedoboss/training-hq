@@ -8,7 +8,8 @@ import { buildHistory } from '../lib/history.js';
 import { ACTION_TEXT } from '../lib/readiness.js';
 import { NECK_PLACES, placeLabel, neckAsk, answerNeck, neckToday, neckTodayText, neckDoneOn } from '../lib/neck.js';
 import { comebackStartOf } from '../lib/finish.js';
-import { isoDate, formatDay, formatHm, addMinutesHm, timeAt } from '../lib/time.js';
+import { isoDate, formatDay, formatHm, addMinutesHm, timeAt, deviceTimeZone } from '../lib/time.js';
+import { checkInLead } from '../lib/reminders.js';
 import { elapsedMs } from '../lib/session.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
@@ -78,7 +79,7 @@ export function render(view) {
     const scanPlan = planFor(planDoc || {}, { scans, today, last, days });
     const scanFirst = scanPlan?.next?.date === nextDate && t.kind !== 'done' && !scans.some((x) => x.date === nextDate && isDone(x));
     const whenLine = hm
-      ? `${nextDate === today ? 'Today' : esc(day(nextDate))}, ${formatHm(hm)} · check-in ${formatHm(addMinutesHm(hm, -checkMin))}`
+      ? `${nextDate === today ? 'Today' : esc(day(nextDate))}, ${formatHm(hm)} · check-in ${(() => { const lead = checkInLead(days[nextDate], nextDate, deviceTimeZone(), checkMin); return lead == null ? 'before you leave' : formatHm(addMinutesHm(hm, -lead)); })()}`
       : `No time set for ${nextDate === today ? 'today' : esc(day(nextDate))}`;
 
     view.innerHTML = `

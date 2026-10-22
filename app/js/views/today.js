@@ -3,7 +3,8 @@
 import { coreSvg } from '../ui/core.js';
 import { toast } from '../ui/toast.js';
 import { getState, subscribe } from '../lib/store.js';
-import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, formatDay, formatHm, addMinutesHm } from '../lib/time.js';
+import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, formatDay, formatHm, addMinutesHm, deviceTimeZone } from '../lib/time.js';
+import { checkInLead } from '../lib/reminders.js';
 import { withDefaults } from '../lib/settings.js';
 import { ready, saveSettings } from '../lib/data.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
@@ -72,7 +73,8 @@ async function trainToday(repo) {
   const holds = slots.length ? { readout: open ? `${open} OPEN` : slots.every((x) => x.skipped) ? 'SKIPPED' : 'DONE', progress: (slots.length - open) / slots.length } : { readout: 'NONE TODAY', progress: null };
   const hm = daysByDate(dayList)[rot.next.date]?.sessionTime;
   const at = hm ? ` at ${formatHm(hm)}` : '';
-  const check = hm ? ` Check-in at ${formatHm(addMinutesHm(hm, -withDefaults(getState().settings).notify.readinessMin))}.` : ' No time set yet.';
+  const lead = hm ? checkInLead(daysByDate(dayList)[rot.next.date], rot.next.date, deviceTimeZone(), withDefaults(getState().settings).notify.readinessMin) : null;
+  const check = hm ? (lead == null ? ' Check-in before you leave.' : ` Check-in at ${formatHm(addMinutesHm(hm, -lead))}.`) : ' No time set yet.';
   if (t.kind === 'train') return { holds, readout: `${next}${wk ? ` · WK ${wk}` : ''}`, progress: 0, line: `Today: ${next}${at}${wk ? `, week ${wk} column` : ''}.${check}` };
   const nextText = `Next: ${next}${at}, ${dayOf(rot.next.date)}${wk ? `, week ${wk} column` : ''}.${hm ? check : ''}`;
   if (t.kind === 'done') return { holds, readout: `${LABEL[t.dayType]} DONE`, progress: 1, line: `${LABEL[t.dayType]} done today. ${nextText}` };

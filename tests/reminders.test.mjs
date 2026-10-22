@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { remindersFor, dueNow } from '../app/js/lib/reminders.js';
+import { remindersFor, dueNow, checkInLead } from '../app/js/lib/reminders.js';
 
 const TZ = 'Asia/Ho_Chi_Minh';
 const at = (iso, hm) => Date.parse(`${iso}T${hm}:00+07:00`);
@@ -29,6 +29,25 @@ test('training day with a time: check-in 30 minutes before, session at its time,
   // Legs not done by the evening: it is still next tomorrow (decision 15), with no time set yet.
   assert.equal(k.evening.body, 'Still open: knees (Gym Hold), knees (Wall Hold). Tomorrow: Legs. No time set yet.');
   assert.equal(k.evening.at, at('2026-01-20', '20:30'));
+});
+
+test('session time set after the usual check-in time: the check-in reminder comes just before he leaves, not at once', () => {
+  // Thu 10/22: at 9:23 AM he set Legs for 9:50 AM; the 9:20 AM check-in fired a minute later.
+  const last = { dayType: 'push', date: '2026-01-18', streak: 2 };
+  const late = { '2026-01-20': { date: '2026-01-20', sessionTime: '09:50', timeSetAt: at('2026-01-20', '09:23') } };
+  const k = byKind(remindersFor({ ...base, date: '2026-01-20', last, days: late }));
+  assert.equal(k.readiness.at, at('2026-01-20', '09:45'));
+  assert.deepEqual(dueNow(Object.values(k), at('2026-01-20', '09:24')), []);
+  assert.deepEqual(dueNow(Object.values(k), at('2026-01-20', '09:45')).map((i) => i.kind), ['readiness']);
+  // Set in time: the usual 30 minutes before.
+  const early = { '2026-01-20': { date: '2026-01-20', sessionTime: '09:50', timeSetAt: at('2026-01-20', '09:10') } };
+  assert.equal(byKind(remindersFor({ ...base, date: '2026-01-20', last, days: early })).readiness.at, at('2026-01-20', '09:20'));
+  // Set 3 minutes before the session: no check-in reminder; the session's own says the check-in is still open.
+  const close = { '2026-01-20': { date: '2026-01-20', sessionTime: '09:50', timeSetAt: at('2026-01-20', '09:47') } };
+  const k3 = byKind(remindersFor({ ...base, date: '2026-01-20', last, days: close }));
+  assert.equal(k3.readiness, undefined);
+  assert.match(k3.session.body, /Check-in still open/);
+  assert.equal(checkInLead({ sessionTime: '09:50' }, '2026-01-20', TZ, 30), 30, 'no timeSetAt: the usual time');
 });
 
 test('done things switch reminders off: check-in in, session started, holds logged', () => {

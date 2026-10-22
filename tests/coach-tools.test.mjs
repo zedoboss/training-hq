@@ -406,6 +406,15 @@ test('schedule: a session time, a rest day and its undo follow the rotation rule
   assert.match(later.text, /Wednesday 1\/21 at 4:30 AM.*today has passed, so this is for tomorrow/);
 });
 
+test('schedule: a session time set after its usual check-in time moves the check-in to just before he leaves', async () => {
+  // 3:00 AM, Legs at 3:20 AM: 2:50 AM has passed, so the check-in reminder is at 3:15 AM, also in the context line.
+  const r = await call('schedule', { action: 'set_time', time: '03:20' });
+  assert.match(r.text, /^Legs Tuesday 1\/20 at 3:20 AM; the usual check-in time has passed, so its reminder comes at 3:15 AM, just before he leaves\./);
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /Session time today: 3:20 AM, check-in 3:15 AM\./);
+  const close = await call('schedule', { action: 'set_time', time: '03:03' });
+  assert.match(close.text, /its reminder is skipped: he does it just before he leaves/);
+});
+
 test('body scan: confirm the proposed date (today too, with the checklist; never a past day), record the safety notice and results', async () => {
   // Today's Legs is open: the proposal is a day he trains either way, and says which workout each way.
   assert.match((await call('body_scans')).text, /No date confirmed\. Proposed: Thursday 1\/22 \(a Pull day\), the first scan/);

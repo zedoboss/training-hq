@@ -31,6 +31,23 @@ export const KINDS = [
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };
+
+/** Minutes before the session for a check-in reminder whose usual time had already passed when he set the time. */
+export const LATE_CHECKIN_MIN = 5;
+
+/**
+ * How many minutes before the session the check-in reminder comes (Thu 10/22, his words: he set Legs at 9:50 AM at
+ * 9:23 AM and "Sore, or good to go?" came a minute later). Normally `readinessMin`; when that time had already passed as
+ * he set the session time, just before he leaves (LATE_CHECKIN_MIN); null when even that had passed (the session's own
+ * reminder says the check-in is still open). A day doc without `timeSetAt` keeps the usual time.
+ */
+export function checkInLead(doc, date, tz, readinessMin) {
+  const at = zonedTime(date, doc.sessionTime, tz);
+  const setAt = doc.timeSetAt || 0;
+  if (setAt < at - readinessMin * 60000) return readinessMin;
+  return setAt < at - LATE_CHECKIN_MIN * 60000 ? LATE_CHECKIN_MIN : null;
+}
+
 const day = (iso) => formatDay(new Date(`${iso}T12:00:00Z`), 'UTC');
 /** "Knees: Wall Hold. 3 × 30 s each. Shoulder: the gym for the ... hold, another hold, or skip today?" */
 const holdsBody = (shown, round = '') => {
@@ -81,9 +98,10 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
     const wk = weekColumn(meta?.firstSessions?.[dayType], date);
     const started = trainedDates.has(date);
     const asked = [...askedAreas(areas).map((a) => a.label.toLowerCase()), ...workingKeys(table, dayType).map((k) => KEY_WORD[k])];
-    if (on('readiness')) {
+    const lead = checkInLead(doc, date, tz, n.readinessMin);
+    if (on('readiness') && lead != null) {
       out.push({
-        id: `readiness:${date}`, kind: 'readiness', at: at - n.readinessMin * 60000, url: '#/checkin', tag: `readiness-${date}`, fixed: true,
+        id: `readiness:${date}`, kind: 'readiness', at: at - lead * 60000, url: '#/checkin', tag: `readiness-${date}`, fixed: true,
         title: 'Sore, or good to go?',
         body: `${LABEL[dayType]} at ${formatHm(hm)}${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}, then energy` : 'Energy'}. Zero to three.`,
         due: !doc.readiness && !started,
@@ -144,7 +162,8 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
     let next = '';
     if (rot2.today.kind === 'train') {
       const hm2 = days[tomorrow]?.sessionTime;
-      next = hm2 ? `Tomorrow: ${LABEL[rot2.today.dayType]} at ${formatHm(hm2)}, check-in at ${formatHm(addMinutesHm(hm2, -n.readinessMin))}.`
+      const lead2 = hm2 ? checkInLead(days[tomorrow], tomorrow, tz, n.readinessMin) : null;
+      next = hm2 ? `Tomorrow: ${LABEL[rot2.today.dayType]} at ${formatHm(hm2)}${lead2 == null ? '' : `, check-in at ${formatHm(addMinutesHm(hm2, -lead2))}`}.`
         : `Tomorrow: ${LABEL[rot2.today.dayType]}. No time set yet.`;
     }
     const still = open.length ? `Still open: ${open.map((s) => `${s.label.toLowerCase()} (${s.exercise})`).join(', ')}.` : '';

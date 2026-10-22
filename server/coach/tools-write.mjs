@@ -21,6 +21,7 @@ import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checkli
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol, measurementFromScan } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText, doctorDue } from '../../app/js/lib/sauna.js';
 import { zonedTime, addMinutesHm, LOGGED_COLS, withZone, hmOf } from '../../app/js/lib/time.js';
+import { checkInLead } from '../../app/js/lib/reminders.js';
 import { restAskAreas, withRestChoice, restChoiceText, PHASE_TEXT } from '../../app/js/lib/holds.js';
 import { withAnswer, planAt } from '../../app/js/lib/walks.js';
 import { fastingOn, withFast } from '../../app/js/lib/fast.js';
@@ -825,9 +826,11 @@ async function schedule(a, ctx) {
     let moved = false;
     if (!a.date && a.action === 'set_time' && date === s.today && zonedTime(date, a.time, s.tz) <= s.now) { date = addDays(s.today, 1); moved = true; }
     if (a.action === 'set_time' && !a.time) return refuse('What time?');
-    put(s, 'days', date, withTime(days[date], date, a.action === 'set_time' ? a.time : null, s.now));
+    const doc = withTime(days[date], date, a.action === 'set_time' ? a.time : null, s.now);
+    put(s, 'days', date, doc);
     const type = date === rot.next.date || moved ? rot.next.dayType : null;
-    return wrote(a.action === 'set_time' ? `${type ? `${LABEL[type]} ` : ''}${dayText(date, s.today)} at ${formatHm(a.time)}; check-in ${formatHm(addMinutesHm(a.time, -pre))}.${moved ? ` (${formatHm(a.time)} today has passed, so this is for tomorrow.)` : ''}${type ? '' : ' (That day is not the next training day in the rotation.)'}` : `Session time cleared for ${dayText(date, s.today)}.`, a.action === 'set_time' ? `${dayText(date, s.today)} ${formatHm(a.time)}` : 'time cleared');
+    const lead = a.action === 'set_time' ? checkInLead(doc, date, s.tz, pre) : null;
+    return wrote(a.action === 'set_time' ? `${type ? `${LABEL[type]} ` : ''}${dayText(date, s.today)} at ${formatHm(a.time)}; ${lead === pre ? `check-in ${formatHm(addMinutesHm(a.time, -pre))}` : `the usual check-in time has passed, so its reminder ${lead == null ? 'is skipped: he does it just before he leaves' : `comes at ${formatHm(addMinutesHm(a.time, -lead))}, just before he leaves`}`}.${moved ? ` (${formatHm(a.time)} today has passed, so this is for tomorrow.)` : ''}${type ? '' : ' (That day is not the next training day in the rotation.)'}` : `Session time cleared for ${dayText(date, s.today)}.`, a.action === 'set_time' ? `${dayText(date, s.today)} ${formatHm(a.time)}` : 'time cleared');
   }
   if (a.action === 'rest_today') {
     if (s.active()) return refuse('A session is in progress. Finish or discard it on the phone first.');

@@ -29,6 +29,7 @@ import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
 import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
+import { checkInLead } from '../../app/js/lib/reminders.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -94,7 +95,8 @@ function rotationLines(s) {
   else out.push(`Today: rest (${t.reason === 'rotation' ? 'the rest day after Legs' : t.reason === 'moved' ? 'session moved to tomorrow at the check-in' : t.reason === 'rest-holds' ? 'rest and tendon holds, from the check-in' : 'a rest day he added'}). Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)} (week ${wk} column).`);
   const hm = days[nxt.date]?.sessionTime;
   const pre = s.settings().notify.readinessMin;
-  out.push(hm ? `Session time ${nxt.date === s.today ? 'today' : dayText(nxt.date, s.today)}: ${formatHm(hm)}, check-in ${formatHm(addMinutesHm(hm, -pre))}.` : `No session time set for ${nxt.date === s.today ? 'today' : dayText(nxt.date, s.today)} (he sets it on Train).`);
+  const lead = hm ? checkInLead(days[nxt.date], nxt.date, s.tz, pre) : null;
+  out.push(hm ? `Session time ${nxt.date === s.today ? 'today' : dayText(nxt.date, s.today)}: ${formatHm(hm)}, check-in ${lead == null ? 'just before he leaves (no reminder: its time had passed when he set the session time)' : formatHm(addMinutesHm(hm, -lead))}.` : `No session time set for ${nxt.date === s.today ? 'today' : dayText(nxt.date, s.today)} (he sets it on Train).`);
   const rd = days[s.today]?.readiness;
   if (t.kind !== 'rest' || rd) out.push(rd ? `Check-in today: rule ${rd.rule}, ${ACTION_TEXT[rd.action] || rd.action}${rd.lighterExercises?.length ? ` (${rd.lighterExercises.join(', ')})` : ''}` : 'Check-in today: not done.');
   const last = s.last();
