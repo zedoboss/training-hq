@@ -361,7 +361,8 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
     'GET /api/calendar.ics': async (req, url, res) => {
       if (!calendar) throw new HttpError(404, 'not available');
       let body;
-      try { body = calendar.ics(url.searchParams.get('k')); } catch (e) { throw new HttpError(e.status || 500, e.message); }
+      try { body = calendar.ics(url.searchParams.get('k'), { agent: req.headers['user-agent'] || '' }); } catch (e) { throw new HttpError(e.status || 500, e.message); }
+      log(`calendar: feed fetched (${String(req.headers['user-agent'] || 'no agent').slice(0, 60)})`);
       res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(body);
     },

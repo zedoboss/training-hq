@@ -367,6 +367,17 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   return out;
 }
 
+/** The last thing he did at home since `since` (a meal answer soon, cooking or eaten; a meal; a workout or holds started), or 0. */
+export function homeSince(store, since) {
+  const list = (col) => store.listRecords(col).map((r) => r.data).filter(Boolean);
+  const times = [
+    ...list('meal-checks').filter((c) => ['soon', 'cooking', 'eaten'].includes(c.answer)).map((c) => c.at),
+    ...list('meals').map((m) => m.at),
+    ...list('sessions').map((x) => x.startedAt),
+  ].filter((t) => Number.isFinite(t) && t > since);
+  return times.length ? Math.max(...times) : 0;
+}
+
 /**
  * The walk coach (Tue 10/20, his words: "bump me throughout the day... to get me to get those 8K steps... If I don't
  * respond within 5 minutes, it should bump me again and ask... When are you going for a walk?"). Its own timing (lib/
@@ -383,7 +394,7 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const docs = store.listRecords('walks').map((r) => r.data).filter(Boolean);
   const doc = docs.find((d) => d.date === date) || null;
   const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
-  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather') });
+  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather'), homeAt: doc?.going ? homeSince(store, doc.going.at) : 0 });
   if (!due) return null;
   const v = coachVoice(due.text, { ...voiceOpts(store), calm: due.calm });
   const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };

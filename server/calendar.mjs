@@ -11,6 +11,8 @@ import { stateFrom, SENT, afterMeals, mealSpansFor } from './notify.mjs';
 import { isoDate } from '../app/js/lib/time.js';
 
 export const KEY = 'calendar:secret';
+/** The last fetch of the feed: {at, agent, count}. */
+export const FETCHED = 'calendar:fetched';
 /** The alert comes this long after the reminder's time: more than the iPhone's 15-minute refresh, so a sent one is gone first. */
 export const ALERT_AFTER_MIN = 20;
 export const REFRESH_MIN = 15;
@@ -30,10 +32,11 @@ export function openCalendar({ store, tz, now = () => Date.now() }) {
   return {
     /** The path for the subscription (the phone adds the Mac address it already uses). */
     link: ({ renew = false } = {}) => ({ path: `/api/calendar.ics?k=${secret.get(renew)}` }),
-    /** The calendar file; throws 403 on a wrong secret. */
-    ics(k) {
+    /** The calendar file; throws 403 on a wrong secret. Each fetch is kept (Thu 10/22: is the iPhone refreshing?). */
+    ics(k, { agent = '' } = {}) {
       secret.check(k);
       const t = now();
+      store.setMeta(FETCHED, { at: t, agent: String(agent).slice(0, 120), count: (store.getMeta(FETCHED)?.count || 0) + 1 });
       return icsFor(calendarItems(store, typeof tz === 'function' ? tz() : tz, t), t, { refreshMin: REFRESH_MIN, alertAfterMin: ALERT_AFTER_MIN });
     },
   };

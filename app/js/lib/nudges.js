@@ -42,7 +42,10 @@ export function dayFraction(now, tz, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUD
 /** A notification in the coach's voice: {title, body}. */
 export function coachVoice(text, { bank = null, moods = {}, intensity = 3, calm = false, rng = Math.random, avoid = new Set() } = {}) {
   const facts = String(text || '').trim();
-  if (calm) return { title: 'Coach', body: facts };
+  // Thu 10/22, 4:54 PM (his words: "all logs obv wrong", on "Started cooking? Are you going to let your future self be
+  // weaker? Move." and "Back from the walk? How many minutes did you go? You got this. Move!"): a push line follows a
+  // call to act, never a question to him.
+  if (calm || /\?\s*$/.test(facts)) return { title: 'Coach', body: facts };
   const line = pickLine(bank, 'nudge', { moods, intensity, rng, avoid });
   return { title: 'Coach', body: line?.text ? `${facts} ${line.text}` : facts };
 }
@@ -52,6 +55,10 @@ export function coachVoice(text, { bank = null, moods = {}, intensity = 3, calm 
  * already says it (Thu 10/22, his words: "Why did it say head home twice?"). A calm item gets no mood line.
  */
 export function coachReminder(item, opts = {}) {
+  // A reminder the coach set for him (set_reminder): its own words, as the coach wrote them; no "Reminder." in front, no
+  // push line (Thu 10/22, 4:54 PM: "Reminder. 4:40 PM. Started cooking? Are you going to let your future self be weaker?
+  // Move.").
+  if (item.kind === 'coach') return coachVoice(item.body || item.title, { ...opts, calm: true });
   const head = String(item.title || '').replace(/[.?!:]?\s*$/, (m) => (/[?!]/.test(m) ? m.trim() : '.'));
   const said = (t) => t.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
   const text = item.body && head && said(item.body).includes(said(head)) ? item.body : [head, item.body].filter(Boolean).join(' ');
