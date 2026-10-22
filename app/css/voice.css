@@ -12,6 +12,8 @@
 #v-strict { margin: 0 14px 12px; }
 .voice-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; white-space: nowrap; cursor: pointer; }
 .voice-chip[hidden] { display: none; }
+.voice-x { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 16px; border: 1px solid var(--pale); background: var(--surface); color: var(--pale); cursor: pointer; }
+.voice-x[hidden] { display: none; }
 .voice-chip.is-listening { color: var(--cyan); border-color: var(--cyan-dim); }
 .voice-chip.is-hearing, .voice-chip.is-thinking { color: var(--pale); border-color: var(--pale); }
 .voice-chip.is-speaking { color: var(--on-pale); background: var(--pale); border-color: var(--pale); }

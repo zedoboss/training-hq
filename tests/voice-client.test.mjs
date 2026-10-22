@@ -106,3 +106,22 @@ test('quiet times: on while any reason is on; the end is announced once', async 
   assert.equal(ends, 1);
   off();
 });
+
+test('voice buttons: the mic only mutes him, the X stops the coach (Thu 10/22)', async () => {
+  const { micTap, showsStop } = await import('../app/js/lib/voice-text.js');
+  // Muting while the coach thinks or speaks is a mute, never a hush.
+  assert.equal(micTap({ on: true, held: false, phase: 'speaking' }), 'mute');
+  assert.equal(micTap({ on: true, held: false, phase: 'thinking' }), 'mute');
+  assert.equal(micTap({ on: false, held: false, phase: 'speaking' }), 'listen');
+  assert.equal(micTap({ on: false, held: true }), 'held');
+  assert.equal(showsStop({ replying: true }), true);
+  assert.equal(showsStop({ replying: false }), false);
+  // Switching the mic off leaves an answer on its way, or being spoken, alone.
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../app/js/lib/voice.js', import.meta.url), 'utf8');
+  const stop = src.slice(src.indexOf('export function stop()'), src.indexOf('\n}\n', src.indexOf('export function stop()')));
+  assert.doesNotMatch(stop, /speechGen\+\+|player\.stop\(\)|quietQueue/);
+  const hud = await readFile(new URL('../app/js/ui/voice-hud.js', import.meta.url), 'utf8');
+  assert.match(hud, /stopEl\.addEventListener\('click', \(\) => voice\.hush\(\)\)/);
+  assert.doesNotMatch(hud.slice(hud.indexOf("el.addEventListener('click'")), /hush/);
+});

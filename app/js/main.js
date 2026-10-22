@@ -91,6 +91,7 @@ function shell() {
       </nav>
       <div class="top-right">
         <button class="voice-chip" id="voice-chip" type="button" hidden></button>
+        <button class="voice-x" id="voice-x" type="button" aria-label="Stop the coach talking" hidden></button>
         <div class="model-readout">
           <div class="hud c-faint" style="letter-spacing:.4em">ACTIVE MODEL</div>
           <div class="hud c-cyan" id="active-model" style="font-size:16px;letter-spacing:.24em;margin-top:6px">SONNET 5.5 · MEDIUM</div>
@@ -135,7 +136,7 @@ subscribe(showModel);
 window.addEventListener('hashchange', route);
 route();
 // Voice (step 9): the header chip, and listening again if it was on for this device.
-mountVoiceHud(document.getElementById('voice-chip'));
+mountVoiceHud(document.getElementById('voice-chip'), document.getElementById('voice-x'));
 mountCoachCaption();
 mountWorkoutBar();
 resumeVoice();

@@ -26,9 +26,12 @@ const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { retur
 const prefs = () => withDefaults(getState().settings);
 
 let mic = null; let opening = null; let wake = null; let held = 0; let lent = 0;
-// Answers still on their way are dropped after "stop", a mute, a tap or his voice cutting in (Tue 10/20: he turned the
-// mic off and the coach still said "Noted, I'll stop..."): each turn speaks only while this hasn't moved on.
+// Answers still on their way are dropped after "stop", the X or his voice cutting in: each turn speaks only while this
+// hasn't moved on. Not after a mute (Thu 10/22: he said "Yo coach", muted himself at once and never heard the answer;
+// the mic is only his microphone, the X stops the coach).
 let speechGen = 0;
+// Turns still on their way; a live one (his voice confirmed, not stopped since) shows the X that stops the coach.
+const turns = new Set();
 let phase = 'off'; // off | listening | hearing | thinking | speaking | paused | tap | error
 let readout = null; let readoutTimer = null; let error = null; let turnsInFlight = 0;
 let bargeTimer = null; let bargeSent = false; let overCoach = false;
@@ -46,7 +49,8 @@ const player = createPlayer({
 });
 
 /** What the header chip and the Voice screen show. */
-export const snapshot = () => ({ wanted: listening(), used: ls.get(SEEN) === '1', on: !!mic, phase, readout, error, held: held > 0 });
+export const snapshot = () => ({ wanted: listening(), used: ls.get(SEEN) === '1', on: !!mic, phase, readout, error, held: held > 0, replying: replying() });
+const replying = () => player.speaking || [...turns].some((t) => t.live && t.gen === speechGen);
 export const listening = () => ls.get(KEY) === '1';
 export function onChange(fn) { subs.add(fn); return () => subs.delete(fn); }
 const emit = () => { const s = snapshot(); for (const f of subs) { try { f(s); } catch { /* a screen gone */ } } };
@@ -118,8 +122,8 @@ async function turn(wav, { overCoach: echo = false } = {}) {
   if (!player.speaking) setPhase('thinking');
   const split = sentenceSplitter();
   const gate = replyGate(); let ok = false;
-  let myGen = speechGen;
-  const sentence = (s) => { if (myGen !== speechGen) return; for (const x of gate.sentence(s)) speak(x); };
+  const me = { gen: speechGen, live: false }; turns.add(me);
+  const sentence = (s) => { if (me.gen !== speechGen) return; for (const x of gate.sentence(s)) speak(x); };
   try {
     const st = prefs();
     await voiceUtterance({
@@ -137,15 +141,15 @@ async function turn(wav, { overCoach: echo = false } = {}) {
           // His voice, confirmed: whatever the coach was saying stops (barge-in), the set or hold talk too (only real
           // words get this far: grunts and breathing are dropped on the Mac). Pain, stop or anything off: Calm.
           // Earlier answers still coming in are dropped; this turn speaks from here on.
-          speechGen++; myGen = speechGen;
+          speechGen++; me.gen = speechGen; me.live = true;
           if (player.speaking) player.stop();
           talk.stop();
           quietQueue.length = 0;
           // "Stop", "that's enough": quiet, and nothing goes to the coach (the Mac decided).
-          if (e.hush) { myGen = -1; showReadout('hush', e.score); setPhase(restPhase()); return; }
+          if (e.hush) { me.gen = -1; showReadout('hush', e.score); setPhase(restPhase()); return; }
           if (callsForCalm(e.text)) talk.setCalm();
           quietQueue.length = 0;
-          setPhase('thinking');
+          setPhase('thinking'); emit();
         } else if (e.type === 'text') {
           for (const s of split.push(e.delta)) sentence(s);
         } else if (e.type === 'action') {
@@ -154,7 +158,7 @@ async function turn(wav, { overCoach: echo = false } = {}) {
         } else if (e.type === 'done') {
           for (const s of split.flush()) sentence(s);
           const end = gate.end();
-          if (myGen !== speechGen) return;
+          if (me.gen !== speechGen) return;
           for (const x of end.speak) speak(x);
           if (end.tick && st.voice.speak) play('tick', st.sounds.tickVolume);
         } else if (e.type === 'error') {
@@ -166,7 +170,7 @@ async function turn(wav, { overCoach: echo = false } = {}) {
     error = e.message;
     showReadout('mac', null);
   } finally {
-    turnsInFlight--;
+    turnsInFlight--; turns.delete(me);
     if (ok) syncNow().catch(() => {});
     if (!player.speaking) setPhase(restPhase());
     emit();
@@ -255,14 +259,11 @@ export async function start() {
   emit();
 }
 
-/** Switch listening off for this device. */
+/** Switch listening off for this device. Only the microphone: an answer on its way or being spoken still plays. */
 export function stop() {
   ls.set(KEY, null);
-  speechGen++;
   closeListening();
-  player.stop();
-  quietQueue.length = 0;
-  setPhase('off');
+  setPhase(player.speaking ? 'speaking' : restPhase());
   emit();
 }
 
@@ -293,8 +294,8 @@ export function watchNudges(repo) {
   return repo.onChange((cols) => { if (cols.includes('coach-messages')) check().catch(() => {}); });
 }
 
-/** Stop the coach talking (a tap on the chip while it speaks). */
-export const hush = () => { speechGen++; player.stop(); quietQueue.length = 0; if (phase === 'speaking') setPhase(restPhase()); };
+/** Stop the coach talking (the X beside the mic): what it says now and any answer still on its way. */
+export const hush = () => { speechGen++; player.stop(); quietQueue.length = 0; if (phase === 'speaking') setPhase(restPhase()); emit(); };
 
 /**
  * Dictation into the chat box (Tue 10/20). While he dictates the coach hears nothing. The coach's microphone, if open,
@@ -307,7 +308,7 @@ export async function lendMic(onFrame) {
   if (opening) await opening.catch(() => {});
   const m = mic;
   if (m) { m.pause(); m.tap(onFrame); }
-  speechGen++; player.stop(); talk.stop(); quietQueue.length = 0;
+  speechGen++; player.stop(); quietQueue.length = 0;
   setPhase(restPhase()); emit();
   let done = false;
   return {

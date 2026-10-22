@@ -29,6 +29,17 @@ export function calibrationPhrases(suppNames = []) {
 /** Short words for the silent readout when speech was heard but not acted on. */
 export const REASON_TEXT = { you: 'YOU', noise: 'NOISE', music: 'MUSIC', unsure: 'TOO SHORT', 'not-you': 'NOT YOU', 'not-calibrated': 'NOT SET UP', empty: 'NO WORDS', duplicate: 'ALREADY HEARD', aside: 'OTHERS TALKING · SAY COACH', 'self-talk': 'SELF-TALK', hush: 'STOPPED' };
 
+/**
+ * The header's two voice buttons (Thu 10/22, like Claude voice mode): the mic only switches his microphone, never the
+ * coach's voice (he muted himself right after "Yo coach" and the answer was never spoken); the X beside it, shown while
+ * an answer is coming or being spoken, is what stops the coach.
+ * @param {{on: boolean, held: boolean}} s  voice.snapshot()
+ * @returns {'mute' | 'held' | 'listen'}
+ */
+export const micTap = (s) => (s.on ? 'mute' : s.held ? 'held' : 'listen');
+/** @param {{replying: boolean}} s */
+export const showsStop = (s) => !!s.replying;
+
 /** Why a calibration phrase was not kept, in his words. */
 export const ENROL_PROBLEM = {
   'too-short': "Didn't catch enough of that. Say it again, a bit closer.",
