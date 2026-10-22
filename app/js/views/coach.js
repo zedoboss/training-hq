@@ -23,6 +23,7 @@ const draftSet = (v) => { try { if (v) localStorage.setItem(DRAFT, v); else loca
 const modelOf = () => withDefaults(getState().settings).coach.model;
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const MIC_ICON = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const BACK_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
 const SEND = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2.5-6.5z"/></svg>';
 
 /** Actions the coach asked this device for (its rest timer, a sync, moving the session screen to an exercise).
@@ -70,6 +71,7 @@ function renderChat(view) {
       <button class="pill" id="c-next" type="button" aria-label="Next day">›</button></div>
     <div class="coach-log" id="c-log" aria-live="polite"></div>
     <form class="coach-compose" id="c-form" autocomplete="off">
+      <a class="btn-ghost coach-back" id="c-back" href="#/train" aria-label="Back to the workout" hidden>${BACK_ICON}</a>
       <button class="btn-ghost coach-mic" id="c-mic" type="button" aria-label="Dictate into the box" aria-pressed="false">${MIC_ICON}</button>
       <textarea class="input coach-input" id="c-text" rows="1" placeholder="Ask, or tell it what you did: 80 for 8" aria-label="Message to the coach"></textarea>
       <button class="btn-primary coach-send" id="c-send" type="submit" aria-label="Send">${SEND}</button>
@@ -246,10 +248,12 @@ function renderChat(view) {
     // Train, and then resume": with a workout running, one tap back to it.
     const drawWorkout = async () => {
       const act = (await repo.list('sessions')).find((s) => s.status === 'active');
-      const b = $('#c-workout');
-      if (!b || gone) return;
-      b.hidden = !act;
-      if (act) b.href = `#/session/${encodeURIComponent(act.id)}`;
+      // Thu 10/22: and an arrow at the bottom left, beside the box ("so I can go back directly to the workout").
+      for (const b of [$('#c-workout'), $('#c-back')]) {
+        if (!b || gone) continue;
+        b.hidden = !act;
+        if (act) b.href = `#/session/${encodeURIComponent(act.id)}`;
+      }
     };
     drawWorkout();
     await load();
