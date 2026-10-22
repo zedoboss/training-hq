@@ -306,6 +306,7 @@ export function contextLine({ store, tz, now, screen = null }) {
   lines.push(`Now: ${suppLine(s)}`);
   lines.push(`Now: ${mealsNowLine(s)}`);
   lines.push(...pathLines(s));
+  lines.push(...phasePlanLines(s));
   lines.push(...recoveryContext(s));
   lines.push(...noticeLines(s));
   lines.push(...situationLines(s));
@@ -524,6 +525,14 @@ function programmeText(s, { dayType = null, week = null } = {}) {
 
 // ---- tendons ------------------------------------------------------------------------------------------------------
 
+/** A phase switch he planned ahead (Thu 10/22): " His plan: this phase until ..., then ... from ...". */
+const planText = (a, s) => (a.phasePlan && !a.phasePlan.done ? ` His plan: this phase until ${dayText(addDays(a.phasePlan.on, -1), s.today)}, then ${PHASE_TEXT[a.phasePlan.next] || a.phasePlan.next} from ${dayText(a.phasePlan.on, s.today)}; the app switches it by itself (his decision, ${dayText(a.phasePlan.from, s.today)}${a.phasePlan.said ? `: "${a.phasePlan.said}"` : ''}).` : '');
+
+/** Planned tendon phase switches, with every message. */
+function phasePlanLines(s) {
+  return s.list('tendons').filter((a) => a.kind === 'area' && a.phasePlan && !a.phasePlan.done).map((a) => `Now: ${a.label}: ${PHASE_TEXT[a.phase] || a.phase}.${planText(a, s)}`);
+}
+
 /**
  * His tendon rules from his data (the seed, private): his note's rules, the three phases in the wording he chose (Thu
  * 10/22, his words: "I like this wording specifically... so the coach can pull this information"), and the context he
@@ -550,7 +559,7 @@ function tendonsText(s) {
   const lines = ['Tendon areas (from his tendon note and his decisions; the app adds no rehab advice):'];
   for (const a of areas) {
     const st = areaStatus(a, rounds[a.id] || {}, s.today);
-    lines.push(`- ${a.label}: ${PHASE_TEXT[a.phase] || a.phase}. ${st.text}.${a.reported ? ` Reported: ${a.reported}` : ''}`);
+    lines.push(`- ${a.label}: ${PHASE_TEXT[a.phase] || a.phase}${a.phaseSince ? ` (since ${dayText(a.phaseSince, s.today)})` : ''}.${planText(a, s)} ${st.text}.${a.reported ? ` Reported: ${a.reported}` : ''}`);
     for (const h of a.holds || []) {
       const load = h.loadNote || (h.loadKg != null ? `${k(h.loadKg)} kg total` : h.load === 'full stack' ? `full stack${h.loadKgLogged != null ? ` (logged as ${k(h.loadKgLogged)} kg)` : ''}` : h.loadKgLogged != null ? `${k(h.loadKgLogged)} kg` : h.load || 'load not recorded');
       const when = Array.isArray(h.timing) ? h.timing.join(' and ') : h.when || '';

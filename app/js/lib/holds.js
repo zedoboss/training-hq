@@ -104,6 +104,26 @@ export const PHASE_TEXT = {
   unknown: 'Phase not set yet',
 };
 
+/**
+ * A tendon area moved to another phase (the coach's tendon_phase, or a switch he planned): the holds follow it (outside
+ * the heal phase a hold with no training-day timing moves to rest days), and the change is logged with the date.
+ */
+export function withPhase(area, phase, { date, reason = '', pain = null } = {}) {
+  const days = (h) => /\bafter (Pull|Push|Legs)\b|\brest days?\b/i.test([...(h.timing || []), h.when || ''].join(' | '));
+  const holds = phase === 'heal' ? area.holds : (area.holds || []).map((h) => (days(h) ? h : { ...h, timing: ['rest days'], when: null, whenBefore: h.when ?? null }));
+  const phaseLog = [...(area.phaseLog || []), { date, from: area.phase, to: phase, reason, ...(pain != null ? { pain } : {}) }].slice(-30);
+  return { ...area, phase, phaseSince: date, holds, phaseLog };
+}
+
+/**
+ * Switches he planned ahead (Thu 10/22, his words: "phase one for one week... then we switch to phase two"), due on
+ * `date` (YYYY-MM-DD) or before: the areas as they are after the switch, the plan marked done.
+ */
+export function duePhasePlans(areas = [], date) {
+  return areas.filter((a) => a?.phasePlan && !a.phasePlan.done && a.phasePlan.on <= date)
+    .map((a) => ({ ...withPhase(a, a.phasePlan.next, { date: a.phasePlan.on, reason: `his plan of ${a.phasePlan.from}${a.phasePlan.said ? `: "${a.phasePlan.said}"` : ''}` }), phasePlan: { ...a.phasePlan, done: true, doneOn: date } }));
+}
+
 /** Default clock times for hold reminders (Settings notify.holdsMorning / holdsEvening); he confirms them once. */
 export const HOLD_TIMES = { morning: '07:30', evening: '19:30' };
 

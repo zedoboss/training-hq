@@ -13,6 +13,7 @@ import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeA
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
+import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor, scanTakenOn } from '../app/js/lib/scans.js';
@@ -372,6 +373,17 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   return out;
 }
 
+/**
+ * Tendon phase switches he planned (Thu 10/22: "phase one for one week... then we switch to phase two"), made on their
+ * day, by the Mac (the phone gets them by sync). Returns the areas switched.
+ */
+export function applyPhasePlans(store, now, tz, log = () => {}) {
+  const areas = store.listRecords('tendons').map((r) => r.data).filter((a) => a?.kind === 'area');
+  const due = duePhasePlans(areas, isoDate(new Date(now), tz));
+  for (const a of due) { store.writeLocal('tendons', `area.${a.id}`, a); log(`tendons: ${a.label} moved to ${a.phase} (his plan of ${a.phasePlan.from})`); }
+  return due;
+}
+
 /** The last thing he did at home since `since` (a meal answer soon, cooking or eaten; a meal; a workout or holds started), or 0. */
 export function homeSince(store, since) {
   const list = (col) => recordsOf(store, col);
@@ -504,6 +516,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const t = now();
       const zone = typeof tz === 'function' ? tz() : tz;
       if (zone !== lastZone) { if (lastZone) log(`notify: reminders now follow ${zone}`); lastZone = zone; }
+      applyPhasePlans(store, t, zone, log);
       if (!push.list().length) return [];
       const sent = store.getMeta(SENT) || {};
       // What he told the coach to hold off on is skipped (lib/holdoffs.js).
