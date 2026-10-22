@@ -80,3 +80,15 @@ test('the coach sets the plans he agreed and logs a class he tells it about', as
     assert.match(line, /Classes: Boxing at The King 2, tue\/thu at 7:00 PM, trial Tuesday 3\/24; last class Sunday 3\/22\./);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Evolt missed before the workout: asked 10 minutes after it ends, unless a scan is saved (Thu 10/22)', () => {
+  const sessions = [{ id: 'w', status: 'done', dayType: 'legs', startedAt: at('10:16'), endedAt: at('11:40'), routineId: 'legs-gbi', exercises: [{ key: 'a', exerciseId: 'squat-smith-machine' }] }];
+  const sets = [{ sessionId: 'w', exKey: 'a', done: true }];
+  const st = reminderState({ sessions, sets, scanPlan: { id: 'main', cadence: 'training' } }, TZ);
+  const ask = remindersFor({ date: D, ...st }).find((r) => r.id === `scan-after:${D}`);
+  assert.equal(ask.at, at('11:50'));
+  assert.equal(ask.url, '#/body/scan');
+  assert.match(ask.body, /^Did you do the Evolt scan today\? If yes, add the results/);
+  const done = reminderState({ sessions, sets, scanPlan: { id: 'main', cadence: 'training' }, scans: [{ date: D, status: 'done' }] }, TZ);
+  assert.equal(remindersFor({ date: D, ...done }).some((r) => r.id === `scan-after:${D}`), false);
+});

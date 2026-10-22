@@ -19,7 +19,7 @@ import { runShortcutUrl } from './body-health.js';
 import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
 import * as voice from '../lib/voice.js';
 import { elapsedMs, nextSetText } from '../lib/session.js';
-import { planFor, isDone } from '../lib/scans.js';
+import { planFor, isDone, cadenceOf } from '../lib/scans.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
@@ -80,9 +80,12 @@ async function trainToday(repo) {
   // Thu 10/22, his words: "I'm mid-workout right now, so I should track that. And since I haven't logged the Evolt scan
   // today, it should be there as well. It should ask." A workout in progress comes first; then a scan day with no scan.
   const scans = await repo.list('body-scans');
-  const scanPlan = planFor((await repo.get('scan-plan', 'main')) || {}, { scans, today, last: lastRotationSession(sessions, bridge), days: daysByDate(dayList) });
+  const planDoc = (await repo.get('scan-plan', 'main')) || {};
+  const scanPlan = planFor(planDoc, { scans, today, last: lastRotationSession(sessions, bridge), days: daysByDate(dayList) });
   const trainsToday = t.kind === 'train' || t.kind === 'done';
-  const scanOpen = trainsToday && scanPlan?.next?.date === today && !scans.some((x) => x.date === today && isDone(x));
+  // After the workout the planner's next scan is tomorrow: today stays a scan day on the every-training-day plan.
+  const scanDay = scanPlan?.next?.date === today || (t.kind === 'done' && (cadenceOf(planDoc) === 'training' || planDoc.next?.date === today));
+  const scanOpen = trainsToday && scanDay && !scans.some((x) => x.date === today && isDone(x));
   const scanAsk = scanOpen ? ' Evolt scan not logged today: did you do it?' : '';
   const active = sessions.find((x) => x.status === 'active' && x.kind !== 'holds');
   if (active) {

@@ -11,7 +11,7 @@ import { withDefaults } from './settings.js';
 import { askedAreas, workingKeys } from './readiness.js';
 import { mealReminders, suppReminders, planReminders, saunaReminders } from './fuel-reminders.js';
 import { fastingOn } from './fast.js';
-import { scanReminders, planFor } from './scans.js';
+import { scanReminders, planFor, isDone, cadenceOf } from './scans.js';
 import { recoveryReminders } from './recovery.js';
 import { activityReminders, activityDays } from './activities.js';
 
@@ -146,7 +146,18 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   const supps = on('supps') && !fasting ? suppReminders({ date, tz, supps: supplements, log: suppLog, dayKind: rot.today.kind === 'rest' ? 'rest' : 'train', follow: { everyMin: n.suppFollowMin, max: n.suppFollowMax } }) : { items: [], open: [] };
   out.push(...supps.items);
   if (on('sauna')) out.push(...saunaReminders({ date, tz, sessions: sauna, plan: saunaPlan || {} }));
-  if (on('scan')) out.push(...scanReminders({ date, tz, plan: planFor(scanPlan || {}, { scans, today: date, last, days }), scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin }));
+  if (on('scan')) {
+    const sp = planFor(scanPlan || {}, { scans, today: date, last, days });
+    out.push(...scanReminders({ date, tz, plan: sp, scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin }));
+    // Thu 10/22, his words: "if I miss one before the workout, after the workout you should ask whether I did it or
+    // not. If I did it, I should be able to attach it": 10 minutes after the workout ends, unless a scan is saved.
+    const end = activity?.workoutEnd?.[date];
+    // (Once the workout is saved the planner's next scan is tomorrow: a scan day is every training day, or the date set.)
+    if (end && (cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date) && !scans.some((s) => s.date === date && isDone(s))) {
+      out.push({ id: `scan-after:${date}`, kind: 'scan', at: end + 10 * 60000, url: '#/body/scan', tag: `scan-after-${date}`, fixed: false,
+        title: 'Evolt scan?', body: 'Did you do the Evolt scan today? If yes, add the results (photo or PDF).', due: true });
+    }
+  }
   if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday }));
   // Step 8: reminders he asked the coach for, at their time, in his words.
   if (on('coach')) {

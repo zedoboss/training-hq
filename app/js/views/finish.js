@@ -5,6 +5,7 @@ import { withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { ready, syncNow } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
+import { cadenceOf, isDone } from '../lib/scans.js';
 import { summarize, elapsedMs, copySession } from '../lib/session.js';
 import { fileToJpeg, newPhotoId } from '../lib/photos.js';
 import { sessionBests, sessionSetRecords, workoutDetail, structureChanged, routineFromSession, previousSame, comebackStartOf } from '../lib/finish.js';
@@ -16,7 +17,7 @@ import * as rest from '../lib/rest-timer.js';
 import { confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
-import { holdsAfter } from '../lib/holds.js';
+import { holdsAfter, holdBase, isHoldSet } from '../lib/holds.js';
 import { neckTodayText, neckDoneOn } from '../lib/neck.js';
 import { withDefaults } from '../lib/settings.js';
 
@@ -118,16 +119,22 @@ export function render(view, params = []) {
     const pct = prev ? changePct(sum.volume, prevVol) : null;
     const source = SOURCE_LABEL[sourceOf(session)] || sourceOf(session);
     const areas = (await repo.list('tendons')).filter((d) => d.kind === 'area' && d.phase !== 'none');
-    const due = holdsAfter(areas, session.dayType);
+    // Each due hold leaves the prompt once it is logged in this workout, as a hold set or as its hold exercise (Thu 10/22:
+    // "Leg Extension Hold (Machine)" counts for the leg extension hold); a hold on some other exercise doesn't count.
+    const heldNames = new Set(done.map((s) => [s, session.exercises.find((e) => e.key === s.exKey)]).filter(([s, e]) => isHoldSet(s, e)).map(([, e]) => holdBase(e?.name)));
+    const due = holdsAfter(areas, session.dayType).filter((h) => !heldNames.has(holdBase(h.exercise)));
     const hold = due.length ? { text: due.map((h) => `${h.exercise} hold, ${h.sets} × ${h.seconds} s`).join(' · ') } : null;
-    // The prompt goes away once that day's tendon holds are logged; a hold on some other exercise doesn't count.
-    const dueNames = new Set(due.map((h) => h.exercise));
-    const holdDone = done.some((s) => s.type === 'hold' && dueNames.has(session.exercises.find((e) => e.key === s.exKey)?.name));
+    const holdDone = !hold;
     // Neck (decision 14, his answer Sun 10/18): after the session his plan puts it behind, offer it next.
     const neck = await repo.get('schedule', 'neck');
     const neckRoutine = (await repo.list('routines')).find((r) => r.dayType === 'neck');
     const neckNext = neckRoutine && session.dayType && neck?.planned && neck.place === `after-${session.dayType}`
       && day === isoDate(new Date()) && !neckDoneOn(sessions, day, (ms) => isoDate(new Date(ms)));
+    // Thu 10/22, his words: missed the Evolt before the workout? Asked here, with the way to add the results.
+    const scanPlan = await repo.get('scan-plan', 'main');
+    const scanAsk = ['pull', 'push', 'legs'].includes(session.dayType) && day === isoDate(new Date())
+      && (cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === day)
+      && !(await repo.list('body-scans')).some((x) => x.date === day && isDone(x));
     const changed = structureChanged(session, done, routine);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
     const detail = workoutDetail(session, all, sessionSetRecords(session, done, history, { fullHistory, comebackStart }));
@@ -150,6 +157,7 @@ export function render(view, params = []) {
         <p class="hint">${fullHistory ? (inComeback ? 'Heaviest working set since the comeback started, against the sessions before this one. ALL-TIME: heaviest ever, Hevy and Strong included.' : 'Heaviest working set ever at the time, Hevy and Strong included.') : 'All-time bests show once your Hevy history is imported (Settings > Import and export).'}</p>
       </section>
       ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
+      ${scanAsk ? '<a class="card hold-prompt" id="scan-ask" href="#/body/scan"><span><span class="hud c-amber">EVOLT SCAN</span><br>Not logged today. Did you do it? Add the results (photo or PDF).</span><span class="pill is-on">Add</span></a>' : ''}
       ${neckNext ? `<a class="card hold-prompt" id="neck-next" href="#/session/start/${esc(neckRoutine.id)}"><span><span class="hud c-cyan">${esc(neckTodayText(neck.place, neck.where).toUpperCase())}</span><br>Your plan: ${neckRoutine.exercises.length} neck exercises</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
