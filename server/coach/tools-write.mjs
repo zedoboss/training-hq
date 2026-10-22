@@ -13,6 +13,7 @@ import { guardCheck } from '../../app/js/lib/targets.js';
 import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../../app/js/lib/finish.js';
 import { restFor, restText, withDefaults } from '../../app/js/lib/settings.js';
 import { mealTimesOf, MEAL_NUDGE } from '../../app/js/lib/fuel-reminders.js';
+import { pathOf, pathState, movePath, stageText } from '../../app/js/lib/hold-path.js';
 import { modeOf } from '../../app/js/lib/progression.js';
 import { currentBodyweight, weightSeries, dailyWeights } from '../../app/js/lib/health.js';
 import { measureIdFor } from '../../app/js/lib/body.js';
@@ -744,6 +745,27 @@ async function fastDay(a, ctx) {
   return wrote(`${dayText(date, s.today)} is a fasting day: no cooking, meal-time, food or supplement prompts${skipped.length ? `; skipped (fasting): ${skipped.join(', ')}` : ''}. Walks are the push; no sauna that day (his checklist wants food in the last few hours). Acknowledge in one line; no lecture.`, `fasting ${date === s.today ? 'today' : date}`);
 }
 
+/** His hold path (Thu 10/22): start it, step up (after he confirms), not yet, or back one stage. */
+async function holdPath(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const found = s.list('tendons').filter((x) => x.kind === 'area').flatMap((area) => (area.holds || []).map((hold, i) => ({ area, hold, i }))).filter((x) => pathOf(x.hold));
+  if (!found.length) return refuse('No hold path is set up.');
+  const q = String(a.area || '').toLowerCase().trim();
+  const p = q ? found.find((x) => x.area.id === q || x.area.label.toLowerCase().includes(q) || q.includes(x.area.id)) : found[0];
+  if (!p) return refuse(`Which one: ${found.map((x) => x.area.label).join(', ')}?`);
+  if (!['start', 'up', 'back', 'not-yet'].includes(a.action)) return refuse('action: start, up, back or not-yet.');
+  const st = pathState({ hold: p.hold, area: p.area, sessions: s.list('sessions'), sets: s.list('sets'), dayOf: (ms) => s.date(ms) });
+  if (a.action !== 'start' && !st.started) return refuse('He hasn\'t started the path yet (hold_path start, or Start the path on Holds).');
+  if (a.action === 'up' && !st.next) return refuse('He is on the last stage already.');
+  if (a.action === 'back' && st.at === 0) return refuse('He is on the first stage already.');
+  const holds = p.area.holds.map((h, j) => (j === p.i ? movePath(h, a.action, s.today) : h));
+  put(s, 'tendons', `area.${p.area.id}`, { ...p.area, holds });
+  const h = holds[p.i]; const now = stageText(h.path, h.path.at);
+  if (a.action === 'not-yet') return wrote(`Not yet: the app asks again after one more quiet Push day at ${st.stage.label}.`, 'not yet');
+  const early = a.action === 'up' && !st.ready ? ` (his call: ${Math.min(st.quietDays.length, st.need)} of ${st.need} quiet Push days)` : '';
+  return wrote(`${p.area.label} ${h.path.name || 'hold path'}: ${now}${early}. ${h.loadNote || ''} It replaces the hold before it; quiet Push days count from today.`.replace(/\s+/g, ' ').trim(), now.toLowerCase());
+}
+
 /**
  * His answer to "eaten, cooking, or skipping?" by talking (Thu 10/22, his words: "I'm going to start cooking... bump me
  * again in 5 minutes to see whether you're cooking... if I say I'm cooking... I'll check back in 15 minutes to see if
@@ -1238,6 +1260,7 @@ export const WRITE_TOOLS = [
   write('tendon_phase', 'Tendon phase', "Move a tendon area (knees, shoulder, wrist...) to another phase of his Tendons note, only on his answer: heal = 3 holds twice a day while it hurts (pain can go in a week or two); fix = 3-4 times a week for at least 4-8 weeks, to fix it for good; maintenance = 5-10 minutes after a workout or one day a week; none. Ask how it feels first; pain = his 0-10 if he says. No other rehab advice.", obj({ area: { type: 'string' }, phase: { type: 'string', enum: ['heal', 'fix', 'maintenance', 'none'] }, pain: { type: 'number', minimum: 0, maximum: 10 }, reason: { type: 'string' } }, ['area', 'phase']), tendonPhase),
   write('neck_plan', 'Neck in the rotation', "Where his Neck routine goes: after-pull, after-push, after-legs or rest-day (Train offers it on those days), not-yet (asked again in a week), or off; and where he does it: gym or home (ask his preference). At home he has NO plates: the load is a water bottle filled by volume (1 ml = 1 g; 0.9 kg = 1 L bottle filled to 900 ml), on a folded towel; ask what else he has at home (homeGear). Only what he chooses; you may suggest a better fit once, with the reason (e.g. after a gym session the plates are right there; on a rest day home saves a trip).", obj({ place: { type: 'string', enum: [...NECK_PLACES.map(([k]) => k), 'not-yet', 'off'] }, where: { type: 'string', enum: ['gym', 'home'] }, homeGear: { type: 'string', description: 'what he has at home for it, his words' }, reason: { type: 'string' } }, ['place']), neckPlan),
   write('fast', 'Fasting day', "He says he's fasting (today by default, or a date): record it so the app stops cooking, meal-time, food and supplement prompts that day and skips today's open supplements ('fasting'); end when he breaks it (a meal logged also ends it). Acknowledge in one line. Never argue his fast or count his kcal against him; no lecture.", obj({ action: { type: 'string', enum: ['start', 'end'] }, date: ISO, said: { type: 'string' } }, ['action']), fastDay),
+  write('hold_path', 'Hold path', "A hold that moves through stages (his shoulder bench path: flat Smith, flat dumbbells, flat barbell, incline dumbbells, incline barbell). start = he begins it (at the first stage); up = the next stage, only after he says the area was not worse the morning after (the app asks when 2 quiet Push days are done); not-yet = one more quiet Push day first; back = one stage back (it got worse). Each stage replaces the hold before it.", obj({ area: { type: 'string' }, action: { type: 'string', enum: ['start', 'up', 'not-yet', 'back'] } }, ['action']), holdPath),
   write('meal_check', 'Meal answer', "His answer about a meal he hasn't logged yet (the app's 'Eaten, cooking, or skipping?', or him saying so): soon = about to start cooking (the app asks again in 5 minutes), cooking (it checks back in 10 minutes so he logs it), eaten (then log_meal what he ate), skipped. soon, cooking and eaten list what of his planned day isn't logged yet today: remind him of the add-ons (soon and cooking: his profile's cooking reminder first). Unanswered, the app asks every 5 minutes. meal: its name or HH:MM when it isn't the meal time nearest now. Say in one line when you'll check back.", obj({ answer: { type: 'string', enum: ['soon', 'cooking', 'eaten', 'skipped'] }, meal: { type: 'string' } }, ['answer']), mealCheck),
   write('hold_off', 'Hold off', "When he tells you to leave something alone for a while ('no sauna this week', 'busy until 3', 'stop the walk questions today', 'no food reminders tonight'): the app's reminders and nudges for those areas stay quiet until then. Areas: food, supps, walk, holds, sauna, scan, training, sleep, recovery, health, evening, all. Until: forMinutes, untilTime (HH:MM, today or tomorrow), or untilDate (through that whole day). His reason in his words. cancel: an id to lift it. Safety alarms and reminders he asked for always come.", obj({ areas: { type: 'array', items: { type: 'string', enum: AREA_NAMES } }, forMinutes: { type: 'integer', minimum: 5, maximum: 20160 }, untilTime: HM, untilDate: ISO, reason: { type: 'string' }, cancel: { type: 'string' } }), holdOff),
   write('walk', 'Walk', "His answer to a walk question (the app asks him to walk through the day until his step goal, and asks again 5 minutes after no answer). plan: when he'll go (inMinutes for 'in an hour', or time HH:MM; said = his words); vague ('later', 'after dinner', 'in a bit'): pick a time yourself and say it. going: he is out now. done: he walked (minutes, steps if he says). skip: not now, with his reason and when to ask again (askAgainInMinutes, default 60). clear: forget the time. Always say the time back: 'Okay, I'll message you at 6:10 PM.'", obj({ action: { type: 'string', enum: ['plan', 'going', 'done', 'skip', 'clear'] }, inMinutes: { type: 'integer', minimum: 1, maximum: 1440 }, time: HM, said: { type: 'string' }, minutes: { type: 'integer', minimum: 1, maximum: 600 }, steps: { type: 'integer', minimum: 0, maximum: 100000 }, reason: { type: 'string' }, askAgainInMinutes: { type: 'integer', minimum: 5, maximum: 720 } }, ['action']), walkAnswer),

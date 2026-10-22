@@ -14,6 +14,7 @@ import { confirmSheet, promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { holdScript } from '../lib/coach-talk.js';
 import * as talk from '../lib/talk.js';
+import { pathOf, pathState, movePath, stageText } from '../lib/hold-path.js';
 
 /** Rest between holds, from Settings (default 2:00). */
 const holdRestS = () => withDefaults(getState().settings).rest.holdS || 120;
@@ -29,11 +30,43 @@ const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); retur
 // When each area's holds are done: written in the tendon data (timingText), shown for confirmation the first time.
 const timingOf = (a) => a.timingText || 'Not set yet.';
 
+// Thu 10/22: a hold that moves through stages (lib/hold-path.js): he starts it, the app asks to step up, he confirms.
+const dayOfLocal = (ms) => isoDate(new Date(ms));
+function pathHtml(a, h, i, sessions, sets) {
+  const path = pathOf(h);
+  if (!path) return '';
+  const st = pathState({ hold: h, area: a, sessions, sets, dayOf: dayOfLocal });
+  const steps = path.stages.map((x, j) => `<span class="${st.started && j === st.at ? 'c-cyan' : j < st.at ? 'c-green' : 'c-muted'}">${esc(x.label)}</span>`).join(' → ');
+  const btn = (how, label, cls = 'btn-ghost') => `<button class="${cls} small" type="button" data-path="${how}" data-area="${esc(a.id)}" data-i="${i}">${label}</button>`;
+  if (!st.started) {
+    return `<div class="hold-path"><div class="hud c-muted">${esc((path.name || 'Hold path').toUpperCase())} · NOT STARTED</div><div class="hint">${steps}</div>
+      <div class="hint">Each stage replaces the one before; after ${st.need} quiet Push days the app asks you to step up.</div>
+      <div class="btn-row">${btn('start', 'Start the path', 'btn-primary')}</div></div>`;
+  }
+  return `<div class="hold-path"><div class="hud c-cyan">${esc((path.name || 'Hold path').toUpperCase())} · ${esc(stageText(path, st.at).toUpperCase())}</div><div class="hint">${steps}</div>
+    <div class="hint">${st.next ? `Quiet Push days at this stage: ${Math.min(st.quietDays.length, st.need)} of ${st.need} (every set at most 3-4/10).` : 'Last stage.'}</div>
+    ${st.ready ? `<div class="hint c-amber">Ready for ${esc(st.next.label)}${st.next.loadNote ? ` (${esc(st.next.loadNote)})` : ''}. Shoulder not worse the morning after?</div>
+      <div class="btn-row">${btn('up', 'Step up', 'btn-primary')}${btn('not-yet', 'Not yet')}</div>` : ''}
+    ${st.at > 0 ? `<div class="btn-row">${btn('back', 'Back one stage')}</div>` : ''}</div>`;
+}
+
 async function loadAreas(repo) {
   return (await repo.list('tendons')).filter((d) => d.kind === 'area').sort((a, b) => ['knees', 'shoulder', 'wrist'].indexOf(a.id) - ['knees', 'shoulder', 'wrist'].indexOf(b.id));
 }
 
 function renderList(view, repo) {
+  // The hold path's buttons (start, step up, not yet, back one stage).
+  const onPath = async (b) => {
+    const today = isoDate(new Date());
+    const doc = (await repo.list('tendons')).find((d) => d.kind === 'area' && d.id === b.dataset.area);
+    if (!doc) return;
+    const i = Number(b.dataset.i); const how = b.dataset.path;
+    if (how === 'back' && !(await confirmSheet('Back one stage?', { ok: 'Back one stage' }))) return;
+    const holds = doc.holds.map((h, j) => (j === i ? movePath(h, how, today) : h));
+    await repo.put('tendons', `area.${doc.id}`, { ...doc, holds });
+    const h = holds[i];
+    toast(how === 'not-yet' ? 'Asking again after one more quiet Push day.' : `${stageText(h.path, h.path.at)}.`);
+  };
   const draw = async () => {
     const today = isoDate(new Date());
     const [areas, sessions, sets, bridge, dayList] = await Promise.all([loadAreas(repo), repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('days')]);
@@ -94,8 +127,10 @@ function renderList(view, repo) {
           ${a.openQuestion ? `<div class="hint c-amber">To decide: ${esc(a.openQuestion.text)}</div>` : ''}
           ${a.holds.map((h, i) => `<div class="hold-row"><div><b>${esc(h.exercise)}</b><div class="hint">${esc(loadText(h))} · ${h.sets || 3} × ${h.seconds || 30} s${h.where ? ` · ${esc(h.where)}` : ''}</div></div>
             <a class="pill is-on" href="#/holds/${esc(a.id)}/${i}">Start</a></div>`).join('')}
+          ${a.holds.map((h, i) => pathHtml(a, h, i, sessions, sets)).join('')}
         </section>`;
       }).join('')}`;
+    view.querySelectorAll('[data-path]').forEach((b) => b.addEventListener('click', () => onPath(b)));
     const answer = async (areaId, choice) => {
       let holdName = null;
       if (choice === 'other') {

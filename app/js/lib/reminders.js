@@ -14,6 +14,7 @@ import { fastingOn } from './fast.js';
 import { scanReminders, planFor, isDone, cadenceOf } from './scans.js';
 import { recoveryReminders } from './recovery.js';
 import { activityReminders, activityDays } from './activities.js';
+import { pathsOf } from './hold-path.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -87,7 +88,7 @@ const holdText = (s) => (s.ask ? `${s.label}: the gym for the ${s.restHold || s.
  * @param {object} [o.recovery]  A13: {plan, state, notes, photos} (lib/recovery.js), when he has a recovery record
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null, flexPlan = null, combatPlan = null, activity = undefined, flexTests = [] }) {
+export function remindersFor({ paths = [], date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null, flexPlan = null, combatPlan = null, activity = undefined, flexTests = [] }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -204,6 +205,17 @@ export function remindersFor({ date, tz, last, days = {}, areas = [], rounds = {
   }
   // A13: his recovery record: the weekly check-in, things to do, photos.
   if (on('recovery') && recovery?.plan) out.push(...recoveryReminders({ date, tz, ...recovery, hm: n.recoveryHm }));
+  // A hold path ready for its next stage (Thu 10/22: the app asks, he confirms): the morning after its last quiet Push
+  // day, every morning until he steps up or says not yet.
+  if (on('holds')) {
+    for (const { area, state: st } of paths) {
+      if (!st.ready || !(st.quietDays.at(-1) < date)) continue;
+      out.push({
+        id: `hold-path:${area.id}:${st.at}:${date}`, kind: 'holds', at: zonedTime(date, addMinutesHm(n.wakeHm, 30), tz), url: '#/holds', tag: `hold-path-${area.id}`, fixed: false,
+        title: `${area.label}: ready for ${st.next.label.toLowerCase()}?`, body: `${st.need} quiet Push days on ${st.stage.label}. Not worse this morning? Step up on Holds, or tell me.`, due: true,
+      });
+    }
+  }
   // Meals (6.3): his meal times with nothing logged, and the after photo.
   if (on('meals') && !fasting) {
     out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
@@ -285,6 +297,7 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     meta,
     table: tendons.find((d) => d?.kind === 'readiness') ?? null,
     trainedDates: new Set(sessions.filter((s) => s.kind !== 'holds' && s.startedAt && s.status !== 'discarded').map((s) => isoDate(new Date(s.startedAt), tz))),
+    paths: pathsOf({ areas, sessions, sets, dayOf: (ms) => isoDate(new Date(ms), tz) }),
     sessionStarts: sessions.filter((s) => s.kind !== 'holds' && s.startedAt && s.status !== 'discarded').map((s) => s.startedAt).sort((a, b) => a - b),
     neck,
     meals,

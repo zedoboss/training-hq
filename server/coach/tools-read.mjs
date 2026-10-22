@@ -32,6 +32,7 @@ import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/r
 import { checkInLead } from '../../app/js/lib/reminders.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
+import { pathsOf, stageText } from '../../app/js/lib/hold-path.js';
 
 const obj = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ISO = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
@@ -204,6 +205,16 @@ function scanLine(s) {
   return `Body scan: none confirmed; the app proposes ${dayText(st.proposal.date, s.today)}.`;
 }
 
+/** His hold paths (Thu 10/22): where he is, and when one is ready to step up (he confirms; hold_path). */
+function pathLines(s) {
+  const areas = s.list('tendons').filter((x) => x.kind === 'area');
+  return pathsOf({ areas, sessions: s.list('sessions'), sets: s.list('sets'), dayOf: (ms) => s.date(ms) }).map(({ area, hold, state: st }) => {
+    const p = hold.path;
+    if (!st.started) return `Now: ${area.label} ${p.name || 'hold path'}: not started (${p.stages.map((x) => x.label).join(' → ')}). He starts it on Holds or by asking you (hold_path start).`;
+    return `Now: ${area.label} ${p.name || 'hold path'}: ${stageText(p, st.at)} since ${dayText(p.since, s.today)}; quiet Push days ${Math.min(st.quietDays.length, st.need)} of ${st.need}${st.ready ? `; READY for ${st.next.label}: ask whether the ${area.label.toLowerCase()} was not worse the morning after, then hold_path up (or not-yet)` : st.next ? `; next: ${st.next.label}` : '; last stage'}.`;
+  });
+}
+
 /** Everything that matters today, in lines (the 'today' tool). */
 export function todayText(s) {
   const lines = [...rotationLines(s)];
@@ -245,6 +256,7 @@ export function contextLine({ store, tz, now, screen = null }) {
   // Thu 10/22: asked "what's up?" he repeated a wrong 2:13 PM notification ("0 of 4 taken") as today's supplements; the
   // live count is here with every message, ahead of what the notifications said.
   lines.push(`Now: ${suppLine(s)}`);
+  lines.push(...pathLines(s));
   lines.push(...recoveryContext(s));
   lines.push(...noticeLines(s));
   lines.push(...situationLines(s));

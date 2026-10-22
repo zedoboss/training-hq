@@ -730,3 +730,18 @@ test('supplement_plan kind out (Thu 10/22): ordered with a date, arrived puts it
   assert.ok(list('supplements').filter((x) => x.restockedAt).length === 2);
   assert.match((await call('supplement_plan', { kind: 'out', answer: 'arrived' })).text, /Nothing is out of stock/);
 });
+
+test('hold_path (Thu 10/22): start, step up after he confirms, not yet, back; the context says where he is', async () => {
+  const area = list('tendons').find((x) => x.id === 'knees');
+  const path = { name: 'Bench hold path', passDays: 2, stages: [{ label: 'Flat Smith', exercise: 'Wall Hold', loadKg: 30 }, { label: 'Flat dumbbells', exercise: 'Bench Press (Dumbbell)', loadKg: 20, loadNote: '20 kg total: 2 × 10 kg' }] };
+  store.writeLocal('tendons', 'area.knees', { ...area, holds: [{ ...area.holds[0], path }] });
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /\nNow: Knees Bench hold path: not started \(Flat Smith → Flat dumbbells\)/);
+  assert.match((await call('hold_path', { action: 'up' })).text, /hasn't started the path/);
+  assert.match((await call('hold_path', { action: 'start' })).text, /^Knees Bench hold path: Stage 1 of 2: Flat Smith \(30 kg\)/);
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /Stage 1 of 2: Flat Smith \(30 kg\) since Tuesday 1\/20; quiet Push days 0 of 2; next: Flat dumbbells/);
+  const up = await call('hold_path', { area: 'knees', action: 'up' });
+  assert.match(up.text, /Stage 2 of 2: Flat dumbbells \(20 kg\) \(his call: 0 of 2 quiet Push days\)\. 20 kg total: 2 × 10 kg/);
+  assert.equal(list('tendons').find((x) => x.id === 'knees').holds[0].exercise, 'Bench Press (Dumbbell)');
+  assert.match((await call('hold_path', { action: 'up' })).text, /last stage already/);
+  assert.match((await call('hold_path', { action: 'back' })).text, /Stage 1 of 2: Flat Smith/);
+});
