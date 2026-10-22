@@ -1,8 +1,28 @@
 // Push subscriptions on the Mac (step 4): one per paired device, kept in the server's own meta table (not synced:
-// an endpoint is only useful to the Mac). notify() sends to every subscribed device and drops ones that are gone.
+// an endpoint is only useful to the Mac). notify() sends to every subscribed device and drops ones that are gone, with
+// the body cut to what the lock screen shows (lockScreen).
 import { loadVapid, sendPush } from './webpush.mjs';
 
 const KEY = 'push:subs';
+// The lock screen shows about 4 lines (Thu 10/22, his words: "I can't read everything unless I hold it"). Talk keeps
+// the full message; the notification carries its start.
+export const LOCK_SCREEN_CHARS = 150;
+
+/** Whole sentences from the start that fit; a first sentence that doesn't fit is cut at a clause or word, with "…". */
+export function lockScreen(text, max = LOCK_SCREEN_CHARS) {
+  const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  let out = '';
+  for (const s of t.split(/(?<=[.!?])\s+/)) {
+    if ((out ? out.length + 1 : 0) + s.length > max) break;
+    out = out ? `${out} ${s}` : s;
+  }
+  if (out) return out;
+  const head = t.slice(0, max - 1);
+  const at = Math.max(head.lastIndexOf('; '), head.lastIndexOf(', '), head.lastIndexOf(': '));
+  const cut = at >= max / 2 ? head.slice(0, at) : head.slice(0, Math.max(head.lastIndexOf(' '), 1));
+  return `${cut.replace(/[\s,;:–-]+$/, '')}…`;
+}
 // Push services want a contact for the sender; the app's public address is enough (no personal data).
 export const DEFAULT_SUBJECT = 'https://zedoboss.github.io/training-hq/';
 
@@ -32,6 +52,7 @@ export function openPush({ store, vapidFile, vapid = null, subject = DEFAULT_SUB
 
   /** Send to all devices (or one). Resolves to {sent, failed, dropped}. */
   async function notify(message, { deviceId = null } = {}) {
+    if (typeof message?.body === 'string') message = { ...message, body: lockScreen(message.body) };
     let sent = 0; let failed = 0; let dropped = 0;
     for (const s of list().filter((x) => !deviceId || x.deviceId === deviceId)) {
       try {

@@ -119,6 +119,9 @@ test('server routes: key, subscribe per device, test send, drop a gone subscript
     assert.deepEqual(t.json, { sent: 1, failed: 0, dropped: 0 });
     assert.equal(sent[0][0], 'a1b2c3d4e5f6');
     assert.equal(sent[0][1].url, '#/settings');
+    // Every notification fits the lock screen (Thu 10/22); the full text stays in Talk.
+    await push.notify({ title: 'Coach', body: `Rest day holds: what today? still not done (due 10:30 AM). Knees: Toes Wall Squat Hold. 3 × 30 s each, about 6 min a round. ${'And more detail '.repeat(10)}here.` });
+    assert.equal(sent.at(-1)[1].body, 'Rest day holds: what today? still not done (due 10:30 AM). Knees: Toes Wall Squat Hold. 3 × 30 s each, about 6 min a round.');
     answer = 410;
     const gone = await call('POST', '/api/push/test');
     assert.equal(gone.status, 502);
@@ -132,4 +135,18 @@ test('server routes: key, subscribe per device, test send, drop a gone subscript
     store.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('lockScreen: short stays whole; long keeps whole sentences from the start; one long sentence is cut with …', async () => {
+  const { lockScreen, LOCK_SCREEN_CHARS } = await import('../server/push.mjs');
+  assert.equal(LOCK_SCREEN_CHARS, 150);
+  assert.equal(lockScreen('Legs at 9:50 AM.  Check-in still open.'), 'Legs at 9:50 AM. Check-in still open.');
+  const long = 'Snack logged. Take your supplements now: Vitamin D3 + K2 (MK-7), Omega-3 fish oil, Ashwagandha KSM-66. You got this. Move! And one more line to push it over.';
+  assert.equal(lockScreen(long), 'Snack logged. Take your supplements now: Vitamin D3 + K2 (MK-7), Omega-3 fish oil, Ashwagandha KSM-66. You got this. Move!');
+  const one = "Done: after you log your sleep I say good morning, name today's session and ask one short question; the check-in waits until you're about to leave and stops getting tacked onto other answers.";
+  const cut = lockScreen(one);
+  assert.ok(cut.length <= 150, cut);
+  assert.equal(cut, "Done: after you log your sleep I say good morning, name today's session and ask one short question…");
+  const words = lockScreen('word '.repeat(60));
+  assert.ok(words.length <= 150 && words.endsWith('word…'), words);
 });
