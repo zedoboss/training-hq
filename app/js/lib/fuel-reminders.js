@@ -8,7 +8,7 @@ import { addDays } from './rotation.js';
 import { ladderState, stepText, plannedHm, OVERDUE_MIN } from './sauna.js';
 
 /** Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. */
-export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, cookingMin: 30, againMin: 5, againForMin: 120 };
+export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, soonMin: 5, cookingMin: 15, againMin: 5, againForMin: 120 };
 
 const hmId = (hm) => hm.replace(':', '');
 
@@ -70,14 +70,21 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
         title: `${slot.name}: still waiting`, body: `Asked at ${formatHm(askHm)}. Eaten, cooking, or skipping?`, due: !logged && !check,
       });
     }
-    // "Cooking": ask again a little later, until a meal is logged.
-    if (check?.answer === 'cooking') {
-      const again = check.at + MEAL_NUDGE.cookingMin * 60000;
-      out.push({
-        id: `meal-cooking:${date}:${hmId(slot.time)}:${check.at}`, kind: 'meals', at: again, url: `#/fuel/check/${date}/${hmId(slot.time)}`,
-        tag: `meal-${date}-${hmId(slot.time)}`, fixed: false, title: `${slot.name}: ready?`, body: 'Take the before photo when it is on the plate. Eaten, or skipping?',
-        due: !today.some((m) => m.at >= check.at),
-      });
+    // His answer, then (Thu 10/22, his words): about to cook ("soon") asks again in 5 minutes whether he's cooking;
+    // cooking checks back in 15 to see if he has eaten, so he logs it. Unanswered, every 5 minutes after that, until a
+    // meal is logged or he answers again.
+    if (check?.answer === 'soon' || check?.answer === 'cooking') {
+      const soon = check.answer === 'soon';
+      const first = check.at + (soon ? MEAL_NUDGE.soonMin : MEAL_NUDGE.cookingMin) * 60000;
+      for (let k = 0; k * MEAL_NUDGE.againMin <= MEAL_NUDGE.againForMin; k++) {
+        out.push({
+          id: `meal-${check.answer}:${date}:${hmId(slot.time)}:${check.at}${k ? `:${k}` : ''}`, kind: 'meals', at: first + k * MEAL_NUDGE.againMin * 60000,
+          url: `#/fuel/check/${date}/${hmId(slot.time)}`, tag: `meal-${date}-${hmId(slot.time)}`, group: `meal-${check.answer}:${date}:${hmId(slot.time)}`, fixed: false,
+          title: soon ? `${slot.name}: cooking yet?` : `${slot.name}: eaten?`,
+          body: soon ? 'Cooking, eaten, or skipping?' : 'Log it: the before photo, or tell me what you ate. Still cooking, or skipping?',
+          due: !today.some((m) => m.at >= check.at),
+        });
+      }
     }
   }
   // After photo, about 25 minutes after the before photo.

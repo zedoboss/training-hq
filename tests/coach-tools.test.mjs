@@ -676,3 +676,16 @@ test('tendon_phase (Wed 10/21): knees from heal to fix on his answer; the wall s
   assert.deepEqual([k.phase, k.phaseSince, k.phaseLog.at(-1).from, k.phaseLog.at(-1).pain], ['fix', '2026-01-20', 'heal', 0]);
   assert.match((await call('tendon_phase', { area: 'elbows', phase: 'fix' })).text, /^Which area/);
 });
+
+test('meal_check (Thu 10/22): about to cook = asked again in 5 minutes, cooking = checked back in 15, the meal nearest now', async () => {
+  store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }, { name: 'Last meal', time: '16:30' }] } });
+  clock = Date.UTC(2026, 0, 20, 12, 40);
+  const soon = await call('meal_check', { answer: 'soon' });
+  assert.match(soon.text, /^First meal: about to cook\. The app asks again at 12:45 PM, in 5 minutes: cooking yet\?/);
+  assert.deepEqual(list('meal-checks').map((c) => [c.id, c.answer, c.by]), [['2026-01-20.1230', 'soon', 'coach']]);
+  clock = Date.UTC(2026, 0, 20, 12, 46);
+  const cooking = await call('meal_check', { answer: 'cooking' });
+  assert.match(cooking.text, /^First meal: cooking\. The app checks back at 1:01 PM, in 15 minutes, to see if he has eaten so he logs it\./);
+  assert.match((await call('meal_check', { answer: 'skipped', meal: 'last' })).text, /^Last meal skipped/);
+  assert.deepEqual(list('meal-checks').map((c) => [c.id, c.answer]).sort(), [['2026-01-20.1230', 'cooking'], ['2026-01-20.1630', 'skipped']]);
+});

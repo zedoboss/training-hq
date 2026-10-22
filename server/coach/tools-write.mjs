@@ -11,7 +11,8 @@ import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/li
 import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId } from '../../app/js/lib/session.js';
 import { guardCheck } from '../../app/js/lib/targets.js';
 import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../../app/js/lib/finish.js';
-import { restFor, restText } from '../../app/js/lib/settings.js';
+import { restFor, restText, withDefaults } from '../../app/js/lib/settings.js';
+import { mealTimesOf, MEAL_NUDGE } from '../../app/js/lib/fuel-reminders.js';
 import { modeOf } from '../../app/js/lib/progression.js';
 import { currentBodyweight, weightSeries, dailyWeights } from '../../app/js/lib/health.js';
 import { measureIdFor } from '../../app/js/lib/body.js';
@@ -701,6 +702,32 @@ async function fastDay(a, ctx) {
   return wrote(`${dayText(date, s.today)} is a fasting day: no cooking, meal-time, food or supplement prompts${skipped.length ? `; skipped (fasting): ${skipped.join(', ')}` : ''}. Walks are the push; no sauna that day (his checklist wants food in the last few hours). Acknowledge in one line; no lecture.`, `fasting ${date === s.today ? 'today' : date}`);
 }
 
+/**
+ * His answer to "eaten, cooking, or skipping?" by talking (Thu 10/22, his words: "I'm going to start cooking... bump me
+ * again in 5 minutes to see whether you're cooking... if I say I'm cooking... I'll check back in 15 minutes to see if
+ * you have eaten it so you can log it"). The same record as the buttons on his phone; the meal nearest now by default.
+ */
+async function mealCheck(a, ctx) {
+  const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
+  const slots = mealTimesOf(withDefaults(s.one('settings', 'main')).fuel.mealTimes);
+  if (!slots.length) return refuse('He has no meal times set (Settings > Fuel), so nothing asks about meals.');
+  const q = String(a.meal || '').toLowerCase().trim();
+  const at = (t) => zonedTime(s.today, t.time, s.tz);
+  const slot = (q && slots.find((t) => t.time === q || t.name.toLowerCase().includes(q) || q.includes(t.name.toLowerCase())))
+    || [...slots].sort((x, y) => Math.abs(at(x) - s.now) - Math.abs(at(y) - s.now))[0];
+  const id = `${s.today}.${slot.time.replace(':', '')}`;
+  put(s, 'meal-checks', id, { id, date: s.today, slot: slot.time, name: slot.name, answer: a.answer, at: s.now, by: 'coach' });
+  const name = slot.name;
+  if (a.answer === 'soon') {
+    return wrote(`${name}: about to cook. The app asks again at ${timeText(s.now + MEAL_NUDGE.soonMin * 60000, s.tz)}, in ${MEAL_NUDGE.soonMin} minutes: cooking yet? Tell him in one line, like "OK, I'll bump you in 5 minutes to see if you're cooking."`, `${name.toLowerCase()}: about to cook`);
+  }
+  if (a.answer === 'cooking') {
+    return wrote(`${name}: cooking. The app checks back at ${timeText(s.now + MEAL_NUDGE.cookingMin * 60000, s.tz)}, in ${MEAL_NUDGE.cookingMin} minutes, to see if he has eaten so he logs it. Tell him in one line, like "Noted. I'll check back in 15 minutes to see if you've eaten, so you can log it."`, `${name.toLowerCase()}: cooking`);
+  }
+  if (a.answer === 'skipped') return wrote(`${name} skipped: no more asks about it today.`, `${name.toLowerCase()} skipped`);
+  return wrote(`${name}: eaten, no more asks about it. If he said what he ate, log it now with log_meal; else ask for the before photo or what he ate.`, `${name.toLowerCase()}: eaten`);
+}
+
 /** What he wants the app to leave alone for a while (Wed 10/21): areas, until when, his reason. */
 async function holdOff(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
@@ -1150,6 +1177,7 @@ export const WRITE_TOOLS = [
   write('tendon_phase', 'Tendon phase', "Move a tendon area (knees, shoulder, wrist...) to another phase of his Tendons note, only on his answer: heal = 3 holds twice a day while it hurts (pain can go in a week or two); fix = 3-4 times a week for at least 4-8 weeks, to fix it for good; maintenance = 5-10 minutes after a workout or one day a week; none. Ask how it feels first; pain = his 0-10 if he says. No other rehab advice.", obj({ area: { type: 'string' }, phase: { type: 'string', enum: ['heal', 'fix', 'maintenance', 'none'] }, pain: { type: 'number', minimum: 0, maximum: 10 }, reason: { type: 'string' } }, ['area', 'phase']), tendonPhase),
   write('neck_plan', 'Neck in the rotation', "Where his Neck routine goes: after-pull, after-push, after-legs or rest-day (Train offers it on those days), not-yet (asked again in a week), or off; and where he does it: gym or home (ask his preference). At home he has NO plates: the load is a water bottle filled by volume (1 ml = 1 g; 0.9 kg = 1 L bottle filled to 900 ml), on a folded towel; ask what else he has at home (homeGear). Only what he chooses; you may suggest a better fit once, with the reason (e.g. after a gym session the plates are right there; on a rest day home saves a trip).", obj({ place: { type: 'string', enum: [...NECK_PLACES.map(([k]) => k), 'not-yet', 'off'] }, where: { type: 'string', enum: ['gym', 'home'] }, homeGear: { type: 'string', description: 'what he has at home for it, his words' }, reason: { type: 'string' } }, ['place']), neckPlan),
   write('fast', 'Fasting day', "He says he's fasting (today by default, or a date): record it so the app stops cooking, meal-time, food and supplement prompts that day and skips today's open supplements ('fasting'); end when he breaks it (a meal logged also ends it). Acknowledge in one line. Never argue his fast or count his kcal against him; no lecture.", obj({ action: { type: 'string', enum: ['start', 'end'] }, date: ISO, said: { type: 'string' } }, ['action']), fastDay),
+  write('meal_check', 'Meal answer', "His answer about a meal he hasn't logged yet (the app's 'Eaten, cooking, or skipping?', or him saying so): soon = about to start cooking (the app asks again in 5 minutes), cooking (it checks back in 15 minutes so he logs it), eaten (then log_meal what he ate), skipped. Unanswered, the app asks every 5 minutes. meal: its name or HH:MM when it isn't the meal time nearest now. Say in one line when you'll check back.", obj({ answer: { type: 'string', enum: ['soon', 'cooking', 'eaten', 'skipped'] }, meal: { type: 'string' } }, ['answer']), mealCheck),
   write('hold_off', 'Hold off', "When he tells you to leave something alone for a while ('no sauna this week', 'busy until 3', 'stop the walk questions today', 'no food reminders tonight'): the app's reminders and nudges for those areas stay quiet until then. Areas: food, supps, walk, holds, sauna, scan, training, sleep, recovery, health, evening, all. Until: forMinutes, untilTime (HH:MM, today or tomorrow), or untilDate (through that whole day). His reason in his words. cancel: an id to lift it. Safety alarms and reminders he asked for always come.", obj({ areas: { type: 'array', items: { type: 'string', enum: AREA_NAMES } }, forMinutes: { type: 'integer', minimum: 5, maximum: 20160 }, untilTime: HM, untilDate: ISO, reason: { type: 'string' }, cancel: { type: 'string' } }), holdOff),
   write('walk', 'Walk', "His answer to a walk question (the app asks him to walk through the day until his step goal, and asks again 5 minutes after no answer). plan: when he'll go (inMinutes for 'in an hour', or time HH:MM; said = his words); vague ('later', 'after dinner', 'in a bit'): pick a time yourself and say it. going: he is out now. done: he walked (minutes, steps if he says). skip: not now, with his reason and when to ask again (askAgainInMinutes, default 60). clear: forget the time. Always say the time back: 'Okay, I'll message you at 6:10 PM.'", obj({ action: { type: 'string', enum: ['plan', 'going', 'done', 'skip', 'clear'] }, inMinutes: { type: 'integer', minimum: 1, maximum: 1440 }, time: HM, said: { type: 'string' }, minutes: { type: 'integer', minimum: 1, maximum: 600 }, steps: { type: 'integer', minimum: 0, maximum: 100000 }, reason: { type: 'string' }, askAgainInMinutes: { type: 'integer', minimum: 5, maximum: 720 } }, ['action']), walkAnswer),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question), or delete one by id.', obj({ text: { type: 'string' }, topic: { type: 'string' }, remove: { type: 'string' } }), writeNote),

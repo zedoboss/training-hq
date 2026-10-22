@@ -189,14 +189,20 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   assert.equal(items.find((i) => i.id === `meal:${date}:0730`).due, false);
   assert.equal(k['meal-after'].at, at(date, '08:05'));
   assert.equal(k['meal-after'].due, true);
-  // Cooking: no lunch reminder, a follow-up 30 minutes after the answer until a meal is logged.
+  // Cooking (Thu 10/22, his words): checked back 15 minutes after the answer, "to see if you have eaten it so you can
+  // log it", then every 5 minutes until a meal is logged.
   const checks = [{ id: `${date}.1230`, date, slot: '12:30', answer: 'cooking', at: at(date, '13:16') }];
   items = mealReminders({ date, tz: TZ, meals: [breakfast], checks, mealTimes: settings.fuel.mealTimes });
   assert.equal(items.find((i) => i.id === `meal:${date}:1230`).due, false);
   assert.ok(items.filter((i) => i.group === `meal-again:${date}:1230`).every((i) => !i.due), 'answered: no more repeats');
   const cooking = items.find((i) => i.id.startsWith('meal-cooking'));
-  assert.equal(cooking.at, at(date, '13:46'));
+  assert.equal(cooking.at, at(date, '13:31'));
+  assert.equal(cooking.title, 'Lunch: eaten?');
   assert.equal(cooking.due, true);
+  assert.deepEqual(items.filter((i) => i.group === `meal-cooking:${date}:1230`).slice(1, 3).map((i) => i.at), [at(date, '13:36'), at(date, '13:41')]);
+  // About to cook: asked again in 5 minutes, "cooking yet?".
+  const soon = mealReminders({ date, tz: TZ, meals: [breakfast], checks: [{ ...checks[0], answer: 'soon' }], mealTimes: settings.fuel.mealTimes }).find((i) => i.id.startsWith('meal-soon'));
+  assert.deepEqual([soon.at, soon.title, soon.due], [at(date, '13:21'), 'Lunch: cooking yet?', true]);
   const lunchMeal = { id: 'm2', date, at: at(date, '13:40'), name: 'Lunch', source: 'manual', before: { photoId: null } };
   items = mealReminders({ date, tz: TZ, meals: [breakfast, lunchMeal], checks, mealTimes: settings.fuel.mealTimes });
   assert.equal(items.find((i) => i.id.startsWith('meal-cooking')).due, false);

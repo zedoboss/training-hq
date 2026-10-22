@@ -101,7 +101,7 @@ async function editTargets(repo) {
   });
 }
 
-const ANSWER = { eaten: 'Eaten', cooking: 'Cooking', skipped: 'Skipping' };
+const ANSWER = { eaten: 'Eaten', soon: 'About to cook', cooking: 'Cooking', skipped: 'Skipping' };
 
 /** "Eaten, cooking, or skipping?" for one meal time (from a reminder). */
 async function answerCheck(repo, date, hmId) {
@@ -112,7 +112,8 @@ async function answerCheck(repo, date, hmId) {
     // The camera must open inside the tap itself (iPhone rule), so it is clicked before the answer is saved.
     { label: 'Eaten: take the photo now', run: () => { document.querySelector('#f-cam')?.click(); save('eaten'); } },
     { label: 'Eaten: log it without a photo', run: () => { document.querySelector('#f-manual')?.click(); save('eaten'); } },
-    { label: 'Cooking: ask me again in 30 minutes', run: async () => { await save('cooking'); toast('Asking again in 30 minutes.'); } },
+    { label: 'About to cook: ask me in 5 minutes', run: async () => { await save('soon'); toast('Asking again in 5 minutes.'); } },
+    { label: 'Cooking: check back in 15 minutes', run: async () => { await save('cooking'); toast('Checking back in 15 minutes.'); } },
     { label: 'Skipping it', run: async () => { await save('skipped'); toast(`${name} skipped.`); } },
   ]);
 }
