@@ -103,11 +103,41 @@ test('walks and rain (Wed 10/21): raining now -> planned for the first safe hour
   const { rainingNow } = await import('../app/js/lib/walks.js');
   const hour = (hm, uv, feels, rain) => ({ at: at(hm), uv, feels, rain });
   const weather = { current: { at: at('17:30'), precip: 0.6, code: 80 }, hours: [hour('17:00', 1.1, 31, 53), hour('18:00', 0.1, 31, 63), hour('19:00', 0, 32, 65), hour('20:00', 0, 32, 55), hour('21:00', 0, 32, 39)] };
-  assert.deepEqual(rainingNow(weather, at('17:40')), { words: 'rain showers, 0.6 mm in the last hour' });
+  assert.deepEqual(rainingNow(weather, at('17:40')), { words: 'forecast model: rain showers, 0.6 mm in the last hour', sure: false, source: 'model' });
   assert.equal(rainingNow({ current: { ...weather.current, precip: 0, code: 2 } }, at('17:40')), null);
   assert.equal(rainingNow(weather, at('20:00')), null, 'old conditions are not trusted');
   const p = walkDue({ ...base, now: at('17:40'), doc: null, steps: steps(356, '17:01'), weather });
   assert.equal(p.kind, 'planned');
   assert.equal(p.planAt, at('21:00'));
-  assert.match(p.text, /^Walk: raining now \(rain showers, 0\.6 mm in the last hour\)\. I planned it for 9:00 PM, when it's UV 0, feels 32°C, rain 39%\./);
+  assert.match(p.text, /^Walk: rain likely now \(forecast model: rain showers, 0\.6 mm in the last hour\), not confirmed\. I planned it for 9:00 PM, when it's UV 0, feels 32°C, rain 39%\..* Dry where you are\? Tell me and you go now\.$/);
+});
+
+test('rain is a forecast until confirmed (Thu 10/22: "drizzle, take an umbrella" while it was dry)', async () => {
+  const { rainingNow, umbrellaWorth, rainChanceText } = await import('../app/js/lib/walks.js');
+  const { metarObs } = await import('../server/weather.mjs');
+  const hour = (hm, rain, mm) => ({ at: at(hm), uv: 0.5, feels: 31, rain, mm });
+  // What the model said that afternoon: drizzle code 53, 0.2 mm, rain 47%, one model of four wet.
+  const w = { current: { at: at('16:00'), precip: 0.2, code: 53 }, hours: [hour('16:00', 47, [0.1, 0, 0.7, 0]), hour('17:00', 54, [0.7, 0.4, 0.9, 0.5])] };
+  assert.equal(rainingNow(w, at('16:08')), null, 'a drizzle code under 0.3 mm is not rain');
+  assert.equal(umbrellaWorth(w, at('16:08')), false);
+  assert.equal(rainChanceText(w.hours[0]), 'rain 47%, 1 of 4 models show rain (models split, leaning dry)');
+  assert.equal(rainChanceText(w.hours[1]), 'rain 54%, 4 of 4 models show rain (models agree: rain)');
+  // The airport station: a real observation; no rain there vetoes a model-only shower.
+  const dry = metarObs({ icaoId: 'XXXX', obsTime: at('16:00') / 1000, clouds: [{ cover: 'FEW' }, { cover: 'SCT' }] }, 20);
+  assert.deepEqual(dry, { at: at('16:00'), id: 'XXXX', km: 20, rain: false, near: false, wx: 'no rain', sky: 'partly cloudy' });
+  const shower = { ...w, current: { at: at('16:00'), precip: 0.8, code: 80 } };
+  assert.equal(rainingNow({ ...shower, obs: dry }, at('16:10')), null);
+  const wet = metarObs({ icaoId: 'XXXX', obsTime: at('16:00') / 1000, wxString: '-SHRA BR', clouds: [{ cover: 'BKN' }] }, 20);
+  assert.equal(wet.wx, 'showers');
+  assert.equal(metarObs({ obsTime: 1, wxString: 'VCSH' }, 5).wx, 'showers nearby');
+  assert.deepEqual(rainingNow({ ...shower, obs: wet }, at('16:10')), { words: 'rain showers, 0.8 mm in the last hour; the station 20 km away reports showers', sure: true, source: 'model+station' });
+  assert.equal(umbrellaWorth({ ...shower, obs: wet }, at('16:10')), true);
+  // His word beats both, for an hour.
+  const seen = { at: at('16:20'), raining: false, said: 'clouds, no rain' };
+  assert.equal(rainingNow({ ...shower, obs: wet, seen }, at('16:30')), null);
+  assert.equal(umbrellaWorth({ ...shower, obs: wet, seen }, at('16:30')), false);
+  assert.equal(rainingNow({ ...shower, obs: wet, seen }, at('17:25')).sure, true, 'after an hour the sources count again');
+  assert.equal(rainingNow({ seen: { ...seen, raining: true, said: 'pouring' } }, at('16:30')).words, 'he says it\'s raining ("pouring")');
+  // The walk isn't moved for a model drizzle.
+  assert.equal(walkDue({ ...base, now: at('16:08'), doc: null, steps: steps(3000, '16:00'), weather: w }).kind, 'ask');
 });

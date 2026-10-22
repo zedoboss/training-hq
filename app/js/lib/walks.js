@@ -25,13 +25,54 @@ export const WALK = {
 // feels 33°C or less; never = UV 6 or more, or it feels 36°C or more; in between only when nothing safe is left today.
 // Rain of 70% or more is avoided when another hour is free.
 export const HEAT = { uvSafe: 3, uvNever: 6, feelsSafe: 33, feelsNever: 36, rainAvoid: 70, rainNowMm: 0.3, dryAfterRain: 50 };
-const WET = (code) => (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
-/** Raining at his place now (the model's current conditions, if fresh): {words} or null. */
+// Thu 10/22, his words: "there are clouds above me... but there is no rain... improve the weather system": the model's
+// "drizzle, 0.2 mm" had been told to him as fact, with an umbrella. Now a model alone never makes it "raining": a drizzle
+// code under 0.3 mm doesn't count, the nearest weather station's observation (a real one, server/weather.mjs) can veto
+// the model, and what he says he sees outside beats both for an hour.
+const RAINY = (code) => (code >= 61 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
+export const SEEN_MS = 60 * 60000;   // his word on the weather holds this long
+export const OBS_MS = 90 * 60000;    // a station observation older than this isn't "now"
+/** What he said he sees outside, if recent: {at, raining, said} or null. */
+export const seenNow = (weather, now) => (weather?.seen && now - weather.seen.at >= 0 && now - weather.seen.at < SEEN_MS ? weather.seen : null);
+/** The nearest station's observation, if recent. */
+export const obsNow = (weather, now) => (weather?.obs && now - weather.obs.at < OBS_MS ? weather.obs : null);
+/**
+ * Raining at his place now: {words, sure, source} or null. His word first; then the forecast model's current
+ * conditions (rain code or 0.3 mm+), dropped when the nearest station sees no rain, sure only when the station sees it too.
+ */
 export function rainingNow(weather, now) {
+  const seen = seenNow(weather, now);
+  if (seen) return seen.raining ? { words: `he says it's raining${seen.said ? ` ("${seen.said}")` : ''}`, sure: true, source: 'him' } : null;
   const c = weather?.current;
   if (!c || now - c.at > 90 * 60000) return null;
-  if ((c.precip ?? 0) >= HEAT.rainNowMm || WET(c.code)) return { words: `${weatherCodeText(c.code) || 'rain'}${c.precip != null ? `, ${c.precip} mm in the last hour` : ''}` };
-  return null;
+  if (!((c.precip ?? 0) >= HEAT.rainNowMm || RAINY(c.code))) return null;
+  const obs = obsNow(weather, now);
+  if (obs && !obs.rain && !obs.near) return null;
+  const words = `${weatherCodeText(c.code) || 'rain'}${c.precip != null ? `, ${c.precip} mm in the last hour` : ''}`;
+  return obs ? { words: `${words}; the station ${obs.km} km away reports ${obs.wx}`, sure: true, source: 'model+station' } : { words: `forecast model: ${words}`, sure: false, source: 'model' };
+}
+/** "Raining now (...)" when sure; a forecast stays a forecast: "Rain likely now (forecast model: ...), not confirmed". */
+const wetText = (wet) => (wet.sure ? `Raining now (${wet.words})` : `Rain likely now (${wet.words}), not confirmed`);
+/** How many forecast models show rain (0.3 mm+) in an hour: {wet, of} or null. */
+export function modelsAgree(h) {
+  const mm = (h?.mm || []).filter((x) => x != null);
+  return mm.length ? { wet: mm.filter((x) => x >= HEAT.rainNowMm).length, of: mm.length } : null;
+}
+/** The forecast for one hour in words, with how sure it is: "rain 47%, 1 of 4 models show rain (unsure)". */
+export function rainChanceText(h) {
+  if (!h) return 'unknown';
+  const a = modelsAgree(h);
+  const sure = !a ? '' : a.wet === 0 ? 'models agree: dry' : a.wet === a.of ? 'models agree: rain' : a.wet * 2 >= a.of ? 'models split, leaning rain' : 'models split, leaning dry';
+  return `rain ${h.rain ?? '?'}%${a ? `, ${a.wet} of ${a.of} models show rain (${sure})` : ''}`;
+}
+/** Umbrella only on a sure thing: raining for sure now, or the hour ahead 70%+ with most models showing rain. */
+export function umbrellaWorth(weather, now) {
+  const r = rainingNow(weather, now);
+  if (r) return r.sure;
+  if (seenNow(weather, now)) return false;
+  const h = (weather?.hours || []).find((x) => x.at <= now && now < x.at + HOUR) || null;
+  const a = modelsAgree(h);
+  return Boolean(h && h.rain >= HEAT.rainAvoid && a && a.wet * 2 > a.of);
 }
 const HOUR = 3600000;
 /** 'safe' | 'caution' | 'never' for one forecast hour. */
@@ -162,7 +203,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     if (now < d.plan.at) return null;
     // His time came but it's too hot or bright now: move it to the next good time, once per plan.
     if (badNow && better && better.at > now && !d.asks.some((a) => a.kind === 'moved' && a.at >= d.plan.setAt)) {
-      return { kind: 'moved', planAt: better.at, text: `${wet ? `Raining now (${wet.words})` : `It's ${weatherWords(nowH)} now`}: not a walk to do. I moved your walk to ${t(better.at)} (${weatherWords(better.h)}${wet ? `, rain ${better.h.rain}%` : ''}). Say if you want to go anyway.` };
+      return { kind: 'moved', planAt: better.at, text: `${wet ? `${wetText(wet)}` : `It's ${weatherWords(nowH)} now`}: not a walk to do. I moved your walk to ${t(better.at)} (${weatherWords(better.h)}${wet ? `, rain ${better.h.rain}%` : ''}). ${wet && !wet.sure ? 'Dry where you are? Tell me and you go now.' : 'Say if you want to go anyway.'}` };
     }
     const asked = d.asks.filter((a) => a.at >= d.plan.at);
     const planTime = formatHm(hmOf(new Date(d.plan.at), tz));
@@ -176,7 +217,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   const since = Math.max(last?.at || 0, skip?.at || 0, walked?.at || 0);
   // No time set and it isn't good walking weather now: the coach plans it (his words: "he can schedule them").
   if (badNow) {
-    if (better && better.at > now) return { kind: 'planned', planAt: better.at, text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${wet ? `raining now (${wet.words})` : `too hot or bright now (${weatherWords(nowH)})`}. I planned it for ${t(better.at)}, when it's ${weatherWords(better.h)}${wet ? `, rain ${better.h.rain}%` : ''}. ${st} Tell me if another time suits you.` };
+    if (better && better.at > now) return { kind: 'planned', planAt: better.at, text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${wet ? wetText(wet).replace(/^./, (x) => x.toLowerCase()) : `too hot or bright now (${weatherWords(nowH)})`}. I planned it for ${t(better.at)}, when it's ${weatherWords(better.h)}${wet ? `, rain ${better.h.rain}%` : ''}. ${st} ${wet && !wet.sure ? 'Dry where you are? Tell me and you go now.' : 'Tell me if another time suits you.'}` };
     if (!d.asks.some((a) => a.kind === 'no-window')) return { kind: 'no-window', text: `No safe walking weather left today (now ${weatherWords(nowH)}). Steps can wait for a cooler hour: early morning or after sunset.` };
     return null;
   }

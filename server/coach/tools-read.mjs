@@ -19,7 +19,7 @@ import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/m
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
-import { walkLines, usualWalkHm, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow } from '../../app/js/lib/walks.js';
+import { walkLines, usualWalkHm, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
 import { activeHolds } from '../../app/js/lib/holdoffs.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
@@ -163,13 +163,29 @@ function foodLine(s) {
 /** The weather now and the next 12 hours (Wed 10/21: "check if it's raining for me"). */
 function weatherText(s) {
   const w = s.store.getMeta?.('weather');
-  if (!w?.hours?.length) return 'No weather data on the Mac yet (it fetches from Open-Meteo about every 30 minutes).';
+  if (!w?.hours?.length) return 'No weather data on the Mac yet (it fetches from Open-Meteo about every 15 minutes). Ask him what he sees outside.';
   const cur = w.current;
   const hours = w.hours.filter((h) => h.at + 3600000 > s.now && h.at <= s.now + 12 * 3600000);
-  return [`Weather at ${w.label || 'his place'} (Open-Meteo forecast model, updated ${timeText(w.fetchedAt, s.tz)}; it models the area, it isn't a rain gauge at his door).`,
-    cur ? `Now: ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm of rain in the last hour` : ''}, ${Math.round(cur.temp)}°C, feels ${Math.round(cur.feels)}°C.` : '',
-    `Next hours: ${hours.map((h) => `${timeText(h.at, s.tz)} UV ${Math.round(h.uv * 10) / 10}, feels ${Math.round(h.feels)}°C, rain ${h.rain}% (${hourRisk(h)})`).join('; ')}.`,
+  return [`Weather at ${w.label || 'his place'}: a FORECAST MODEL for the area (Open-Meteo, updated ${timeText(w.fetchedAt, s.tz)}), not what is at his door. Say it as a forecast.`,
+    ...rainNowLines(w, s),
+    cur ? `Model now: ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm of rain in the last hour` : ''}, ${Math.round(cur.temp)}°C, feels ${Math.round(cur.feels)}°C.` : '',
+    `Next hours (forecast): ${hours.map((h) => `${timeText(h.at, s.tz)} UV ${Math.round(h.uv * 10) / 10}, feels ${Math.round(h.feels)}°C, ${rainChanceText(h)} (${hourRisk(h)})`).join('; ')}.`,
     'Walking rule: safe = UV under 3 and feels 33°C or less; never at UV 6+ or feels 36°C+.'].filter(Boolean).join('\n');
+}
+
+/**
+ * Thu 10/22 (he was told "drizzle, take an umbrella" from the model while it was dry): what he said he sees, the
+ * nearest station's real observation, the verdict on rain now and whether an umbrella is worth saying.
+ */
+function rainNowLines(w, s) {
+  const seen = seenNow(w, s.now);
+  const obs = obsNow(w, s.now);
+  const r = rainingNow(w, s.now);
+  return [
+    seen ? `He said at ${timeText(seen.at, s.tz)} what he sees outside: ${seen.raining ? 'raining' : 'no rain'}${seen.said ? ` ("${seen.said}")` : ''}. His word beats the models until ${timeText(seen.at + 3600000, s.tz)}.` : '',
+    obs ? `Nearest weather station (${obs.id || 'airport'}, ${obs.km} km away, a real observation, not a model), ${timeText(obs.at, s.tz)}: ${obs.wx}${obs.sky ? `, ${obs.sky}` : ''}. Rain can be local: it isn't his street either.` : 'No recent weather station observation.',
+    `Rain now: ${r ? (r.sure ? `YES (${r.words})` : `MAYBE, not confirmed (${r.words})`) : 'no'}. Umbrella: ${umbrellaWorth(w, s.now) ? 'worth saying' : 'do not tell him to take one (not confirmed); give the chance as a forecast if it matters'}.`,
+  ].filter(Boolean);
 }
 
 /** His meal times (Tue 10/20): the coach guides him by them: when to cook, when to eat, the latest. */
@@ -187,8 +203,9 @@ export function walkTextLines(s, { week = false } = {}) {
     const end = zonedTime(addDays(s.today, 1), '00:00', s.tz);
     const windows = safeWindowsText(w, s.now, end, s.tz);
     const cur = w.current && s.now - w.current.at < 2 * 3600000 ? w.current : null;
-    const next = (w.hours || []).filter((h) => h.at > s.now && h.at <= s.now + 4 * 3600000).map((h) => `${timeText(h.at, s.tz)} rain ${h.rain ?? '?'}%`).join(', ');
-    lines.splice(1, 0, `Walking weather (${w.label || 'his area'}, Open-Meteo forecast model, updated ${timeText(w.fetchedAt, s.tz)}; not a rain gauge at his door): ${cur ? `now ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm in the last hour` : ''}, ` : 'now '}${weatherWords(nowH)}: ${rainingNow(w, s.now) ? 'RAINING now: walk with an umbrella only if he wants; otherwise the first drier hour' : { safe: 'fine to walk', caution: 'only with shade and water, and only if nothing safer is left today', never: 'NOT safe to walk' }[hourRisk(nowH)] || 'unknown'}. Chance of rain next hours: ${next || 'unknown'}. Safe windows left today (UV under 3, feels 33°C or less): ${windows || 'none'}. Never suggest a walk at UV 6+ or feels 36°C+; plan it in a safe window.`);
+    const next = (w.hours || []).filter((h) => h.at > s.now && h.at <= s.now + 4 * 3600000).map((h) => `${timeText(h.at, s.tz)} ${rainChanceText(h)}`).join(', ');
+    const wet = rainingNow(w, s.now);
+    lines.splice(1, 0, `Walking weather (${w.label || 'his area'}, Open-Meteo forecast model, updated ${timeText(w.fetchedAt, s.tz)}; a forecast, not what is at his door): ${cur ? `model now ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm in the last hour` : ''}, ` : 'now '}${weatherWords(nowH)}: ${wet?.sure ? 'RAINING now (confirmed): the first drier hour, or he goes with an umbrella if he wants' : wet ? 'rain MAYBE (model only, not confirmed): ask him what he sees before moving the walk or saying umbrella' : { safe: 'fine to walk', caution: 'only with shade and water, and only if nothing safer is left today', never: 'NOT safe to walk' }[hourRisk(nowH)] || 'unknown'}. ${rainNowLines(w, s).join(' ')} Chance of rain next hours: ${next || 'unknown'}. Safe windows left today (UV under 3, feels 33°C or less): ${windows || 'none'}. Never suggest a walk at UV 6+ or feels 36°C+; plan it in a safe window.`);
   }
   return week ? lines : lines.slice(0, nowH ? 2 : 1);
 }
@@ -705,7 +722,7 @@ const read = (name, title, description, inputSchema, fn) => ({ name, title, desc
 } });
 
 export const READ_TOOLS = [
-  read('weather', 'Weather', "The weather at his place now and the next hours (Open-Meteo forecast model): raining or not now, chance of rain, UV and how hot it feels, and today's safe walking windows. For 'is it raining?', 'should I walk now?'.", obj(), (s) => weatherText(s)),
+  read('weather', 'Weather', "The weather at his place now and the next hours: what he said he sees, the nearest weather station's observation, the forecast models (with how many agree): raining or not now, chance of rain, UV and how hot it feels, and today's safe walking windows. For 'is it raining?', 'should I walk now?'.", obj(), (s) => weatherText(s)),
   read('today', 'Today', "Everything about today: the rotation (today's day type, week column, or why it's a rest day, and the next session), the session time and check-in, the session in progress with the next set, tendon holds due, supplements, food so far, the next body scan. Call it first for any question about today or tomorrow.", obj(), (s) => todayText(s)),
   read('programme', 'Programme', "A day's routine with each exercise's target for the next session (exactly what Start gives: total kg with the bar and plates per side, reps, sets, and why: table, 30% cap, check-in), plus last time. dayType defaults to the next session; week shows another week's column.", obj({ dayType: DAY_TYPE, week: { type: 'integer', minimum: 1, maximum: 12 } }), (s, a) => programmeText(s, a)),
   read('tendons', 'Tendons', 'His tendon areas with their phase, holds (load, sets, seconds, where, when), what is done and due, his note\'s rules, the readiness table and today\'s check-in.', obj(), (s) => tendonsText(s)),

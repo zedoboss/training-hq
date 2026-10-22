@@ -753,3 +753,26 @@ test('meal_check with no meal named (Thu 10/22 audit): the earliest meal asked a
   clock = Date.UTC(2026, 0, 20, 16, 40);
   assert.match((await call('meal_check', { answer: 'cooking' })).text, /^Last meal: cooking/);
 });
+
+test('weather (Thu 10/22): a forecast is said as one, the station and his word come with it, and his word wins', async () => {
+  const h = (min, rain, mm) => ({ at: NOW + min * 60000, uv: 0, feels: 30, temp: 29, rain, mm });
+  store.setMeta('weather', { fetchedAt: NOW, label: 'test place', current: { at: NOW, precip: 0.2, code: 53, temp: 29, feels: 33 }, hours: [h(0, 47, [0.1, 0, 0.7, 0]), h(60, 80, [0.7, 0.4, 0.9, 0.5])],
+    obs: { at: NOW, id: 'XXXX', km: 20, rain: false, near: false, wx: 'no rain', sky: 'partly cloudy' } });
+  let text = (await call('weather')).text;
+  assert.match(text, /FORECAST MODEL/);
+  assert.match(text, /Nearest weather station \(XXXX, 20 km away, a real observation, not a model\), 3:00 AM: no rain, partly cloudy\./);
+  assert.match(text, /Rain now: no\. Umbrella: do not tell him to take one/);
+  assert.match(text, /rain 47%, 1 of 4 models show rain \(models split, leaning dry\)/);
+  clock = NOW + 5 * 60000;
+  const r = await call('weather_seen', { raining: false, said: 'clouds, some sky, no rain' });
+  assert.match(r.text, /no rain where he is \("clouds, some sky, no rain"\), until 4:05 AM his word beats the forecast/);
+  text = (await call('weather')).text;
+  assert.match(text, /He said at 3:05 AM what he sees outside: no rain \("clouds, some sky, no rain"\)\. His word beats the models until 4:05 AM\./);
+  // The next refresh keeps his word.
+  const { openWeather } = await import('../server/weather.mjs');
+  const fake = async (url) => ({ ok: true, json: async () => (/metar/.test(url) ? [] : /models=/.test(url) ? { hourly: {} } : { hourly: { time: ['2026-01-20T03:00'], uv_index: [0], apparent_temperature: [30], temperature_2m: [29], precipitation_probability: [10] }, current: {} }) });
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(join(dir, 'weather.json'), JSON.stringify({ lat: 1, lon: 2 }));
+  await openWeather({ configDir: dir, store, fetchFn: fake, now: () => clock }).refresh({ force: true });
+  assert.equal(store.getMeta('weather').seen.said, 'clouds, some sky, no rain');
+});
