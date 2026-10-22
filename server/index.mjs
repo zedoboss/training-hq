@@ -10,7 +10,7 @@ import { openImports } from './imports.mjs';
 import { openImportInbox } from './import-inbox.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
-import { startNotifier, phoneZone } from './notify.mjs';
+import { startNotifier, phoneZone, sessionBusy } from './notify.mjs';
 import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
 import { openEvoltImport } from './evolt-import.mjs';
@@ -107,8 +107,8 @@ const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.data
 const changes = config.coachChanges === false ? null : openChanges({
   store, push, codeDir: config.changesCodeDir || CODE_DIR, privateDir: p.privateDir, tz: () => phoneZone(store), log,
   restart: () => setTimeout(() => shutdown('a coach change updated the server'), 2000).unref(),
-  // A workout left open for hours (a forgotten test) doesn't hold the restart back for ever.
-  busy: () => store.listRecords('sessions').some((r) => r.data?.status === 'active' && Date.now() - (r.data.startedAt || 0) < 4 * 3600000),
+  // A workout left open for hours (a forgotten test) or a holds round left open doesn't hold the restart back for ever.
+  busy: () => sessionBusy(store.listRecords('sessions').map((r) => r.data).filter(Boolean), Date.now()),
 });
 const changesTimer = changes ? setInterval(() => { changes.tick().catch((e) => log(`coach changes: ${e.stack || e}`)); }, 15000) : null;
 changesTimer?.unref();

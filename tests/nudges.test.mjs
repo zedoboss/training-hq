@@ -471,3 +471,37 @@ test('Thu 10/22: collagen already taken before the second meal: no prompt, the d
     assert.deepEqual(sent.map((m) => m.tag), ['dishes']);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Thu 10/22: the dishes are not sent late, nor after the coach already said it; an open holds round does not hold back a restart', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick, sessionBusy } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-dishes-late-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
+    // His day: breakfast logged 1:30 PM, the coach's own reminder about the dishes at 1:31 PM.
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'Breakfast', source: 'manual', before: { items: [] } });
+    await dishesTick({ store, push, now: at(D, '13:30'), tz: TZ });
+    store.writeLocal('coach-messages', 'c1', { id: 'c1', role: 'assistant', kind: 'reminder', text: 'Reminder. Get up and clean the dishes.', at: at(D, '13:31') });
+    assert.equal((await dishesTick({ store, push, now: at(D, '13:33'), tz: TZ }))?.key, undefined, 'the coach already said it');
+    // A snack, and the Mac busy until 25 minutes later: too late, not sent.
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '16:30'), name: 'Snack', source: 'manual', before: { items: [] } });
+    await dishesTick({ store, push, now: at(D, '16:30'), tz: TZ });
+    assert.equal((await dishesTick({ store, push, now: at(D, '16:55'), tz: TZ }))?.key, undefined, 'late');
+    assert.equal(sent.filter((m) => m.tag === 'dishes').length, 0);
+    // On time it still comes.
+    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '18:00'), name: 'Snack', source: 'manual', before: { items: [] } });
+    await dishesTick({ store, push, now: at(D, '18:00'), tz: TZ });
+    assert.equal((await dishesTick({ store, push, now: at(D, '18:02'), tz: TZ }))?.key, 'dishes');
+    // The restart after a coach change: a holds round open 2 hours doesn't count; a workout does, for 4 hours.
+    assert.equal(sessionBusy([{ kind: 'holds', status: 'active', startedAt: at(D, '11:52') }], at(D, '13:40')), false);
+    assert.equal(sessionBusy([{ kind: 'workout', status: 'active', startedAt: at(D, '11:00') }], at(D, '13:40')), true);
+    assert.equal(sessionBusy([{ kind: 'workout', status: 'active', startedAt: at(D, '08:00') }], at(D, '13:40')), false);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

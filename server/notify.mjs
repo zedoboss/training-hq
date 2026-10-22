@@ -124,7 +124,16 @@ function sayInTalk(store, { text, at, tz, kind, ref }) {
  * a wrist round left open at 11:32 AM kept the dishes after his first meal from ever coming).
  */
 const HOLDS_BUSY_MIN = 30;
-const busyNow = (list, now) => list('sessions').some((x) => x.status === 'active' && !(x.kind === 'holds' && now - (x.startedAt || 0) > HOLDS_BUSY_MIN * 60000))
+const WORKOUT_BUSY_MIN = 240;
+/**
+ * A session in progress: a workout for up to 4 hours, a holds round for its first 30 minutes. Also what holds back the
+ * server's restart after a coach change (Thu 10/22: a round left open at 11:52 AM held every restart back until 1:59
+ * PM, so the changes he asked for in that time weren't live).
+ */
+export const sessionBusy = (sessions, now) => sessions.some((x) => x?.status === 'active' && now - (x.startedAt || 0) < (x.kind === 'holds' ? HOLDS_BUSY_MIN : WORKOUT_BUSY_MIN) * 60000);
+// The dishes prompt more than 15 minutes late (the Mac asleep, busy or restarting) is old news: not sent.
+const DISHES_LATE_MIN = 15;
+const busyNow = (list, now) => sessionBusy(list('sessions'), now)
   || list('sauna').some((x) => x.status === 'active');
 
 /** What the nudges need, read from the Mac's database. */
@@ -256,7 +265,15 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     const w2 = state.after2?.[date];
     if (w2?.id === second.id && w2.asked) readyAt[second.id] = w2.done || Infinity;
   }
-  const due = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) || heldOff('dishes', holds, now) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now, readyAt });
+  const ready = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) || heldOff('dishes', holds, now) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now, readyAt });
+  // Late, or already said by the coach (Thu 10/22, his words: "Why did the notification get sent right now for me to do
+  // the dishes?" His 1:15 PM meal's came at 1:59 PM, after the coach's own reminder at 1:34 PM): counted, not sent.
+  const said = list('coach-messages').filter((x) => x.role === 'assistant' && x.kind !== 'nudge' && /\bdish/i.test(x.text || ''));
+  const dueAt = (m) => (m.id in readyAt ? readyAt[m.id] : mealEatenAt(m, state.seen[m.id]) + DISHES_AFTER_MIN * 60000);
+  const skip = ready.filter((m) => now - dueAt(m) > DISHES_LATE_MIN * 60000 || said.some((x) => x.at >= state.seen[m.id]));
+  for (const m of skip) state.sent[m.id] = now;
+  if (skip.length) log(`dishes after ${skip.map((m) => m.name || m.id).join(', ')}: not sent (late, or the coach already said it)`);
+  const due = ready.filter((m) => !skip.includes(m));
   if (due.length) {
     for (const m of due) state.sent[m.id] = now;
     const opts = voiceOpts(store);
