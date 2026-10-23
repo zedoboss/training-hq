@@ -402,7 +402,17 @@ function mealItems(s, items) {
 const sizeRefusal = (noSize) => `No grams for ${noSize.map((x) => `"${x.name}"`).join(', ')}: packs and counts work only for his foods that have them (the meals tool lists them). Ask him for the grams. Nothing saved.`;
 const itemText = (x) => `${x.name} ${x.portion ? `${x.portion} (${Math.round(x.grams)} g)` : `${Math.round(x.grams)} g`}${x.source === 'usda' ? '' : x.source === 'label' ? ' (his pack label)' : x.source === 'typed' ? ' (his numbers)' : ' (estimate)'}`;
 
-const momentOf = (s, date, hm) => (hm ? zonedTime(date || s.today, hm, s.tz) : s.now);
+/**
+ * The moment of "HH:MM" on a day. A day he names with a time after midnight (Sat 10/24: "2:40 AM, for Friday", before
+ * he slept) is the night after that day when the morning of it doesn't count for it and the night after does.
+ */
+function momentOf(s, date, hm) {
+  if (!hm) return s.now;
+  const on = zonedTime(date || s.today, hm, s.tz);
+  if (!date || s.wakingDay(on) === date) return on;
+  const after = zonedTime(addDays(date, 1), hm, s.tz);
+  return after <= s.now + 3600000 && s.wakingDay(after) === date ? after : on;
+}
 
 async function logMeal(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
@@ -420,8 +430,11 @@ async function logMeal(a, ctx) {
   const { items: extra, unknown, noSize } = a.items?.length ? mealItems(s, a.items) : { items: [], unknown: [], noSize: [] };
   if (noSize.length) return refuse(sizeRefusal(noSize));
   if (unknown.length) return refuse(`No USDA match for ${unknown.map((x) => `"${x.name}"`).join(', ')}. Give its USDA FoodData Central description (usda), or ask him for the kcal and protein. Nothing logged yet.`);
-  const name = a.name ? String(a.name).slice(0, 40) : preset ? preset.name : defaultMealName(at, s.settings().fuel?.mealTimes, s.tz);
-  const meal = preset ? mealFromPreset({ id, at, preset, tz: s.tz, name }) : newMeal({ id, at, name, tz: s.tz });
+  // Sat 10/24: the day it counts toward: the date he gives, else his waking day (after midnight, before he has slept,
+  // the day before; lib/waking-day.js).
+  const date = a.date || s.wakingDay(at);
+  const name = a.name ? String(a.name).slice(0, 40) : preset ? preset.name : defaultMealName(at, s.settings().fuel?.mealTimes, s.tz, { night: date < s.date(at) });
+  const meal = preset ? mealFromPreset({ id, at, preset, tz: s.tz, name, date }) : newMeal({ id, at, name, tz: s.tz, date });
   const items = [...(preset ? meal.before.items : []), ...extra];
   meal.before = { ...meal.before, items, confirmedAt: s.now };
   meal.by = 'coach';
@@ -438,7 +451,7 @@ async function logMeal(a, ctx) {
   put(s, 'meals', id, meal);
   const t = itemTotals(items);
   const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
-  return wrote(`Logged ${meal.name}${preset ? ` (his preset "${preset.name}")` : ''}, ${timeText(at, s.tz)}${meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.today ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+  return wrote(`Logged ${meal.name}${preset ? ` (his preset "${preset.name}")` : ''}, ${timeText(at, s.tz)}${meal.date !== s.date(at) ? ` (counts for ${dayText(meal.date, s.today)}, his waking day)` : meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.foodDay() ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
 }
 
 /** Thu 10/22: save a logged meal as one of his presets, to log again by name or with one tap on Fuel. */
@@ -468,7 +481,7 @@ async function correctMeal(a, ctx) {
     next.before = { ...(meal.before || {}), items, confirmedAt: s.now, edited: true };
   }
   if (a.name) next.name = String(a.name).slice(0, 40);
-  if (a.time) { next.at = zonedTime(meal.date, a.time, s.tz); }
+  if (a.time) { next.at = momentOf(s, meal.date, a.time); }
   if (a.note !== undefined) next.note = String(a.note).slice(0, 300);
   // "Ate it all" by talking (Thu 10/22 audit: only the phone's button could stop the after-photo prompt).
   if (a.ateAll) next.after = { photoId: null, at: s.now, none: true, leftovers: [], confirmedAt: s.now, by: 'coach' };
@@ -506,7 +519,7 @@ function findSupp(s, name) {
 
 async function supplement(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
-  const date = a.date || s.today;
+  const date = a.date || s.foodDay();
   if (date > s.today) return refuse('That day is still to come. Supplements are ticked when taken.');
   const dayKind = suppDayKind(s, date);
   const done = []; const problems = []; const notes = [];
@@ -846,7 +859,7 @@ async function mealCheck(a, ctx) {
  * me to first melt the butter and then move the pan away").
  */
 function planLeftText(s, cooking = false) {
-  const items = s.list('meals').filter((m) => m.date === s.today).flatMap((m) => m.before?.items || []);
+  const items = s.list('meals').filter((m) => m.date === s.foodDay()).flatMap((m) => m.before?.items || []);
   const left = (s.one('fuel', 'plan')?.foods || []).filter((f) => Number(f.gramsPerDay) > 0).map((f) => {
     const had = items.filter((x) => (f.fdcId && Number(x.fdcId) === Number(f.fdcId)) || sameFood(f.name, x.name || '')).reduce((n, x) => n + (Number(x.grams) || 0), 0);
     return { f, g: Math.round(Number(f.gramsPerDay) - had) };
@@ -1349,10 +1362,10 @@ export const WRITE_TOOLS = [
   write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),
   write('next_exercise', 'Next exercise', 'Move his phone to the next exercise with sets left and say its next set.', obj(), nextExercise),
   write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
-  write('log_meal', 'Log a meal', 'Log a meal he describes or shows in a photo in Talk, one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now. photo: the id of a photo he sent in Talk that shows this meal; leave time out then (the meal then gets the time the photo was taken) unless he says when he ate. away: true when he ate it out, not at home (a restaurant, "going out to eat"): his supplements are at home, so the app then says take them once home and reminds him later, and sends no dishes message. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, photo: { type: 'string', description: 'id of the photo he sent in Talk (cphoto....)' }, away: { type: 'boolean', description: 'he ate it out, away from home' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
+  write('log_meal', 'Log a meal', 'Log a meal he describes or shows in a photo in Talk, one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now. Leave date out for today: after midnight, before he has slept, the app puts the meal on his waking day (the day before) by itself, at its real time; a date he names with a time after midnight is the night after that day. photo: the id of a photo he sent in Talk that shows this meal; leave time out then (the meal then gets the time the photo was taken) unless he says when he ate. away: true when he ate it out, not at home (a restaurant, "going out to eat"): his supplements are at home, so the app then says take them once home and reminds him later, and sends no dishes message. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, photo: { type: 'string', description: 'id of the photo he sent in Talk (cphoto....)' }, away: { type: 'boolean', description: 'he ate it out, away from home' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
   write('meal_preset', 'Save a meal preset', 'Save a logged meal (its id from the meals tool) as one of his presets, under the name he says (default the meal\'s name). A preset of the same name is replaced. He then logs it with one tap on Fuel or by telling you.', obj({ meal: { type: 'string' }, name: { type: 'string' } }, ['meal']), mealPreset),
   write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, mark that he ate it all (ateAll: no after photo needed), or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, ateAll: { type: 'boolean' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
-  write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
+  write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Leave date out for today: after midnight, before he has slept, today is still the day before (his waking day) by itself. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
   write('supplement_setup', 'Set up a supplement', "Set up one of his supplements the way he says (what he'd enter on its page): time of day (24-hour HH:MM, or '' for no set time), with food or not, servings left in the pack, a different rest-day dose. Only what he asks for; it never adds or removes a supplement. afterMeal true = he takes it right after his first meal (the app asks the moment that meal is logged; a meal named Snack doesn't count); 'second' = right after his second meal (the app asks once it's eaten, again every 5 minutes until ticked, and that meal's dishes reminder waits for it); false = not tied to a meal.", obj({ supplement: { type: 'string' }, time: { type: 'string', pattern: '^(([01]\\d|2[0-3]):[0-5]\\d)?$' }, withFood: { type: 'string', enum: ['with', 'without', 'either'] }, servings: { type: 'number', minimum: 0 }, doseRest: { type: 'string' }, afterMeal: { enum: [true, false, 'second'] } }, ['supplement']), supplementSetup),
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), about ones out of stock (kind out: ordered with arrives YYYY-MM-DD when he says when they come, not-yet, arrived = back on his daily list, stop = no more restock questions; supplement: names, or all), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'out', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, arrives: ISO, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
   write('body_scan', 'Body scan', "How often he scans (every: 'training' = every training day, 'monthly' = every 4 weeks on a confirmed date); confirm the next scan date (monthly only; default: the app's proposal) or cancel it; change one preparation checklist line in his words (line: its id from body_scans, or none to add one; text; when: 'before' or 'day'); record that he read the scanner's safety notice, or what his gym's staff said; save results he reads out (every number exactly as shown: label, value, unit) with the conditions.", obj({ action: { type: 'string', enum: ['every', 'checklist_line', 'confirm_date', 'cancel_date', 'safety_read', 'staff_said', 'record_results'] }, every: { type: 'string', enum: ['training', 'monthly'] }, line: { type: 'string' }, when: { type: 'string', enum: ['before', 'day'] }, date: ISO, time: HM, text: { type: 'string' }, metrics: { type: 'array', items: obj({ label: { type: 'string' }, value: { type: 'number' }, text: { type: 'string' }, unit: { type: 'string' } }, ['label']) }, fasted: { type: 'boolean' }, trainedBefore: { type: 'boolean' }, unusual: { type: 'string' } }, ['action']), bodyScan),

@@ -13,7 +13,8 @@ import { weekColumn } from '../lib/programme.js';
 import { roundsByDate, holdSlots, restChoices, openSlots } from '../lib/holds.js';
 import { logMealFromFile, cameraInput } from './meal.js';
 import { dayTotals } from '../lib/meals.js';
-import { checklist, dayKindFor } from '../lib/supplements.js';
+import { checklist, dayKindFrom } from '../lib/supplements.js';
+import { wakingDayAt } from '../lib/waking-day.js';
 import { stepsToday, healthAsOf } from './body.js';
 import { runShortcutUrl } from './body-health.js';
 import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
@@ -107,15 +108,15 @@ async function trainToday(repo) {
 async function fuelToday(repo) {
   const [meals, estimates, plan, supps, slog, sessions, bridge, dayList] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.get('fuel', 'plan'),
     repo.list('supplements'), repo.list('supp-log'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days')]);
-  const today = isoDate(new Date());
+  // His waking day (Sat 10/24): after midnight, before he has slept, the readout is still the day before's.
+  const today = await wakingDayAt(repo);
   // A fasting day (Wed 10/21, his words: "it should be over there that I'm fast just for today"): no food target, no
   // supplement count; tomorrow is back to normal by itself (the fast belongs to its date).
   const fast = daysByDate(dayList)[today]?.fast;
   if (fastingOn(daysByDate(dayList), today, meals)) return { readout: `FASTING TODAY<br>SINCE ${formatTime(new Date(fast.at)).toUpperCase()}<br>NO FOOD OR SUPPS`, progress: null };
   const t = dayTotals(meals, estimates, today);
   const kcal = Math.round(t.kcal).toLocaleString('en-US');
-  const rot = rotationDay({ last: lastRotationSession(sessions, bridge), today, days: daysByDate(dayList) });
-  const due = checklist({ supps, log: slog, date: today, dayKind: dayKindFor(today, { today, rotKind: rot.today.kind }) }).flatMap((g) => g.items);
+  const due = checklist({ supps, log: slog, date: today, dayKind: dayKindFrom({ sessions, bridge, days: dayList, date: today, today: isoDate(new Date()) }) }).flatMap((g) => g.items);
   const supp = due.length ? `<br>SUPPS ${due.filter((i) => i.entry?.status === 'taken').length}/${due.length}` : '';
   if (!plan?.kcal) return { readout: `${kcal} KCAL${supp}`, progress: null };
   return { readout: `${kcal} / ${Number(plan.kcal).toLocaleString('en-US')} KCAL<br>${Math.round(t.protein)} G PROTEIN${supp}`, progress: Math.min(1, t.kcal / plan.kcal) };
@@ -259,7 +260,7 @@ export function render(view) {
       talk = todayCounts(await repo.list('coach-messages'), isoDate(new Date()), (ms) => isoDate(new Date(ms)));
       if (!gone) draw(getState());
     };
-    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages', 'body-scans', 'scan-plan'].includes(c))) refresh(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages', 'body-scans', 'scan-plan', 'sleep-log'].includes(c))) refresh(); });
     refresh();
     // The workout's minutes in the status line.
     minuteTimer = setInterval(() => { if (!gone && train?.live) refresh(); }, 60000);

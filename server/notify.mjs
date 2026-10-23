@@ -12,6 +12,7 @@ import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
+import { wakingDay } from '../app/js/lib/waking-day.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
 import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
@@ -58,6 +59,13 @@ const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'cook', 'evening', 'ne
  * before 9:00 and talking to the coach at 9:15): the earliest sign he's up, his logged wake time or his first
  * message, meal or workout from 5:00 AM on, when that is before the wake time in Settings. "HH:MM".
  */
+/** Sat 10/24: the day food and supplements count toward now (after midnight, before he has slept: the day before). */
+export function foodDayOf(store, now, tz) {
+  const date = isoDate(new Date(now), tz);
+  const one = (col) => { const r = store.getRecord(col, date); return r && !r.deleted ? r.data : null; };
+  return wakingDay(now, { tz, sleepLog: one('sleep-log'), health: one('health'), sessions: recordsOf(store, 'sessions') });
+}
+
 export function wakeHmToday(store, now, tz, wakeHm) {
   const date = isoDate(new Date(now), tz);
   const from = zonedTime(date, '05:00', tz);
@@ -360,13 +368,15 @@ export function nudgeInputs(store, now, tz) {
   const n = { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
   const health = one('health', date);
   const plan = one('fuel', 'plan');
-  const eaten = dayTotals(list('meals'), list('meal-estimates'), date);
+  // Food and supplements: his waking day (after midnight, before he has slept, still the day before).
+  const food = foodDayOf(store, now, tz);
+  const eaten = dayTotals(list('meals'), list('meal-estimates'), food);
   const trained = st.trainedDates?.has?.(date) || false;
   const rot = rotationDay({ last: st.last, today: date, days: st.days || {} });
-  const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
+  const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date: food, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
   const untimed = groups.filter((g) => !g.time && !g.afterMeal && !g.afterMeal2).flatMap((g) => g.items);
   const afterMeal = groups.filter((g) => g.afterMeal).flatMap((g) => g.items);
-  const firstMeal = list('meals').filter((m) => m.date === date && m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[0];
+  const firstMeal = list('meals').filter((m) => m.date === food && m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[0];
   const firstMealAt = firstMeal ? firstMeal.at : NaN;
   const fasting = fastingOn(st.days || {}, date, list('meals'));
   return {
@@ -389,7 +399,7 @@ export function nudgeInputs(store, now, tz) {
       wokeAt: one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && isoDate(new Date(x.endedAt), tz) === date).map((x) => x.endedAt)) || null,
       mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan })?.mealAt ?? null,
-      lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === date && m.at).map((m) => m.at)) || null,
+      lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === food && m.at).map((m) => m.at)) || null,
       // His last answer to a meal question (eaten, about to cook, cooking, skipping): the after-workout meal nudge stops on it.
       mealAnsweredAt: Math.max(0, ...list('meal-checks').filter((c) => c.date === date && c.at).map((c) => c.at)) || null,
       morning: n.morning || null,
@@ -419,7 +429,8 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   const list = (col) => recordsOf(store, col);
   const n0 = withDefaults(store.getRecord('settings', 'main')?.data).notify;
   const n = { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
-  const date = isoDate(new Date(now), tz);
+  // His waking day (Sat 10/24): a meal after midnight, before he has slept, is that day's second meal, not tomorrow's first.
+  const date = foodDayOf(store, now, tz);
   const meals = list('meals').filter((m) => m.date === date);
   const st = store.getMeta(DISHES);
   const state = st || { seen: {}, sent: {} };
@@ -486,7 +497,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       if (!open2.length) w.done = now;
       // Not before the time he set himself for being home or taking it (Fri 10/23, ownSuppsTime).
       else if (now - w.last >= (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)
-        && now >= ownSuppsTime(list('coach-reminders').filter((r) => isoDate(new Date(r.at || 0), tz) === date), open2, second.at)) {
+        && now >= ownSuppsTime(list('coach-reminders').filter((r) => isoDate(new Date(r.at || 0), tz) >= date), open2, second.at)) {
         w.last = now;
         await say(w.everyMin ? `Back home yet? Take your ${open2.join(', ')} now.` : `Still waiting: ${open2.join(', ')}. Get up and take it now, then the dishes.`, 'supps-after-meal-2');
       }

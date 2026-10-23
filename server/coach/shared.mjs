@@ -7,6 +7,7 @@ import { mergeLibrary } from '../../app/js/lib/library.js';
 import { buildHistory } from '../../app/js/lib/history.js';
 import { rotationDay, lastRotationSession, daysByDate } from '../../app/js/lib/rotation.js';
 import { platesPerSide, kg as k } from '../../app/js/lib/loads.js';
+import { wakingDay } from '../../app/js/lib/waking-day.js';
 
 export { k, formatHm };
 
@@ -32,6 +33,10 @@ export function snapshot(store, { tz, now = Date.now() } = {}) {
     setsOf: (sessionId) => list('sets').filter((x) => x.sessionId === sessionId).sort((a, b) => a.order - b.order),
     minPlate: () => smallestPlate(s.equipment()),
     date: (ms) => isoDate(new Date(ms), tz),
+    /** Sat 10/24: the day food and supplements at `ms` count toward (after midnight, before he has slept: the day before). */
+    wakingDay: (ms = now) => { const d = isoDate(new Date(ms), tz); return wakingDay(ms, { tz, sleepLog: one('sleep-log', d), health: one('health', d), sessions: list('sessions') }); },
+    /** His waking day now: food and supplements "today". */
+    foodDay: () => m('foodDay', () => s.wakingDay(now)),
   };
   return s;
 }

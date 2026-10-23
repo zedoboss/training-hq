@@ -190,21 +190,28 @@ function suppDayKind(s, date) {
   return dayKindFrom({ sessions: s.list('sessions'), bridge: s.one('bridge', 'last-loads'), days: s.list('days'), date, today: s.today, tz: s.tz });
 }
 
+/**
+ * Sat 10/24 (his words: "I still haven't slept... the body registers it as one day"): after midnight, before he has
+ * slept, food and supplements are still the day before's (his waking day, lib/waking-day.js). Said with the lines.
+ */
+const wakingNote = (s) => (s.foodDay() !== s.today ? ` (his waking day, ${dayText(s.foodDay(), s.today)}: past midnight and he hasn't slept yet, so food and supplements now still count for it; the app does this by itself)` : '');
+
 function suppLine(s) {
   const supps = s.list('supplements'); const log = s.list('supp-log');
-  const groups = checklist({ supps, log, date: s.today, dayKind: suppDayKind(s, s.today) });
+  const day = s.foodDay();
+  const groups = checklist({ supps, log, date: day, dayKind: suppDayKind(s, day) });
   const items = groups.flatMap((g) => g.items);
   const taken = items.filter((i) => i.entry?.status === 'taken').length;
   const skipped = items.filter((i) => i.entry?.status === 'skipped').length;
   const open = items.filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
   const outs = outOfStock(supps, log, s.today);
-  return `Supplements today: ${items.length ? `${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}` : 'none scheduled'}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out): ${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
+  return `Supplements today${wakingNote(s)}: ${items.length ? `${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}` : 'none scheduled'}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out): ${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
 }
 
 function foodLine(s) {
   const plan = s.one('fuel', 'plan') || {};
-  const t = dayTotals(s.list('meals'), s.list('meal-estimates'), s.today);
-  return `Food today: ${t.kcal.toLocaleString('en-US')} kcal of ${plan.kcal ? plan.kcal.toLocaleString('en-US') : '?'}, ${t.protein} g protein of ${plan.proteinG ?? '?'} g (${plural(t.meals, 'meal')}${t.estimated ? `, ${t.estimated} still estimates` : ''}${t.unread ? `, ${t.unread} being read` : ''}).`;
+  const t = dayTotals(s.list('meals'), s.list('meal-estimates'), s.foodDay());
+  return `Food today${wakingNote(s)}: ${t.kcal.toLocaleString('en-US')} kcal of ${plan.kcal ? plan.kcal.toLocaleString('en-US') : '?'}, ${t.protein} g protein of ${plan.proteinG ?? '?'} g (${plural(t.meals, 'meal')}${t.estimated ? `, ${t.estimated} still estimates` : ''}${t.unread ? `, ${t.unread} being read` : ''}).`;
 }
 
 /**
@@ -217,21 +224,22 @@ function foodLine(s) {
 export function mealsNowLine(s) {
   const slots = mealTimesOf(s.settings().fuel?.mealTimes);
   // An empty meal (no photo, no items) counts as no meal (Thu 10/22, lib/meals.js isEmptyMeal).
-  const meals = s.list('meals').filter((m) => m.date === s.today && !isEmptyMeal(m)).sort((a, b) => a.at - b.at);
+  const day = s.foodDay();
+  const meals = s.list('meals').filter((m) => m.date === day && !isEmptyMeal(m)).sort((a, b) => a.at - b.at);
   const items = (m) => (m.before?.items || []).map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g`).join(', ') || 'items being read';
   const had = meals.length ? meals.map((m) => `${m.name} ${timeText(m.at, s.tz)} (${items(m)})`).join('; ') : 'nothing logged yet';
-  if (!slots.length) return `Meals today: ${had}.`;
+  if (!slots.length) return `Meals today${wakingNote(s)}: ${had}.`;
   // Each real meal (not a snack) and each answer "eaten" or "skipped" uses up the next meal time, in order.
-  const checks = s.list('meal-checks').filter((c) => c.date === s.today);
+  const checks = s.list('meal-checks').filter((c) => c.date === day);
   const answered = (t) => checks.some((c) => c.slot === t.time && (c.answer === 'eaten' || c.answer === 'skipped'));
   let real = meals.filter((m) => !/snack/i.test(m.name || '')).length;
   const nextIdx = slots.findIndex((t) => { if (answered(t)) return false; if (real > 0) { real -= 1; return false; } return true; });
-  if (nextIdx < 0) return `Meals today: ${had}. Every meal time is done for today.`;
+  if (nextIdx < 0) return `Meals today${wakingNote(s)}: ${had}. Every meal time is done for today.`;
   const slot = slots[nextIdx];
   const presets = presetsOf(s.one('fuel', 'presets'));
   const preset = presets.find((p) => p.name.toLowerCase() === slot.name.toLowerCase()) || presets[nextIdx] || null;
   const usual = preset ? ` What he usually eats then (his preset "${preset.name}"): ${preset.items.map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g`).join(', ')}.` : '';
-  return `Meals today: ${had}. Next meal: ${slot.name} (${formatHm(slot.time)}${slot.latest ? `, ${formatHm(slot.latest)} at the latest` : ''}).${usual} A cooking tip or a note about a food (like the eggs' butter step) goes only with the meal that has that food and only while it isn't logged today; never assume what he's cooking from a note.`;
+  return `Meals today${wakingNote(s)}: ${had}. Next meal: ${slot.name} (${formatHm(slot.time)}${slot.latest ? `, ${formatHm(slot.latest)} at the latest` : ''}).${usual} A cooking tip or a note about a food (like the eggs' butter step) goes only with the meal that has that food and only while it isn't logged today; never assume what he's cooking from a note.`;
 }
 
 /** The weather now and the next 12 hours (Wed 10/21: "check if it's raining for me"). */
@@ -722,7 +730,7 @@ function healthText(s, { days = 14 }) {
 // ---- meals --------------------------------------------------------------------------------------------------------
 
 export function mealsText(s, { date = null }) {
-  const d = date || s.today;
+  const d = date || s.foodDay();
   const meals = s.list('meals').filter((m) => m.date === d).sort((a, b) => a.at - b.at);
   const est = s.list('meal-estimates');
   const plan = s.one('fuel', 'plan') || {};

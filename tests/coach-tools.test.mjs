@@ -39,6 +39,8 @@ function seed() {
   w('supplements', 'supp.powder', { id: 'supp.powder', kind: 'supplement', name: 'Test powder', short: 'powder', dose: '5 g', days: { type: 'daily' }, status: 'active', order: 1, stock: { servings: 3, countedAt: at('2026-01-19') } });
   w('supplements', 'supp.caps', { id: 'supp.caps', kind: 'supplement', name: 'Test capsules', short: 'caps', dose: '2 caps', days: { type: 'daily' }, status: 'active', order: 2 });
   w('fuel', 'plan', { kind: 'plan', kcal: 2000, proteinG: 150, foods: [{ name: 'Rice' }] });
+  // Up at 2:30 AM for an early session: the 3:00 AM clock is this day's (his waking day, lib/waking-day.js).
+  w('sleep-log', '2026-01-20', { id: '2026-01-20', date: '2026-01-20', bed: Date.UTC(2026, 0, 19, 19, 0), wake: Date.UTC(2026, 0, 20, 2, 30), inBedMin: 450, asleepMin: 450, source: 'coach' });
   w('tendons', 'area.knees', { kind: 'area', id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Wall Hold', sets: 3, seconds: 30, where: 'home' }], loadsArea: { exercises: ['Leg Extension (Machine)'] } });
   w('tendons', 'readiness', { kind: 'readiness', status: 'draft', workingArea: { legs: ['L'], pull: [], push: [] },
     ratings: [{ key: 'T', label: 'Sore tendon area', levels: ['none', 'slight', 'at the limit', 'above it'] }, { key: 'L', label: 'Legs', levels: ['none', 'slight', 'clearly', 'very'] }, { key: 'E', label: 'Energy', levels: ['drained', 'low', 'normal', 'high'] }] });
@@ -329,14 +331,14 @@ test('a meal he describes is logged with confirmed items, and can be corrected',
 
 test('Fri 10/23: a meal photo he sent in Talk goes with the meal, at the time it was taken, with no after-photo ask', async () => {
   const JPEG = 'data:image/jpeg;base64,/9j/4AAQ';
-  store.writeLocal('coach-photos', 'cphoto.a.0x', { id: 'cphoto.a.0x', messageId: 'cm.1', dataUrl: JPEG, at: NOW - 40 * 60000, sentAt: NOW });
+  store.writeLocal('coach-photos', 'cphoto.a.0x', { id: 'cphoto.a.0x', messageId: 'cm.1', dataUrl: JPEG, at: NOW - 20 * 60000, sentAt: NOW });
   const r = await call('log_meal', { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }], photo: 'cphoto.a.0x' });
-  assert.match(r.text, /^Logged [A-Za-z]+, 2:20 AM \[id meal-/, 'when the photo was taken, not when he sent it');
+  assert.match(r.text, /^Logged [A-Za-z]+, 2:40 AM \[id meal-/, 'when the photo was taken, not when he sent it');
   const meal = list('meals')[0];
   assert.ok(meal.before.confirmedAt, 'the photo reader leaves it alone');
   assert.equal(meal.source, 'manual', 'no "after photo" reminder');
   const mp = store.getRecord('meal-photos', meal.before.photoId).data;
-  assert.deepEqual([mp.mealId, mp.kind, mp.dataUrl, mp.at], [meal.id, 'before', JPEG, NOW - 40 * 60000]);
+  assert.deepEqual([mp.mealId, mp.kind, mp.dataUrl, mp.at], [meal.id, 'before', JPEG, NOW - 20 * 60000]);
   // A time he gives beats the photo's; an unknown photo id is refused, nothing logged.
   assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.a.0x', time: '02:50' })).text, /2:50 AM/);
   assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.nope' })).text, /No photo cphoto\.nope from Talk\..*Nothing logged yet/);
@@ -624,7 +626,7 @@ test('micronutrients (A12): his references, food and supplements ticked taken, n
   store.writeLocal('fuel', 'plan', { kind: 'plan', kcal: 2000, proteinG: 150, foods: [{ name: 'Eggs', fdcId: 171287, gramsPerDay: 500 }] });
   store.writeLocal('fuel', 'micro', { energyBasisMJ: 10, references: [{ key: 'vitA', name: 'Vitamin A', unit: 'mcg', ref: 750, refNote: 'EFSA DRV', ul: 3000, ulNote: 'EFSA UL', group: 'vitamins' }, { key: 'vitC', name: 'Vitamin C', unit: 'mg', ref: 110, refNote: 'EFSA DRV', group: 'vitamins' }],
     retention: { foods: [171287], factors: { vitA: 0.9 } }, supplements: { 'supp.powder': { perDay: { vitC: 1000 } } } });
-  await call('log_meal', { items: [{ name: 'Eggs', grams: 200 }], time: '02:00' });
+  await call('log_meal', { items: [{ name: 'Eggs', grams: 200 }], time: '02:45' });
   await call('supplement', { names: ['powder'], status: 'taken' });
   const t = (await call('micronutrients')).text;
   assert.match(t, /Numbers only: never advise/);

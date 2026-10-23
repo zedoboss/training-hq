@@ -13,6 +13,7 @@ import {
 } from '../lib/meals.js';
 import { mealTimesOf } from '../lib/fuel-reminders.js';
 import { hmOf } from '../lib/time.js';
+import { wakingDayAt } from '../lib/waking-day.js';
 import { actionSheet, confirmSheet, promptText, promptLong, overlay } from '../ui/sheet.js';
 import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE, myFoods, labelItem, sameFood, amountChoices } from '../lib/foods.js';
 
@@ -32,8 +33,9 @@ export async function logMealFromFile(file, { at = Date.now() } = {}) {
   const mealId = newId('meal');
   const photoId = newPhotoId();
   await repo.put('meal-photos', photoId, { id: photoId, mealId, kind: 'before', dataUrl, at });
-  const name = defaultMealName(at, withDefaults(getState().settings).fuel?.mealTimes);
-  await repo.put('meals', mealId, newMeal({ id: mealId, at, photoId, name }));
+  const date = await wakingDayAt(repo, at);
+  const name = defaultMealName(at, withDefaults(getState().settings).fuel?.mealTimes, undefined, { night: date < isoDate(new Date(at)) });
+  await repo.put('meals', mealId, newMeal({ id: mealId, at, photoId, name, date }));
   syncNow();
   return mealId;
 }
@@ -46,8 +48,9 @@ export async function logMealFromFile(file, { at = Date.now() } = {}) {
 export async function logMealManual({ at = Date.now(), items = [] } = {}) {
   const repo = await ready;
   const mealId = newId('meal');
-  const name = items.presetName || defaultMealName(at, withDefaults(getState().settings).fuel?.mealTimes);
-  const meal = newMeal({ id: mealId, at, name });
+  const date = await wakingDayAt(repo, at);
+  const name = items.presetName || defaultMealName(at, withDefaults(getState().settings).fuel?.mealTimes, undefined, { night: date < isoDate(new Date(at)) });
+  const meal = newMeal({ id: mealId, at, name, date });
   await repo.put('meals', mealId, { ...meal, before: { ...meal.before, items: cleanItems(items), confirmedAt: at }, ...(items.presetId ? { preset: items.presetId } : {}) });
   syncNow();
   return mealId;
@@ -428,7 +431,7 @@ export function render(view, [id]) {
         const hm = await import('../ui/sheet.js').then((m) => m.promptTime('Meal time', new Date(meal.at).toTimeString().slice(0, 5)));
         if (!hm) return;
         const d = new Date(meal.at); d.setHours(Number(hm.slice(0, 2)), Number(hm.slice(3)), 0, 0);
-        save({ at: d.getTime(), date: isoDate(d) });
+        save({ at: d.getTime(), date: await wakingDayAt(repo, d.getTime()) });
       } },
       { label: 'Delete this meal', danger: true, run: async () => {
         if (!(await confirmSheet('Delete this meal and its photos?', { ok: 'Delete', danger: true }))) return;

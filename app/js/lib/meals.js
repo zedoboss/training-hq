@@ -25,9 +25,12 @@ const r1 = (x) => Math.round(x * 10) / 10;
 
 /**
  * A name for a meal started at `at`: his nearest meal time (within 90 minutes) when he has set them,
- * else by the clock (before 10:30 AM breakfast, before 3 PM lunch, 5 PM to 10 PM dinner, otherwise snack).
+ * else by the clock (before 10:30 AM breakfast, before 3 PM lunch, 5 PM to 10 PM dinner, otherwise snack). night: it
+ * counts for the day before (lib/waking-day.js).
  */
-export function defaultMealName(at, mealTimes = [], tz) {
+export function defaultMealName(at, mealTimes = [], tz, { night = false } = {}) {
+  // Sat 10/24: after midnight, before he has slept (it counts for the day before): his last meal time, not breakfast.
+  if (night) return [...(mealTimes || [])].filter((t) => /^\d{1,2}:\d{2}$/.test(String(t.time || ''))).sort((a, b) => String(a.time).padStart(5, '0').localeCompare(String(b.time).padStart(5, '0'))).at(-1)?.name || 'Dinner';
   const d = new Date(at);
   const hm = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
   const [h, m] = hm.split(':').map(Number);
@@ -47,9 +50,10 @@ export function defaultMealName(at, mealTimes = [], tz) {
 }
 
 /** A new meal from a before photo (or a manual one with no photo). */
-export function newMeal({ id, at, photoId = null, name, tz }) {
+export function newMeal({ id, at, photoId = null, name, tz, date = null }) {
   return {
-    id, date: isoDate(new Date(at), tz), at, name, source: photoId ? 'photo' : 'manual',
+    // date: the day it counts toward (his waking day, lib/waking-day.js); the calendar date of `at` when not given.
+    id, date: date || isoDate(new Date(at), tz), at, name, source: photoId ? 'photo' : 'manual',
     before: photoId ? { photoId, at, scaleG: null, items: null, confirmedAt: null } : { photoId: null, at, scaleG: null, items: [], confirmedAt: null },
     after: null, hint: '', round: 0, note: '',
   };
@@ -243,8 +247,8 @@ export function presetsFor(presets = [], slots = [], hm = null) {
 }
 
 /** A new meal from a preset, logged and confirmed at `at`. */
-export function mealFromPreset({ id, at, preset, tz, name }) {
-  const meal = newMeal({ id, at, name: name || preset.name, tz });
+export function mealFromPreset({ id, at, preset, tz, name, date = null }) {
+  const meal = newMeal({ id, at, name: name || preset.name, tz, date });
   return { ...meal, before: { ...meal.before, items: cleanItems(preset.items), confirmedAt: at }, preset: preset.id };
 }
 

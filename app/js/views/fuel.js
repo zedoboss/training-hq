@@ -14,6 +14,7 @@ import { dayTotals, mealTotals, mealState, STATE_SHORT, presetsOf, mealFromPrese
 import { newId } from '../lib/routines.js';
 import { logMealFromFile, logMealManual, cameraInput, presetsNear } from './meal.js';
 import { photoTime } from '../lib/photos.js';
+import { wakingDayAt } from '../lib/waking-day.js';
 import { dayKindOn } from './supps.js';
 import { checklist } from '../lib/supplements.js';
 import { toast } from '../ui/toast.js';
@@ -115,7 +116,8 @@ async function answerCheck(repo, date, hmId) {
   // tap, the preset for this meal time first.
   const usual = (await presetsNear(slot ? zonedTimeLocal(slot.time) : Date.now())).map((p) => ({ label: `Eaten: ${p.name}, as usual`, run: async () => {
     const id = newId('meal');
-    await repo.put('meals', id, mealFromPreset({ id, at: Date.now(), preset: p }));
+    const at = Date.now();
+    await repo.put('meals', id, mealFromPreset({ id, at, preset: p, date: await wakingDayAt(repo, at) }));
     await save('eaten');
     const pt = itemTotals(p.items);
     toast(`Logged ${p.name}: ${n0(pt.kcal)} kcal, ${pt.protein} g protein. Tap it below to change it.`);
@@ -132,10 +134,12 @@ async function answerCheck(repo, date, hmId) {
 }
 
 export function render(view, params) {
-  const today = isoDate(new Date());
+  // Today is his waking day (Sat 10/24): after midnight, before he has slept, Fuel is still the day before.
+  let today = isoDate(new Date());
   const checking = params[0] === 'check';
   const dateParam = checking ? params[1] : params[0];
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') ? dateParam : today;
+  const asked = /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') ? dateParam : null;
+  let date = asked || today;
   view.innerHTML = `<div id="f-body"><p class="view-sub">Loading…</p></div>${cameraInput('f-cam')}`;
   const body = view.querySelector('#f-body');
   let repo; let alive = true; let off = () => {};
@@ -147,6 +151,8 @@ export function render(view, params) {
   });
 
   const draw = async () => {
+    today = await wakingDayAt(repo);
+    if (!asked) date = today;
     const [meals, estimates, photos, plan, checks, dayList, presetDoc] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days'), repo.get('fuel', 'presets')]);
     if (!alive) return;
     // A fasting day (Wed 10/21): no target, no "to go"; a meal logged after it began ends it.
@@ -238,7 +244,8 @@ export function render(view, params) {
       if (!preset) return;
       b.disabled = true;
       const id = newId('meal');
-      await repo.put('meals', id, mealFromPreset({ id, at: Date.now(), preset }));
+      const at = Date.now();
+      await repo.put('meals', id, mealFromPreset({ id, at, preset, date: await wakingDayAt(repo, at) }));
       const pt = itemTotals(preset.items);
       toast(`Logged ${preset.name}: ${n0(pt.kcal)} kcal, ${pt.protein} g protein. Tap it below to change or delete.`);
     }; });
@@ -261,7 +268,7 @@ export function render(view, params) {
   const unsub = subscribe((s) => { const k = `${s.paired}|${s.mac.reachable}|${s.sync.pending > 0}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log', 'days'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log', 'days', 'sleep-log'].includes(c))) draw(); });
     draw().then(() => { if (checking && alive) answerCheck(repo, date, params[2]); });
   });
   return () => { alive = false; off(); unsub(); };

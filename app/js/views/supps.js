@@ -9,6 +9,7 @@ import { withDefaults } from '../lib/settings.js';
 import { isoDate, formatHm, formatDay, formatTime, timeAt } from '../lib/time.js';
 import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, checklist, outOfStock, logEntry, dayKindFrom, scheduledOn, logId, streak, reviewOpen, applyReview, answerReview } from '../lib/supplements.js';
 import { addDays } from '../lib/rotation.js';
+import { wakingDayAt } from '../lib/waking-day.js';
 import { actionSheet, promptText, promptLong, confirmSheet } from '../ui/sheet.js';
 import { lowAnswered, weeklyAnsweredSince } from '../lib/fuel-reminders.js';
 import { newId } from '../lib/routines.js';
@@ -84,9 +85,11 @@ export async function answerSupp(repo, supp, date, status, reason = '') {
 }
 
 function renderDay(view, repo, alive, dateParam) {
-  const today = isoDate(new Date());
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') && dateParam <= today ? dateParam : today;
+  // Today is his waking day (Sat 10/24): after midnight, before he has slept, the checklist is still the day before's.
+  let today; let date;
   const draw = async () => {
+    today = await wakingDayAt(repo);
+    date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') && dateParam <= isoDate(new Date()) ? dateParam : today;
     const [all, log, dayKind, answers] = await Promise.all([repo.list('supplements'), repo.list('supp-log'), dayKindOn(repo, date), repo.list('supp-answers')]);
     if (!alive()) return;
     const groups = checklist({ supps: all, log, date, dayKind });
@@ -161,7 +164,7 @@ function renderDay(view, repo, alive, dateParam) {
   };
   draw();
   let t = null;
-  return repo.onChange((cols) => { if (cols.some((c) => ['supplements', 'supp-log', 'sessions', 'days'].includes(c))) { clearTimeout(t); t = setTimeout(draw, 60); } });
+  return repo.onChange((cols) => { if (cols.some((c) => ['supplements', 'supp-log', 'sessions', 'days', 'sleep-log'].includes(c))) { clearTimeout(t); t = setTimeout(draw, 60); } });
 }
 
 
