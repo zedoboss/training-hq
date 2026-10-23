@@ -84,6 +84,12 @@ export function rotationDay({ last, today, days = {} }) {
   return { today: { kind: 'train', dayType: after, reason: null }, next: { dayType: after, date: today }, last };
 }
 
+/**
+ * On a rest day, the next session's day type when that session is tomorrow, else null (Sat 10/24: a weekly gym hold
+ * isn't asked on a rest day before a training day; he's at the gym tomorrow and it goes after that session).
+ */
+export const sessionTomorrow = (rot, date) => (rot?.today?.kind === 'rest' && rot.next?.date === addDays(date, 1) ? rot.next.dayType : null);
+
 /** Day record with an added rest day (or with it taken away again). */
 export function withRest(doc, date, reason, at = Date.now()) {
   const base = doc || { date };

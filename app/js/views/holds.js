@@ -3,7 +3,7 @@
 import { ready, saveSettings, macPost } from '../lib/data.js';
 import { setQuiet } from '../lib/quiet.js';
 import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase } from '../lib/holds.js';
-import { rotationDay, lastRotationSession, daysByDate, LABEL } from '../lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, LABEL, sessionTomorrow } from '../lib/rotation.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
 import { kg as fmtKg } from '../lib/loads.js';
@@ -78,7 +78,9 @@ function renderList(view, repo) {
     const ease = new Set(todayDoc?.readiness?.easeHolds || []);
     const rounds = roundsByDate(areas, sessions, sets, bridge);
     const dayType = rot.today.kind === 'rest' ? null : rot.today.dayType;
-    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today) });
+    // Sat 10/24: on a rest day before a session, a weekly gym hold goes after that session (not asked today).
+    const nextSession = sessionTomorrow(rot, today);
+    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today), nextSession });
     const areaOf = (id) => areas.find((a) => a.id === id);
     // Thu 10/22, his words: "the shoulder should be there in this tendons": an area behind its weekly count (fix or
     // maintenance) with nothing planned today is listed under today too, to do any day.
@@ -110,7 +112,7 @@ function renderList(view, repo) {
       <section class="card pad-card hold-today">
         <div class="hud c-muted">TODAY · ${esc(formatDay(new Date()).toUpperCase())} · ${rot.today.kind === 'rest' ? 'REST DAY' : `${esc(LABEL[dayType]).toUpperCase()} DAY`}</div>
         ${slots.length ? slots.map(slotRow).join('') : weekly.length ? '' : '<p class="hint">Nothing scheduled today.</p>'}
-        ${weekly.map(({ a, st }) => `<div class="hold-row slot-row" data-slot="${esc(a.id)}:week"><div><span class="hud c-amber">THIS WEEK · ${st.done} OF ${st.target[0] === st.target[1] ? st.target[0] : `${st.target[0]}-${st.target[1]}`} · ANY DAY</span>
+        ${weekly.map(({ a, st }) => `<div class="hold-row slot-row" data-slot="${esc(a.id)}:week"><div><span class="hud c-amber">THIS WEEK · ${st.done} OF ${st.target[0] === st.target[1] ? st.target[0] : `${st.target[0]}-${st.target[1]}`} · ${nextSession && a.holds[0].where !== 'home' ? `AFTER ${esc(LABEL[nextSession]).toUpperCase()} TOMORROW` : 'ANY DAY'}</span>
           <div><b>${esc(a.label)}</b> · ${esc(a.holds[0].exercise)}${a.holds[0].where ? ` <span class="hint">(${esc(a.holds[0].where)})</span>` : ''}${a.holds.length > 1 ? `<div class="hint">then ${esc(a.holds.slice(1).map((h) => h.exercise).join(', '))}</div>` : ''}</div></div><a class="pill is-on" href="#/holds/${esc(a.id)}/0">Start</a></div>`).join('')}
       </section>
       ${unconfirmed.length || timesOpen ? `<section class="card pad-card confirm-card"><div class="hud c-amber">CONFIRM YOUR HOLD TIMES (FIRST TIME)</div>

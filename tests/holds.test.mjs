@@ -130,6 +130,34 @@ test('rest-day hold (A2): asked each rest day; gym, his own hold or skip; the la
   assert.equal(holdSlots({ areas, dayKind: 'train', dayType: 'push', restChoices: restChoices(days, '2026-10-30') }).find((y) => y.area === 'shoulder').ask, undefined);
 });
 
+test('Sat 10/24: a rest day before a session: the gym hold goes after that session, not asked today', async () => {
+  const { holdSlots, restChoices, withRestChoice } = await import('../app/js/lib/holds.js');
+  const { rotationDay, sessionTomorrow } = await import('../app/js/lib/rotation.js');
+  const areas = [
+    { id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Gym Hold', when: 'after Legs', where: 'gym' }, { exercise: 'Home Hold', where: 'home' }] },
+    { id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Press Hold', timing: ['after Push'] }, { exercise: 'Raise Hold', timing: ['after Push', 'rest days'] }] },
+  ];
+  const last = { dayType: 'legs', date: '2026-10-22', streak: 3 };
+  // Fri 10/23 rest, Pull on Saturday: tomorrow's session. Saturday marked rest too: none. A training day: none.
+  assert.equal(sessionTomorrow(rotationDay({ last, today: '2026-10-23' }), '2026-10-23'), 'pull');
+  assert.equal(sessionTomorrow(rotationDay({ last, today: '2026-10-23', days: { '2026-10-24': { rest: { reason: 'added' } } } }), '2026-10-23'), null);
+  assert.equal(sessionTomorrow(rotationDay({ last: { ...last, streak: 1 }, today: '2026-10-23' }), '2026-10-23'), null);
+  const shoulder = (o = {}) => holdSlots({ areas: o.areas || areas, dayKind: 'rest', roundsToday: o.rounds || {}, restChoices: restChoices(o.days || {}, '2026-10-23'), nextSession: 'nextSession' in o ? o.nextSession : 'pull' }).find((x) => x.area === 'shoulder');
+  assert.equal(shoulder(), undefined, 'not asked, nothing open');
+  assert.equal(holdSlots({ areas, dayKind: 'rest', nextSession: 'pull' }).filter((x) => x.area === 'knees').length, 2, 'the knees stay');
+  assert.equal(shoulder({ nextSession: null }).ask, true, 'no session tomorrow: asked as before');
+  // Kept: done today, his answer today, his own hold standing from the last rest day, a hold at home.
+  assert.equal(shoulder({ rounds: { shoulder: 1 } }).done, true);
+  assert.equal(shoulder({ days: { '2026-10-23': withRestChoice(null, '2026-10-23', 'shoulder', { choice: 'gym' }) } }).exercise, 'Raise Hold');
+  assert.equal(shoulder({ days: { '2026-10-23': withRestChoice(null, '2026-10-23', 'shoulder', { choice: 'skip' }) } }).skipped, true);
+  assert.equal(shoulder({ days: { '2026-10-19': withRestChoice(null, '2026-10-19', 'shoulder', { choice: 'other', holdName: 'Band hold' }) } }).exercise, 'Band hold');
+  assert.equal(shoulder({ days: { '2026-10-19': withRestChoice(null, '2026-10-19', 'shoulder', { choice: 'gym' }) } }), undefined);
+  const home = areas.map((a) => (a.id === 'shoulder' ? { ...a, holds: [a.holds[0], { ...a.holds[1], where: 'home' }] } : a));
+  assert.equal(shoulder({ areas: home }).ask, true);
+  // Training days are untouched.
+  assert.equal(holdSlots({ areas, dayKind: 'train', dayType: 'push', nextSession: 'pull' }).find((x) => x.area === 'shoulder').slot, 'after');
+});
+
 test('a round on the hold timer: every hold with its GET READY, rest between holds', async () => {
   const { roundSeconds, roundLength } = await import('../app/js/lib/holds.js');
   assert.equal(roundSeconds(), 375, '3 × (15 + 30) + 2 × 120 = 6:15');

@@ -100,7 +100,15 @@ test('rest_day_hold (A2): asked on a rest day, his answer recorded, never on a t
   store.writeLocal('tendons', 'area.shoulder', { kind: 'area', id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Press Hold', timing: ['after Push'] }, { exercise: 'Raise Hold', timing: ['after Push', 'rest days'] }] });
   assert.equal((await call('rest_day_hold', { choice: 'gym' })).wrote, undefined);
   await call('schedule', { action: 'rest_today' });
-  assert.match((await call('today')).text, /Rest-day shoulder hold: ask him what he wants today: the gym just for the Raise Hold hold, another hold he names, or skip today/);
+  // The session moved to tomorrow: the gym hold goes after it, nothing asked today (Sat 10/24).
+  let t = (await call('today')).text;
+  assert.doesNotMatch(t, /Rest-day shoulder hold: ask him/);
+  assert.match(t, /Shoulder: no rest-day question today: he trains tomorrow \(Legs\), so the Raise Hold hold goes after that session\. Never ask him to go to the gym for it today\./);
+  // Two rest days in a row: asked.
+  store.writeLocal('days', '2026-01-21', { date: '2026-01-21', rest: { reason: 'added', at: 1 } });
+  t = (await call('today')).text;
+  assert.match(t, /Rest-day shoulder hold: ask him what he wants today: the gym just for the Raise Hold hold, another hold he names, or skip today/);
+  assert.doesNotMatch(t, /no rest-day question today/);
   const no = await call('rest_day_hold', { choice: 'other' });
   assert.match(no.text, /needs the hold he named/);
   const r = await call('rest_day_hold', { choice: 'other', hold: 'Band hold' });
@@ -467,7 +475,7 @@ test('schedule: a rest day says plainly which holds are still due today, and lea
   const r = await call('schedule', { action: 'rest_today' });
   assert.doesNotMatch(r.text, /as planned/);
   assert.match(r.text, /Holds still due today: Knees: Wall Hold, 2 rounds of 3 × 30 s still due today: one now \(the 9:30 AM morning round is late\), the evening one at 9:30 PM \(the app reminds him then\); not back to back\./);
-  assert.match(r.text, /Shoulder: rest-day hold not answered yet: ask it as its own question, naming the shoulder: the gym for the Raise Hold hold/);
+  assert.doesNotMatch(r.text, /Shoulder: rest-day hold not answered yet/); // Wednesday's session takes the gym hold (Sat 10/24)
   assert.match(r.text, /offer to remind him of a round the app doesn't remind him of \(set_reminder/);
   assert.match(r.text, /The body scan and the check-in move with the session to Wednesday 1\/21 by themselves.*don't mention or ask about either\./);
   // Early in the day both rounds are still ahead, each with the app's reminder.

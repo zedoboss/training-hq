@@ -21,7 +21,7 @@ test('the next days: the rotation moves on as planned; only fixed reminders, onl
     'holds-morning:2026-01-22', 'holds-evening:2026-01-22',
     'holds-morning:2026-01-23', 'holds-evening:2026-01-23',
   ]);
-  assert.equal(items[1].title, 'Rest day holds: what today?');
+  assert.equal(items[1].title, 'Rest day holds'); // Pull the next day takes the shoulder's gym hold (Sat 10/24)
   assert.ok(items.every((i) => i.fixed && i.kind !== 'evening'));
 });
 

@@ -7,7 +7,7 @@ import { formatTime, formatTimeSec, weekdayShort, isoDate, isoWeek, gmtOffset, f
 import { checkInLead } from '../lib/reminders.js';
 import { withDefaults } from '../lib/settings.js';
 import { ready, saveSettings } from '../lib/data.js';
-import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT } from '../lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT, sessionTomorrow } from '../lib/rotation.js';
 import { fastingOn } from '../lib/fast.js';
 import { weekColumn } from '../lib/programme.js';
 import { roundsByDate, holdSlots, restChoices, openSlots } from '../lib/holds.js';
@@ -70,7 +70,7 @@ async function trainToday(repo) {
   const areas = tendons.filter((d) => d.kind === 'area');
   const rounds = roundsByDate(areas, sessions, sets, bridge);
   const n = withDefaults(getState().settings).notify;
-  const slots = holdSlots({ areas, dayKind: t.kind, dayType: t.kind === 'rest' ? null : t.dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(daysByDate(dayList), today) });
+  const slots = holdSlots({ areas, dayKind: t.kind, dayType: t.kind === 'rest' ? null : t.dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(daysByDate(dayList), today), nextSession: sessionTomorrow(rot, today) });
   const open = openSlots(slots).length;
   const holds = slots.length ? { readout: open ? `${open} OPEN` : slots.every((x) => x.skipped) ? 'SKIPPED' : 'DONE', progress: (slots.length - open) / slots.length } : { readout: 'NONE TODAY', progress: null };
   const hm = daysByDate(dayList)[rot.next.date]?.sessionTime;

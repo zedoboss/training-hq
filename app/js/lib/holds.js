@@ -145,11 +145,12 @@ const onRestDays = (h) => /\brest days?\b/i.test(timingOf(h));
  * @param {object} [o.roundsToday] {areaId: rounds logged today}
  * @param {{morning:string, evening:string}} [o.times]
  * @param {object} [o.restChoices] {areaId: {today, last}} from restChoices(): his rest-day answer (A2)
+ * @param {string|null} [o.nextSession] on a rest day, tomorrow's session (sessionTomorrow in rotation.js)
  * @returns {Array<{area:string, label:string, slot:'after'|'rest'|'morning'|'evening', time:string|null,
  *   holdIndex:number|'other', exercise:string, where:string|null, done:boolean, ask?:boolean, choice?:string|null,
  *   skipped?:boolean, last?:object|null}>}
  */
-export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES, restChoices = {} }) {
+export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES, restChoices = {}, nextSession = null }) {
   const out = [];
   const trainType = dayKind === 'rest' ? null : dayType;
   for (const a of areas || []) {
@@ -176,6 +177,10 @@ export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, ti
       if (after < 0 && rest >= 0 && slots[0]) {
         const rc = restChoices[a.id] || {};
         const pick = rc.today || (rc.last?.choice === 'skip' ? rc.lastPlan : rc.last) || null;
+        // Sat 10/24 (Fri 10/23: at 2:50 PM the coach put the shoulder after Pull on Saturday, from 3:41 PM the holds asked
+        // him to go to the gym for it on his rest day): a session tomorrow takes the gym hold, so nothing is asked today.
+        // Still here: his answer today, a round done today, his own hold standing.
+        if (nextSession && !rc.today && !(roundsToday[a.id] > 0) && pick?.choice !== 'other' && holds[rest].where !== 'home') continue;
         Object.assign(slots[0], { ask: !rc.today, choice: pick?.choice || null, skipped: rc.today?.choice === 'skip', last: rc.last || null, restHold: holds[rest].exercise });
         if (pick?.choice === 'other' && pick.holdName) Object.assign(slots[0], { holdIndex: 'other', exercise: pick.holdName, where: null, also: [] });
       }

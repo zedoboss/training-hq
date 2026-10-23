@@ -3,13 +3,13 @@
 // asked for, computed by the app's own rules (the same modules the phone uses), so the coach repeats them instead of
 // working anything out.
 import { snapshot, dayText, whenText, timeText, loadText, repsText, mmss, plural, findByName, k, formatHm } from './shared.mjs';
-import { LABEL, addDays } from '../../app/js/lib/rotation.js';
+import { LABEL, addDays, sessionTomorrow } from '../../app/js/lib/rotation.js';
 import { weekColumn } from '../../app/js/lib/programme.js';
 import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js';
 import { targetFor, lastNotes } from '../../app/js/lib/targets.js';
 import { confirmedKg, modeOf, isConfirmed } from '../../app/js/lib/progression.js';
 import { currentBodyweight, healthDays, hoursText, weightSeries, withSleepLog } from '../../app/js/lib/health.js';
-import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds } from '../../app/js/lib/holds.js';
+import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds, restAskAreas } from '../../app/js/lib/holds.js';
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
@@ -120,7 +120,7 @@ function slotsToday(s) {
   const rot = s.rotation();
   const rounds = roundsByDate(areas, s.list('sessions'), s.list('sets'), s.one('bridge', 'last-loads'));
   const st = s.settings().notify;
-  return { areas, slots: holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today) }) };
+  return { areas, slots: holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today), nextSession: sessionTomorrow(rot, s.today) }) };
 }
 
 /**
@@ -177,6 +177,11 @@ function holdLines(s) {
   for (const x of slots.filter((y) => y.slot === 'rest' && y.ask)) {
     const area = areas.find((a) => a.id === x.area);
     out.push(`Rest-day ${x.label.toLowerCase()} hold: ask him what he wants today: the gym just for the ${x.restHold} hold, another hold he names, or skip today (record it with rest_day_hold). Never suggest a hold yourself.${x.last ? ` Last rest day (${dayText(x.last.date, s.today)}): ${restChoiceText(x.last, area)}.` : ''}`);
+  }
+  // Sat 10/24: a rest day before a session: the gym hold goes after tomorrow's session, not asked today.
+  const next = sessionTomorrow(s.rotation(), s.today);
+  for (const a of next ? restAskAreas(areas).filter((y) => !slots.some((x) => x.area === y.id)) : []) {
+    out.push(`${a.label}: no rest-day question today: he trains tomorrow (${LABEL[next]}), so the ${a.holds.find((h) => /\brest days?\b/i.test([...(h.timing || []), h.when || ''].join(' ')))?.exercise || 'rest-day'} hold goes after that session. Never ask him to go to the gym for it today.`);
   }
   return out;
 }

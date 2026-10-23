@@ -74,12 +74,31 @@ test('no time set: no check-in or session reminder; the evening nudges for tomor
 });
 
 test('rest day: shoulder rest-day hold with the morning knee hold; tomorrow with its time', () => {
-  const days = { '2026-01-21': { date: '2026-01-21', sessionTime: '05:00' } };
+  // Two rest days in a row: no session tomorrow, so the shoulder's gym hold is asked.
+  const days = { '2026-01-21': { date: '2026-01-21', rest: { reason: 'added', at: 1 } }, '2026-01-22': { date: '2026-01-22', sessionTime: '05:00' } };
   const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, days });
   const k = byKind(items);
   assert.equal(k['holds-morning'].title, 'Rest day holds: what today?');
   assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
-  assert.match(k.evening.body, /Tomorrow: Pull at 5:00 AM, check-in at 4:30 AM\.$/);
+  assert.equal(k['holds-evening'].body, 'Knees: Wall Hold, 2 rounds, not back to back. 3 × 30 s each, about 6 min a round. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
+});
+
+test('Sat 10/24: a rest day before a session: the gym hold goes after it, never "the gym ... today?"', () => {
+  // Fri 10/23 (rest, Pull on Saturday): at 2:50 PM the coach put the shoulder after Pull on Saturday; from 3:41 PM the
+  // holds asked him to go to the gym for the cable raise hold on his rest day.
+  const days = { '2026-01-21': { date: '2026-01-21', sessionTime: '05:00' } };
+  const run = (o = {}) => byKind(remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, days: { ...days, ...(o.days || {}) }, rounds: o.rounds || {} }));
+  let k = run();
+  assert.equal(k['holds-morning'].title, 'Rest day holds');
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.');
+  assert.equal(k['holds-evening'].body, 'Knees: Wall Hold, 2 rounds, not back to back. 3 × 30 s each, about 6 min a round.');
+  assert.match(k.evening.body, /^Tomorrow: Pull at 5:00 AM, check-in at 4:30 AM\.$/);
+  // Knees done: nothing about holds is due all day.
+  k = run({ rounds: { knees: { '2026-01-20': 2 } } });
+  assert.ok(Object.values(k).filter((i) => i.kind === 'holds').every((i) => !i.due));
+  // He chose the gym anyway (or his own hold): that stays, as he said.
+  k = run({ days: { '2026-01-20': { date: '2026-01-20', restHolds: { shoulder: { choice: 'gym', at: 1 } } } } });
+  assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. Shoulder: Raise Hold. 3 × 30 s each, about 6 min a round.');
 });
 
 test('rest day (A2): his answer drives the reminder; a skip drops the shoulder from it and from the evening list', () => {
@@ -101,6 +120,7 @@ test('Sat 10/24: one holds stream on a rest day: two reminders, a few check-ins 
   const settings = { notify: { holdsMorning: '09:30', holdsEvening: '21:30', eveningCheck: '22:30', bedHm: '00:00', wakeHm: '10:00' } };
   const last = { dayType: 'legs', date: '2026-01-19', streak: 3 };
   const run = (rounds = {}, days = {}) => remindersFor({ ...base, date: '2026-01-20', last, days, settings, rounds });
+  // Pull tomorrow: the shoulder's gym hold goes after it, so these are about the knees only (Sat 10/24).
   const items = run();
   const holds = items.filter((i) => i.kind === 'holds');
   assert.deepEqual(holds.map((i) => [i.id, new Date(i.at).toISOString()]), [
@@ -120,17 +140,18 @@ test('Sat 10/24: one holds stream on a rest day: two reminders, a few check-ins 
   assert.equal(holds[1].body, "Knees: Wall Hold. About 6 min and it's off the list.");
   assert.equal(holds[1].title, "Holds: haven't heard from you");
   assert.equal(holds[2].body, 'Knees: Wall Hold. One round now, the next at 9:30 PM. About 6 min.');
-  // The rest-day question: in the morning and evening reminders, not in every check-in.
-  assert.match(holds[0].body, /Shoulder: the gym for the Raise Hold hold, another hold, or skip today\?/);
-  assert.ok(holds.filter((i) => i.group).every((i) => !/Shoulder/.test(i.body)));
+  assert.ok(holds.every((i) => !/Shoulder/.test(i.body)));
   // The evening one says all that's left today, the morning round too, knees once with its count.
-  assert.equal(holds[3].body, 'Knees: Wall Hold, 2 rounds, not back to back. 3 × 30 s each, about 6 min a round. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
+  assert.equal(holds[3].body, 'Knees: Wall Hold, 2 rounds, not back to back. 3 × 30 s each, about 6 min a round.');
+  // No session tomorrow: the rest-day question is in the morning and evening reminders, not in every check-in.
+  const asked = run({}, { '2026-01-21': { date: '2026-01-21', rest: { reason: 'added', at: 1 } } }).filter((i) => i.kind === 'holds');
+  assert.deepEqual(asked.filter((i) => /Shoulder: the gym for the Raise Hold hold, another hold, or skip today\?/.test(i.body)).map((i) => i.id), ['holds-morning:2026-01-20', 'holds-evening:2026-01-20']);
   assert.equal(holds[4].body, 'Knees: Wall Hold, 2 rounds, not back to back. Get them in before bed and log them.');
   // The round-up doesn't list them again (the holds stream asks); nothing else open: just tomorrow.
   assert.equal(items.find((i) => i.kind === 'evening').body, 'Tomorrow: Pull. No time set yet.');
   // Morning round done: the morning check-ins stop; the evening ones are about one round.
   const k = byKind(run({ knees: { '2026-01-20': 1 } }).filter((i) => i.kind === 'holds' && i.due).map((i) => ({ ...i, id: i.id.replace('holds-check:2026-01-20:', 'check-') })));
-  assert.deepEqual(Object.keys(k), ['holds-morning', 'holds-evening', 'check-evening']);
+  assert.deepEqual(Object.keys(k), ['holds-evening', 'check-evening']);
   assert.equal(k['check-evening'].body, 'Knees: Wall Hold. Get them in before bed and log them.');
   // Both rounds done and the shoulder answered: nothing due.
   const done = run({ knees: { '2026-01-20': 2 } }, { '2026-01-20': { date: '2026-01-20', restHolds: { shoulder: { choice: 'skip', at: 1 } } } });

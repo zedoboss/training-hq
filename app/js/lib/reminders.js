@@ -2,7 +2,7 @@
 // push notifications (server/notify.mjs); the phone lists them and, as a fallback for when the Mac is off, hands the
 // fixed ones to an iPhone Shortcut (Reminders). Each item carries `due`: whether it still applies right now
 // (a check-in already done or holds already logged switch it off).
-import { rotationDay, LABEL, addDays, lastRotationSession, daysByDate } from './rotation.js';
+import { rotationDay, LABEL, addDays, lastRotationSession, daysByDate, sessionTomorrow } from './rotation.js';
 import { holdSlots, roundsByDate, restChoices, openSlots, roundSeconds, roundLength, holdsAfter } from './holds.js';
 import { isoDate } from './time.js';
 import { weekColumn } from './programme.js';
@@ -155,7 +155,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
 
   // Tendon holds (decisions 17, 18): morning (and rest-day) holds, evening holds.
   const roundsToday = Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[date] || 0]));
-  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday, times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(days, date) });
+  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday, times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(days, date), nextSession: sessionTomorrow(rot, date) });
   if (on('holds')) {
     const st = withDefaults(settings);
     const round = roundLength(roundSeconds({ getReadyS: st.holds?.getReadyS ?? 15, restS: st.rest?.holdS ?? 120 }));
