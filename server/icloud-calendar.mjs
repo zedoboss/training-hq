@@ -156,13 +156,21 @@ export function eventKit(events, { app = HELPER_APP, now = Date.now(), timeoutMs
   writeFileSync(req, JSON.stringify(helperRequest(events, { now })));
   return new Promise((done) => {
     execFile('open', ['-W', '-g', '-j', '-n', '-a', app, '--args', req, ans], { timeout: timeoutMs }, (e, _out, err) => {
-      let out = '';
-      try { out = readFileSync(ans, 'utf8'); } catch { /* no answer: the error says why */ }
-      rmSync(dir, { recursive: true, force: true });
-      done({ out, err: out ? '' : String(err || '') + (e ? String(e.message || e) : '') || 'THQ Calendar gave no answer' });
+      // `open -W` can return before a quick run has written its answer ("Unable to block on application", Fri 10/23):
+      // wait for the answer file a little.
+      const until = Date.now() + (e?.killed ? 0 : ANSWER_WAIT_MS);
+      const read = () => {
+        let out = '';
+        try { out = readFileSync(ans, 'utf8'); } catch { /* not written yet */ }
+        if (!out && Date.now() < until) { setTimeout(read, 100); return; }
+        rmSync(dir, { recursive: true, force: true });
+        done({ out, err: out ? '' : String(err || '') + (e ? String(e.message || e) : '') || 'THQ Calendar gave no answer' });
+      };
+      read();
     });
   });
 }
+const ANSWER_WAIT_MS = 20000;
 
 /** Starts the Mac's Calendar app hidden, in the background (it must run for the AppleScript; nothing comes to the front). */
 export function startCalendar() {
