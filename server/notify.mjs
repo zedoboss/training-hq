@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, ateOut, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
@@ -484,7 +484,9 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       }
     } else if (w?.asked && !w.done) {
       if (!open2.length) w.done = now;
-      else if (now - w.last >= (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)) {
+      // Not before the time he set himself for being home or taking it (Fri 10/23, ownSuppsTime).
+      else if (now - w.last >= (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)
+        && now >= ownSuppsTime(list('coach-reminders').filter((r) => isoDate(new Date(r.at || 0), tz) === date), open2, second.at)) {
         w.last = now;
         await say(w.everyMin ? `Back home yet? Take your ${open2.join(', ')} now.` : `Still waiting: ${open2.join(', ')}. Get up and take it now, then the dishes.`, 'supps-after-meal-2');
       }

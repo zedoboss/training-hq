@@ -760,3 +760,65 @@ test('Fri 10/23: a meal eaten out says take the supplements once home, no dishes
     assert.deepEqual(sent.map((m) => m.tag), ['supps-after-meal', 'supps-after-meal-2', 'supps-after-meal-2']);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Fri 10/23: his own time for being home / the supplements holds the "back home yet?" nudge until it', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick, nudgeInputs } = await import('../server/notify.mjs');
+  const { ownSuppsTime } = await import('../app/js/lib/nudges.js');
+  const names = ['Vitamin D3 + K2 (MK-7)', 'Omega-3 fish oil', 'Ashwagandha KSM-66'];
+  const meal = at(D, '16:59');
+  const rem = (id, hm, text, x = {}) => ({ id, at: at(D, hm), date: D, hm, text, createdAt: at(D, '17:31'), by: 'coach', ...x });
+  // What counts: about home or these supplements, set for after the meal, not cancelled.
+  assert.equal(ownSuppsTime([], names, meal), 0);
+  assert.equal(ownSuppsTime([rem('a', '17:44', 'Decathlon: heading over?')], names, meal), 0, 'an errand is not his home time');
+  assert.equal(ownSuppsTime([rem('a', '17:59', 'Back home? D3 + K2, omega-3 and ashwagandha are still open.')], names, meal), at(D, '18:29'));
+  assert.equal(ownSuppsTime([rem('a', '17:59', 'Take the ashwagandha')], names, meal), at(D, '18:29'), 'a supplement by name');
+  assert.equal(ownSuppsTime([rem('a', '17:59', 'Supplements at home', { cancelledAt: at(D, '17:40') })], names, meal), 0, 'cancelled');
+  assert.equal(ownSuppsTime([rem('a', '16:00', 'Supplements')], names, meal), 0, 'set before the meal');
+  assert.equal(ownSuppsTime([{ id: 'coach:a', kind: 'coach', at: at(D, '17:59'), body: 'Back home?', due: true }], names, meal), at(D, '18:29'), 'the planner\'s shape');
+  assert.equal(ownSuppsTime([{ id: 'supps:x', kind: 'supps', at: at(D, '17:59'), title: 'Supplements', due: true }], names, meal), 0, 'the planner\'s own supplement reminders don\'t count');
+
+  const dir = mkdtempSync(join(tmpdir(), 'thq-own-home-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('supplements', 'supp.d3', { id: 'supp.d3', kind: 'supplement', name: 'Vitamin D3 + K2 (MK-7)', short: 'D3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
+    store.writeLocal('supplements', 'supp.ash', { id: 'supp.ash', kind: 'supplement', name: 'Ashwagandha KSM-66', short: 'ashwagandha', days: { type: 'daily' }, status: 'active', order: 2, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
+    store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 3, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
+    // The day he hit: the meal out at 4:59 PM; "back home yet?" he had set for 5:30 PM; then at 5:31 PM Decathlon 5:44
+    // and supplements at home 5:59 PM. The app's own nudge went out at 5:41 PM.
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: meal, name: 'Last meal', source: 'manual', away: true, before: { items: [{ name: 'Udon', grams: 375, kcal: 500, protein: 12 }] } });
+    store.writeLocal('coach-reminders', 'r1', rem('r1', '17:30', 'Back home yet? D3 + K2, omega-3 and ashwagandha are still open.', { createdAt: at(D, '17:10'), firedAt: at(D, '17:30') }));
+    store.writeLocal('coach-reminders', 'r2', rem('r2', '17:44', 'Decathlon: heading over?'));
+    store.writeLocal('coach-reminders', 'r3', rem('r3', '17:59', 'Back home? D3 + K2, omega-3 and ashwagandha are still open.'));
+    const home = (hm) => nudgeCandidates({ ...nudgeInputs(store, at(D, hm), TZ).args, now: at(D, hm) }).find((x) => x.key === 'supps-after-meal');
+    for (const hm of ['17:29', '17:41', '17:59', '18:15', '18:28']) assert.equal(home(hm), undefined, `nothing of the app's own at ${hm}`);
+    assert.match(home('18:29').text, /^Back home yet\? Take your supplements now: Vitamin D3 \+ K2 \(MK-7\), Ashwagandha KSM-66\./);
+    // He moves it: cancelled, nothing of his left after the 5:30 PM one, so the nudge can come 30 minutes after that.
+    store.writeLocal('coach-reminders', 'r3', rem('r3', '17:59', 'Back home? D3 + K2, omega-3 and ashwagandha are still open.', { cancelledAt: at(D, '17:50') }));
+    assert.ok(home('18:00'));
+    assert.equal(home('17:41'), undefined, 'still 30 minutes after his 5:30 PM reminder');
+    // Taken: nothing.
+    store.writeLocal('supp-log', `${D}:supp.d3`, { id: `${D}:supp.d3`, date: D, suppId: 'supp.d3', status: 'taken', at: at(D, '18:00') });
+    store.writeLocal('supp-log', `${D}:supp.ash`, { id: `${D}:supp.ash`, date: D, suppId: 'supp.ash', status: 'taken', at: at(D, '18:00') });
+    assert.equal(home('18:30'), undefined);
+
+    // A meal at home with no reminder of his: unchanged, the nudge right after it.
+    assert.equal(ownSuppsTime([], ['Collagen peptides'], at(D, '20:00')), 0);
+
+    // The second meal out, collagen: his own "collagen at home at 9:00 PM" holds the 30-minute bump until 9:30 PM.
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    await dishesTick({ store, push, now: at(D, '19:00'), tz: TZ });
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '20:00'), name: 'Dinner', source: 'manual', away: true, before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
+    assert.equal((await dishesTick({ store, push, now: at(D, '20:01'), tz: TZ }))?.key, 'supps-after-meal-2');
+    store.writeLocal('coach-reminders', 'r4', rem('r4', '21:00', 'Home yet? Collagen.', { createdAt: at(D, '20:02') }));
+    assert.equal(await dishesTick({ store, push, now: at(D, '20:31'), tz: TZ }), null, 'his 9:00 PM time first');
+    assert.equal(await dishesTick({ store, push, now: at(D, '21:10'), tz: TZ }), null);
+    assert.equal((await dishesTick({ store, push, now: at(D, '21:30'), tz: TZ }))?.key, 'supps-after-meal-2');
+    assert.equal(sent.at(-1).body, 'Back home yet? Take your collagen now.');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

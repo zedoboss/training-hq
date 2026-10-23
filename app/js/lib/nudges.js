@@ -106,8 +106,10 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
   // A fasting day (Wed 10/21): nothing about food or supplements.
   if (fasting) { suppsAfterMeal = null; suppsUntimed = null; targets = null; workoutEndedAt = workoutEndedAt && lastMealAt > workoutEndedAt ? workoutEndedAt : null; }
-  // Eaten out (Fri 10/23): not before he can be home, and asked as "back home yet?".
-  if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt + (suppsAfterMeal.away ? AWAY_REMIND_MIN * 60000 : 0)) {
+  // Eaten out (Fri 10/23): not before he can be home, and asked as "back home yet?". Not before the time he set himself
+  // for being home or taking them either (ownSuppsTime).
+  if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt + (suppsAfterMeal.away ? AWAY_REMIND_MIN * 60000 : 0)
+    && now >= ownSuppsTime(reminders, suppsAfterMeal.open, suppsAfterMeal.mealAt)) {
     out.push({ key: 'supps-after-meal', priority: 91, gapMin: 30, url: '#/supps',
       text: suppsAfterMeal.away ? `Back home yet? Take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.`
         : `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });
@@ -280,6 +282,25 @@ export function ateOut(m, holds = []) {
   const at = m.at || 0;
   return holds.some((h) => h && (h.areas || []).some((a) => a === 'food' || a === 'all') && OUT_WORDS.test(h.reason || '')
     && (h.from ?? h.at ?? 0) - 30 * 60000 <= at && at <= Math.min(h.until || 0, h.cancelledAt || Infinity));
+}
+
+/**
+ * His own time for the supplements after a meal (Fri 10/23, his words: "I told him that I'm gonna go to Decathlon. And
+ * he responded: Decathlon 5:44 and then supplements at home 5:59. Right now it's 5:42. And at 5:41 I got back home yet
+ * a message"): a reminder he had the coach set after that meal about being home or these supplements. The app's own
+ * "take them now" / "back home yet?" waits for it, and for AWAY_REMIND_MIN after it went out (his reminder asks first).
+ * @param {Array} reminders  today's reminders (remindersFor shape: kind 'coach', at, body, due) or coach-reminders records
+ * @param {string[]} names   the supplements still open
+ * @param {number} since     the meal's time, ms
+ * @returns {number} when the app may ask, ms (0 = no reminder of his)
+ */
+export function ownSuppsTime(reminders = [], names = [], since = 0) {
+  const words = [...new Set(names.flatMap((n) => String(n).toLowerCase().split(/[^a-z0-9]+/))
+    .filter((w) => (w.length >= 4 || /^[a-z]\d$/.test(w)) && !/^(vitamin|with|after|daily)$/.test(w)))];
+  const about = (t) => /\bhome\b|\bsupp(lement)?s?\b/i.test(t) || String(t).toLowerCase().split(/[^a-z0-9]+/).some((w) => words.includes(w));
+  const mine = reminders.filter((r) => r && (r.kind === 'coach' || (r.kind == null && 'text' in r)) && r.due !== false && !r.cancelledAt
+    && !r.trigger && r.at >= since && about(r.body ?? r.text ?? ''));
+  return mine.length ? Math.max(...mine.map((r) => r.at)) + AWAY_REMIND_MIN * 60000 : 0;
 }
 
 // ---- After the second meal (Thu 10/22, his words: "after my second meal have it prompt first notification that i
