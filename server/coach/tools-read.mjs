@@ -115,12 +115,39 @@ function rotationLines(s) {
   return out;
 }
 
-function holdLines(s) {
+function slotsToday(s) {
   const areas = s.list('tendons').filter((a) => a.kind === 'area');
   const rot = s.rotation();
   const rounds = roundsByDate(areas, s.list('sessions'), s.list('sets'), s.one('bridge', 'last-loads'));
   const st = s.settings().notify;
-  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today) });
+  return { areas, slots: holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today) }) };
+}
+
+/**
+ * The holds still due today in plain words, for the coach to say as one clear line (Fri 10/23, after he made the day a
+ * rest day the schedule tool said only "Tendon holds as planned" and the coach answered "Your tendon holds still run on
+ * a rest day", which told him nothing: "okay now I don't get it"). Which area, which hold, how many rounds and when.
+ */
+export function holdsDueText(s) {
+  const { slots } = slotsToday(s);
+  const open = slots.filter((x) => !x.done && !x.skipped);
+  if (!slots.length) return 'No tendon holds today.';
+  if (!open.length) return 'Tendon holds today: all done.';
+  const nowHm = hmOf(new Date(s.now), s.tz);
+  const reminded = s.settings().notify.kinds?.holds !== false;
+  const parts = [];
+  for (const label of [...new Set(open.map((x) => x.label))]) {
+    const mine = open.filter((x) => x.label === label);
+    const ask = mine.find((x) => x.ask);
+    if (ask) { parts.push(`${label}: rest-day hold not answered yet: ask it as its own question, naming the ${label.toLowerCase()}: the gym for the ${ask.restHold} hold, another hold he names, or skip today`); continue; }
+    const when = mine.map((x) => (x.slot === 'after' ? 'after the session' : x.time && nowHm >= x.time ? `one now (the ${formatHm(x.time)} ${x.slot === 'evening' ? 'evening' : 'morning'} round is late)` : `the ${x.slot === 'evening' ? 'evening' : x.slot === 'morning' ? 'morning' : 'rest-day'} one at ${formatHm(x.time)}${reminded ? ' (the app reminds him then)' : ''}`));
+    parts.push(`${label}: ${mine[0].exercise}, ${mine.length === 1 ? '1 round' : `${mine.length} rounds`} of 3 × 30 s still due today: ${when.join(', ')}${mine.length > 1 ? '; not back to back' : ''}`);
+  }
+  return `Holds still due today: ${parts.join('. ')}.`;
+}
+
+function holdLines(s) {
+  const { areas, slots } = slotsToday(s);
   if (!slots.length) return ['Tendon holds today: none planned.'];
   // How long a round takes, so the coach never guesses (Tue 10/20 it said "3 minutes"): 3 × 30 s, his rest between
   // holds, and the timer's GET READY before each.

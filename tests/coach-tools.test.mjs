@@ -438,6 +438,32 @@ test('schedule: a session time, a rest day and its undo follow the rotation rule
   assert.match(later.text, /Wednesday 1\/21 at 4:30 AM.*today has passed, so this is for tomorrow/);
 });
 
+test('schedule: a rest day says plainly which holds are still due today, and leaves the scan and check-in alone', async () => {
+  // Fri 10/23: "Tendon holds as planned" became "Your tendon holds still run on a rest day. Want to deal with the body
+  // scan and the check-in tomorrow, before Pull?": "okay now I don't get it... what do you mean by check-in tomorrow".
+  store.writeLocal('settings', 'main', { notify: { holdsMorning: '09:30', holdsEvening: '21:30' } });
+  store.writeLocal('tendons', 'area.shoulder', { kind: 'area', id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Raise Hold', timing: ['after Push', 'rest days'] }] });
+  await call('schedule', { action: 'set_time', time: '04:30' });
+  clock = Date.UTC(2026, 0, 20, 12, 17); // 12:17 PM: the morning round is late
+  const r = await call('schedule', { action: 'rest_today' });
+  assert.doesNotMatch(r.text, /as planned/);
+  assert.match(r.text, /Holds still due today: Knees: Wall Hold, 2 rounds of 3 × 30 s still due today: one now \(the 9:30 AM morning round is late\), the evening one at 9:30 PM \(the app reminds him then\); not back to back\./);
+  assert.match(r.text, /Shoulder: rest-day hold not answered yet: ask it as its own question, naming the shoulder: the gym for the Raise Hold hold/);
+  assert.match(r.text, /offer to remind him of a round the app doesn't remind him of \(set_reminder/);
+  assert.match(r.text, /The body scan and the check-in move with the session to Wednesday 1\/21 by themselves.*don't mention or ask about either\./);
+  // Early in the day both rounds are still ahead, each with the app's reminder.
+  await call('schedule', { action: 'undo_rest' });
+  clock = Date.UTC(2026, 0, 20, 3, 0);
+  const early = await call('schedule', { action: 'rest_today' });
+  assert.match(early.text, /Knees: Wall Hold, 2 rounds of 3 × 30 s still due today: the morning one at 9:30 AM \(the app reminds him then\), the evening one at 9:30 PM \(the app reminds him then\)/);
+  // Hold reminders switched off: no promise that the app reminds him.
+  await call('schedule', { action: 'undo_rest' });
+  store.writeLocal('settings', 'main', { notify: { holdsMorning: '09:30', holdsEvening: '21:30', kinds: { holds: false } } });
+  const off = await call('schedule', { action: 'rest_today' });
+  assert.match(off.text, /the morning one at 9:30 AM, the evening one at 9:30 PM; not back to back/);
+  assert.doesNotMatch(off.text, /the app reminds him then/);
+});
+
 test('schedule: a session time set after its usual check-in time moves the check-in to just before he leaves', async () => {
   // 3:00 AM, Legs at 3:20 AM: 2:50 AM has passed, so the check-in reminder is at 3:15 AM, also in the context line.
   const r = await call('schedule', { action: 'set_time', time: '03:20' });

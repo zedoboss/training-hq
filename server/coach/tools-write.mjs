@@ -6,7 +6,7 @@
 // sauna ladder and hard stops are untouched, supplements are only what he says he took.
 import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByName, wrote, refuse, k, formatHm } from './shared.mjs';
 import { offered, saidNow, toldToStart, confirmedNow } from './tools-app.mjs';
-import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal } from './tools-read.mjs';
+import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal, holdsDueText } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
 import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId } from '../../app/js/lib/session.js';
 import { guardCheck } from '../../app/js/lib/targets.js';
@@ -1007,7 +1007,7 @@ async function schedule(a, ctx) {
     put(s, 'days', s.today, nextDays[s.today]);
     const moved = rotationDay({ last: s.last(), today: s.today, days: nextDays }).next;
     if (hm && !days[moved.date]?.sessionTime) put(s, 'days', moved.date, withTime(days[moved.date], moved.date, hm, s.now));
-    return wrote(`Today is a rest day now (his rule: skip it, carry on with the next day type; no make-up). Next: ${LABEL[moved.dayType]}, ${dayText(moved.date, s.today)}${hm ? ` at ${formatHm(hm)}` : ''}. Tendon holds as planned.`, 'rest today');
+    return wrote(`Today is a rest day now (his rule: skip it, carry on with the next day type; no make-up). Next: ${LABEL[moved.dayType]}, ${dayText(moved.date, s.today)}${hm ? ` at ${formatHm(hm)}` : ''}. ${holdsDueText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }))} Say the holds plainly in one line (which, how many, when) and offer to remind him of a round the app doesn't remind him of (set_reminder, at the time he picks). The body scan and the check-in move with the session to ${dayText(moved.date, s.today)} by themselves (his routine before every session; the check-in is asked when he leaves for the gym): don't mention or ask about either.`, 'rest today');
   }
   if (a.action === 'undo_rest') {
     const r = days[s.today]?.rest;
