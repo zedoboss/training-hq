@@ -378,15 +378,15 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
     'POST /api/coach/send': async (req, url, res) => {
       const device = auth(req);
       if (!coach) throw new HttpError(404, 'coach not available');
-      const { text, model, tz, screen } = await readJson(req);
-      if (!String(text ?? '').trim()) throw new HttpError(400, 'nothing to send');
+      const { text, images, model, tz, screen } = await readJson(req);
+      if (!String(text ?? '').trim() && !(Array.isArray(images) && images.length)) throw new HttpError(400, 'nothing to send');
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
       let open = true;
       res.on('close', () => { open = false; });
       const emit = (e) => { if (open && !res.writableEnded) res.write(`${JSON.stringify(e)}\n`); };
       const ping = setInterval(() => emit({ type: 'ping' }), 10000);
       try {
-        await coach.send({ text, model, tz: typeof tz === 'string' && tz.length < 64 && validZone(tz) ? tz : null, screen: safeHash(screen), deviceId: device.id, emit });
+        await coach.send({ text, images, model, tz: typeof tz === 'string' && tz.length < 64 && validZone(tz) ? tz : null, screen: safeHash(screen), deviceId: device.id, emit });
       } catch (e) {
         emit({ type: 'error', error: e.message });
       } finally {

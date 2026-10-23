@@ -134,7 +134,7 @@ data/*.csv     Every record stored in the app, one file per kind (sessions, sets
                settings, ...): id first, then every field; nested values are JSON.
 photos/*.jpg   Session photos; meal photos as photos/meal-<meal id>-before.jpg and -after.jpg; progress
                photos as photos/progress-<date>-<front|side|back>.jpg; body scan result photos as
-               photos/scan-<date>-<photo id>.jpg.
+               photos/scan-<date>-<photo id>.jpg; photos sent in Talk as photos/talk-<photo id>.jpg.
 `.replace(/\n/g, '\r\n');
 
 /**
@@ -171,6 +171,11 @@ export function exportFiles(data, { tz }) {
   for (const p of data['scan-photos'] || []) {
     if (typeof p.dataUrl !== 'string' || !p.dataUrl.startsWith('data:image/jpeg')) continue;
     files.push({ name: `photos/scan-${fileSafe(p.date)}-${fileSafe(p.id)}.jpg`, data: dataUrlBytes(p.dataUrl) });
+    photos++;
+  }
+  for (const p of data['coach-photos'] || []) {
+    if (typeof p.dataUrl !== 'string' || !p.dataUrl.startsWith('data:image/jpeg')) continue;
+    files.push({ name: `photos/talk-${fileSafe(p.id)}.jpg`, data: dataUrlBytes(p.dataUrl) });
     photos++;
   }
   const done = new Set(sessions.filter((s) => s.status === 'done').map((s) => s.id));

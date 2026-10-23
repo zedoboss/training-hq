@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
-import { openCoach, conversation, COL } from '../server/coach/index.mjs';
+import { openCoach, conversation, COL, PHOTOS, MAX_PHOTOS } from '../server/coach/index.mjs';
 import { createApp } from '../server/app.mjs';
 import { APP_DIR } from '../server/config.mjs';
 import { systemPrompt, turnText, recapText, RULES } from '../server/coach/prompt.mjs';
@@ -72,6 +72,43 @@ test('a fresh process gets a recap of the conversation since the last "new conve
   await coach.close();
 });
 
+// Fri 10/23, his words: "I want to be able to attach images here in this chat... photos of the meal".
+const JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+test('photos sent in Talk: saved for every device, sent to Claude as images with their ids and his usual foods', async () => {
+  store.writeLocal('fuel', 'plan', { kind: 'plan', foods: [{ name: 'Eggs', fdcId: 1 }, { name: 'Butter', cooks: { Eggs: 10 } }] });
+  const proc = fakeProcess(() => 'Logged.');
+  const coach = openCoach({ store, process: proc, now: () => clock++, tz: 'UTC' });
+  const takenAt = clock - 10 * 60000;
+  const events = [];
+  await coach.send({ text: 'lunch', images: [{ dataUrl: JPEG, at: takenAt }], emit: (e) => events.push(e) });
+  const [msg] = conversation(store);
+  assert.equal(msg.photos.length, 1);
+  assert.deepEqual(events[0].message.photos, msg.photos, 'the phone learns the photo ids at once');
+  const photo = store.getRecord(PHOTOS, msg.photos[0]).data;
+  assert.deepEqual([photo.messageId, photo.dataUrl, photo.at], [msg.id, JPEG, takenAt]);
+  const body = proc.bodies[0];
+  assert.ok(Array.isArray(body), 'content blocks, not a string');
+  assert.deepEqual(body[0], { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: '/9j/4AAQSkZJRg==' } });
+  assert.equal(body[1].type, 'text');
+  assert.match(body[1].text, new RegExp(`^\\[He attached a photo in Talk: ${photo.id.replace(/\./g, '\\.')} \\(taken 9:48 AM\\)\\. They are above\\.\\]`));
+  assert.match(body[1].text, /Foods he often eats .*Eggs \[fdcId 1\]/);
+  assert.match(body[1].text, /He cooks Eggs in about 10 g of Butter/);
+  assert.match(body[1].text, /\nlunch\n\n<context>/);
+  // A photo alone is a message; junk, too many and a camera clock in the future are cleaned up.
+  await coach.send({ images: [JPEG, 'data:text/html;base64,PGI+', { dataUrl: JPEG, at: clock + 86400000 }, JPEG, JPEG, JPEG] });
+  const two = conversation(store).at(-2);
+  assert.equal(two.text, '');
+  assert.equal(two.photos.length, MAX_PHOTOS - 1, 'the html one dropped, the sixth past the limit');
+  assert.ok(two.photos.every((id) => store.getRecord(PHOTOS, id).data.at <= two.at), 'never taken after it was sent');
+  await assert.rejects(coach.send({ text: ' ', images: ['nope'] }), /Nothing to send/);
+  // A fresh process hears there were photos.
+  proc.fresh = true;
+  await coach.send({ text: 'and?' });
+  assert.match(proc.bodies.at(-1), /He: \[sent a photo: cphoto\.[^\]]+\] lunch\n/);
+  assert.match(proc.bodies.at(-1), /He: \[sent 3 photos: /);
+  await coach.close();
+});
+
 test('an error becomes a saved reply marked as an error', async () => {
   const proc = fakeProcess();
   proc.turn = async () => { throw new Error('Claude Code on the Mac is not logged in. Open the Claude app on the Mac once.'); };
@@ -109,6 +146,7 @@ test('the chat routes: streamed reply, status, new conversation; a token is need
 
   assert.equal((await post('/api/coach/send', { text: 'hi' }, 'nope')).status, 401);
   assert.equal((await post('/api/coach/send', { text: ' ' })).status, 400);
+  assert.equal((await post('/api/coach/send', { text: ' ', images: [JPEG] })).status, 200, 'a photo alone is sent');
   const res = await post('/api/coach/send', { text: 'hi', model: 'deep', tz: 'Asia/Ho_Chi_Minh' });
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /ndjson/);

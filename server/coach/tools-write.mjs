@@ -406,7 +406,10 @@ const momentOf = (s, date, hm) => (hm ? zonedTime(date || s.today, hm, s.tz) : s
 
 async function logMeal(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
-  const at = momentOf(s, a.date, a.time);
+  // Fri 10/23: a photo he sent in Talk goes with the meal (shown on Fuel); the meal's time is when it was taken.
+  const photo = a.photo ? s.one('coach-photos', a.photo) : null;
+  if (a.photo && !photo?.dataUrl) return refuse(`No photo ${a.photo} from Talk. Use the id his message gives. Nothing logged yet.`);
+  const at = photo && !a.time ? photo.at : momentOf(s, a.date, a.time);
   if (at > s.now + 3600000) return refuse('That time is in the future. Meals are logged once eaten.');
   const id = newId('meal');
   // Thu 10/22: one of his presets, as saved (plus any extra items he names).
@@ -423,6 +426,13 @@ async function logMeal(a, ctx) {
   meal.before = { ...meal.before, items, confirmedAt: s.now };
   meal.by = 'coach';
   if (a.note) meal.note = String(a.note).slice(0, 300);
+  if (photo) {
+    // A meal-photo of its own (Fuel shows it); the items are already confirmed, so the Mac's photo reader leaves it alone
+    // and, logged from what he sent, it asks for no after photo.
+    const pid = `photo-${id}`;
+    put(s, 'meal-photos', pid, { id: pid, mealId: id, kind: 'before', dataUrl: photo.dataUrl, at: photo.at, from: photo.id });
+    meal.before.photoId = pid;
+  }
   put(s, 'meals', id, meal);
   const t = itemTotals(items);
   const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
@@ -1330,7 +1340,7 @@ export const WRITE_TOOLS = [
   write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),
   write('next_exercise', 'Next exercise', 'Move his phone to the next exercise with sets left and say its next set.', obj(), nextExercise),
   write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
-  write('log_meal', 'Log a meal', 'Log a meal he describes (no photo), one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
+  write('log_meal', 'Log a meal', 'Log a meal he describes or shows in a photo in Talk, one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now. photo: the id of a photo he sent in Talk that shows this meal; leave time out then (the meal then gets the time the photo was taken) unless he says when he ate. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, photo: { type: 'string', description: 'id of the photo he sent in Talk (cphoto....)' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
   write('meal_preset', 'Save a meal preset', 'Save a logged meal (its id from the meals tool) as one of his presets, under the name he says (default the meal\'s name). A preset of the same name is replaced. He then logs it with one tap on Fuel or by telling you.', obj({ meal: { type: 'string' }, name: { type: 'string' } }, ['meal']), mealPreset),
   write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, mark that he ate it all (ateAll: no after photo needed), or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, ateAll: { type: 'boolean' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
   write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),

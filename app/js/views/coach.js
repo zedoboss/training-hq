@@ -9,7 +9,8 @@ import { withDefaults } from '../lib/settings.js';
 import { formatDay, formatTimeSec, formatTime, isoDate, timeAt, dayAt } from '../lib/time.js';
 import * as rest from '../lib/rest-timer.js';
 import { messagesOf, MODEL_LABEL, toolChips, runAction, textHtml, changeView } from '../lib/coach.js';
-import { actionSheet, confirmSheet } from '../ui/sheet.js';
+import { actionSheet, confirmSheet, overlay } from '../ui/sheet.js';
+import { fileToJpeg, photoTime } from '../lib/photos.js';
 import { toast } from '../ui/toast.js';
 import { stop as voiceStop } from '../lib/voice.js';
 import { startDictation } from '../lib/dictate.js';
@@ -23,6 +24,8 @@ const draftSet = (v) => { try { if (v) localStorage.setItem(DRAFT, v); else loca
 const modelOf = () => withDefaults(getState().settings).coach.model;
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const MIC_ICON = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const CAMERA = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+const MAX_PICS = 4;
 const SEND = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 16-2.5-6.5z"/></svg>';
 
 /** Actions the coach asked this device for (its rest timer, a sync, moving the session screen to an exercise).
@@ -44,6 +47,14 @@ const deps = {
 };
 const runAfterDone = () => { const fns = afterDone; afterDone = []; setTimeout(() => fns.forEach((f) => f()), 700); };
 
+// Fri 10/23, his words: "I want to be able to attach images here in this chat... photos of the meal". A message's photos
+// ('coach-photos', from the Mac by sync; the ones just sent from here until then), by id.
+const photoUrls = new Map();
+const picsHtml = (m) => {
+  const urls = (m.images || (m.photos || []).map((id) => photoUrls.get(id) || null));
+  return urls.length ? `<div class="c-pics">${urls.map((u) => (u ? `<button class="c-pic" type="button" data-full><img src="${esc(u)}" alt="Photo you sent"></button>` : '<span class="c-pic is-missing hud c-faint">PHOTO</span>')).join('')}</div>` : '';
+};
+
 function msgHtml(m, { live = false } = {}) {
   const who = m.role === 'user' ? (m.via === 'voice' ? 'YOU · VOICE' : 'YOU') : 'COACH';
   const cls = m.role === 'user' ? 'is-user' : m.error ? 'is-error' : 'is-coach';
@@ -51,7 +62,8 @@ function msgHtml(m, { live = false } = {}) {
   const opens = (m.actions || []).filter((a) => a.kind === 'open' && /^#\//.test(a.url || ''));
   return `<article class="c-msg ${cls}${live ? ' is-live' : ''}" data-id="${esc(m.id || '')}">
     <div class="hud c-meta"><span>${esc(formatTimeSec(new Date(m.at || Date.now())))} · ${who}</span>${m.role === 'assistant' && m.model ? `<span class="c-faint">${esc(MODEL_LABEL[m.model] || '')}</span>` : ''}</div>
-    <p class="c-words">${m.text ? textHtml(m.text) : live ? '<span class="c-dots" aria-label="Thinking"><i></i><i></i><i></i></span>' : ''}</p>
+    ${picsHtml(m)}
+    ${m.text || live || !(m.images || m.photos)?.length ? `<p class="c-words">${m.text ? textHtml(m.text) : live ? '<span class="c-dots" aria-label="Thinking"><i></i><i></i><i></i></span>' : ''}</p>` : ''}
     ${tools.length ? `<div class="hud c-tools">${toolChips(tools).map((t) => `<span class="${t.ok ? '' : 'c-amber'}" title="${esc(t.summary)}">${esc(t.label)}${t.count > 1 ? ` ×${t.count}` : ''}${t.ok ? '' : ' !'}</span>`).join('<span class="c-faint"> · </span>')}</div>` : ''}
     ${opens.length ? `<div class="c-acts">${opens.map((a) => `<a class="pill is-on" href="${esc(a.url)}">${esc(a.label || 'Open')}</a>`).join('')}</div>` : ''}
   </article>`;
@@ -70,6 +82,9 @@ function renderChat(view) {
       <button class="pill" id="c-next" type="button" aria-label="Next day">›</button></div>
     <div class="coach-log" id="c-log" aria-live="polite"></div>
     <form class="coach-compose" id="c-form" autocomplete="off">
+      <div class="coach-attach" id="c-pics" hidden></div>
+      <input type="file" id="c-file" accept="image/*" multiple hidden>
+      <button class="btn-ghost coach-mic" id="c-cam" type="button" aria-label="Attach a photo">${CAMERA}</button>
       <button class="btn-ghost coach-mic" id="c-mic" type="button" aria-label="Dictate into the box" aria-pressed="false">${MIC_ICON}</button>
       <textarea class="input coach-input" id="c-text" rows="1" placeholder="Message the coach" aria-label="Message to the coach"></textarea>
       <button class="btn-primary coach-send" id="c-send" type="submit" aria-label="Send">${SEND}</button>
@@ -78,6 +93,30 @@ function renderChat(view) {
   const $ = (q) => view.querySelector(q);
   const box = $('#c-text');
   box.value = draftGet();
+  // Photos picked for the next message (shrunk like a meal photo), with when each was taken.
+  let pics = [];
+  const drawPics = () => {
+    const el = $('#c-pics');
+    el.hidden = !pics.length;
+    el.innerHTML = pics.map((p, i) => `<span class="c-pic"><img src="${esc(p.dataUrl)}" alt="Photo to send"><button class="c-pic-x" type="button" data-drop="${i}" aria-label="Remove photo">×</button></span>`).join('');
+    el.querySelectorAll('[data-drop]').forEach((b) => b.addEventListener('click', () => { pics.splice(Number(b.dataset.drop), 1); drawPics(); }));
+  };
+  $('#c-cam').addEventListener('click', () => {
+    if (pics.length >= MAX_PICS) { toast(`${MAX_PICS} photos at most in one message.`); return; }
+    $('#c-file').click();
+  });
+  $('#c-file').addEventListener('change', async (ev) => {
+    const files = [...(ev.target.files || [])].slice(0, MAX_PICS - pics.length);
+    ev.target.value = '';
+    for (const f of files) {
+      try { pics.push({ dataUrl: await fileToJpeg(f), at: await photoTime(f) }); } catch { toast('That photo could not be read.'); }
+    }
+    if (!gone) drawPics();
+  });
+  $('#c-log').addEventListener('click', (ev) => {
+    const img = ev.target.closest('[data-full]')?.querySelector('img');
+    if (img) overlay(`<img class="meal-full" src="${esc(img.getAttribute('src'))}" alt="Photo">`);
+  });
 
   const setState = (text, cls = 'c-cyan') => { const el = $('#c-state'); el.textContent = text; el.className = `hud coach-state ${cls}`; };
   const idleState = () => {
@@ -143,7 +182,7 @@ function renderChat(view) {
     window.scrollTo(0, document.documentElement.scrollHeight);
   };
 
-  async function send(text) {
+  async function send(text, images = []) {
     rest.unlockAudio(); // a tap: lets the rest timer's sound play later on iPhone
     const ctrl = new AbortController();
     busy = ctrl;
@@ -153,16 +192,16 @@ function renderChat(view) {
     try { await syncNow(); } catch { /* send anyway */ }
     const model = modelOf();
     pendingLive = { id: '', role: 'assistant', text: '', at: Date.now(), tools: [], actions: [], model };
-    const userTemp = { id: `tmp-${Date.now()}`, role: 'user', text, at: Date.now() };
+    const userTemp = { id: `tmp-${Date.now()}`, role: 'user', text, at: Date.now(), ...(images.length ? { images: images.map((p) => p.dataUrl) } : {}) };
     live.push(userTemp);
     draw();
     try {
       afterDone = [];
       await coachSend({
-        text, model, tz: tz(), screen: location.hash, signal: ctrl.signal,
+        text, images, model, tz: tz(), screen: location.hash, signal: ctrl.signal,
         onEvent: (e) => {
           if (gone) return;
-          if (e.type === 'user') { live = live.filter((m) => m !== userTemp); live.push(e.message); pendingLive.at = e.message.at + 1; draw(); setState('THINKING…'); }
+          if (e.type === 'user') { (e.message.photos || []).forEach((id, i) => { if (images[i]) photoUrls.set(id, images[i].dataUrl); }); live = live.filter((m) => m !== userTemp); live.push(e.message); pendingLive.at = e.message.at + 1; draw(); setState('THINKING…'); }
           else if (e.type === 'text') { pendingLive.text += e.delta; updateLive(); }
           else if (e.type === 'tool-start') setState(`USING ${String(e.name || '').toUpperCase().replace(/_/g, ' ')}…`);
           else if (e.type === 'tool') { pendingLive.tools.push(e.tool); updateLive(); setState('THINKING…'); }
@@ -180,6 +219,7 @@ function renderChat(view) {
         live = live.filter((m) => m !== userTemp);
         pendingLive = null;
         if (unsent && !box.value) { box.value = text; draftSet(text); fit(); }
+        if (unsent && images.length && !pics.length) { pics = images; drawPics(); }
         if (!stopped) toast(e.message);
         draw();
       }
@@ -199,10 +239,11 @@ function renderChat(view) {
       return;
     }
     const text = box.value.trim();
-    if (!text) return;
+    if (!text && !pics.length) return;
     if (!getState().paired) { toast('Pair with your Mac first (Settings).'); return; }
+    const images = pics; pics = []; drawPics();
     box.value = ''; draftSet(''); fit();
-    send(text);
+    send(text, images);
   });
   box.addEventListener('input', () => { draftSet(box.value); fit(); });
   box.addEventListener('keydown', (ev) => {
@@ -242,11 +283,15 @@ function renderChat(view) {
   let off = () => {};
   ready.then(async (r) => {
     repo = r;
-    const load = async () => { stored = (await repo.list('coach-messages')); live = live.filter((m) => !stored.some((x) => x.id === m.id)); };
+    const load = async () => {
+      stored = (await repo.list('coach-messages'));
+      live = live.filter((m) => !stored.some((x) => x.id === m.id));
+      if (stored.some((m) => m.photos?.some((id) => !photoUrls.has(id)))) for (const p of await repo.list('coach-photos')) photoUrls.set(p.id, p.dataUrl);
+    };
     await load();
     if (gone) return;
     draw(); drawModel(); idleState(); fit();
-    off = repo.onChange(async (cols) => { if (cols.includes('coach-messages')) { await load(); if (!gone) draw({ scroll: !busy }); } });
+    off = repo.onChange(async (cols) => { if (cols.includes('coach-messages') || cols.includes('coach-photos')) { await load(); if (!gone) draw({ scroll: !busy }); } });
     // Start the coach's Claude on the Mac now, so the first answer comes sooner.
     if (getState().paired) macPost('/api/coach/warm', { model: modelOf() }).then(() => { if (!busy) idleState(); }).catch(() => { if (!busy) setState('MAC UNREACHABLE', 'c-amber'); });
   });

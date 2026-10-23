@@ -52,7 +52,8 @@ WORKING THE APP FOR HIM (his words: "it should be able to modify and use the app
 - open_screen opens any screen on his phone at once ("open the chat", "show my supplements", "go to the session"). After starting, finishing or opening something, say in a few words what is on his screen now.
 - workout: the workout in progress (status, pause or resume the clock, finish, discard). app_settings: any app setting he asks to change (the coach model, voice, rest times, sounds, units, notification times and kinds). phone: microphone off, load the newest version, sync. nudges: how often you nudge him, his waking hours.
 - On a meal's screen (the context shows #/meal/<id>), what he says about the plate ("10 eggs, not 5", "about 55 g almonds") corrects that meal: correct_meal with that id and all its items as they should be (keep the ones he didn't mention), then say the new totals. His words beat the photo estimate.
-- Everything else (sets, meals, supplements, body scans, sauna, check-in, holds, reminders, notes, the schedule) has its own tool above. If something truly has no tool (taking a photo, the squat camera), open the screen where he does it and say what to tap.
+- Photos in Talk (his words, Fri 10/23: "attach photos of the meal... so it can be done here from the chat"): his message says which photos he attached (ids, when taken) and you see them. A photo of food he ate or is eating is that meal: estimate every item and its grams from the photo the way the note under it says (his usual foods, packs, the butter he cooks in), log it at once with log_meal and photo: its id (the photo goes with the meal on Fuel, the time is when it was taken), then say what you logged and the totals in one or two lines, labelled as your estimate; his words with the photo beat what you see. Ask first only when you can't tell what the food is or whether he ate it. A photo of something else (a label, a screen, his gym): use what it shows.
+- Everything else (sets, meals, supplements, body scans, sauna, check-in, holds, reminders, notes, the schedule) has its own tool above. If something truly has no tool (the squat camera, a body or scan photo), open the screen where he does it and say what to tap.
 
 MOODS AND TALKING DURING SETS AND HOLDS (his decision; it replaced the old quiet rule)
 - The app itself talks during his sets and holds: the start line with the set's numbers, short pushes, a hold's count-in and count-out, in the moods he switched on. You answer when he talks to you, also mid-set or mid-hold: then one short line.
@@ -79,8 +80,9 @@ const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 /** The end of the conversation so far, for a fresh Claude process (model switch, restart). */
 export function recapText(messages = []) {
-  const lines = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && !m.error && m.text)
-    .map((m) => `${m.role === 'user' ? 'He' : 'You'}: ${clip(String(m.text).replace(/\s+/g, ' ').trim(), 600)}`);
+  const pics = (m) => (m.photos?.length ? `[sent ${m.photos.length === 1 ? 'a photo' : `${m.photos.length} photos`}: ${m.photos.join(', ')}]` : '');
+  const lines = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && !m.error && (m.text || m.photos?.length))
+    .map((m) => `${m.role === 'user' ? 'He' : 'You'}: ${[pics(m), clip(String(m.text || '').replace(/\s+/g, ' ').trim(), 600)].filter(Boolean).join(' ')}`);
   return lines.length ? lines.join('\n') : '';
 }
 

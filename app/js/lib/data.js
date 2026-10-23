@@ -233,14 +233,14 @@ export async function uploadHealth(text, name) {
 
 // The coach (step 8) runs on the Mac. A message goes there and the reply streams back as JSON lines: the words as
 // they are written, the tools used, actions for this device. The whole conversation also syncs ('coach-messages').
-export async function coachSend({ text, model, tz, screen, onEvent, signal }) {
+export async function coachSend({ text, images = [], model, tz, screen, onEvent, signal }) {
   await ready;
   const url = await repo.getMeta('macUrl');
   const token = await repo.getMeta('token');
   if (!url || !token) throw new Error('Pair with your Mac first (Settings).');
   let res;
   try {
-    res = await fetch(`${url}/api/coach/send`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text, model, tz, screen }) });
+    res = await fetch(`${url}/api/coach/send`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text, model, tz, screen, ...(images.length ? { images } : {}) }) });
   } catch (e) {
     if (e?.name === 'AbortError') throw e;
     setState({ mac: { reachable: false } });

@@ -30,8 +30,8 @@ You get the list of items that were on the plate before, numbered from 0. For ea
 Reply with JSON only, no other text:
 {"leftovers": [{"index": number, "name": string, "grams": number}], "notes": string}`;
 
-/** The text sent with a photo: his usual foods (from the private data) and any note he added. */
-export function promptText({ kind, meal, plan, before = [] }) {
+/** His usual foods, packs and what he cooks in (from the private data): also sent with a photo he gives the coach in Talk. */
+export function planLines(plan) {
   const lines = [];
   if (plan?.foods?.length) lines.push(`Foods he often eats (use these names when they match): ${plan.foods.map((f) => (f.fdcId ? `${f.name} [fdcId ${f.fdcId}]` : f.name)).join('; ')}.`);
   const amounts = amountsLine(plan);
@@ -40,6 +40,12 @@ export function promptText({ kind, meal, plan, before = [] }) {
   for (const f of (plan?.foods || []).filter((x) => x.cooks && Object.keys(x.cooks).length)) {
     lines.push(`He cooks ${Object.entries(f.cooks).map(([food, g]) => `${food} in about ${g} g of ${f.name}`).join(' and ')}: when the photo shows them, add a "${f.name}" item with those grams (it is not visible).`);
   }
+  return lines;
+}
+
+/** The text sent with a photo: his usual foods (from the private data) and any note he added. */
+export function promptText({ kind, meal, plan, before = [] }) {
+  const lines = planLines(plan);
   if (kind === 'after') lines.push(`On the plate before:\n${before.map((x, i) => `${i}. ${x.name}: ${x.grams} g`).join('\n')}`);
   lines.push(kind === 'after' ? 'This is the after photo.' : 'This is the before photo.');
   if (meal.hint) lines.push(`His note about this meal. It overrides the photo and the list of usual foods: name the items and amounts the way he says.\n${meal.hint}`);

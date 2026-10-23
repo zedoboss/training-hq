@@ -319,6 +319,22 @@ test('a meal he describes is logged with confirmed items, and can be corrected',
   assert.match((await call('log_meal', { items: [{ name: 'Nuoc cham', grams: 20 }] })).text, /No USDA match for "Nuoc cham"\. .*Nothing logged yet/);
 });
 
+test('Fri 10/23: a meal photo he sent in Talk goes with the meal, at the time it was taken, with no after-photo ask', async () => {
+  const JPEG = 'data:image/jpeg;base64,/9j/4AAQ';
+  store.writeLocal('coach-photos', 'cphoto.a.0x', { id: 'cphoto.a.0x', messageId: 'cm.1', dataUrl: JPEG, at: NOW - 40 * 60000, sentAt: NOW });
+  const r = await call('log_meal', { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }], photo: 'cphoto.a.0x' });
+  assert.match(r.text, /^Logged [A-Za-z]+, 2:20 AM \[id meal-/, 'when the photo was taken, not when he sent it');
+  const meal = list('meals')[0];
+  assert.ok(meal.before.confirmedAt, 'the photo reader leaves it alone');
+  assert.equal(meal.source, 'manual', 'no "after photo" reminder');
+  const mp = store.getRecord('meal-photos', meal.before.photoId).data;
+  assert.deepEqual([mp.mealId, mp.kind, mp.dataUrl, mp.at], [meal.id, 'before', JPEG, NOW - 40 * 60000]);
+  // A time he gives beats the photo's; an unknown photo id is refused, nothing logged.
+  assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.a.0x', time: '02:50' })).text, /2:50 AM/);
+  assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.nope' })).text, /No photo cphoto\.nope from Talk\..*Nothing logged yet/);
+  assert.equal(list('meals').length, 2);
+});
+
 test('sauna: a symptom ends the running session at once; the hard-stop words come back', async () => {
   store.writeLocal('sauna', 'sauna-1', { id: 'sauna-1', date: '2026-01-20', startedAt: NOW - 600000, stepIndex: 0, plannedRounds: 1, roundMin: 10, status: 'active', rounds: [{ n: 1, planned: 10, inAt: NOW - 500000, outAt: null }], breaks: [], symptoms: [], after: null });
   const r = await call('sauna_session', { action: 'symptoms', symptoms: ['dizzy'] });

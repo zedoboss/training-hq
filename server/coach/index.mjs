@@ -11,11 +11,37 @@ import { openMcp } from './mcp.mjs';
 import { systemPrompt, turnText, recapText, daySummary } from './prompt.mjs';
 import { isoDate } from '../../app/js/lib/time.js';
 import { COACH_MODELS as MODELS } from '../claude.mjs';
-import { deviceTimeZone } from '../../app/js/lib/time.js';
+import { deviceTimeZone, formatTime } from '../../app/js/lib/time.js';
+import { imageBlock } from '../claude.mjs';
+import { planLines } from '../meal-vision.mjs';
 
 export const COL = 'coach-messages';
 export const MAX_TEXT = 4000;
 export const RECAP_MESSAGES = 16;
+// Fri 10/23, his words: "I want to be able to attach images here in this chat... photos of the meal". Photos he sends
+// in Talk: 'coach-photos' {id, messageId, dataUrl, at (when taken), sentAt}, written by the Mac, synced to the phone.
+export const PHOTOS = 'coach-photos';
+export const MAX_PHOTOS = 4;
+const MAX_PHOTO_CHARS = 8 * 1024 * 1024;
+
+/** The photos of one message, checked: data: URLs of images only, at most MAX_PHOTOS; `at` (when taken) kept if sane. */
+export function cleanPhotos(images, sentAt) {
+  return (Array.isArray(images) ? images : []).slice(0, MAX_PHOTOS).map((x) => {
+    const dataUrl = typeof x === 'string' ? x : x?.dataUrl;
+    if (typeof dataUrl !== 'string' || dataUrl.length > MAX_PHOTO_CHARS || !/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return null;
+    const t = Number(x?.at);
+    return { dataUrl, at: Number.isFinite(t) && t <= sentAt + 60000 && t > sentAt - 2 * 86400000 ? Math.min(t, sentAt) : sentAt };
+  }).filter(Boolean);
+}
+
+/** The words that go to Claude with the photos: their ids and times, and how to log a meal from one. */
+export function photoNote(photos, { tz, plan = null }) {
+  if (!photos.length) return '';
+  const list = photos.map((p) => `${p.id} (taken ${formatTime(new Date(p.at), tz)})`).join(', ');
+  const foods = planLines(plan);
+  return [`[He attached ${photos.length === 1 ? 'a photo' : `${photos.length} photos`} in Talk: ${list}. They are above.]`,
+    foods.length ? `For a meal photo:\n${foods.join('\n')}` : ''].filter(Boolean).join('\n');
+}
 
 const rand = () => randomBytes(3).toString('hex');
 export const messageId = (at) => `cm.${String(at).padStart(13, '0')}.${rand()}`;
@@ -84,12 +110,13 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
    * Send one message and wait for the reply. emit receives: {type:'user', message}, {type:'text', delta},
    * {type:'tool-start', name}, {type:'tool', tool}, {type:'action', action}, {type:'done', message}.
    */
-  async function send({ text, model = 'fast', deviceId = null, tz: tzIn = null, via = 'text', screen = null, emit = () => {} }) {
+  async function send({ text, images = [], model = 'fast', deviceId = null, tz: tzIn = null, via = 'text', screen = null, emit = () => {} }) {
     const words = String(text ?? '').trim().slice(0, MAX_TEXT);
-    if (!words) throw new Error('Nothing to send.');
+    const at = now();
+    const pics = cleanPhotos(images, at);
+    if (!words && !pics.length) throw new Error('Nothing to send.');
     const key = MODELS[model] ? model : 'fast';
     const zone = tzIn || tz;
-    const at = now();
     const turnId = `turn.${at.toString(36)}.${rand()}`;
     let earlier = conversation(store);
     // A new day is a fresh chat (Tue 10/20, his words): the process starts over with the day before in short.
@@ -102,7 +129,14 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
       earlier = [];
     }
     const voice = via === 'voice';
-    const userMsg = save({ id: messageId(at), role: 'user', text: words, at, tz: zone, device: deviceId, turnId, model: key, ...(voice ? { via: 'voice' } : {}) });
+    const msgId = messageId(at);
+    const photos = pics.map((p, i) => {
+      const id = `cphoto.${at.toString(36)}.${i}${rand()}`;
+      const rec = { id, messageId: msgId, dataUrl: p.dataUrl, at: p.at, sentAt: at };
+      store.writeLocal(PHOTOS, id, rec);
+      return rec;
+    });
+    const userMsg = save({ id: msgId, role: 'user', text: words, at, tz: zone, device: deviceId, turnId, model: key, ...(photos.length ? { photos: photos.map((p) => p.id) } : {}), ...(voice ? { via: 'voice' } : {}) });
     emit({ type: 'user', message: userMsg });
     const t = { turnId, tz: zone, deviceId, tools: [], actions: [], emit };
     let reply;
@@ -117,7 +151,8 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
           const recap = fresh ? [before ? `The day before, in short:\n${before}` : '', recapText(earlier.slice(-RECAP_MESSAGES))].filter(Boolean).join('\n\n') : '';
           let extra = '';
           try { extra = context ? context({ store, tz: zone, now: now(), screen }) : ''; } catch (e) { log(`coach context: ${e.stack || e}`); }
-          return turnText({ text: words, now: now(), tz: zone, recap, extra, voice, screen });
+          const body = turnText({ text: [photoNote(photos, { tz: zone, plan: store.getRecord('fuel', 'plan')?.data }), words].filter(Boolean).join('\n'), now: now(), tz: zone, recap, extra, voice, screen });
+          return photos.length ? [...photos.map((p) => imageBlock(p.dataUrl)), { type: 'text', text: body }] : body;
         },
       });
       reply = { role: 'assistant', text: res.text || '(no answer)', model: key, ms: res.ms, ...(res.firstMs != null ? { firstMs: res.firstMs } : {}), ...(voice ? { via: 'voice' } : {}) };
