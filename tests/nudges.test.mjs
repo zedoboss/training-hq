@@ -372,6 +372,7 @@ test('walk tick (Tue 10/20): asks, 5 minutes later asks for a time, stays quiet 
   try {
     store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' }, body: { stepGoal: 8000 } });
     store.writeLocal('health', D, { date: D, steps: 3000, fileAt: at(D, '14:00') });
+    store.setMeta('morning:state', { date: D, open: at(D, '05:00') }); // his morning questions are through
     const sent = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     const tick = (hm) => walkTick({ store, push, now: at(D, hm), tz: TZ });
@@ -658,6 +659,7 @@ test('Thu 10/22: a meal ask and his own reminder about the meal in the same minu
   try {
     const mealTimes = [{ name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
     store.writeLocal('settings', 'main', { notify: { wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
+    store.setMeta('morning:state', { date: D, open: at(D, '05:00') }); // his morning questions are through
     const rem = (id, hm, createdHm, text, extra = {}) => store.writeLocal('coach-reminders', id, { id, at: at(D, hm), date: D, hm, text, createdAt: at(D, createdHm), by: 'coach', ...extra });
     rem('home', '16:30', '16:20', "It's 4:30 PM. Are you home? Started cooking?");
     const all = [];

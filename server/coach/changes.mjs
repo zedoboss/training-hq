@@ -181,7 +181,8 @@ HOW
 8. A second chat checks your work against his words before he hears "done": test the cases around the one he hit, so it finds nothing.
 
 WHEN YOU FINISH, write ${resultFile} with this JSON and nothing else, then end the chat:
-{"status": "done" | "failed" | "question", "said": "<what he reads, also as a phone notification: ONE short sentence, at most 120 characters, so the lock screen shows it whole; plain, blunt, starting with what changes for him; e.g. Done: after you log sleep I say good morning first; the check-in waits till you leave.>", "reload": <true if you changed anything under server/, else false>, "commits": ["<short sha> <subject>"], "checked": "<one line: what you tested to know it works>"}`;
+{"status": "done" | "failed" | "question", "said": "<what he reads, also as a phone notification: ONE short sentence, at most 120 characters, so the lock screen shows it whole; plain, blunt, starting with what changes for him; e.g. Done: after you log sleep I say good morning first; the check-in waits till you leave.>", "reload": <true if you changed anything under server/, else false>, "commits": ["<short sha> <subject>"], "checked": "<one line: what you tested to know it works>"}
+Only when his words ask the Mac to answer him at length (e.g. "respond back to me with all the messages"), add "talk": "<that answer, plain text with line breaks, at most 4000 characters>": it goes into Talk after "said", never as a notification.`;
 }
 
 /** The reviewer's instructions: his words in order, the builder's answer, the diff from the heads the build started at. */
@@ -273,14 +274,25 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
   // "done" used to come before the restart that makes server changes live).
   const bootAt = now();
 
-  function sayInTalk(c, text, kind = 'change') {
-    const at = now();
+  function sayInTalk(c, text, kind = 'change', at = now()) {
     const id = `cm.${String(at).padStart(13, '0')}.${rand()}`;
     store.writeLocal(MSGS, id, { id, role: 'assistant', text, at, tz: c.tz || tz(), kind, ref: `change:${c.id}` });
   }
 
-  async function tell(c, text) {
-    sayInTalk(c, text);
+  /**
+   * The builder's longer answer for Talk, after the short one (result.json "talk"; Fri 10/23, his words: "let the Mac
+   * respond back to me with how he thinks this should be, with a proper response, with all the messages"). Talk only:
+   * the notification stays the short one.
+   */
+  function talkOf(c) {
+    try { const t = JSON.parse(readFileSync(files(c.id).resultFile, 'utf8')).talk; return typeof t === 'string' ? t.trim().slice(0, 4000) : ''; } catch { return ''; }
+  }
+
+  async function tell(c, text, { done = false } = {}) {
+    const at = now();
+    sayInTalk(c, text, 'change', at);
+    const more = done ? talkOf(c) : '';
+    if (more) sayInTalk(c, more, 'change', at + 1);
     try { if (push?.list?.().length) await push.notify({ title: 'Coach', body: text, url: '#/coach', tag: `change-${c.id}` }); } catch (e) { log(`coach change ${c.id}: notification: ${e.message}`); }
   }
 
@@ -318,7 +330,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     const { checked: _, ...more } = extra;
     put({ ...c, status, stage: null, doneAt: now(), answer, reload, ...(quiet ? { announce: 'morning' } : afterRestart ? { announce: 'after-restart' } : {}), commits, ...(checked ? { checked } : {}), ...more });
     // Server code: he hears it once the restart has made it live (announced()); the rest is live now.
-    if (!afterRestart && !quiet) await tell(c, answer);
+    if (!afterRestart && !quiet) await tell(c, answer, { done: status === 'done' });
     log(`coach change ${c.id}: ${status}${extra.reviewed === false ? ' (not reviewed)' : extra.review ? ` (review: ${extra.review.status})` : ''}${reload ? ', server restarts' : ''}${afterRestart ? ', then he hears it' : quiet ? ', told in the morning' : ''}`);
     if (reload && (status === 'done' || extra.review)) restartDue = true;
   }
@@ -421,7 +433,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
   async function announced() {
     for (const c of all().filter((x) => x.announce === 'after-restart' && (x.doneAt || 0) < bootAt)) {
       put({ ...c, announce: 'done', announcedAt: now() });
-      await tell(c, c.answer);
+      await tell(c, c.answer, { done: c.status === 'done' });
     }
   }
 

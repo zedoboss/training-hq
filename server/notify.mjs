@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
@@ -17,7 +17,7 @@ import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor, scanTakenOn } from '../app/js/lib/scans.js';
-import { zonedTime, hmOf } from '../app/js/lib/time.js';
+import { zonedTime, hmOf, formatTime } from '../app/js/lib/time.js';
 import { healthSendsText } from './health.mjs';
 
 export const SENT = 'notify:sent';
@@ -76,6 +76,106 @@ export function wakeHmToday(store, now, tz, wakeHm) {
 // Thu 10/22: the scan reminders before his session follow the time he chose for it, like the check-in: never moved.
 const SESSION_TIMED = /^scan-(morning|arrive):/;
 
+// ---- His morning (Fri 10/23, lib/nudges.js morningStep): "Are you up?" at his wake time, then sleep, then his body
+// (pain from his last workout first), one at a time; the day's reminders that wait for his wake time, the nudges, the
+// walk coach, the coach's own questions and the overnight message wait until that's through. What came due meanwhile
+// goes out after it, as one message. Reminders he set, the sauna, and the check-in and session at a time he chose keep
+// their time.
+export const MORNING_STATE = 'morning:state';
+/** The coach's own replies in Talk (not the app's notifications). */
+const COACH_REPLY = (m) => m.role === 'assistant' && !m.kind && !m.error;
+const ASKS_SLEEP = /\b(sleep|slept|bed)\b[^.!?]*\?/i;
+const ASKS_BODY = /\b(back|body|sore\w*|knees?|pain|hurts?|hurting)\b[^.!?]*\?/i;
+
+/**
+ * The first sign he's up today, from 5:00 AM: his message, a meal or his answer to a meal question, a supplement
+ * ticked, a workout or holds round started, his sleep log's wake time, the app opened (its zone report, Apple Health).
+ */
+export function upAtToday(store, now, tz) {
+  const date = isoDate(new Date(now), tz);
+  const from = zonedTime(date, '05:00', tz);
+  const list = (col) => recordsOf(store, col);
+  const signs = [
+    store.getRecord('sleep-log', date)?.data?.wake,
+    ...list('coach-messages').filter((m) => m.role === 'user').map((m) => m.at),
+    ...list('meals').map((m) => m.at),
+    ...list('meal-checks').map((c) => c.at),
+    ...list('supp-log').map((e) => e.at),
+    ...list('sessions').filter((x) => x.status !== 'discarded').map((x) => x.startedAt),
+    ...list('here').filter((h) => h.phone).map((h) => h.at),
+    ...list('health').map((d) => d.fileAt),
+  ].filter((t) => Number.isFinite(t) && t >= from && t <= now);
+  return signs.length ? Math.min(...signs) : null;
+}
+
+/** Where his morning is now (read only): morningStep's {hold, open, ask}, with today's state and when it opened. */
+export function morningGate(store, now, tz) {
+  const date = isoDate(new Date(now), tz);
+  const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  const m = store.getMeta(MORNING_STATE);
+  const state = m?.date === date ? m : { date };
+  const off = { hold: false, open: true, ask: null, state, date, openAt: null };
+  // Nudges off or paused, or he asked the coach to hold off everything: no morning questions, nothing held.
+  if (!n.nudgeEveryMin || now < (n.nudgePausedUntil || 0) || heldOff('morning', holdsOf(store), now)) return off;
+  const list = (col) => recordsOf(store, col);
+  const health = store.getRecord('health', date)?.data;
+  const wakeAt = zonedTime(date, n.wakeHm, tz);
+  const upAt = upAtToday(store, now, tz);
+  const msgs = list(MSGS);
+  const since = Math.min(state.up || Infinity, upAt ?? Infinity, wakeAt);
+  const replies = msgs.filter((x) => COACH_REPLY(x) && x.at >= since && x.at <= now);
+  const askedBy = (re) => Math.max(0, ...replies.filter((x) => re.test(x.text || '')).map((x) => x.at)) || null;
+  const sessions = list('sessions');
+  const trainedToday = sessions.some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && isoDate(new Date(x.startedAt), tz) === date);
+  const step = morningStep({
+    now, wakeAt, upAt, state,
+    sleepKnown: Boolean(health?.sleep || store.getRecord('sleep-log', date)?.data),
+    bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness) || trainedToday,
+    coachAsked: { sleep: askedBy(ASKS_SLEEP), body: askedBy(ASKS_BODY) },
+    lastUserAt: Math.max(0, ...msgs.filter((x) => x.role === 'user').map((x) => x.at || 0)),
+    lastCoachAt: Math.max(store.getMeta(LAST) || 0, ...msgs.filter((x) => x.role === 'assistant').map((x) => x.at || 0)),
+    bodyText: morningBodyText(lastWorkoutPain({ sessions, sets: list('sets'), today: date, tz }), date, tz),
+  });
+  return { ...step, state, date, openAt: step.open ? state.open || now : null };
+}
+
+/**
+ * Once a minute, first: notes when the morning started holding and when it opened, and asks the next question when
+ * it's time (pushed and written into Talk). Returns what was sent, or null.
+ */
+export async function morningTick({ store, push, log = () => {}, now, tz }) {
+  const g = morningGate(store, now, tz);
+  const st = { ...g.state };
+  const start = zonedTime(g.date, withDefaults(store.getRecord('settings', 'main')?.data).notify.wakeHm, tz);
+  // Held from his wake time (the Mac asleep then: up to 30 minutes later, what a late reminder may still be); first
+  // seen later (the server just updated mid-day): from now, so nothing older is let out.
+  if (g.hold && !st.from) st.from = now - start < 30 * 60000 ? Math.min(start, now) : now;
+  if (g.open && st.from && !st.open) st.open = g.openAt;
+  let out = null;
+  if (g.ask && !busyNow((col) => recordsOf(store, col), now)) {
+    const v = coachVoice(g.ask.text, { calm: true });
+    const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: `morning-${g.ask.key}` }) : { sent: 0 };
+    sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `morning:${g.ask.key}` });
+    st[g.ask.key] = now;
+    // The nudges' own sleep question is this one: not again today.
+    if (g.ask.key === 'sleep') { const ns = store.getMeta(NUDGES) || { last: 0, byKey: {} }; ns.byKey.sleep = now; store.setMeta(NUDGES, ns); }
+    store.setMeta(LAST, now);
+    log(`morning ${g.ask.key}: ${v.body.slice(0, 80)} (${r.sent} sent)`);
+    out = { key: `morning:${g.ask.key}`, body: v.body };
+  }
+  if (JSON.stringify(st) !== JSON.stringify(g.state)) store.setMeta(MORNING_STATE, st);
+  return out;
+}
+
+/** For the coach, with every message: where his morning is while it is still going. */
+export function morningContext(store, now, tz) {
+  const g = morningGate(store, now, tz);
+  if (!g.hold) return '';
+  const t = (ms) => formatTime(new Date(ms), tz);
+  const asked = [['up', '"Are you up?"'], ['sleep', 'how he slept'], ['body', 'how his body feels']].filter(([k]) => g.state[k]).map(([k, w]) => `${w} at ${t(g.state[k])}`);
+  return `His morning (his rule, Fri 10/23): one question at a time, in this order: is he up, how he slept, how his body feels (${morningBodyText(lastWorkoutPain({ sessions: recordsOf(store, 'sessions'), sets: recordsOf(store, 'sets'), today: g.date, tz }), g.date, tz)}), then the day's plan. The app ${asked.length ? `asked ${asked.join(', ')}` : 'has asked nothing yet'}, and holds the day's reminders until that's through. When he answers one, ask the next yourself, one question, never the plan first.`;
+}
+
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */
 export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
   const st = stateFrom(store, tz);
@@ -89,8 +189,15 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
     const w = zonedTime(d, wakeOn(d), tz);
     return w > at ? w : zonedTime(addDays(d, 1), n.wakeHm, tz);
   };
+  const waits = (i) => WAIT_FOR_WAKE.has(i.kind) && !SESSION_TIMED.test(i.id || '');
+  // His morning (morningGate): while it holds, what comes due waits; once through, it goes out then, together.
+  const g = morningGate(store, now, tz);
+  const from = g.state.from ?? now;
+  const held = (i) => waits(i) && i.at >= from && isoDate(new Date(i.at), tz) === today;
   const items = [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }))
-    .map((i) => (WAIT_FOR_WAKE.has(i.kind) && !SESSION_TIMED.test(i.id || '') && !awake(i.at) ? { ...i, at: toWake(i.at) } : i));
+    .map((i) => (waits(i) && !awake(i.at) ? { ...i, at: toWake(i.at) } : i))
+    .map((i) => (g.hold && held(i) && i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, morning: 'waiting' }
+      : !g.hold && g.state.from && g.openAt && held(i) && i.at < g.openAt ? { ...i, at: g.openAt, morning: 'after', heldAt: i.at } : i));
   return afterMeals(items, mealSpansFor(store, now, tz), st.coachReminders);
 }
 
@@ -431,7 +538,7 @@ export function homeSince(store, since) {
  */
 export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
-  if (inp.n.kinds?.walk === false || now < (inp.n.nudgePausedUntil || 0) || heldOff('walk', holdsOf(store), now)) return null;
+  if (inp.n.kinds?.walk === false || now < (inp.n.nudgePausedUntil || 0) || heldOff('walk', holdsOf(store), now) || morningGate(store, now, tz).hold) return null;
   const a = inp.args;
   if (a.workoutEndedAt && now >= a.workoutEndedAt && now - a.workoutEndedAt < AFTER_WORKOUT_QUIET_MIN * 60000) return null;
   if (now - (store.getMeta(LAST) || 0) < 2 * 60000 || now - (inp.lastUserAt || 0) < 60000) return null;
@@ -467,7 +574,7 @@ export const INITIATIVE_GAP_MIN = 180;
 export async function initiativeTick({ store, push, coach, log = () => {}, now, tz }) {
   if (!coach?.initiate) return null;
   const inp = nudgeInputs(store, now, tz);
-  if (inp.busy || now < (inp.n.nudgePausedUntil || 0) || inp.n.kinds?.coach === false) return null;
+  if (inp.busy || now < (inp.n.nudgePausedUntil || 0) || inp.n.kinds?.coach === false || morningGate(store, now, tz).hold) return null;
   const awake = awakeAt(now, tz, addMinHm(inp.n.wakeHm, 60), addMinHm(inp.n.bedHm, -60));
   if (!awake || now - (store.getMeta(LAST) || 0) < 10 * 60000 || now - (inp.lastUserAt || 0) < 10 * 60000) return null;
   const state = store.getMeta(INIT) || { last: 0, byKey: {} };
@@ -498,7 +605,7 @@ const addMinHm = (hm, m) => { const [h, mm] = String(hm || '00:00').split(':').m
 export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
   const state = store.getMeta(NUDGES) || { last: 0, byKey: {} };
-  const awake = awakeAt(now, tz, inp.n.wakeHm, inp.n.bedHm);
+  const awake = awakeAt(now, tz, inp.n.wakeHm, inp.n.bedHm) && !morningGate(store, now, tz).hold;
   if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy, pausedUntil: inp.n.nudgePausedUntil })) return null;
   const holds = holdsOf(store);
   const pick = pickNudge(nudgeCandidates(inp.args).filter((c) => !heldOff(c.key, holds, now)), state.byKey, now);
@@ -546,6 +653,8 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       if (zone !== lastZone) { if (lastZone) log(`notify: reminders now follow ${zone}`); lastZone = zone; }
       applyPhasePlans(store, t, zone, log);
       if (!push.list().length) return [];
+      // His morning first: its question, and whether the rest of the day is still held.
+      const morning = await morningTick({ store, push, log, now: t, tz: zone });
       const sent = store.getMeta(SENT) || {};
       // What he told the coach to hold off on is skipped (lib/holdoffs.js).
       const holds = holdsOf(store);
@@ -563,7 +672,17 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id));
       if (items.length) {
         const opts = voiceOpts(store);
-        for (const i of items) {
+        // What waited for his morning: one message, in the order it was due, one line in his moods at the end.
+        const after = items.filter((i) => i.morning === 'after');
+        if (after.length > 1) {
+          const said = after.sort((a, b) => a.heldAt - b.heldAt).map((i) => coachReminder(i, { ...opts, calm: true }).body);
+          const v = coachVoice(`Your plan now: ${said.join(' Then: ')}`, { ...opts, calm: after.some((i) => i.calm) });
+          const r = await push.notify({ title: v.title, body: v.body, url: after[0].url, tag: 'morning-plan' });
+          for (const i of after) sent[i.id] = t;
+          sayInTalk(store, { text: v.body, at: t, tz: zone, kind: 'reminder', ref: after.map((i) => i.id).join(',') });
+          log(`notify morning plan: ${after.map((i) => i.id).join(', ')} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
+        }
+        for (const i of after.length > 1 ? items.filter((x) => !after.includes(x)) : items) {
           // The coach says it (Mon 10/19): title "Coach", the reminder's facts, one short line in his moods. A coach
           // reminder can carry live facts (Wed 10/21: "are my steps counted?" gets what the Shortcut really sent).
           const v = coachReminder(i.facts === 'health' ? { ...i, body: `${i.body} ${healthSendsText(store, { since: i.since, now: t, tz: zone })}` } : i, opts);
@@ -588,7 +707,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const next = nextDueAt(store, t, zone, everyMs);
       soon = next ? setTimeout(tick, next - t + 250) : null;
       soon?.unref?.();
-      return [...items, ...(dishes ? [dishes] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : []), ...(init ? [init] : [])];
+      return [...(morning ? [morning] : []), ...items, ...(dishes ? [dishes] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : []), ...(init ? [init] : [])];
     } catch (e) {
       log(`notify error: ${e.stack || e}`);
       return [];

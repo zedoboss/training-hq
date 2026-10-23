@@ -11,7 +11,7 @@ import { openImports } from './imports.mjs';
 import { openImportInbox } from './import-inbox.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
-import { startNotifier, phoneZone, sessionBusy } from './notify.mjs';
+import { startNotifier, phoneZone, sessionBusy, morningGate } from './notify.mjs';
 import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
 import { openCalendar } from './calendar.mjs';
@@ -137,7 +137,9 @@ changesTimer?.unref();
 const nightly = config.nightly === false ? null : openNightly({
   store, privateDir: p.privateDir, profile: () => readProfile(p.dataDir), push, tz: () => phoneZone(store), log,
   fixedOnMac: (date) => { try { return fixedOnMacFrom(readFileSync(join(p.privateDir, 'PROGRESS.md'), 'utf8'), date); } catch { return ''; } },
-  busy: () => Boolean(coach?.talking?.()) || sessionBusy(store.listRecords('sessions').map((r) => r.data).filter(Boolean), Date.now()),
+  // Fri 10/23: and not before his morning questions are through (notify.mjs morningGate).
+  busy: () => Boolean(coach?.talking?.()) || sessionBusy(store.listRecords('sessions').map((r) => r.data).filter(Boolean), Date.now())
+    || morningGate(store, Date.now(), phoneZone(store)).hold,
 });
 const nightlyTick = () => nightly?.tick().catch((e) => log(`nightly: ${e.stack || e}`));
 if (nightly) setTimeout(nightlyTick, 60000).unref();

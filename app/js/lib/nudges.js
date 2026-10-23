@@ -17,6 +17,8 @@ export const QUIET_AFTER_MIN = 10;
 export const STALE_HEALTH_H = 6;
 /** No nudges this long after a workout ends (shower, not hungry yet); then the first meal. */
 export const AFTER_WORKOUT_QUIET_MIN = 20;
+/** A nudge said once a day. */
+const ONCE_MIN = 18 * 60;
 /** Kinds of reminder that speak plainly (no mood line). */
 const CALM_KINDS = new Set(['sauna', 'recovery', 'scan']);
 
@@ -128,9 +130,9 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   const after = Array.isArray(morning?.gymAfterMin) && morning.gymAfterMin.length === 2 ? morning.gymAfterMin : null;
   const gymText = after ? `${formatHm(addMin(wokeHm, after[0]))} to ${formatHm(addMin(wokeHm, after[1]))}` : null;
 
-  // Sleep: the morning question until he answers (until noon).
+  // Sleep: the morning question, until noon. Asked once (Fri 10/23, his words: "you shouldn't keep on messaging me").
   if (!sleepLogged && sinceWake < Math.max(60, minOf('12:00') - minOf(wakeHm))) {
-    out.push({ key: 'sleep', priority: 90, gapMin: 40, url: '#/coach',
+    out.push({ key: 'sleep', priority: 90, gapMin: ONCE_MIN, url: '#/coach',
       text: `How did you sleep? Tell me when you went to bed and when you woke up (your schedule: ${formatHm(bedHm)} to ${formatHm(wakeHm)}).` });
   }
 
@@ -141,9 +143,11 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       text: `Morning: ${String(morning.text).replace(/[.\s]+$/, '')}.${train0 && gymText && !session.started ? ` Gym ${gymText}.` : ''}` });
   }
 
-  // A body scan planned today (Tue 10/20): the checklist until it's done, ahead of everything else.
+  // A body scan planned today (Tue 10/20): the checklist, once that day (Fri 10/23: it went out 4 times by 12:10 PM, "the
+  // body scan, which you said twice... body scan again. You're not making any sense"); the scan reminders at his session
+  // time (lib/scans.js) still come. After his sleep question, not ahead of it.
   if (scanToday) {
-    out.push({ key: 'scan', priority: 92, gapMin: 30, url: '#/body/scan',
+    out.push({ key: 'scan', priority: 87, gapMin: ONCE_MIN, url: '#/body/scan',
       text: `Body scan today, before you train: ${scanToday.items.join('; ')}. Then tell me the numbers.` });
   }
 
@@ -275,4 +279,91 @@ export function nudgeDue({ now, everyMin = NUDGE_DEFAULTS.everyMin, awake = true
 /** The candidate to send: the most important one not nudged within its own gap, or null. */
 export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
   return candidates.find((c) => now - (sentByKey[c.key] || 0) >= c.gapMin * 60000) || null;
+}
+
+// ---- The start of his day (Fri 10/23, his words: "you should have asked me if I'm awake... Since I haven't messaged
+// you... you shouldn't keep on messaging me... my sore back from yesterday's workout... you should have started with
+// that. That's way more important than morning hold or the body scan"): his morning holds came first at 10:01 AM, the
+// scan checklist 4 times, "How did you sleep?" only at 11:18 AM and nothing about his back. Now one question at a
+// time, in a human order: are you up, then sleep, then his body (pain from his last workout first), then the day's
+// plan. Nothing else of his day goes out before that. ----
+/**
+ * giveUpH: no answer this long after his wake time, the day goes on as usual (Claude's default: never a silent day).
+ * waitMin: a question he leaves this long counts as passed over, the next one comes. quietMin: after his message or
+ * the coach's reply, this long before the next question.
+ */
+export const MORNING = { giveUpH: 4, waitMin: 30, quietMin: 3 };
+export const MORNING_UP_TEXT = 'Morning. Are you up?';
+const PAIN_WORDS = /\b(pain\w*|hurts?|hurting|sore\w*|ache[sd]?|aching|tweak\w*|strain\w*)\b/i;
+const BODY_PART = /\b(lower back|upper back|back|knees?|shoulders?|elbows?|wrists?|hips?|neck|hamstrings?|quads?|groin|calf|calves|ankles?|chest)\b/gi;
+
+/**
+ * Pain from his last workout before today (in the 2 days before): the exercise notes, skip reasons, set notes and pain
+ * scores. {label, date, parts, exercise} or null.
+ */
+export function lastWorkoutPain({ sessions = [], sets = [], today, tz }) {
+  const from = isoDate(new Date(Date.parse(`${today}T12:00:00Z`) - 2 * 86400000), 'UTC');
+  const last = sessions.filter((x) => x?.startedAt && x.kind !== 'holds' && x.status !== 'discarded' && x.status !== 'active')
+    .map((x) => ({ x, d: isoDate(new Date(x.startedAt), tz) })).filter(({ d }) => d < today && d >= from)
+    .sort((a, b) => b.x.startedAt - a.x.startedAt)[0];
+  if (!last) return null;
+  const se = last.x;
+  const mine = sets.filter((s) => s?.sessionId === se.id);
+  const hits = [];
+  for (const e of se.exercises || []) {
+    const texts = [e.notes, e.skipped?.reason, ...mine.filter((s) => s.exKey === e.key).map((s) => s.note)].filter(Boolean).map(String);
+    const said = texts.filter((t) => PAIN_WORDS.test(t));
+    const scored = mine.some((s) => s.exKey === e.key && Number(s.pain) >= 3);
+    if (said.length || scored) hits.push({ name: e.name, parts: said.flatMap((t) => (t.match(BODY_PART) || []).map((p) => p.toLowerCase())), skipped: Boolean(e.skipped) });
+  }
+  if (se.note && PAIN_WORDS.test(se.note)) hits.push({ name: null, parts: (String(se.note).match(BODY_PART) || []).map((p) => p.toLowerCase()) });
+  if (!hits.length) return null;
+  let parts = [...new Set(hits.flatMap((h) => h.parts))];
+  if (parts.includes('lower back') || parts.includes('upper back')) parts = parts.filter((p) => p !== 'back');
+  return { label: LABEL[se.dayType] || se.title || 'workout', date: last.d, parts, exercise: hits.find((h) => h.name && !h.skipped)?.name || hits.find((h) => h.name)?.name || null };
+}
+
+/** The body question of his morning: the pain from his last workout first, else how the body feels. */
+export function morningBodyText(pain, today, tz) {
+  if (!pain) return 'How does your body feel today? Knees, legs, back: 0 to 3.';
+  const yesterday = isoDate(new Date(Date.parse(`${today}T12:00:00Z`) - 86400000), 'UTC');
+  const day = pain.date === yesterday ? 'yesterday' : `on ${formatDayIso(pain.date)}`;
+  const where = pain.parts.length ? pain.parts.join(' and ') : 'body';
+  const on = pain.exercise ? ` on ${pain.exercise.replace(/\s*\(.*\)$/, '').toLowerCase()}` : '';
+  return `How's your ${where} today? It hurt${on} ${day} (${pain.label}). 0 to 3, and does it still hurt when you bend or move?`;
+}
+const formatDayIso = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'numeric', day: 'numeric', timeZone: 'UTC' }).replace(',', '');
+
+/**
+ * Where his morning is. One question at a time; the day's reminders and nudges wait (hold) until it's through.
+ * @param {object} o
+ * @param {number} o.now
+ * @param {number} o.wakeAt      his usual wake time today (Settings), ms
+ * @param {number|null} o.upAt   the first sign he's up today (a message, a meal, a workout, the app opened...), ms
+ * @param {boolean} o.sleepKnown last night's sleep logged
+ * @param {boolean} o.bodyKnown  today's check-in done, or he trained today already
+ * @param {{up?: number, sleep?: number, body?: number, open?: number}} o.state  when each was asked today; open = done
+ * @param {{sleep?: number, body?: number}} o.coachAsked  the coach asked it itself in Talk (its reply), when
+ * @param {number} o.lastUserAt  his last message, ms
+ * @param {number} o.lastCoachAt the coach's last message or notification, ms
+ * @param {string} o.bodyText    the body question
+ * @returns {{hold: boolean, open: boolean, ask: {key: string, text: string}|null}}
+ */
+export function morningStep({ now, wakeAt, upAt = null, sleepKnown = false, bodyKnown = false, state = {}, coachAsked = {}, lastUserAt = 0, lastCoachAt = 0, bodyText = morningBodyText(null) }) {
+  if (state.open) return { hold: false, open: true, ask: null };
+  // Before his day starts: the wake-time rules hold things already.
+  if (now < Math.min(wakeAt, upAt ?? Infinity)) return { hold: false, open: false, ask: null };
+  if (now - Math.max(wakeAt, upAt ?? 0) >= MORNING.giveUpH * 3600000) return { hold: false, open: true, ask: null };
+  if (!upAt) return { hold: true, open: false, ask: state.up ? null : { key: 'up', text: MORNING_UP_TEXT } };
+  const quiet = now - Math.max(lastUserAt || 0, lastCoachAt || 0) >= MORNING.quietMin * 60000;
+  const steps = [['sleep', sleepKnown, 'How did you sleep? When did you go to bed and when did you wake up?'], ['body', bodyKnown, bodyText]];
+  for (const [key, known, text] of steps) {
+    if (known) continue;
+    const askedAt = Math.max(state[key] || 0, coachAsked[key] || 0);
+    if (!askedAt) return { hold: true, open: false, ask: quiet ? { key, text } : null };
+    // Answered (he wrote after it) or passed over: the next one.
+    if (!(lastUserAt > askedAt) && now - askedAt < MORNING.waitMin * 60000) return { hold: true, open: false, ask: null };
+  }
+  // Then the plan: not on top of his answer or the coach's reply either.
+  return quiet ? { hold: false, open: true, ask: null } : { hold: true, open: false, ask: null };
 }

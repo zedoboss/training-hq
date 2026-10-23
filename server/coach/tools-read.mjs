@@ -30,7 +30,7 @@ import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/nec
 import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
-import { afterMeals, mealSpansFor } from '../notify.mjs';
+import { afterMeals, mealSpansFor, morningContext } from '../notify.mjs';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
 import { pathsOf, stageText } from '../../app/js/lib/hold-path.js';
@@ -309,8 +309,9 @@ export function contextLine({ store, tz, now, screen = null }) {
   lines.push(...phasePlanLines(s));
   lines.push(...recoveryContext(s));
   lines.push(...noticeLines(s));
+  lines.push(morningContext(store, s.now, s.tz));
   lines.push(...situationLines(s));
-  return lines.join('\n');
+  return lines.filter(Boolean).join('\n');
 }
 
 /**

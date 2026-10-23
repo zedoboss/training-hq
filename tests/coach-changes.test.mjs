@@ -196,3 +196,29 @@ test('a build waits while the code or private folder has unsaved edits (Claude i
   clock += 46 * 60000; await q2.tick();
   assert.equal(l2.length, 1);
 });
+
+test('Fri 10/23: a longer answer in the builder\'s "talk" goes into Talk after the short one, never as a notification', async () => {
+  const { q, alive, pushed } = queue();
+  const c = q.request({ said: 'let the Mac respond back to me with all the messages', kind: 'behaviour' });
+  await q.tick();
+  const long = 'How this morning should have gone:\n10:00 AM: Morning. Are you up?\nThen: How did you sleep?';
+  writeFileSync(q.files(c.id).resultFile, JSON.stringify({ status: 'done', said: 'Done: mornings go up, sleep, back, then the plan.', reload: false, commits: [], checked: 'x', talk: long }));
+  alive.clear();
+  await q.tick();
+  writeFileSync(q.files(c.id).reviewFile, JSON.stringify({ status: 'ok', said: 'Done: mornings go up, sleep, back, then the plan.', reload: false, commits: [], checked: 'y' }));
+  alive.clear();
+  await q.tick();
+  const said = talk().sort((a, b) => a.at - b.at).map((m) => m.text);
+  assert.deepEqual(said, ['Done: mornings go up, sleep, back, then the plan.', long], 'line breaks kept');
+  assert.deepEqual(pushed.map((p) => p.body), ['Done: mornings go up, sleep, back, then the plan.'], 'the notification is the short one');
+});
+
+test('Fri 10/23: no "talk" from a build that failed its check', async () => {
+  const { q, alive } = queue();
+  const c = q.request({ said: 'something', kind: 'behaviour' });
+  await q.tick();
+  writeFileSync(q.files(c.id).resultFile, JSON.stringify({ status: 'failed', said: 'That didn\'t work.', reload: false, commits: [], checked: 'x', talk: 'LONG' }));
+  alive.clear();
+  await q.tick();
+  assert.equal(talk().some((m) => m.text === 'LONG'), false);
+});

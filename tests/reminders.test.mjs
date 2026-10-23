@@ -328,6 +328,7 @@ test('a meal asked again every 5 minutes; after the Mac slept, only the latest r
   const store = openStore(join(dir, 'db.sqlite'));
   try {
     store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }] }, notify: { wakeHm: '09:00' } });
+    store.setMeta('morning:state', { date: '2026-01-20', open: at('2026-01-20', '05:00') }); // his morning questions are through
     let now = at('2026-01-20', '12:30');
     const sent = [];
     const push = { list: () => [{ deviceId: 'a1b2c3d4e5f6' }], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0, dropped: 0 }; } };
