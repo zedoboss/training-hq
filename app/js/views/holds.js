@@ -3,7 +3,7 @@
 import { ready, saveSettings, macPost } from '../lib/data.js';
 import { setQuiet } from '../lib/quiet.js';
 import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase } from '../lib/holds.js';
-import { rotationDay, lastRotationSession, daysByDate, LABEL, sessionTomorrow } from '../lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, LABEL, sessionTomorrow, afterRestDay, addDays } from '../lib/rotation.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
 import { kg as fmtKg } from '../lib/loads.js';
@@ -80,7 +80,7 @@ function renderList(view, repo) {
     const dayType = rot.today.kind === 'rest' ? null : rot.today.dayType;
     // Sat 10/24: on a rest day before a session, a weekly gym hold goes after that session (not asked today).
     const nextSession = sessionTomorrow(rot, today);
-    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today), nextSession });
+    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today), nextSession, carriedFrom: afterRestDay(rot, today, days), roundsYesterday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[addDays(today, -1)] || 0])) });
     const areaOf = (id) => areas.find((a) => a.id === id);
     // Thu 10/22, his words: "the shoulder should be there in this tendons": an area behind its weekly count (fix or
     // maintenance) with nothing planned today is listed under today too, to do any day.

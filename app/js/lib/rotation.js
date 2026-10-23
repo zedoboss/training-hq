@@ -90,6 +90,19 @@ export function rotationDay({ last, today, days = {} }) {
  */
 export const sessionTomorrow = (rot, date) => (rot?.today?.kind === 'rest' && rot.next?.date === addDays(date, 1) ? rot.next.dayType : null);
 
+/**
+ * On a training day, yesterday's date when yesterday was a rest day (so today's session was its next one), else null:
+ * the weekly gym hold not asked then comes after today's session (holdSlots carriedFrom). Once today's session is done
+ * the rotation's own rest is read from the type (the day after a rest is the first of the rotation).
+ */
+export const afterRestDay = (rot, date, days = {}) => {
+  const k = rot?.today?.kind;
+  const y = addDays(date, -1);
+  const rest = k === 'train' ? !!rot.last && rot.last.date < y && rotationDay({ last: rot.last, today: y, days }).today.kind === 'rest'
+    : k === 'done' && (rot.last?.streak || 1) === 1 && (!!restOf(days, y) || rot.last.dayType === nextDayType('legs'));
+  return rest ? y : null;
+};
+
 /** Day record with an added rest day (or with it taken away again). */
 export function withRest(doc, date, reason, at = Date.now()) {
   const base = doc || { date };

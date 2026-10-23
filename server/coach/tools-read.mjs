@@ -3,7 +3,7 @@
 // asked for, computed by the app's own rules (the same modules the phone uses), so the coach repeats them instead of
 // working anything out.
 import { snapshot, dayText, whenText, timeText, loadText, repsText, mmss, plural, findByName, k, formatHm } from './shared.mjs';
-import { LABEL, addDays, sessionTomorrow } from '../../app/js/lib/rotation.js';
+import { LABEL, addDays, sessionTomorrow, afterRestDay } from '../../app/js/lib/rotation.js';
 import { weekColumn } from '../../app/js/lib/programme.js';
 import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js';
 import { targetFor, lastNotes } from '../../app/js/lib/targets.js';
@@ -120,7 +120,7 @@ function slotsToday(s) {
   const rot = s.rotation();
   const rounds = roundsByDate(areas, s.list('sessions'), s.list('sets'), s.one('bridge', 'last-loads'));
   const st = s.settings().notify;
-  return { areas, slots: holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today), nextSession: sessionTomorrow(rot, s.today) }) };
+  return { areas, slots: holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today), nextSession: sessionTomorrow(rot, s.today), carriedFrom: afterRestDay(rot, s.today, s.days()), roundsYesterday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[addDays(s.today, -1)] || 0])) }) };
 }
 
 /**

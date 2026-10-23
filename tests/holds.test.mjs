@@ -158,6 +158,31 @@ test('Sat 10/24: a rest day before a session: the gym hold goes after that sessi
   assert.equal(holdSlots({ areas, dayKind: 'train', dayType: 'push', nextSession: 'pull' }).find((x) => x.area === 'shoulder').slot, 'after');
 });
 
+test('Sat 10/24: the gym hold not asked on the rest day comes after the next session (Pull), as the coach said', async () => {
+  const { holdSlots, restChoices, withRestChoice } = await import('../app/js/lib/holds.js');
+  const { rotationDay, afterRestDay } = await import('../app/js/lib/rotation.js');
+  const areas = [{ id: 'shoulder', label: 'Shoulder', phase: 'fix', holds: [{ exercise: 'Press Hold', timing: ['after Push'] }, { exercise: 'Raise Hold', timing: ['after Push', 'rest days'] }] }];
+  const last = { dayType: 'legs', date: '2026-10-22', streak: 3 };
+  // Sat 10/24, Pull, Friday was the rest day: yesterday's date; after Pull too; a day after a session: none.
+  assert.equal(afterRestDay(rotationDay({ last, today: '2026-10-24' }), '2026-10-24', {}), '2026-10-23');
+  assert.equal(afterRestDay(rotationDay({ last: { dayType: 'pull', date: '2026-10-24', streak: 1 }, today: '2026-10-24' }), '2026-10-24'), '2026-10-23');
+  assert.equal(afterRestDay(rotationDay({ last: { dayType: 'pull', date: '2026-10-24', streak: 2 }, today: '2026-10-24' }), '2026-10-24'), null);
+  assert.equal(afterRestDay(rotationDay({ last: { dayType: 'push', date: '2026-10-23', streak: 1 }, today: '2026-10-24' }), '2026-10-24'), null);
+  const sat = (o = {}) => holdSlots({ areas, dayKind: 'train', dayType: 'pull', roundsToday: o.today || {}, restChoices: restChoices(o.days || {}, '2026-10-24'), carriedFrom: 'carriedFrom' in o ? o.carriedFrom : '2026-10-23', roundsYesterday: o.yesterday || {} }).find((x) => x.area === 'shoulder');
+  const s = sat();
+  assert.equal(s.slot, 'after');
+  assert.equal(s.exercise, 'Raise Hold');
+  assert.equal(s.ask, undefined);
+  assert.equal(sat({ today: { shoulder: 1 } }).done, true);
+  // Not carried: no rest day yesterday, a round done yesterday, his answer yesterday, his own hold standing.
+  assert.equal(sat({ carriedFrom: null }), undefined);
+  assert.equal(sat({ yesterday: { shoulder: 1 } }), undefined);
+  assert.equal(sat({ days: { '2026-10-23': withRestChoice(null, '2026-10-23', 'shoulder', { choice: 'skip' }) } }), undefined);
+  assert.equal(sat({ days: { '2026-10-19': withRestChoice(null, '2026-10-19', 'shoulder', { choice: 'other', holdName: 'Band hold' }) } }), undefined);
+  // Push after a rest day: its own after-Push round, nothing extra.
+  assert.equal(holdSlots({ areas, dayKind: 'train', dayType: 'push', carriedFrom: '2026-10-23' }).filter((x) => x.area === 'shoulder').length, 1);
+});
+
 test('a round on the hold timer: every hold with its GET READY, rest between holds', async () => {
   const { roundSeconds, roundLength } = await import('../app/js/lib/holds.js');
   assert.equal(roundSeconds(), 375, '3 × (15 + 30) + 2 × 120 = 6:15');

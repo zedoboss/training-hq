@@ -146,11 +146,13 @@ const onRestDays = (h) => /\brest days?\b/i.test(timingOf(h));
  * @param {{morning:string, evening:string}} [o.times]
  * @param {object} [o.restChoices] {areaId: {today, last}} from restChoices(): his rest-day answer (A2)
  * @param {string|null} [o.nextSession] on a rest day, tomorrow's session (sessionTomorrow in rotation.js)
+ * @param {string|null} [o.carriedFrom] on a training day, yesterday's date when it was a rest day (afterRestDay in rotation.js)
+ * @param {object} [o.roundsYesterday] {areaId: rounds logged yesterday}
  * @returns {Array<{area:string, label:string, slot:'after'|'rest'|'morning'|'evening', time:string|null,
  *   holdIndex:number|'other', exercise:string, where:string|null, done:boolean, ask?:boolean, choice?:string|null,
  *   skipped?:boolean, last?:object|null}>}
  */
-export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES, restChoices = {}, nextSession = null }) {
+export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES, restChoices = {}, nextSession = null, carriedFrom = null, roundsYesterday = {} }) {
   const out = [];
   const trainType = dayKind === 'rest' ? null : dayType;
   for (const a of areas || []) {
@@ -168,7 +170,14 @@ export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, ti
       // One round covers the area for the day: the first matching hold of the slot leads, the rest follow in the round.
       const after = trainType ? holds.findIndex((h) => isAfter(h, trainType)) : -1;
       const rest = !trainType ? holds.findIndex(onRestDays) : -1;
+      // Sat 10/24: the gym hold not asked on yesterday's rest day (a session was next) comes after today's session,
+      // unless he answered yesterday, did a round then, or his own hold stood (it was asked then).
+      const rc0 = restChoices[a.id] || {};
+      const prev = rc0.last?.choice === 'skip' ? rc0.lastPlan : rc0.last;
+      const carried = after < 0 && trainType && carriedFrom ? holds.findIndex(onRestDays) : -1;
+      const carry = carried >= 0 && holds[carried].where !== 'home' && rc0.last?.date !== carriedFrom && !(roundsYesterday[a.id] > 0) && prev?.choice !== 'other';
       if (after >= 0) add('after', after);
+      else if (carry) add('after', carried);
       else if (rest >= 0) add('rest', rest);
       // The round's other holds on the same timing (bench hold, then the cable raise hold, after Push).
       if (slots[0]) slots[0].also = holds.filter((h, i) => i !== slots[0].holdIndex && (after >= 0 ? isAfter(h, trainType) : onRestDays(h))).map((h) => h.exercise);
