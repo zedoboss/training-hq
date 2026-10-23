@@ -15,7 +15,7 @@ import { startNotifier, phoneZone, sessionBusy } from './notify.mjs';
 import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
 import { openCalendar } from './calendar.mjs';
-import { openICloudCalendar, isRealFolder } from './icloud-calendar.mjs';
+import { openICloudCalendar, isRealFolder, eventKit } from './icloud-calendar.mjs';
 import { openEvoltImport } from './evolt-import.mjs';
 import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
@@ -79,7 +79,7 @@ const calendar = openCalendar({ store, tz: () => phoneZone(store) });
 // keeps it in line with the open reminders through its Calendar app; iCloud updates the iPhone in seconds. Only the
 // real server on his private folder (a dev copy in a scratch folder would overwrite his calendar); config.icloudCalendar
 // overrides.
-const icloud = (config.icloudCalendar ?? isRealFolder(p.privateDir)) ? openICloudCalendar({ store, tz: () => phoneZone(store), log }) : null;
+const icloud = (config.icloudCalendar ?? isRealFolder(p.privateDir)) ? openICloudCalendar({ store, tz: () => phoneZone(store), direct: eventKit, log }) : null;
 log(`icloud calendar: ${icloud ? 'on' : 'off (not his private folder)'}`);
 const icloudTick = () => icloud?.sync().catch((e) => log(`icloud calendar: ${e.stack || e}`));
 if (icloud) setTimeout(icloudTick, 20000).unref();

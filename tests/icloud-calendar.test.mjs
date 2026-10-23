@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
-import { desiredEvents, syncScript, readAnswer, openICloudCalendar, isRealFolder, CALENDAR_NAME, STATUS, KEY_PREFIX } from '../server/icloud-calendar.mjs';
+import { desiredEvents, syncScript, readAnswer, openICloudCalendar, isRealFolder, helperRequest, eventKit, CALENDAR_NAME, STATUS, KEY_PREFIX, LOOK_DAYS } from '../server/icloud-calendar.mjs';
 import { backupStatusText, BACKUP_CALENDAR } from '../app/js/lib/backup-reminders.js';
 
 const TZ = 'Asia/Bangkok';
@@ -135,4 +135,56 @@ test('Calendar not running: the Mac starts it hidden and tries once more (Thu 10
     assert.equal(st.ok, true);
     assert.ok(logs.some((l) => /starting the Calendar app \(hidden\)/.test(l)));
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Fri 10/23 ("why does the calendar app keep opening by itself?"): THQ Calendar writes the events, the Calendar app stays closed; until macOS allows it, the Calendar app keeps the backup current', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-icloud-direct-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    let clock = at('2026-03-18', '14:00');
+    store.writeLocal('coach-reminders', 'r1', { id: 'r1', at: at('2026-03-18', '17:00'), date: '2026-03-18', hm: '17:00', text: 'Call home', createdAt: clock - 60000, by: 'coach' });
+    const calls = []; const scripts = []; const logs = []; let launched = 0;
+    let answer = { out: 'NO_ACCESS waiting\n', err: '' };
+    const ic = openICloudCalendar({
+      store, tz: () => TZ, now: () => clock, log: (m) => logs.push(m), launch: async () => { launched++; },
+      direct: async (events, o) => { calls.push({ events, o }); return answer; },
+      run: async (s) => { scripts.push(s); return { out: 'OK 1 0 0\n', err: '' }; },
+    });
+    // Not allowed yet: the Calendar app does it this time, so a sent reminder still leaves his iPhone.
+    let st = await ic.sync();
+    assert.equal(calls.length, 1);
+    assert.equal(scripts.length, 1);
+    assert.equal(st.ok, true);
+    assert.ok(logs.some((l) => /THQ Calendar couldn't write \(macOS hasn't allowed THQ Calendar to use calendars yet \(click Allow on the Mac\)\.\)/.test(l)));
+    // Within 10 minutes THQ Calendar isn't asked again (no prompt after prompt); after them it is.
+    clock += 5 * 60000; await ic.sync({ force: true });
+    assert.equal(calls.length, 1);
+    assert.equal(scripts.length, 2);
+    clock += 6 * 60000; answer = { out: 'OK 0 0 1\n', err: '' };
+    st = await ic.sync({ force: true });
+    assert.equal(calls.length, 2);
+    assert.equal(scripts.length, 2, 'allowed: the Calendar app is no longer used');
+    assert.equal(launched, 0, 'and never started');
+    assert.equal(st.ok, true);
+    assert.ok(logs.some((l) => /writing through THQ Calendar \(the Calendar app stays closed\)/.test(l)));
+    assert.equal(calls[1].events[0].title, 'Call home · 5:00 PM');
+    // The calendar missing is THQ Calendar's real answer, not a reason to open the Calendar app.
+    clock += 31 * 60000; answer = { out: 'NO_CALENDAR\n', err: '' };
+    st = await ic.sync();
+    assert.equal(st.why, 'no-calendar');
+    assert.equal(scripts.length, 2);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('what THQ Calendar is asked: our prefix, two weeks around now, start and end in seconds; missing app = NO_HELPER', async () => {
+  const now = at('2026-03-18', '14:00');
+  const r = helperRequest([{ key: 'thq-backup:a@1-x', title: 'T', notes: 'N', at: at('2026-03-18', '17:20') }], { now });
+  assert.equal(r.calendar, CALENDAR_NAME);
+  assert.equal(r.prefix, KEY_PREFIX);
+  assert.equal(r.from, (now - LOOK_DAYS * 86400000) / 1000);
+  assert.equal(r.to, (now + LOOK_DAYS * 86400000) / 1000);
+  assert.deepEqual(r.events, [{ key: 'thq-backup:a@1-x', title: 'T', notes: 'N', start: at('2026-03-18', '17:20') / 1000, end: at('2026-03-18', '17:20') / 1000 + 300 }]);
+  assert.equal(readAnswer(...Object.values(await eventKit([], { app: '/nonexistent/THQ Calendar.app' }))).why, 'no-helper');
+  assert.equal(readAnswer('NO_ACCESS denied\n').why, 'no-access');
+  assert.match(readAnswer('NO_ACCESS denied\n').text, /Privacy & Security, Calendars, THQ Calendar/);
 });

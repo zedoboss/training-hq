@@ -4,11 +4,15 @@
 // hour before), so its alerts rang at stale times. Now the Mac writes the same open reminders into a calendar named
 // "Training HQ Backup" in his iCloud account through the Mac's Calendar app, and iCloud pushes every change to the iPhone in
 // seconds: a reminder the Mac sends, moves, or that he did or cancelled, leaves the iPhone at once; with the Mac off
-// the events stay and ring 20 minutes after their time (each event starts at that alert time). One AppleScript run per change (and every 30 minutes).
-// macOS asks once whether the server may control Calendar; he creates the iCloud calendar once on his iPhone.
+// the events stay and ring 20 minutes after their time (each event starts at that alert time). One run per change (and every 30 minutes).
+// Fri 10/23, his words: "why does the calendar app keep opening by itself?": every run started the Mac's Calendar app.
+// Now THQ Calendar (cal-helper/main.swift, built by scripts/build-cal-helper.mjs) writes the events through macOS's
+// calendar service and Calendar stays closed; macOS asks him once to allow it. Until it may (or if it's missing), the
+// AppleScript through the Calendar app still keeps the backup current, so a sent reminder never rings from it.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { calendarItems, ALERT_AFTER_MIN } from './calendar.mjs';
 import { formatTime } from '../app/js/lib/time.js';
@@ -21,6 +25,10 @@ export const HOURS = 72;
 export const HEAL_MS = 30 * 60000;
 export const RETRY_MS = 5 * 60000;
 export const TIMEOUT_MS = 120000;
+export const HELPER_ID = 'com.traininghq.calendar';
+export const HELPER_APP = join(homedir(), 'Library', 'Application Support', 'TrainingHQ', 'THQ Calendar.app');
+/** How far around now the helper looks for our events (ours are at most 72 h ahead; sent ones are removed). */
+export const LOOK_DAYS = 14;
 
 const hash = (s) => createHash('sha1').update(String(s)).digest('hex').slice(0, 8);
 const oneLine = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -106,6 +114,8 @@ export function readAnswer(out = '', err = '') {
   const m = /^OK (\d+) (\d+) (\d+)/.exec(String(out).trim());
   if (m) return { ok: true, added: +m[1], removed: +m[2], kept: +m[3] };
   if (/NO_CALENDAR/.test(out)) return { ok: false, why: 'no-calendar', text: `No calendar named "${CALENDAR_NAME}" on the Mac: make one in iCloud (iPhone: Calendar, Calendars, Add Calendar).` };
+  if (/NO_ACCESS/.test(out)) return { ok: false, why: 'no-access', text: `macOS hasn't allowed THQ Calendar to use calendars yet (${/waiting|asking/.test(out) ? 'click Allow on the Mac' : 'System Settings, Privacy & Security, Calendars, THQ Calendar'}).` };
+  if (/NO_HELPER/.test(err)) return { ok: false, why: 'no-helper', text: 'THQ Calendar isn\'t built (node scripts/build-cal-helper.mjs).' };
   const e = String(err || out);
   if (/-1743|not authori[sz]ed|Not allowed/i.test(e)) return { ok: false, why: 'not-allowed', text: 'macOS hasn\'t allowed the server to use Calendar (System Settings, Privacy & Security, Automation).' };
   if (/\(-600\)|isn.t running/i.test(e)) return { ok: false, why: 'not-running', text: 'The Mac\'s Calendar app isn\'t running.' };
@@ -126,14 +136,60 @@ export function osascript(script, { timeoutMs = TIMEOUT_MS } = {}) {
  * @param {() => string} o.tz   his time zone (the reminders' days)
  * @param {(script: string) => Promise<{out, err}>} [o.run]  tests pass a fake
  */
+/** What THQ Calendar gets: the calendar, our prefix, the window around now, and each event's start and end (seconds). */
+export function helperRequest(events, { name = CALENDAR_NAME, now = Date.now() } = {}) {
+  return {
+    calendar: name, prefix: KEY_PREFIX,
+    from: (now - LOOK_DAYS * 86400000) / 1000, to: (now + LOOK_DAYS * 86400000) / 1000,
+    events: events.map((e) => ({ key: e.key, title: e.title, notes: e.notes, start: e.at / 1000, end: e.at / 1000 + 300 })),
+  };
+}
+
+/**
+ * Runs THQ Calendar on these events (opened by LaunchServices, so macOS asks about calendar access for it, not for
+ * the server). Resolves {out, err} like osascript; err "NO_HELPER" when it isn't built. Never rejects.
+ */
+export function eventKit(events, { app = HELPER_APP, now = Date.now(), timeoutMs = TIMEOUT_MS + 10000 } = {}) {
+  if (!existsSync(app)) return Promise.resolve({ out: '', err: 'NO_HELPER' });
+  const dir = mkdtempSync(join(tmpdir(), 'thq-cal-'));
+  const req = join(dir, 'request.json'); const ans = join(dir, 'answer.txt');
+  writeFileSync(req, JSON.stringify(helperRequest(events, { now })));
+  return new Promise((done) => {
+    execFile('open', ['-W', '-g', '-j', '-n', '-a', app, '--args', req, ans], { timeout: timeoutMs }, (e, _out, err) => {
+      let out = '';
+      try { out = readFileSync(ans, 'utf8'); } catch { /* no answer: the error says why */ }
+      rmSync(dir, { recursive: true, force: true });
+      done({ out, err: out ? '' : String(err || '') + (e ? String(e.message || e) : '') || 'THQ Calendar gave no answer' });
+    });
+  });
+}
+
 /** Starts the Mac's Calendar app hidden, in the background (it must run for the AppleScript; nothing comes to the front). */
 export function startCalendar() {
   return new Promise((resolve) => { execFile('open', ['-g', '-j', '-a', 'Calendar'], { timeout: 20000 }, () => setTimeout(resolve, 5000)); });
 }
 
-export function openICloudCalendar({ store, tz, run = osascript, launch = startCalendar, now = () => Date.now(), log = () => {} }) {
+export function openICloudCalendar({ store, tz, run = osascript, launch = startCalendar, direct = null, now = () => Date.now(), log = () => {} }) {
   let busy = false;
   let lastSig = null; let lastOkAt = 0; let lastFailAt = 0; let lastWhy = null;
+  // THQ Calendar (direct): used first; after it can't (no access yet, not built, an error), the Calendar app this time,
+  // and THQ Calendar again 10 minutes later (not at every change, so a prompt he hasn't answered isn't asked again and again).
+  let directAfter = 0; let directWhy = undefined;
+
+  /** One sync through THQ Calendar, or null when the Calendar app has to do it this time. */
+  async function viaDirect(events, t) {
+    if (!direct || t < directAfter) return null;
+    const { out, err } = await direct(events, { now: t });
+    const r = readAnswer(out, err);
+    if (r.ok || r.why === 'no-calendar') {
+      if (directWhy !== null) log('icloud calendar: writing through THQ Calendar (the Calendar app stays closed)');
+      directWhy = null;
+      return r;
+    }
+    if (r.why !== directWhy) log(`icloud calendar: THQ Calendar couldn't write (${r.text}); the Calendar app does it meanwhile`);
+    directWhy = r.why; directAfter = t + 2 * RETRY_MS;
+    return null;
+  }
 
   /** Brings the calendar in line with the open reminders, when they changed (or every 30 minutes, or forced). */
   async function sync({ force = false } = {}) {
@@ -147,14 +203,17 @@ export function openICloudCalendar({ store, tz, run = osascript, launch = startC
     if (!force && lastFailAt && t - lastFailAt < (lastWhy === 'no-calendar' ? 60000 : RETRY_MS)) return null;
     busy = true;
     try {
-      let { out, err } = await run(syncScript(events));
-      let r = readAnswer(out, err);
-      // Thu 10/22, 7:01 PM: Calendar had been quit and the AppleScript didn't start it: start it hidden, try once more.
-      if (r.why === 'not-running') {
-        log('icloud calendar: starting the Calendar app (hidden)');
-        await launch();
-        ({ out, err } = await run(syncScript(events)));
+      let r = await viaDirect(events, t);
+      if (!r) {
+        let { out, err } = await run(syncScript(events));
         r = readAnswer(out, err);
+        // Thu 10/22, 7:01 PM: Calendar had been quit and the AppleScript didn't start it: start it hidden, try once more.
+        if (r.why === 'not-running') {
+          log('icloud calendar: starting the Calendar app (hidden)');
+          await launch();
+          ({ out, err } = await run(syncScript(events)));
+          r = readAnswer(out, err);
+        }
       }
       const status = { ...r, at: t, events: events.length };
       store.setMeta(STATUS, status);
