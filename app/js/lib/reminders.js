@@ -83,7 +83,7 @@ export const HOLDS_CHECK = { morningMin: [120, 360], eveningMin: [75], gapMin: 6
 const HOLDS_SAID = {
   morning: [
     ["Holds: haven't heard from you", (list, round) => `${list} ${cap(round)} and it's off the list.`],
-    ['Still no holds logged today', (list, round, evening) => `${list} One round now${evening ? `, the next at ${evening}` : ''}. ${cap(round)}.`],
+    ['Holds still open today', (list, round, evening) => `${list} One round now${evening ? `, the next at ${evening}` : ''}. ${cap(round)}.`],
   ],
   evening: [["Last call on today's holds", (list) => `${list} Get them in before bed and log them.`]],
 };
