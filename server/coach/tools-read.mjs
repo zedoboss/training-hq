@@ -140,7 +140,18 @@ export function holdsDueText(s) {
     const mine = open.filter((x) => x.label === label);
     const ask = mine.find((x) => x.ask);
     if (ask) { parts.push(`${label}: rest-day hold not answered yet: ask it as its own question, naming the ${label.toLowerCase()}: the gym for the ${ask.restHold} hold, another hold he names, or skip today`); continue; }
-    const when = mine.map((x) => (x.slot === 'after' ? 'after the session' : x.time && nowHm >= x.time ? `one now (the ${formatHm(x.time)} ${x.slot === 'evening' ? 'evening' : 'morning'} round is late)` : `the ${x.slot === 'evening' ? 'evening' : x.slot === 'morning' ? 'morning' : 'rest-day'} one at ${formatHm(x.time)}${reminded ? ' (the app reminds him then)' : ''}`));
+    // Only one late round is "now": a second late one (both missed by 10:00 PM) comes later, never "one now" twice.
+    let nowSaid = false;
+    const when = mine.map((x) => {
+      const name = x.slot === 'evening' ? 'evening' : x.slot === 'morning' ? 'morning' : 'rest-day';
+      if (x.slot === 'after') return 'after the session';
+      if (x.time && nowHm >= x.time) {
+        if (nowSaid) return `the ${name} one later, once there's a gap (the ${formatHm(x.time)} round is late too)`;
+        nowSaid = true;
+        return `one now (the ${formatHm(x.time)} ${name} round is late)`;
+      }
+      return `the ${name} one at ${formatHm(x.time)}${reminded ? ' (the app reminds him then)' : ''}`;
+    });
     parts.push(`${label}: ${mine[0].exercise}, ${mine.length === 1 ? '1 round' : `${mine.length} rounds`} of 3 × 30 s still due today: ${when.join(', ')}${mine.length > 1 ? '; not back to back' : ''}`);
   }
   return `Holds still due today: ${parts.join('. ')}.`;

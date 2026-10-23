@@ -462,6 +462,11 @@ test('schedule: a rest day says plainly which holds are still due today, and lea
   const off = await call('schedule', { action: 'rest_today' });
   assert.match(off.text, /the morning one at 9:30 AM, the evening one at 9:30 PM; not back to back/);
   assert.doesNotMatch(off.text, /the app reminds him then/);
+  // Both rounds missed by 10:00 PM: one now, the other later, never "one now" twice.
+  await call('schedule', { action: 'undo_rest' });
+  clock = Date.UTC(2026, 0, 20, 22, 0);
+  const late = await call('schedule', { action: 'rest_today' });
+  assert.match(late.text, /one now \(the 9:30 AM morning round is late\), the evening one later, once there's a gap \(the 9:30 PM round is late too\); not back to back/);
 });
 
 test('schedule: a session time set after its usual check-in time moves the check-in to just before he leaves', async () => {
