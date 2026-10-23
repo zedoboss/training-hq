@@ -7,8 +7,13 @@ import { checklist, shortName, statusOn, stockStatus, lastsText, outOfStock, out
 import { addDays } from './rotation.js';
 import { ladderState, stepText, plannedHm, OVERDUE_MIN } from './sauna.js';
 
-/** Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. */
-export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, soonMin: 5, cookingMin: 10, againMin: 5, againForMin: 120 };
+/**
+ * Minutes after a meal time before asking, how far back a meal counts for it, and when "cooking" asks again. Unanswered,
+ * a few check-ins, further apart and each worded differently (Fri 10/23, his words: "You've been bumping me... I went
+ * with the ghost approach today. So you need something more human-like responses": "still waiting" every 5 minutes):
+ * checkInMin after the ask, followUpMin after the first check back on "soon" or "cooking".
+ */
+export const MEAL_NUDGE = { afterMin: 45, windowMin: 90, soonMin: 5, cookingMin: 10, checkInMin: [20, 60, 120], followUpMin: [20, 50] };
 
 const hmId = (hm) => hm.replace(':', '');
 
@@ -34,59 +39,90 @@ export const mealTimesOf = (list) => (list || []).filter((t) => /^\d{2}:\d{2}$/.
 export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [] }) {
   const out = [];
   const today = meals.filter((m) => m.date === date).sort((a, b) => a.at - b.at);
-  for (const slot of mealTimesOf(mealTimes)) {
+  const slots = mealTimesOf(mealTimes);
+  // When a meal's questions start: its "start cooking", else its ask.
+  const askHmOf = (slot) => (slot.latest ? slot.time : addMinutesHm(slot.time, MEAL_NUDGE.afterMin));
+  const startOf = (slot) => Math.min(zonedTime(date, askHmOf(slot), tz), zonedTime(date, slot.time, tz) - (slot.cookMin || 0) * 60000);
+  slots.forEach((slot, n) => {
     const slotAt = zonedTime(date, slot.time, tz);
     const id = `${date}.${hmId(slot.time)}`;
     const check = checks.find((c) => c.id === id);
     const logged = today.some((m) => m.at >= slotAt - MEAL_NUDGE.windowMin * 60000);
     const before = today.filter((m) => m.at < slotAt - MEAL_NUDGE.windowMin * 60000).at(-1);
+    const earlier = slots.slice(0, n).map((t) => checks.find((c) => c.id === `${date}.${hmId(t.time)}`)).filter(Boolean);
+    // Fri 10/23, his words: "you said last meal and then you mean like cooking and then you mentioned first meal is
+    // late... that kind of doesn't make sense": nothing eaten yet today, a later meal time is his first meal of the day.
+    const firstOfDay = n > 0 && !before && !earlier.some((c) => c.answer === 'eaten');
+    const label = firstOfDay ? 'First meal of the day' : slot.name;
+    // He's on an earlier meal (about to cook or cooking, in the last 2 hours, not logged yet): its own check-backs ask;
+    // this one doesn't start on top of them.
+    const onEarlier = earlier.some((c) => (c.answer === 'soon' || c.answer === 'cooking') && c.at > startOf(slot) - 2 * 3600000 && !today.some((m) => m.at >= c.at));
+    const open = !logged && !check && !onEarlier;
+    // The next meal time takes over: no more check-ins on this one from its start.
+    const nextAt = slots[n + 1] ? startOf(slots[n + 1]) : Infinity;
     // With a latest time the meal is a target: asked at its time; without, 45 minutes after it.
-    const askHm = slot.latest ? slot.time : addMinutesHm(slot.time, MEAL_NUDGE.afterMin);
+    const askHm = askHmOf(slot);
     if (slot.cookMin) {
       // Once, at its time: start cooking so it's on the plate at the meal time.
       out.push({
         id: `meal-cook:${date}:${hmId(slot.time)}`, kind: 'cook', at: slotAt - slot.cookMin * 60000, url: '#/fuel',
-        tag: `meal-${date}-${hmId(slot.time)}`, fixed: false, title: `Start cooking: ${slot.name.toLowerCase()} at ${formatHm(slot.time)}`,
-        body: `${slot.cookMin} minutes to get it on the plate${slot.latest ? `; ${formatHm(slot.latest)} at the latest` : ''}.`,
-        due: !logged && !check,
+        tag: `meal-${date}-${hmId(slot.time)}`, fixed: false,
+        title: firstOfDay ? 'Nothing eaten yet today' : `Start cooking: ${slot.name.toLowerCase()} at ${formatHm(slot.time)}`,
+        body: firstOfDay
+          ? `Start cooking now: ${slot.cookMin} minutes and it's on the plate by ${formatHm(slot.time)}${slot.latest ? `; ${formatHm(slot.latest)} at the latest` : ''}.`
+          : `${slot.cookMin} minutes to get it on the plate${slot.latest ? `; ${formatHm(slot.latest)} at the latest` : ''}.`,
+        due: open,
       });
     }
+    // Asked once; the check-ins below follow it, the 30-minute nudges don't repeat it (again: false).
     out.push({
       id: `meal:${date}:${hmId(slot.time)}`, kind: 'meals', at: zonedTime(date, askHm, tz), url: `#/fuel/check/${date}/${hmId(slot.time)}`,
-      tag: `meal-${date}-${hmId(slot.time)}`, fixed: false, title: `${slot.name} time`,
+      tag: `meal-${date}-${hmId(slot.time)}`, fixed: false, title: firstOfDay ? label : `${slot.name} time`,
       // The last meal by its time, not its name (Tue 10/20: "Lunch time ... nothing logged since lunch", his 2:22 PM
       // meal had been named Lunch before he set his meal times).
       body: `${formatHm(askHm)}, nothing logged ${before ? `since your ${formatTime(new Date(before.at), tz)} meal` : 'yet today'}.${slot.latest ? ` ${formatHm(slot.latest)} at the latest.` : ''} Eaten, cooking, or skipping?`,
-      due: !logged && !check,
-      ...(slot.latest ? { latestAt: zonedTime(date, slot.latest, tz), name: slot.name } : {}),
+      again: false, due: open,
+      ...(slot.latest ? { latestAt: zonedTime(date, slot.latest, tz), name: label } : {}),
     });
-    // Thu 10/22, his words: "He should remind me every 5 minutes if I haven't responded": until he answers (eaten,
-    // cooking or skipping) or logs a meal, every 5 minutes for 2 hours; the coach's 30-minute nudges after that.
+    // No answer: a few check-ins like a coach, further apart, each said differently, until he answers or logs a meal,
+    // or the next meal time starts (replaces Thu 10/22's every 5 minutes for 2 hours).
     const askAt = zonedTime(date, askHm, tz);
-    for (let k = 1; k * MEAL_NUDGE.againMin <= MEAL_NUDGE.againForMin; k++) {
+    const lower = label.toLowerCase();
+    const latestHm = slot.latest ? formatHm(slot.latest) : null;
+    MEAL_NUDGE.checkInMin.forEach((min, k) => {
+      const at = askAt + min * 60000;
+      if (at >= nextAt) return;
+      const late = slot.latest && at >= zonedTime(date, slot.latest, tz);
+      const [title, body] = [
+        [`${label}: haven't heard from you`, 'Eaten, cooking, or skipping it?'],
+        [`Still nothing on your ${lower}`, late ? `${latestHm} was the latest you set. Eat now, or skip it?` : `${latestHm ? `${latestHm} is the latest you set. ` : ''}When are you eating, or are you skipping it?`],
+        [`Last check on your ${lower}`, 'Eating now, or skipping it today?'],
+      ][k];
       out.push({
-        id: `meal-again:${date}:${hmId(slot.time)}:${k}`, kind: 'meals', at: askAt + k * MEAL_NUDGE.againMin * 60000, url: `#/fuel/check/${date}/${hmId(slot.time)}`,
-        tag: `meal-${date}-${hmId(slot.time)}`, group: `meal-again:${date}:${hmId(slot.time)}`, fixed: false,
-        title: `${slot.name}: still waiting`, body: `Asked at ${formatHm(askHm)}. Eaten, cooking, or skipping?`, due: !logged && !check,
+        id: `meal-again:${date}:${hmId(slot.time)}:${k + 1}`, kind: 'meals', at, url: `#/fuel/check/${date}/${hmId(slot.time)}`,
+        tag: `meal-${date}-${hmId(slot.time)}`, group: `meal-again:${date}:${hmId(slot.time)}`, fixed: false, title, body, due: open,
       });
-    }
+    });
     // His answer, then (Thu 10/22, his words): about to cook ("soon") asks again in 5 minutes whether he's cooking;
     // cooking checks back in 10 (1:03 PM: "within 10 minutes", not 15) to see if he has eaten, so he logs it.
-    // Unanswered, every 5 minutes after that, until a meal is logged or he answers again.
+    // Unanswered, two more check backs, further apart and said differently, until a meal is logged or he answers again.
     if (check?.answer === 'soon' || check?.answer === 'cooking') {
       const soon = check.answer === 'soon';
       const first = check.at + (soon ? MEAL_NUDGE.soonMin : MEAL_NUDGE.cookingMin) * 60000;
-      for (let k = 0; k * MEAL_NUDGE.againMin <= MEAL_NUDGE.againForMin; k++) {
+      const said = soon
+        ? [[`${label}: cooking yet?`, 'Cooking, eaten, or skipping?'], [`Started on your ${lower}?`, 'Cooking, eaten, or skipping it?'], [`Your ${lower}: still on?`, 'Cooking, eaten, or skipping it?']]
+        : [[`${label}: eaten?`, 'Log it: the before photo, or tell me what you ate. Still cooking, or skipping?'],
+          [`${label}: done cooking?`, "Tell me what's on the plate and I'll log it. Or still at it?"],
+          [`Did you eat your ${lower}?`, 'What did you have? Or did you skip it?']];
+      [0, ...MEAL_NUDGE.followUpMin].forEach((min, k) => {
         out.push({
-          id: `meal-${check.answer}:${date}:${hmId(slot.time)}:${check.at}${k ? `:${k}` : ''}`, kind: 'meals', at: first + k * MEAL_NUDGE.againMin * 60000,
+          id: `meal-${check.answer}:${date}:${hmId(slot.time)}:${check.at}${k ? `:${k}` : ''}`, kind: 'meals', at: first + min * 60000,
           url: `#/fuel/check/${date}/${hmId(slot.time)}`, tag: `meal-${date}-${hmId(slot.time)}`, group: `meal-${check.answer}:${date}:${hmId(slot.time)}`, fixed: false,
-          title: soon ? `${slot.name}: cooking yet?` : `${slot.name}: eaten?`,
-          body: soon ? 'Cooking, eaten, or skipping?' : 'Log it: the before photo, or tell me what you ate. Still cooking, or skipping?',
-          due: !today.some((m) => m.at >= check.at),
+          title: said[k][0], body: said[k][1], due: !today.some((m) => m.at >= check.at),
         });
-      }
+      });
     }
-  }
+  });
   // After photo, about 25 minutes after the before photo.
   for (const m of today) {
     if (!m.before?.photoId || m.source !== 'photo') continue;

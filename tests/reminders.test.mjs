@@ -174,11 +174,12 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   let items = all.filter((i) => !i.group);
   const k = byKind(items);
   assert.equal(items.length, 3);
-  // Thu 10/22, his words: "He should remind me every 5 minutes if I haven't responded": every 5 minutes for 2 hours.
+  // Fri 10/23 (replaces Thu 10/22's every 5 minutes for 2 hours): three check-ins, further apart, each said differently.
   const again = all.filter((i) => i.group === `meal-again:${date}:1230`);
-  assert.equal(again.length, 24);
-  assert.deepEqual([again[0].at, again[23].at], [at(date, '13:20'), at(date, '15:15')]);
-  assert.equal(again[0].body, 'Asked at 1:15 PM. Eaten, cooking, or skipping?');
+  assert.equal(again.length, 3);
+  assert.deepEqual(again.map((i) => i.at), [at(date, '13:35'), at(date, '14:15'), at(date, '15:15')]);
+  assert.equal(new Set(again.map((i) => `${i.title} ${i.body}`)).size, 3, 'no line twice');
+  assert.equal(`${again[0].title}. ${again[0].body}`, "Lunch: haven't heard from you. Eaten, cooking, or skipping it?");
   assert.ok(again.every((i) => i.due) && all.filter((i) => i.group === `meal-again:${date}:0730`).every((i) => !i.due), 'breakfast was logged');
   const lunch = items.find((i) => i.id === `meal:${date}:1230`);
   assert.equal(lunch.at, at(date, '13:15'));
@@ -199,7 +200,9 @@ test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cookin
   assert.equal(cooking.at, at(date, '13:26'));
   assert.equal(cooking.title, 'Lunch: eaten?');
   assert.equal(cooking.due, true);
-  assert.deepEqual(items.filter((i) => i.group === `meal-cooking:${date}:1230`).slice(1, 3).map((i) => i.at), [at(date, '13:31'), at(date, '13:36')]);
+  const backs = items.filter((i) => i.group === `meal-cooking:${date}:1230`);
+  assert.deepEqual(backs.slice(1).map((i) => i.at), [at(date, '13:46'), at(date, '14:16')], 'then 2 more, further apart');
+  assert.equal(new Set(backs.map((i) => i.title)).size, 3, 'each said differently');
   // About to cook: asked again in 5 minutes, "cooking yet?".
   const soon = mealReminders({ date, tz: TZ, meals: [breakfast], checks: [{ ...checks[0], answer: 'soon' }], mealTimes: settings.fuel.mealTimes }).find((i) => i.id.startsWith('meal-soon'));
   assert.deepEqual([soon.at, soon.title, soon.due], [at(date, '13:21'), 'Lunch: cooking yet?', true]);
@@ -318,7 +321,7 @@ test('meals with a latest time and cook minutes (Tue 10/20): cook reminder, aske
   assert.deepEqual(mealTimesOf([{ name: 'X', time: '12:00', latest: '11:00' }])[0].latest, null, 'a latest before the meal time is ignored');
 });
 
-test('a meal asked again every 5 minutes; after the Mac slept, only the latest repeat is sent (Thu 10/22)', async () => {
+test('a meal\'s check-ins; after the Mac slept, only the latest one is sent (Thu 10/22, spacing Fri 10/23)', async () => {
   const { mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -337,11 +340,13 @@ test('a meal asked again every 5 minutes; after the Mac slept, only the latest r
     const ids = async () => (await n.tick()).map((i) => i.id || '').filter((id) => /^meal(-again)?:/.test(id));
     assert.deepEqual(await ids(), ['meal:2026-01-20:1230']);
     now = at('2026-01-20', '12:35');
+    assert.deepEqual(await ids(), [], 'not every 5 minutes');
+    now = at('2026-01-20', '12:50');
     assert.deepEqual(await ids(), ['meal-again:2026-01-20:1230:1']);
-    // Asleep 12:36-12:51: one repeat, the latest, not three at once; the skipped ones never come.
-    now = at('2026-01-20', '12:51');
-    assert.deepEqual(await ids(), ['meal-again:2026-01-20:1230:4']);
-    now = at('2026-01-20', '12:52');
+    // Asleep 12:51-2:31 PM: one check-in, the latest, not two at once; the skipped one never comes.
+    now = at('2026-01-20', '14:31');
+    assert.deepEqual(await ids(), ['meal-again:2026-01-20:1230:3']);
+    now = at('2026-01-20', '14:32');
     assert.deepEqual(await ids(), []);
     assert.equal(sent.at(-1).tag, 'meal-2026-01-20-1230');
     // He answers: no more.
@@ -352,4 +357,65 @@ test('a meal asked again every 5 minutes; after the Mac slept, only the latest r
     store.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('Fri 10/23: he goes quiet all day: a few check-ins, never the same line, and with nothing eaten the later meal is his first meal of the day', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { startNotifier } = await import('../server/notify.mjs');
+  const { mealReminders } = await import('../app/js/lib/fuel-reminders.js');
+  const date = '2026-01-20';
+  const hmOf = (t) => new Date(t).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+  const mealTimes = [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
+  const dir = mkdtempSync(join(tmpdir(), 'thq-meal-quiet-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { fuel: { mealTimes }, notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.setMeta('morning:state', { date, open: at(date, '05:00') }); // his morning questions are through
+    let now = at(date, '11:55');
+    const sent = [];
+    const push = { list: () => [{ deviceId: 'a1b2c3d4e5f6' }], notify: async (m) => { if (/^meal-/.test(m.tag || '')) sent.push({ at: now, body: m.body }); return { sent: 1, failed: 0, dropped: 0 }; } };
+    const n = startNotifier({ store, push, tz: TZ, now: () => now, everyMs: 1e9 });
+    n.stop();
+    for (; now <= at(date, '19:00'); now += 5 * 60000) await n.tick();
+    const hms = sent.map((m) => hmOf(m.at));
+    assert.deepEqual(hms, ['12:00 PM', '12:30 PM', '12:50 PM', '1:30 PM', '2:30 PM', '4:00 PM', '4:30 PM', '4:50 PM', '5:30 PM', '6:30 PM'], 'never every 5 minutes');
+    // Each line differs from the one before (the mood line aside), and the later meal never talks about a "last meal".
+    const facts = sent.map((m) => m.body.split(/(?<=[.?!])\s/).slice(0, 2).join(' '));
+    for (let k = 1; k < facts.length; k++) assert.notEqual(facts[k], facts[k - 1]);
+    const later = sent.filter((m) => m.at >= at(date, '16:00')).map((m) => m.body);
+    assert.ok(later.every((b) => !/last meal|is late|first meal is/i.test(b)), later.join(' | '));
+    assert.match(later[0], /^Nothing eaten yet today\. Start cooking now: 30 minutes and it's on the plate by 4:30 PM; 5:00 PM at the latest\./);
+    assert.match(later[1], /^First meal of the day\. 4:30 PM, nothing logged yet today\. 5:00 PM at the latest\. Eaten, cooking, or skipping\?$/);
+    assert.equal(later[2], "First meal of the day: haven't heard from you. Eaten, cooking, or skipping it?");
+    assert.match(later[3], /^Still nothing on your first meal of the day\. 5:00 PM was the latest you set\. Eat now, or skip it\?$/);
+    assert.ok(sent.filter((m) => m.at < at(date, '16:00')).every((b) => !/last meal|of the day/i.test(b.body)));
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const items = (meals = [], checks = []) => mealReminders({ date, tz: TZ, meals, checks, mealTimes });
+  const one = (list, id) => list.find((i) => i.id === id);
+  // He ate the first meal: the later one is his last meal, as before.
+  const ate = items([{ id: 'm', date, at: at(date, '13:00'), name: 'First meal' }]);
+  assert.equal(one(ate, `meal-cook:${date}:1630`).title, 'Start cooking: last meal at 4:30 PM');
+  assert.equal(one(ate, `meal:${date}:1630`).title, 'Last meal time');
+  assert.equal(one(ate, `meal-again:${date}:1630:1`).title, "Last meal: haven't heard from you");
+  // Said "eaten" without logging it: the same. Skipped it: still nothing eaten, so the first meal of the day.
+  assert.equal(one(items([], [{ id: `${date}.1230`, answer: 'eaten', at: at(date, '13:00') }]), `meal:${date}:1630`).title, 'Last meal time');
+  const skip = items([], [{ id: `${date}.1230`, answer: 'skipped', at: at(date, '13:00') }]);
+  assert.equal(one(skip, `meal:${date}:1630`).title, 'First meal of the day');
+  assert.ok(skip.filter((i) => i.id.includes(':1230')).every((i) => !i.due), 'skipped: nothing more about it');
+  // The next meal time takes over: the first meal's check-ins stop at its "start cooking".
+  const early = mealReminders({ date, tz: TZ, mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }, { name: 'Last meal', time: '15:00', latest: '16:00', cookMin: 30 }] });
+  assert.deepEqual(early.filter((i) => i.group === `meal-again:${date}:1230`).map((i) => hmOf(i.at)), ['12:50 PM', '1:30 PM'], 'not 2:30 PM, after 2:30 PM cooking starts');
+  // Cooking the first meal late (3:50 PM, not logged yet): its check backs ask, the later meal doesn't start on top.
+  const cooking = items([], [{ id: `${date}.1230`, answer: 'cooking', at: at(date, '15:50') }]);
+  assert.ok(cooking.filter((i) => i.id.includes(':1630')).every((i) => !i.due), 'no "start cooking" or ask for the later meal');
+  assert.deepEqual(cooking.filter((i) => i.id.startsWith('meal-cooking:')).map((i) => [hmOf(i.at), i.due]), [['4:00 PM', true], ['4:20 PM', true], ['4:50 PM', true]]);
+  // Logged at 4:10 PM: everything stops (the meal counts for the later time too).
+  const logged = items([{ id: 'm', date, at: at(date, '16:10') }], [{ id: `${date}.1230`, answer: 'cooking', at: at(date, '15:50') }]);
+  assert.ok(logged.filter((i) => i.kind === 'meals' || i.kind === 'cook').every((i) => !i.due));
 });

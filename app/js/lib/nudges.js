@@ -177,15 +177,12 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     // after photo came back every half hour or hour); repeats the planner sends itself (group) aren't doubled.
     if (!a || !r.due || r.again === false || r.group || r.at > now || r.at < now - 16 * 3600000) continue;
     let title = String(r.title || '').replace(/[.:]?\s*$/, '');
-    let body = r.body;
+    const body = r.body;
     let tail = '';
     // Holds an hour or more past their time say so (Tue 10/20, his words: it said "Morning holds" in the afternoon).
     // A late morning round: one now, the evening one at its time, not back to back (brief section 4, line 8).
-    // A meal past the latest he set (Tue 10/20): say it's late, with both times.
-    if (r.kind === 'meals' && r.latestAt && now > r.latestAt) {
-      title = `${r.name} is late: due ${formatHm(hmOf(new Date(r.at), tz))}, ${formatHm(hmOf(new Date(r.latestAt), tz))} was the latest`;
-      body = 'Nothing logged. Eaten, cooking, or skipping?';
-    }
+    // A meal ask isn't nudged here: its own check-ins follow it (lib/fuel-reminders.js; Fri 10/23, "First meal is late"
+    // came on top of them, and after the last meal's time).
     if (r.kind === 'holds' && now - r.at >= 60 * 60000) {
       title = `${title} still not done (due ${formatHm(hmOf(new Date(r.at), tz))})`;
       const evening = r.id.startsWith('holds-morning:') ? reminders.find((x) => x.id === r.id.replace('holds-morning:', 'holds-evening:')) : null;
@@ -203,8 +200,11 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     out.push({ key: 'supps-untimed', priority: 58, gapMin: 60, url: '#/supps',
       text: `Supplements: ${suppsUntimed.taken ?? suppsUntimed.total - o.length} of ${suppsUntimed.total} taken today. Still open: ${o.slice(0, 4).join(', ')}${o.length > 4 ? ` and ${o.length - 4} more` : ''}. Take them and tell me.` });
   }
-  // A meal still being read counts as nothing yet: no "you're behind" until it's read (Thu 10/22 audit).
-  if (targets?.kcal && frac >= 0.15 && !eaten.unread) {
+  // A meal still being read counts as nothing yet: no "you're behind" until it's read (Thu 10/22 audit). A meal-time
+  // question he hasn't answered yet: that one asks, not this too (Fri 10/23: "Food: 0 of 3,174 kcal... Eat." between
+  // the meal asks).
+  const mealAsked = reminders.some((r) => r.kind === 'meals' && String(r.id).startsWith('meal:') && r.due && r.at <= now);
+  if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked) {
     const expect = targets.kcal * frac;
     if (eaten.kcal < expect * 0.7 && expect - eaten.kcal >= 400) {
       out.push({ key: 'food', priority: 55, gapMin: 60, url: '#/fuel',

@@ -77,7 +77,7 @@ self.addEventListener('push', (event) => {
   // Thu 10/22, "Rest over": each one must sound, so it gets a fresh tag (a reused tag may replace the last one
   // silently); the one before it is closed so they don't pile up.
   const rest = /^(rest|hold)$/.test(m.tag || '');
-  // A meal asked again every 5 minutes (Thu 10/22): the same, per meal.
+  // A meal's check-ins (Thu 10/22): the same, per meal.
   const meal = /^meal-/.test(m.tag || '');
   event.waitUntil((async () => {
     if (rest) { try { for (const n of await self.registration.getNotifications()) if (/^(rest|hold)-/.test(n.tag || '')) n.close(); } catch { /* not supported */ } }

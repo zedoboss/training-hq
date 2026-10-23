@@ -232,7 +232,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
         title: 'Head home', body: 'Gym done. Get settled, food is next.', calm: true, again: false, due: !fed });
       const from = activity.workoutStart?.[date] ?? ag.doneAt;
       const inGym = (i) => (i.kind === 'meals' || i.kind === 'cook') && i.id !== `home:${date}` && i.at >= from && i.at < ag.mealAt;
-      // Repeats (every 5 minutes until he answers) that fell in the gym time: none; the moved prompt asks once.
+      // Check-ins (until he answers) that fell in the gym time: none; the moved prompt asks once.
       for (const i of out) if (inGym(i) && i.group) i.due = false;
       const moved = out.filter((i) => inGym(i) && !i.group);
       // One prompt per meal at that moment: the later one (the meal itself over "start cooking").

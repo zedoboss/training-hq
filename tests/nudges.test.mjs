@@ -352,12 +352,21 @@ test('holds an hour past their time say so; a late morning round: one now, the e
   assert.ok(both.includes('Morning holds still not done (due 10:30 AM). Knees: Wall Hold. 3 × 30 s each, about 6 min a round.'), 'evening time passed: no "evening one at"');
 });
 
-test('a meal past the latest he set says it is late, with both times', () => {
-  const reminders = [{ id: `meal:${D}:1230`, kind: 'meals', tag: 'meal-1230', at: at(D, '12:30'), latestAt: at(D, '14:00'), name: 'First meal', due: true,
-    title: 'First meal time', body: '12:30 PM, nothing logged yet today. 2:00 PM at the latest. Eaten, cooking, or skipping?' }];
-  const text = (now) => nudgeCandidates({ now, tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' }).find((c) => c.key.startsWith('meals:'))?.text;
-  assert.equal(text(at(D, '13:00')), 'First meal time. 12:30 PM, nothing logged yet today. 2:00 PM at the latest. Eaten, cooking, or skipping?');
-  assert.equal(text(at(D, '14:10')), 'First meal is late: due 12:30 PM, 2:00 PM was the latest. Nothing logged. Eaten, cooking, or skipping?');
+test('Fri 10/23: an unanswered meal ask is not nudged again on top of its check-ins, and no "Food: 0 of..." while it is out', async () => {
+  const { mealReminders } = await import('../app/js/lib/fuel-reminders.js');
+  const mealTimes = [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
+  const reminders = mealReminders({ date: D, tz: TZ, meals: [], mealTimes });
+  const targets = { kcal: 3174, protein: 242.5 };
+  const cands = (hm, list = reminders) => nudgeCandidates({ now: at(D, hm), tz: TZ, reminders: list, rot: legsDay, wakeHm: '10:00', bedHm: '00:00', targets, sleepLogged: true });
+  for (const hm of ['13:00', '14:40', '15:20', '16:10', '16:40']) {
+    const c = cands(hm);
+    assert.ok(!c.some((x) => x.key.startsWith('meals:')), `${hm}: no meal nudge`);
+    assert.ok(!c.some((x) => /is late/.test(x.text)), `${hm}: no "is late"`);
+    assert.ok(!c.some((x) => x.key === 'food'), `${hm}: no food pace nudge while a meal question is out`);
+  }
+  // Skipped (answered): the food pace nudge may speak again.
+  const skipped = mealReminders({ date: D, tz: TZ, meals: [], mealTimes, checks: [{ id: `${D}.1230`, answer: 'skipped', at: at(D, '12:40') }, { id: `${D}.1630`, answer: 'skipped', at: at(D, '16:40') }] });
+  assert.ok(cands('16:45', skipped).some((x) => x.key === 'food'));
 });
 
 test('walk tick (Tue 10/20): asks, 5 minutes later asks for a time, stays quiet once he gives one, then "walk time"', async () => {
@@ -680,8 +689,8 @@ test('Thu 10/22: a meal ask and his own reminder about the meal in the same minu
       t = at(D, '16:40') + 38250;
       await n.tick();
       assert.deepEqual(sent.list, ['coach-home', 'coach-pan']);
-      // The next ask in the run comes as usual.
-      t = at(D, '16:45') + 23250;
+      // The next check back in the run comes as usual, 20 minutes on.
+      t = at(D, '17:00') + 23250;
       await n.tick();
       assert.deepEqual(sent.list, ['coach-home', 'coach-pan', `meal-${D}-1630`]);
     } finally { n.stop(); }

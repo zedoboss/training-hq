@@ -130,11 +130,12 @@ export function notifyPanel(el) {
     if (!ul) return;
     const items = await todaysReminders();
     const today = isoDate(new Date());
-    // A run of repeats (a meal asked every 5 minutes) is one line: its first, "then every 5 minutes until you answer".
+    // A run of check-ins (a meal he hasn't answered) is one line: its first, then how many more follow.
     const firstOf = new Map();
     for (const i of items) if (i.group && !(firstOf.get(i.group)?.at <= i.at)) firstOf.set(i.group, i);
+    const more = (g) => items.filter((x) => x.group === g).length - 1;
     const mine = items.filter((i) => isoDate(new Date(i.at)) === today && (!i.group || firstOf.get(i.group) === i))
-      .map((i) => (i.group ? { ...i, body: `${i.body} Then every 5 minutes until you answer.`, due: items.some((x) => x.group === i.group && x.due) } : i));
+      .map((i) => (i.group ? { ...i, body: `${i.body}${more(i.group) > 0 ? ` No answer: ${more(i.group)} more check-in${more(i.group) > 1 ? 's' : ''}, further apart.` : ''}`, due: items.some((x) => x.group === i.group && x.due) } : i));
     ul.innerHTML = mine.length ? mine.map((i) => `<li class="rem ${i.due ? '' : 'is-done'}"><span class="hud ${i.due ? 'c-cyan' : 'c-muted'}">${formatTime(new Date(i.at))}</span>
       <span><b>${esc(i.title)}</b><br><span class="hint">${esc(i.body)}${i.due ? '' : ' · nothing to send'}</span></span></li>`).join('')
       : '<li class="hint">Nothing today. Set a session time on Train to get the check-in and session reminders.</li>';

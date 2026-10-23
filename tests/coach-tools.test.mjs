@@ -817,6 +817,16 @@ test('meal_check with no meal named (Thu 10/22 audit): the earliest meal asked a
   assert.match((await call('meal_check', { answer: 'cooking' })).text, /^Last meal: cooking/);
 });
 
+test('meal_check with no meal named (Fri 10/23): nothing answered all day, once the later meal time has started, that one', async () => {
+  store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }] } });
+  for (const id of ['2026-01-20.1230', '2026-01-20.1630']) store.writeLocal('meal-checks', id, null, { deleted: true });
+  clock = Date.UTC(2026, 0, 20, 15, 50);
+  assert.match((await call('meal_check', { answer: 'soon' })).text, /^First meal: about to cook/, 'before 4:00 PM: still the first one');
+  store.writeLocal('meal-checks', '2026-01-20.1230', null, { deleted: true });
+  clock = Date.UTC(2026, 0, 20, 16, 35);
+  assert.match((await call('meal_check', { answer: 'skipped' })).text, /^Last meal skipped/, 'the one the app is asking about now');
+});
+
 test('weather (Thu 10/22): a forecast is said as one, the station and his word come with it, and his word wins', async () => {
   const h = (min, rain, mm) => ({ at: NOW + min * 60000, uv: 0, feels: 30, temp: 29, rain, mm });
   store.setMeta('weather', { fetchedAt: NOW, label: 'test place', current: { at: NOW, precip: 0.2, code: 53, temp: 29, feels: 33 }, hours: [h(0, 47, [0.1, 0, 0.7, 0]), h(60, 80, [0.7, 0.4, 0.9, 0.5])],

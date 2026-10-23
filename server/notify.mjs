@@ -660,7 +660,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const holds = holdsOf(store);
       const all = plan(store, t, zone);
       const due = dueNow(all, t, sent).filter((i) => !itemHeld(i, holds, t));
-      // A run of repeats due at once (the meal asked every 5 minutes, the Mac asleep a while): the latest only; the
+      // A run of repeats due at once (a meal's check-ins, the Mac asleep a while): the latest only; the
       // rest count as sent.
       const latest = new Map();
       for (const i of due) if (i.group && !(latest.get(i.group)?.at >= i.at)) latest.set(i.group, i);
