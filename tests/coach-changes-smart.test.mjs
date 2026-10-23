@@ -56,13 +56,15 @@ test('a correction of a queued request goes into it: same id, same place in line
   assert.match(p, /His words, in order \(the latest wins where they differ\):\n1\. 4:20 PM, his request: "Errands should wait for my meal"[\s\S]*2\. 4:24 PM, his correction: "Not always, only today because of the time frame"\n   What he wants: only reminders that land mid-meal wait/);
 });
 
-test('a correction while it is being built: a correcting request right after it, built on top of it', async () => {
+test('a correction while a build from before Fri 10/23 runs (it can\'t take words): a correcting request right after it', async () => {
   const { q, launched, result } = queue();
   const a = q.request({ said: 'Errands should wait for my meal' });
   clock = at('16:21');
   const b = q.request({ said: 'Shorter walk messages' });
   await q.tick();
   assert.equal(rec(a.id).status, 'working');
+  const { briefed, ...old } = rec(a.id);
+  store.writeLocal(COL, a.id, old);
   clock = at('16:24');
   const r = await ask({ said: 'No, only the ones that land mid-meal', amends: a.id });
   assert.match(r.text, /is being built right now, so his correction is filed to build right after it, on top of it \(next in line, about 9 minutes\)/, '3 minutes left on the build, then its own 6');

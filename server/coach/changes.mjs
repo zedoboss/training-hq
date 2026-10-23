@@ -10,14 +10,17 @@
 //
 // One wish = one request (Thu 10/22: a correction became a second build, "double check" a third). A record keeps
 // every ask in order (asks: [{at, said, want, about, kind: ask|amend|verify|review}]): his corrections are merged into a
-// queued request, a request being built gets a correcting one right after it (corrects), "double check" sets verify
-// on an open one or queues a check of a finished one (kind 'check', checkOf).
+// queued request, a request being built gets them while it works (Fri 10/23, his words: "So I can add more details to
+// the same task": change-more.mjs hands them to the running builder or reviewer; words that come after it ended get
+// a correcting request right after it, corrects), "double check" sets verify on an open one or queues a check of a
+// finished one (kind 'check', checkOf).
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { findClaude } from '../claude.mjs';
+import { seenCount, addedAsks } from './change-more.mjs';
 import { formatTime, formatDay, isoDate } from '../../app/js/lib/time.js';
 
 export const COL = 'coach-changes';
@@ -127,14 +130,18 @@ export const relatedTo = (all = [], now = Date.now()) => all.filter((c) => isOpe
 
 const ASK_LABEL = { ask: 'his request', amend: 'his correction', verify: 'he asked to double-check', review: 'the reviewer found' };
 
-function wordsBlock(c, tz) {
+/** late: asks from this index on came after the builder had finished (the reviewer's prompt marks them). */
+function wordsBlock(c, tz, late = Infinity) {
   const asks = asksOf(c);
   const t = (ms) => (tz ? formatTime(new Date(ms), tz) : new Date(ms).toISOString());
   if (asks.length <= 1) {
     return `His words: "${c.said}"\nWhat it is about: ${c.about || '(see the conversation)'}\nWhat he wants instead: ${c.want || '(see his words)'}`;
   }
-  return `His words, in order (the latest wins where they differ):\n${asks.map((a, i) => `${i + 1}. ${t(a.at)}, ${ASK_LABEL[a.kind] || 'his words'}: "${a.said}"${a.about ? `\n   What it is about: ${a.about}` : ''}${a.want ? `\n   What he wants: ${a.want}` : ''}`).join('\n')}`;
+  return `His words, in order (the latest wins where they differ):\n${asks.map((a, i) => `${i + 1}. ${t(a.at)}, ${ASK_LABEL[a.kind] || 'his words'}${i >= late ? ' (came after the builder had finished: if the build doesn\'t cover it, do it yourself)' : ''}: "${a.said}"${a.about ? `\n   What it is about: ${a.about}` : ''}${a.want ? `\n   What he wants: ${a.want}` : ''}`).join('\n')}`;
 }
+
+/** He may add words while a chat works on his request: they come in as a note after a tool call or when it tries to end. */
+const LIVE_LINE = 'He may add more words while you work (Talk is open): they come in as a note starting "HE ADDED MORE TO THIS REQUEST" after a tool call or when you try to end. They are part of this request; work them in, the latest winning, and write the answer file again if the note says it was set aside.';
 
 const refLine = (r, tz) => `${r.id} ("${clip(r.said, 200)}", ${r.status}${r.doneAt ? ` ${formatTime(new Date(r.doneAt), tz)}` : ''}${r.answer ? `: "${clip(r.answer, 200)}"` : ''}${r.commits?.length ? `; commits ${r.commits.join(', ')}` : ''})`;
 
@@ -179,6 +186,7 @@ HOW
 6. Read only, never modify: ~/Documents/Celestial Vault, ~/Documents/gods-eye-view, ~/.celestial-globe. Never print, copy or move anything in config/.
 7. If his words can be read two ways that would do opposite things, change nothing and ask him one short question in your answer (status "question"). Otherwise take the most sensible reading and do it.
 8. A second chat checks your work against his words before he hears "done": test the cases around the one he hit, so it finds nothing.
+9. ${LIVE_LINE}
 
 WHEN YOU FINISH, write ${resultFile} with this JSON and nothing else, then end the chat:
 {"status": "done" | "failed" | "question", "said": "<what he reads, also as a phone notification: ONE short sentence, at most 120 characters, so the lock screen shows it whole; plain, blunt, starting with what changes for him; e.g. Done: after you log sleep I say good morning first; the check-in waits till you leave.>", "reload": <true if you changed anything under server/, else false>, "commits": ["<short sha> <subject>"], "checked": "<one line: what you tested to know it works>"}
@@ -195,7 +203,7 @@ export function reviewPrompt(c, { codeDir, privateDir, reviewFile, ref = null })
 Training HQ's server on this Mac started you to check one change a builder chat just made for him, before he hears "done". He is not watching this chat: don't ask him anything, decide yourself. For this chat this replaces "carry on from Where we stopped" and "wait for his go-ahead" in CLAUDE.md.
 
 HIS REQUEST (${c.kind || 'behaviour'})
-${wordsBlock(c, c.tz)}
+${wordsBlock(c, c.tz, c.builderHeard ?? Infinity)}
 ${c.kind === 'check' && ref ? `It is a check of change ${refLine(ref, c.tz || 'UTC')}.\n` : ''}${c.verify ? 'He asked for it to be double-checked: test it end to end the way he would meet it (a dev copy, or the real function with his real case from today), not only the unit tests.\n' : ''}
 The conversation up to it:
 ${c.context || '(none)'}
@@ -209,6 +217,7 @@ WHAT TO DO
 4. Check it against every one of his words (the latest wins): does it do what he asked, all of it, and nothing he didn't (one day's timing isn't a rule for every day)? Check the cases around it: the same moment on another day or at another time, nothing logged yet, after midnight, a repeat, the phone offline, a message he'd read on the lock screen. Check that every message it touches still reads right (his tone rules: BRIEF.md section 4 and his profile), and that no safety rule got weaker (HARD LIMITS in server/coach/prompt.mjs, the 30% cap, the readiness table, his tendon pain limit, the sauna ladder and hard stops, no supplement or medical advice).
 5. A small gap (a missed case, a wrong word, a missing test): fix it yourself the way the builder would: test, \`node scripts/precache.mjs\` after a change under app/, commit only your files and push the code repo (if HTTPS asks for a login, push to git@github.com:<owner>/<repo>.git); in the private folder commit locally, never push. A big miss (half his ask not done, his words read wrong, a safety rule weakened that a few lines can't restore): don't rebuild it; answer "failed" and say what is missing.
 6. Never touch the real database (data/training-hq.sqlite), never restart or stop the real server (port 4317), never read or print anything in config/. Read only: ~/Documents/Celestial Vault, ~/Documents/gods-eye-view, ~/.celestial-globe.
+7. ${LIVE_LINE} A small addition: do it yourself (status "fixed"); too big for a few lines: "failed" and say what is missing.
 
 WHEN YOU FINISH, write ${reviewFile} with this JSON and nothing else, then end the chat:
 {"status": "ok" | "fixed" | "failed", "said": "<ONE sentence for him, at most 120 characters: ok or fixed: what now works, starting with Done:; failed: what is still wrong, plainly>", "reload": <true if YOU changed anything under server/, else false>, "commits": ["<short sha> <subject>" of your own fixes], "checked": "<one line, at most 200 characters: what you checked>"}`;
@@ -233,10 +242,19 @@ export function launchBuilder({ claude = findClaude(), prompt, cwd, logFile, set
   } finally { closeSync(fd); }
 }
 
-/** The hooks for the builder: change-guard.mjs checks every tool call before it runs. */
-export function guardSettings({ node = process.execPath, guard, codeDir, privateDir }) {
-  const command = [node, guard, codeDir, privateDir].map((x) => `'${String(x).replace(/'/g, "'\\''")}'`).join(' ');
-  return JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } });
+/**
+ * The hooks for the builder: change-guard.mjs checks every tool call before it runs; with more, change-more.mjs hands
+ * over his words added while it works, after every tool call and when it tries to end.
+ */
+export function guardSettings({ node = process.execPath, guard, codeDir, privateDir, more = null }) {
+  const sh = (args) => args.map((x) => `'${String(x).replace(/'/g, "'\\''")}'`).join(' ');
+  const hooks = { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: sh([node, guard, codeDir, privateDir]) }] }] };
+  if (more) {
+    const command = sh([node, more.script, more.moreFile, more.seenFile, more.answerFile]);
+    hooks.PostToolUse = [{ matcher: '*', hooks: [{ type: 'command', command }] }];
+    hooks.Stop = [{ hooks: [{ type: 'command', command }] }];
+  }
+  return JSON.stringify({ hooks });
 }
 
 /** A folder's git HEAD, or null. */
@@ -259,14 +277,47 @@ const changedSince = (start, end, commits = []) => commits.length > 0 || Boolean
  * @param {() => boolean} [o.busy] the coach is answering: the restart waits
  * @param {() => {code: string|null, private: string|null}} [o.heads] both repos' git HEADs
  */
-export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, dirty = () => [], heads = null, log = () => {}, now = () => Date.now(), tz = () => 'UTC', timeoutMs = TIMEOUT_MS, reviewTimeoutMs = REVIEW_TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)) }) {
+export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, dirty = () => [], heads = null, log = () => {}, now = () => Date.now(), tz = () => 'UTC', timeoutMs = TIMEOUT_MS, reviewTimeoutMs = REVIEW_TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)), moreScript = fileURLToPath(new URL('./change-more.mjs', import.meta.url)) }) {
   const dir = join(privateDir, 'logs', 'coach-changes');
   const headsNow = heads || (() => ({ code: gitHead(codeDir), private: gitHead(privateDir) }));
   const all = () => store.listRecords(COL).map((r) => r.data).filter(Boolean).sort((a, b) => a.at - b.at);
   const one = (id) => (id ? all().find((x) => x.id === id) || null : null);
-  const put = (c) => { store.writeLocal(COL, c.id, c); return c; };
-  const files = (id) => ({ logFile: join(dir, `${id}.log`), resultFile: join(dir, `${id}.result.json`), reviewLog: join(dir, `${id}.review.log`), reviewFile: join(dir, `${id}.review.json`) });
+  // His words the coach added while this tick worked on an older copy of the record are kept.
+  const put = (c) => {
+    const cur = one(c.id);
+    const rec = cur && asksOf(cur).length > asksOf(c).length ? { ...c, asks: cur.asks, want: cur.want, context: cur.context, ...(cur.verify ? { verify: true } : {}) } : c;
+    store.writeLocal(COL, rec.id, rec);
+    return rec;
+  };
+  const files = (id) => ({ logFile: join(dir, `${id}.log`), resultFile: join(dir, `${id}.result.json`), reviewLog: join(dir, `${id}.review.log`), reviewFile: join(dir, `${id}.review.json`), moreFile: join(dir, `${id}.more.json`), seenFile: join(dir, `${id}.more.seen`) });
   const messages = () => store.listRecords(MSGS).map((r) => r.data).filter(Boolean);
+
+  // ---- his words added while a chat works on the request (change-more.mjs hands them over) ----
+  const writeAtomic = (file, text) => { writeFileSync(`${file}.tmp`, text); renameSync(`${file}.tmp`, file); };
+  /** How many of his asks the running chat has: those in its prompt (briefed) plus those handed over since. */
+  const heardOf = (c) => (c.briefed == null ? asksOf(c).length : c.briefed + seenCount(files(c.id).seenFile));
+  /** A fresh start for the chat about to run: nothing added yet, nothing seen. */
+  function resetMore(c) {
+    const { moreFile, seenFile } = files(c.id);
+    writeAtomic(moreFile, JSON.stringify({ asks: [] }));
+    rmSync(seenFile, { force: true });
+  }
+  /** The asks added since the running chat started, where its hooks read them. */
+  function syncMore(c) {
+    if (c.briefed == null) return;
+    const added = asksOf(c).slice(c.briefed);
+    const { moreFile } = files(c.id);
+    if (added.length === addedAsks(moreFile).length) return;
+    writeAtomic(moreFile, JSON.stringify({ asks: added.map((a) => ({ ...a, when: formatTime(new Date(a.at), c.tz || tz()) })) }));
+    log(`coach change ${c.id}: his added words go to the running ${c.stage === 'review' ? 'reviewer' : 'builder'}`);
+  }
+  const moreHooks = (c, answerFile) => { const { moreFile, seenFile } = files(c.id); return { script: moreScript, moreFile, seenFile, answerFile }; };
+  /** The chat has written its answer: take it only when it has everything he added and the answer is still there. */
+  function answerReady(c, file, pid) {
+    const latest = one(c.id) || c;
+    if (asksOf(latest).length > heardOf(latest) && isAlive(pid)) { syncMore(latest); return false; }
+    return existsSync(file);
+  }
   let ticking = false;
   let restartDue = false;
   let editsSince = 0; // when the folders were first seen with unsaved edits while a request waited
@@ -333,16 +384,27 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     if (!afterRestart && !quiet) await tell(c, answer, { done: status === 'done' });
     log(`coach change ${c.id}: ${status}${extra.reviewed === false ? ' (not reviewed)' : extra.review ? ` (review: ${extra.review.status})` : ''}${reload ? ', server restarts' : ''}${afterRestart ? ', then he hears it' : quiet ? ', told in the morning' : ''}`);
     if (reload && (status === 'done' || extra.review)) restartDue = true;
+    // His words that came in after the chat had ended: a correcting request right after it, built on top of it.
+    const latest = one(c.id) || c;
+    const left = c.status === 'working' ? asksOf(latest).slice(heardOf(latest)) : [];
+    if (left.length) {
+      const last = left.at(-1);
+      const n = put(newChange({ said: last.said, want: last.want, about: last.about, kind: c.kind === 'check' ? 'bug' : c.kind, at: now(), tz: c.tz || tz(), asks: asksOf(latest).slice(0, -1), corrects: c.id, followsOn: c.id, auto: Boolean(c.auto), earlier: [`"${clip(c.said, 200)}" -> ${answer}`], lineAt: lineAtOf(c) + 1, quiet, messages: messages() }));
+      log(`coach change ${c.id}: his words came after it ended; correction ${n.id} queued first in line`);
+    }
   }
 
   /** The build is done: a second chat checks it against his words before he hears it. */
   function startReview(c, build) {
     mkdirSync(dir, { recursive: true });
     const { reviewLog, reviewFile } = files(c.id);
-    const withBuild = { ...c, build };
+    const latest = one(c.id) || c;
+    // The reviewer's prompt has all his words; those the builder never got are marked for it.
+    const withBuild = { ...latest, build, builderHeard: heardOf(latest), briefed: asksOf(latest).length };
     const prompt = reviewPrompt(withBuild, { codeDir, privateDir, reviewFile, ref: one(c.checkOf) });
     writeFileSync(reviewLog, `coach change review ${c.id}, ${new Date(now()).toISOString()}\n`, { flag: 'a' });
-    const pid = launch({ prompt, cwd: privateDir, logFile: reviewLog, settings: guardSettings({ guard, codeDir, privateDir }), model: REVIEW_MODEL });
+    const pid = launch({ prompt, cwd: privateDir, logFile: reviewLog, settings: guardSettings({ guard, codeDir, privateDir, more: moreHooks(c, reviewFile) }), model: REVIEW_MODEL });
+    resetMore(c); // after the launch: if it fails, what the builder heard still counts
     put({ ...withBuild, stage: 'review', reviewPid: pid, reviewStartedAt: now() });
     log(`coach change ${c.id}: built, reviewer started (pid ${pid})`);
   }
@@ -370,7 +432,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     const said = review.said || 'The check on the Mac found the change isn\'t right yet.';
     await finish(c, { ...merged, status: 'failed', said: again ? `${said.replace(/[.\s]+$/, '')}. Fixing it now.` : `Still not right after a second try: ${said}` }, { review, checked, reviewed: true });
     if (again) {
-      const n = put(newChange({ said: c.said, want: c.want, about: c.about, kind: c.kind === 'check' ? 'bug' : c.kind, at: now(), tz: c.tz || tz(), asks: asksOf(c), auto: true, by: 'review', fixOf: c.id, followsOn: c.id, lineAt: lineAtOf(c) + 1, verify: c.verify, review: { said: review.said, checked: review.checked }, quiet: c.by === 'nightly' || Boolean(c.quiet), messages: messages() }));
+      const n = put(newChange({ said: c.said, want: c.want, about: c.about, kind: c.kind === 'check' ? 'bug' : c.kind, at: now(), tz: c.tz || tz(), asks: asksOf(one(c.id) || c), auto: true, by: 'review', fixOf: c.id, followsOn: c.id, lineAt: lineAtOf(c) + 1, verify: c.verify, review: { said: review.said, checked: review.checked }, quiet: c.by === 'nightly' || Boolean(c.quiet), messages: messages() }));
       log(`coach change ${c.id}: review failed, fix ${n.id} queued first in line`);
     }
   }
@@ -378,6 +440,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
   async function checkReview(c) {
     const { reviewFile } = files(c.id);
     if (existsSync(reviewFile)) {
+      if (!answerReady(c, reviewFile, c.reviewPid)) return;
       let r = null;
       try { r = JSON.parse(readFileSync(reviewFile, 'utf8')); } catch (e) { log(`coach change ${c.id}: the reviewer's answer couldn't be read (${e.message})`); }
       await afterReview(c, r);
@@ -394,6 +457,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     if (c.stage === 'review') { await checkReview(c); return; }
     const { resultFile, logFile } = files(c.id);
     if (existsSync(resultFile)) {
+      if (!answerReady(c, resultFile, c.pid)) return;
       let result = null;
       try { result = JSON.parse(readFileSync(resultFile, 'utf8')); } catch (e) { result = { status: 'failed', said: `The builder's answer couldn't be read (${e.message}).` }; }
       await afterBuild(c, result);
@@ -420,12 +484,14 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     const recent = everything.filter((x) => x.status === 'done' && now() - (x.doneAt || 0) < 86400000);
     const prompt = builderPrompt(c, { codeDir, privateDir, resultFile, others, recent, ref: one(c.corrects || c.checkOf || c.fixOf) });
     writeFileSync(logFile, `coach change ${c.id}, try ${(c.tries || 0) + 1}, ${new Date(now()).toISOString()}\n`, { flag: 'a' });
-    const settings = guardSettings({ guard, codeDir, privateDir });
+    resetMore(c);
+    const settings = guardSettings({ guard, codeDir, privateDir, more: moreHooks(c, resultFile) });
     // The heads the build starts from (kept across a second try): the reviewer reads the diff from here.
     const startHeads = c.startHeads || headsNow();
     const pid = launch({ prompt, cwd: privateDir, logFile, settings, model: MODEL });
     const { waitingFor, waitingSince, ...rest } = c;
-    put({ ...rest, status: 'working', stage: 'build', pid, startedAt: now(), tries: (c.tries || 0) + 1, startHeads });
+    // briefed: how many of his asks are in its prompt; the ones he adds later are handed over while it works.
+    put({ ...rest, status: 'working', stage: 'build', pid, startedAt: now(), tries: (c.tries || 0) + 1, startHeads, briefed: asksOf(c).length });
     log(`coach change ${c.id}: builder started (pid ${pid})`);
   }
 
@@ -444,7 +510,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     try {
       await announced();
       const working = all().filter((c) => c.status === 'working');
-      for (const c of working) await check(c);
+      for (const c of working) { syncMore(c); await check(c); }
       // New server code is live only after a restart: right away, mid-workout too (Thu 10/22, his words: "even mid workout
       // it can restart... as long as it saves": the phone saves on its own), but not while the coach is answering.
       if (restartDue && !busy()) { restartDue = false; restart(); return; }
