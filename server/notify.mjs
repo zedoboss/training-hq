@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, ateOut, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
@@ -366,7 +366,8 @@ export function nudgeInputs(store, now, tz) {
   const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
   const untimed = groups.filter((g) => !g.time && !g.afterMeal && !g.afterMeal2).flatMap((g) => g.items);
   const afterMeal = groups.filter((g) => g.afterMeal).flatMap((g) => g.items);
-  const firstMealAt = Math.min(...list('meals').filter((m) => m.date === date && m.at && !isSnack(m)).map((m) => m.at));
+  const firstMeal = list('meals').filter((m) => m.date === date && m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[0];
+  const firstMealAt = firstMeal ? firstMeal.at : NaN;
   const fasting = fastingOn(st.days || {}, date, list('meals'));
   return {
     date, n, fasting,
@@ -379,7 +380,7 @@ export function nudgeInputs(store, now, tz) {
       // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
       // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
       suppsUntimed: untimed.length ? { total: groups.flatMap((g) => g.items).length, taken: groups.flatMap((g) => g.items).filter((i) => i.entry?.status === 'taken').length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
-      suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt } : null,
+      suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt, away: ateOut(firstMeal, holdsOf(store)) } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
@@ -441,8 +442,12 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     state.suppsFor = { [date]: first.id };
     if (open.length) {
       const opts = voiceOpts(store);
-      const line = pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
-      const body = `${first.name || 'First meal'} logged. Take your supplements now: ${open.join(', ')}.${line?.text ? ` ${line.text}` : ''}`;
+      // Eaten out (Fri 10/23, his words): they're at home, so "when you're back home", no push line, and the nudges ask
+      // "back home yet?" later (nudgeCandidates).
+      const away = ateOut(first, holds);
+      const line = away ? null : pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
+      const body = away ? `${first.name || 'First meal'} logged. You ate out, so take your supplements when you're back home: ${open.join(', ')}. I'll remind you later.`
+        : `${first.name || 'First meal'} logged. Take your supplements now: ${open.join(', ')}.${line?.text ? ` ${line.text}` : ''}`;
       const r = push.list().length ? await push.notify({ title: 'Coach', body, url: '#/supps', tag: 'supps-after-meal' }) : { sent: 0 };
       sayInTalk(store, { text: body, at: now, tz, kind: 'nudge', ref: `supps-after-meal:${first.id}` });
       store.setMeta(LAST, now);
@@ -459,9 +464,11 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     const open2 = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' }).filter((g) => g.afterMeal2)
       .flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
     const w = state.after2?.[date]?.id === second.id ? state.after2[date] : null;
+    // Eaten out (Fri 10/23): take it once home, asked again every 30 minutes, not every 5.
+    const away = ateOut(second, holds);
     const say = async (text, tag) => {
       const opts = voiceOpts(store);
-      const line = pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
+      const line = away ? null : pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
       const body = `${text}${line?.text ? ` ${line.text}` : ''}`;
       const r = push.list().length ? await push.notify({ title: 'Coach', body, url: '#/supps', tag }) : { sent: 0 };
       sayInTalk(store, { text: body, at: now, tz, kind: 'nudge', ref: `supps-after-meal-2:${second.id}` });
@@ -470,13 +477,16 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       out = { key: 'supps-after-meal-2', body };
     };
     if (!w && mealEatenAt(second, state.seen[second.id]) <= now && !heldOff('supps-after-meal', holds, now)) {
-      state.after2 = { [date]: { id: second.id, asked: open2.length ? now : null, last: now, done: open2.length ? null : now } };
-      if (open2.length) await say(`${second.name || 'Second meal'} done. Get up and take your ${open2.join(', ')} now. I'll ask again every ${AFTER_MEAL2_BUMP_MIN} minutes until you tick it.`, 'supps-after-meal-2');
+      state.after2 = { [date]: { id: second.id, asked: open2.length ? now : null, last: now, done: open2.length ? null : now, ...(away ? { everyMin: AWAY_REMIND_MIN } : {}) } };
+      if (open2.length) {
+        await say(away ? `${second.name || 'Second meal'} done. You ate out, so take your ${open2.join(', ')} when you're back home. I'll remind you in ${AWAY_REMIND_MIN} minutes.`
+          : `${second.name || 'Second meal'} done. Get up and take your ${open2.join(', ')} now. I'll ask again every ${AFTER_MEAL2_BUMP_MIN} minutes until you tick it.`, 'supps-after-meal-2');
+      }
     } else if (w?.asked && !w.done) {
       if (!open2.length) w.done = now;
-      else if (now - w.last >= AFTER_MEAL2_BUMP_MIN * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)) {
+      else if (now - w.last >= (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)) {
         w.last = now;
-        await say(`Still waiting: ${open2.join(', ')}. Get up and take it now, then the dishes.`, 'supps-after-meal-2');
+        await say(w.everyMin ? `Back home yet? Take your ${open2.join(', ')} now.` : `Still waiting: ${open2.join(', ')}. Get up and take it now, then the dishes.`, 'supps-after-meal-2');
       }
     }
     const w2 = state.after2?.[date];
@@ -487,9 +497,10 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   // the dishes?" His 1:15 PM meal's came at 1:59 PM, after the coach's own reminder at 1:34 PM): counted, not sent.
   const said = list('coach-messages').filter((x) => x.role === 'assistant' && x.kind !== 'nudge' && /\bdish/i.test(x.text || ''));
   const dueAt = (m) => (m.id in readyAt ? readyAt[m.id] : mealEatenAt(m, state.seen[m.id]) + DISHES_AFTER_MIN * 60000);
-  const skip = ready.filter((m) => now - dueAt(m) > DISHES_LATE_MIN * 60000 || said.some((x) => x.at >= state.seen[m.id]));
+  // A meal eaten out (Fri 10/23) left no dishes at home.
+  const skip = ready.filter((m) => now - dueAt(m) > DISHES_LATE_MIN * 60000 || said.some((x) => x.at >= state.seen[m.id]) || ateOut(m, holds));
   for (const m of skip) state.sent[m.id] = now;
-  if (skip.length) log(`dishes after ${skip.map((m) => m.name || m.id).join(', ')}: not sent (late, or the coach already said it)`);
+  if (skip.length) log(`dishes after ${skip.map((m) => m.name || m.id).join(', ')}: not sent (late, eaten out, or the coach already said it)`);
   const due = ready.filter((m) => !skip.includes(m));
   if (due.length) {
     for (const m of due) state.sent[m.id] = now;
@@ -631,7 +642,7 @@ export function nextDueAt(store, now, tz, withinMs = 60000) {
   // Waiting for his collagen after the second meal: the next bump on the second, and a look every 10 seconds so the
   // dishes follow at once when he ticks it.
   const w = ds.after2?.[isoDate(new Date(now), tz)];
-  const waiting = w?.asked && !w.done ? [w.last + AFTER_MEAL2_BUMP_MIN * 60000, now + 10000] : [];
+  const waiting = w?.asked && !w.done ? [w.last + (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000, now + 10000] : [];
   const times = [
     ...waiting,
     ...plan(store, now, tz).filter((i) => i.due && !sent[i.id]).map((i) => i.at),

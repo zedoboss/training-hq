@@ -93,7 +93,7 @@ const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals:
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
  * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
  * @param {number|null} [o.healthAt]  when Apple Health last reached the Mac (the newest file), ms; null = never; left out = don't say
- * @param {{open: string[], mealAt: number}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, and when that meal was logged
+ * @param {{open: string[], mealAt: number, away?: boolean}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, when that meal was logged, and whether he ate it out
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.mealAfterGymAt  no meal nudge before this after the gym (reminders.js afterGym), ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
@@ -106,9 +106,11 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
   // A fasting day (Wed 10/21): nothing about food or supplements.
   if (fasting) { suppsAfterMeal = null; suppsUntimed = null; targets = null; workoutEndedAt = workoutEndedAt && lastMealAt > workoutEndedAt ? workoutEndedAt : null; }
-  if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt) {
+  // Eaten out (Fri 10/23): not before he can be home, and asked as "back home yet?".
+  if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt + (suppsAfterMeal.away ? AWAY_REMIND_MIN * 60000 : 0)) {
     out.push({ key: 'supps-after-meal', priority: 91, gapMin: 30, url: '#/supps',
-      text: `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });
+      text: suppsAfterMeal.away ? `Back home yet? Take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.`
+        : `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });
   }
   // After the workout (Tue 10/20, his words: "I'm usually not hungry immediately and I obviously need to take a
   // shower... wait 20 minutes after my workout is finished and then he should bump me about my first meal"): quiet
@@ -259,6 +261,25 @@ export function mealEatenAt(m, seenAt) {
   const after = m.after?.at || null;
   const photoBefore = m.source === 'photo' && m.before?.photoId && !after;
   return after ? Math.max(after, seenAt) : seenAt + (photoBefore ? (DISHES_EAT_MIN - DISHES_AFTER_MIN) * 60000 : 0);
+}
+
+// ---- A meal eaten out (Fri 10/23, his words: "if I'm eating outside, you should say: Oh, you're eating outside, when
+// you're back home, take those supplements. And then I'll remind you later again"): his supplements are at home, so
+// after a meal out the message says take them once home, no dishes, and the reminder comes later. ----
+/** How long after a meal out before "back home yet?". */
+export const AWAY_REMIND_MIN = 30;
+const OUT_WORDS = /\b(eat(ing)?|ate|lunch|dinner|breakfast|meal|food)\s+(out|outside)\b|\bout to eat\b|\brestaurant\b/i;
+
+/**
+ * Did he eat this meal away from home? Its own mark (log_meal away), else a food hold-off he asked for because he was
+ * going out to eat ("Going out to eat now"), running when he ate (from 30 minutes before it was set).
+ */
+export function ateOut(m, holds = []) {
+  if (!m) return false;
+  if (m.away != null) return Boolean(m.away);
+  const at = m.at || 0;
+  return holds.some((h) => h && (h.areas || []).some((a) => a === 'food' || a === 'all') && OUT_WORDS.test(h.reason || '')
+    && (h.from ?? h.at ?? 0) - 30 * 60000 <= at && at <= Math.min(h.until || 0, h.cancelledAt || Infinity));
 }
 
 // ---- After the second meal (Thu 10/22, his words: "after my second meal have it prompt first notification that i

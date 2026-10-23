@@ -704,3 +704,59 @@ test('Thu 10/22: a meal ask and his own reminder about the meal in the same minu
     assert.equal(coveredMealAsks([ask], [ask, { ...cook, due: false }], { now: at(D, '16:30') }).size, 0, 'a cancelled reminder covers nothing');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('Fri 10/23: a meal eaten out says take the supplements once home, no dishes, and "back home yet?" later', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { dishesTick, nudgeInputs, nextDueAt } = await import('../server/notify.mjs');
+  const { ateOut } = await import('../app/js/lib/nudges.js');
+  // What counts as eaten out: his food hold-off for going out to eat, or the meal's own mark.
+  const hold = { id: 'h1', areas: ['food'], until: at(D, '18:18'), reason: 'Going out to eat now; he\'ll send what he ate afterwards.', at: at(D, '16:48') };
+  assert.equal(ateOut({ at: at(D, '16:59') }, [hold]), true);
+  assert.equal(ateOut({ at: at(D, '16:59'), away: false }, [hold]), false, 'the meal\'s own mark wins');
+  assert.equal(ateOut({ at: at(D, '19:00') }, [hold]), false, 'after the hold ran out: home');
+  assert.equal(ateOut({ at: at(D, '16:59') }, [{ ...hold, cancelledAt: at(D, '16:50') }]), false, 'lifted before he ate');
+  assert.equal(ateOut({ at: at(D, '16:59') }, [{ ...hold, reason: 'Busy with work until 6' }]), false, 'a hold for something else');
+  assert.equal(ateOut({ at: at(D, '16:59') }, [{ ...hold, areas: ['walk'] }]), false);
+  assert.equal(ateOut({ at: at(D, '13:00'), away: true }, []), true);
+  assert.equal(ateOut({ at: at(D, '13:00') }, []), false);
+
+  const dir = mkdtempSync(join(tmpdir(), 'thq-away-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('supplements', 'supp.d3', { id: 'supp.d3', kind: 'supplement', name: 'Vitamin D3 + K2', short: 'D3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
+    store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 2, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
+    const sent = [];
+    const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
+    await dishesTick({ store, push, now: at(D, '16:00'), tz: TZ });
+    // The day he hit: "Going out to eat now" at 4:48 PM, the meal logged from photos at 4:59 PM.
+    store.writeLocal('coach-holds', 'h1', hold);
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '16:59'), name: 'Last meal', source: 'manual', before: { items: [{ name: 'Udon', grams: 375, kcal: 500, protein: 12 }] } });
+    assert.equal((await dishesTick({ store, push, now: at(D, '17:08'), tz: TZ }))?.key, 'supps-after-meal');
+    assert.equal(sent[0].body, 'Last meal logged. You ate out, so take your supplements when you\'re back home: Vitamin D3 + K2. I\'ll remind you later.');
+    assert.equal(await dishesTick({ store, push, now: at(D, '17:11'), tz: TZ }), null, 'no dishes after a meal out');
+    assert.equal(sent.length, 1);
+    // Later: the nudge asks whether he's home, not before 30 minutes after the meal.
+    const inp = nudgeInputs(store, at(D, '17:20'), TZ);
+    assert.equal(inp.args.suppsAfterMeal.away, true);
+    assert.equal(nudgeCandidates({ ...inp.args, now: at(D, '17:20') }).some((x) => x.key === 'supps-after-meal'), false, 'too soon to be home');
+    const later = nudgeCandidates({ ...nudgeInputs(store, at(D, '17:30'), TZ).args, now: at(D, '17:30') }).find((x) => x.key === 'supps-after-meal');
+    assert.equal(later.text, 'Back home yet? Take your supplements now: Vitamin D3 + K2. Tell me when they\'re down.');
+
+    // The second meal eaten out too (its own mark): collagen once home, asked again every 30 minutes, not every 5.
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '20:00'), name: 'Dinner', source: 'manual', away: true, before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
+    assert.equal((await dishesTick({ store, push, now: at(D, '20:01'), tz: TZ }))?.key, 'supps-after-meal-2');
+    assert.equal(sent.at(-1).body, 'Dinner done. You ate out, so take your collagen when you\'re back home. I\'ll remind you in 30 minutes.');
+    assert.equal(await dishesTick({ store, push, now: at(D, '20:07'), tz: TZ }), null, 'no 5-minute bump');
+    assert.equal(nextDueAt(store, at(D, '20:30') + 30000, TZ), at(D, '20:30') + 40000, 'still looks every 10 seconds for the tick');
+    assert.equal((await dishesTick({ store, push, now: at(D, '20:31'), tz: TZ }))?.key, 'supps-after-meal-2');
+    assert.equal(sent.at(-1).body, 'Back home yet? Take your collagen now.');
+    store.writeLocal('supp-log', `${D}:supp.co`, { id: `${D}:supp.co`, date: D, suppId: 'supp.co', status: 'taken', at: at(D, '20:40') });
+    assert.equal(await dishesTick({ store, push, now: at(D, '20:41'), tz: TZ }), null, 'ticked: no dishes, he ate out');
+    assert.equal(await dishesTick({ store, push, now: at(D, '21:30'), tz: TZ }), null);
+    assert.deepEqual(sent.map((m) => m.tag), ['supps-after-meal', 'supps-after-meal-2', 'supps-after-meal-2']);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});

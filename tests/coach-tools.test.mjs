@@ -333,6 +333,9 @@ test('Fri 10/23: a meal photo he sent in Talk goes with the meal, at the time it
   assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.a.0x', time: '02:50' })).text, /2:50 AM/);
   assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.nope' })).text, /No photo cphoto\.nope from Talk\..*Nothing logged yet/);
   assert.equal(list('meals').length, 2);
+  // Fri 10/23: a meal he ate out is marked, so the after-meal messages say "when you're back home".
+  const out = await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], time: '02:40', away: true });
+  assert.equal(list('meals').find((m) => out.text.includes(m.id)).away, true);
 });
 
 test('sauna: a symptom ends the running session at once; the hard-stop words come back', async () => {
