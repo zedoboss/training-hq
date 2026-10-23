@@ -415,7 +415,7 @@ export function render(view, [id]) {
     };
     $('#m-mic').onclick = () => talkAboutMeal();
     $('#m-again').onclick = async () => {
-      const hint = await promptLong('Tell the Mac what it got wrong (optional)', meal.hint || '', { placeholder: 'e.g. it is beef tri-tip, about 200 g, and brown rice', ok: 'Ask again' });
+      const hint = await promptLong('Tell the Mac what it got wrong (optional)', meal.hint || '', { placeholder: 'e.g. it is beef shank, about 200 g, and brown rice', ok: 'Ask again' });
       if (hint === null) return;
       pollStart = Date.now(); clearInterval(pollTimer); pollTimer = null;
       await save({ hint, round: (meal.round || 0) + 1, before: { ...meal.before, confirmedAt: null, items: null, edited: false }, ...(meal.after?.photoId ? { after: { ...meal.after, confirmedAt: null, leftovers: null } } : {}) });
