@@ -57,11 +57,41 @@ export function checkInLead(doc, date, tz, readinessMin) {
 const day = (iso) => formatDay(new Date(`${iso}T12:00:00Z`), 'UTC');
 /** "Knees: Wall Hold. 3 × 30 s each. Shoulder: the gym for the ... hold, another hold, or skip today?" */
 const holdsBody = (shown, round = '') => {
-  const plain = shown.filter((s) => !s.ask);
+  const plain = byRound(shown.filter((s) => !s.ask));
   return [plain.length ? `${plain.map(holdText).join('. ')}. 3 × 30 s each${round ? `, ${round} a round` : ''}.` : '', ...shown.filter((s) => s.ask).map(holdText)].filter(Boolean).join(' ');
 };
 const holdText = (s) => (s.ask ? `${s.label}: the gym for the ${s.restHold || s.exercise} hold, another hold, or skip today?`
-  : `${s.label}: ${s.exercise}${s.also?.length ? ` then ${s.also.join(', ')}` : ''}`);
+  : `${s.label}: ${s.exercise}${s.also?.length ? ` then ${s.also.join(', ')}` : ''}${s.n > 1 ? `, ${s.n} rounds, not back to back` : ''}`);
+/** The same hold open twice today (his morning and evening knee rounds) said once, with its count (Sat 10/24: "knees (Toes Wall Squat Hold), shoulder (...), knees (Toes Wall Squat Hold)"). */
+const byRound = (slots) => {
+  const out = [];
+  for (const s of slots) {
+    const same = out.find((x) => x.area === s.area && x.exercise === s.exercise);
+    if (same) same.n += 1; else out.push({ ...s, n: 1 });
+  }
+  return out;
+};
+
+/**
+ * Holds check-ins (Sat 10/24, on Fri 10/23's 11 holds messages: the rest-day holds every hour from 3:41 PM and the
+ * evening holds every hour from 9:40 PM, near the same words; he wants one holds stream that checks in a few times,
+ * further apart, in new words): minutes after the morning time (before the evening time comes) and after the evening
+ * time (before bed). The morning and evening reminders aren't nudged again. A check-in within gapMin of the last holds
+ * message that went out is skipped (server/notify.mjs).
+ */
+export const HOLDS_CHECK = { morningMin: [120, 360], eveningMin: [75], gapMin: 60 };
+const HOLDS_SAID = {
+  morning: [
+    ["Holds: haven't heard from you", (list, round) => `${list} ${cap(round)} and it's off the list.`],
+    ['Still no holds logged today', (list, round, evening) => `${list} One round now${evening ? `, the next at ${evening}` : ''}. ${cap(round)}.`],
+  ],
+  evening: [["Last call on today's holds", (list) => `${list} Get them in before bed and log them.`]],
+};
+/**
+ * A check-in's text: what's left in short ("Knees: Wall Hold, 2 rounds, not back to back."), then its own words. A
+ * rest-day question isn't in it: the morning and evening reminders ask that.
+ */
+const holdsCheckText = (open, say, round, evening) => say(`${byRound(open.filter((s) => !s.ask)).map(holdText).join('. ')}.`, round, evening);
 
 /**
  * @param {object} o
@@ -129,15 +159,38 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
   if (on('holds')) {
     const st = withDefaults(settings);
     const round = roundLength(roundSeconds({ getReadyS: st.holds?.getReadyS ?? 15, restS: st.rest?.holdS ?? 120 }));
+    // One stream (Sat 10/24): the evening one says all that's left today, the morning round too; check-ins follow each.
+    const dayOpen = openSlots(slots.filter((s) => s.slot !== 'after'));
+    const eveningOpen = dayOpen.some((s) => s.slot === 'evening');
+    const eveningAt = zonedTime(date, n.holdsEvening, tz);
+    const bedAt = zonedTime(n.bedHm > n.holdsEvening ? date : addDays(date, 1), n.bedHm, tz);
     for (const [part, hm] of [['morning', n.holdsMorning], ['evening', n.holdsEvening]]) {
       const group = slots.filter((s) => (part === 'morning' ? s.slot === 'morning' || s.slot === 'rest' : s.slot === 'evening') && !s.skipped);
       if (!group.length) continue;
       const open = openSlots(group);
+      const shown = part === 'evening' && open.length ? dayOpen : open;
+      const at0 = zonedTime(date, hm, tz);
+      const stream = `holds:${date}`;
       out.push({
-        id: `holds-${part}:${date}`, kind: 'holds', at: zonedTime(date, hm, tz), url: '#/holds', tag: `holds-${date}-${part}`, fixed: true,
+        id: `holds-${part}:${date}`, kind: 'holds', at: at0, url: '#/holds', tag: `holds-${date}-${part}`, fixed: true,
         title: `${part === 'morning' ? (rot.today.kind === 'rest' ? (open.some((s) => s.ask) ? 'Rest day holds: what today?' : 'Rest day holds') : 'Morning holds') : 'Evening holds'}`,
-        body: holdsBody(open.length ? open : group, round),
-        due: open.length > 0,
+        body: holdsBody(shown.length ? shown : group, round),
+        again: false, stream, due: open.length > 0,
+      });
+      // Morning check-ins end an hour before the evening time; the evening one 15 minutes before bed and by midnight.
+      const until = part === 'morning' ? eveningAt - 60 * 60000 : Math.min(bedAt - 15 * 60000, zonedTime(addDays(date, 1), '00:00', tz));
+      const toDo = open.filter((s) => !s.ask);
+      // Said from what's left (or, once done, what it was); only a rest-day question in it: no check-ins.
+      const said = [shown, group].map((x) => x.filter((s) => !s.ask)).find((x) => x.length);
+      HOLDS_CHECK[`${part}Min`].forEach((min, k) => {
+        const at = at0 + min * 60000;
+        if (at >= until || !said) return;
+        const [title, say] = HOLDS_SAID[part][k];
+        out.push({
+          id: `holds-check:${date}:${part}:${k + 1}`, kind: 'holds', at, url: '#/holds', tag: `holds-${date}-${part}`, group: `holds-check:${date}`, fixed: false,
+          title, body: holdsCheckText(said, say, round, part === 'morning' && eveningOpen ? formatHm(n.holdsEvening) : null),
+          stream, streamGapMin: HOLDS_CHECK.gapMin, due: toDo.length > 0,
+        });
       });
     }
   }
@@ -176,7 +229,9 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
   // hold isn't listed (Thu 10/22 audit).
   if (on('evening')) {
     const eveningAt = zonedTime(date, n.eveningCheck, tz);
-    const open = heldOff('holds', holdoffs, eveningAt) ? [] : openSlots(slots);
+    // Holds the holds stream asks about aren't listed again (Sat 10/24, "knees ... knees" at 10:30 PM); only the ones
+    // after a workout, which it doesn't.
+    const open = heldOff('holds', holdoffs, eveningAt) ? [] : openSlots(slots).filter((s) => !on('holds') || s.slot === 'after');
     const tomorrow = addDays(date, 1);
     const rot2 = rotationDay({ last, today: tomorrow, days });
     let next = '';
@@ -186,7 +241,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
       next = hm2 ? `Tomorrow: ${LABEL[rot2.today.dayType]} at ${formatHm(hm2)}${lead2 == null ? '' : `, check-in at ${formatHm(addMinutesHm(hm2, -lead2))}`}.`
         : `Tomorrow: ${LABEL[rot2.today.dayType]}. No time set yet.`;
     }
-    const still = open.length ? `Still open: ${open.map((s) => `${s.label.toLowerCase()} (${s.exercise})`).join(', ')}.` : '';
+    const still = open.length ? `Still open: ${byRound(open).map((s) => `${s.label.toLowerCase()} (${s.exercise}${s.n > 1 ? `, ${s.n} rounds` : ''})`).join(', ')}.` : '';
     const suppText = supps.open.length && !heldOff('supps', holdoffs, eveningAt) ? `Supplements still open: ${supps.open.join(', ')}.` : '';
     if (still || suppText || next) {
       out.push({

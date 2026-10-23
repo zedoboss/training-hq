@@ -678,11 +678,16 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const latest = new Map();
       for (const i of due) if (i.group && !(latest.get(i.group)?.at >= i.at)) latest.set(i.group, i);
       for (const i of due) if (i.group && latest.get(i.group) !== i) sent[i.id] = t;
+      // A check-in too soon after the last message of its stream (Sat 10/24: the holds reminder held for his morning,
+      // then its check-in minutes later): counted, not sent.
+      const spaced = new Set(due.filter((i) => i.streamGapMin && (all.some((j) => j.stream === i.stream && j.id !== i.id && sent[j.id] && t - sent[j.id] < i.streamGapMin * 60000)
+        || due.some((j) => j.stream === i.stream && !j.streamGapMin))));
+      for (const i of spaced) { sent[i.id] = t; log(`notify ${i.id}: not sent (too soon after the last of ${i.stream})`); }
       // A meal ask his own reminder about the meal says at the same time: counted, not sent.
       const covered = coveredMealAsks(due, all, { sent, now: t, reminders: recordsOf(store, 'coach-reminders') });
       for (const [id, by] of covered) { sent[id] = t; log(`notify ${id}: not sent (his reminder ${by} says it)`); }
-      if (covered.size) store.setMeta(SENT, sent);
-      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id));
+      if (covered.size || spaced.size) store.setMeta(SENT, sent);
+      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !spaced.has(i));
       if (items.length) {
         const opts = voiceOpts(store);
         // What waited for his morning: one message, in the order it was due, one line in his moods at the end.

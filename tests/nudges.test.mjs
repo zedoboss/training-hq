@@ -340,16 +340,18 @@ test('Thu 10/22: a reminder or the dishes due between two ticks go out on the se
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('holds an hour past their time say so; a late morning round: one now, the evening one at its time', () => {
+test('Sat 10/24: open holds are not nudged every hour; their own few check-ins ask (lib/reminders.js)', () => {
   const reminders = [
-    { id: `holds-morning:${D}`, kind: 'holds', tag: 'holds-morning', at: at(D, '10:30'), due: true, title: 'Morning holds', body: 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.' },
-    { id: `holds-evening:${D}`, kind: 'holds', tag: 'holds-evening', at: at(D, '21:30'), due: true, title: 'Evening holds', body: 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.' },
+    { id: `holds-morning:${D}`, kind: 'holds', tag: 'holds-morning', at: at(D, '09:30'), due: true, again: false, title: 'Rest day holds: what today?', body: 'Knees: Wall Hold.' },
+    { id: `holds-evening:${D}`, kind: 'holds', tag: 'holds-evening', at: at(D, '21:30'), due: true, again: false, title: 'Evening holds', body: 'Knees: Wall Hold.' },
+    { id: `holds-check:${D}:morning:1`, kind: 'holds', tag: 'holds-morning', group: `holds-check:${D}`, at: at(D, '11:30'), due: true, title: 'Check', body: 'x' },
+    // Even one without again: false (an older phone's copy) isn't nudged.
+    { id: `holds-x:${D}`, kind: 'holds', tag: 'holds-x', at: at(D, '09:30'), due: true, title: 'Holds', body: 'Knees.' },
   ];
-  const text = (now) => nudgeCandidates({ now, tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' }).find((c) => c.key === 'holds:holds-morning')?.text;
-  assert.equal(text(at(D, '11:00')), 'Morning holds. Knees: Wall Hold. 3 × 30 s each, about 6 min a round.', 'within the hour: as before');
-  assert.equal(text(at(D, '17:27')), 'Morning holds still not done (due 10:30 AM). Knees: Wall Hold. 3 × 30 s each, about 6 min a round. One round now, the evening one at 9:30 PM. Not back to back.');
-  const both = nudgeCandidates({ now: at(D, '23:00'), tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' }).map((c) => c.text);
-  assert.ok(both.includes('Morning holds still not done (due 10:30 AM). Knees: Wall Hold. 3 × 30 s each, about 6 min a round.'), 'evening time passed: no "evening one at"');
+  for (const hm of ['10:31', '15:41', '21:40', '22:40', '23:40']) {
+    const c = nudgeCandidates({ now: at(D, hm), tz: TZ, reminders, rot: legsDay, wakeHm: '10:00', bedHm: '00:00' });
+    assert.deepEqual(c.filter((x) => x.key.startsWith('holds')), [], hm);
+  }
 });
 
 test('Fri 10/23: an unanswered meal ask is not nudged again on top of its check-ins, and no "Food: 0 of..." while it is out', async () => {

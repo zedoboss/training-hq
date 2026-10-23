@@ -17,7 +17,7 @@ test('training day with a time: check-in 30 minutes before, session at its time,
   const days = { '2026-01-20': { date: '2026-01-20', sessionTime: '04:30' } };
   const items = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'push', date: '2026-01-18', streak: 2 }, days });
   const k = byKind(items);
-  assert.deepEqual(items.map((i) => i.id.split(':')[0]), ['readiness', 'session', 'holds-evening', 'evening']);
+  assert.deepEqual(items.map((i) => i.id.split(':')[0]), ['readiness', 'session', 'holds-evening', 'evening', 'holds-check']);
   assert.equal(k.readiness.at, at('2026-01-20', '04:00'));
   assert.equal(k.readiness.title, 'Sore, or good to go?');
   assert.equal(k.readiness.body, 'Legs at 4:30 AM, week 3 column. Knees, shoulder, legs, back, then energy. Zero to three.');
@@ -26,8 +26,9 @@ test('training day with a time: check-in 30 minutes before, session at its time,
   assert.equal(k.session.body, 'Tuesday 1/20. Week 3 column. Check-in still open.');
   assert.equal(k['holds-evening'].at, at('2026-01-20', '19:30'));
   assert.equal(k['holds-evening'].body, 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.');
-  // Legs not done by the evening: it is still next tomorrow (decision 15), with no time set yet.
-  assert.equal(k.evening.body, 'Still open: knees (Gym Hold), knees (Wall Hold). Tomorrow: Legs. No time set yet.');
+  // Legs not done by the evening: it is still next tomorrow (decision 15), with no time set yet. The round-up lists the
+  // gym hold only: the evening one has its own stream (Sat 10/24).
+  assert.equal(k.evening.body, 'Still open: knees (Gym Hold). Tomorrow: Legs. No time set yet.');
   assert.equal(k.evening.at, at('2026-01-20', '20:30'));
 });
 
@@ -60,12 +61,13 @@ test('done things switch reminders off: check-in in, session started, holds logg
   assert.equal(k.evening.body, 'Tomorrow: Legs. No time set yet.'); // the session is still running, nothing is open
   // Once Legs is finished today: no session reminders, and tomorrow is the rotation's rest day.
   const done = remindersFor({ ...base, date: '2026-01-20', last: { dayType: 'legs', date: '2026-01-20', streak: 3 }, days, rounds: { knees: { '2026-01-20': 2 } } });
-  assert.deepEqual(done.map((i) => i.id.split(':')[0]), ['holds-evening']);
+  assert.deepEqual(done.map((i) => [i.id.split(':')[0], i.due]), [['holds-evening', false], ['holds-check', false]]);
 });
 
 test('no time set: no check-in or session reminder; the evening nudges for tomorrow', () => {
   const items = remindersFor({ ...base, date: '2026-01-19', last: { dayType: 'pull', date: '2026-01-18' }, days: {}, rounds: { knees: { '2026-01-19': 2 }, shoulder: { '2026-01-19': 1 } } });
-  assert.deepEqual(items.map((i) => i.id.split(':')[0]), ['holds-morning', 'holds-evening', 'evening']);
+  assert.deepEqual(items.map((i) => i.id.split(':')[0]), ['holds-morning', 'holds-check', 'holds-check', 'holds-evening', 'evening', 'holds-check']);
+  assert.ok(items.filter((i) => i.kind === 'holds').every((i) => !i.due), 'all rounds done: nothing due');
   // Push today (not done yet): tomorrow is still Push by the rotation, and has no time.
   assert.equal(byKind(items).evening.body, 'Tomorrow: Push. No time set yet.');
   assert.equal(byKind(items).evening.title, 'Tomorrow');
@@ -91,6 +93,59 @@ test('rest day (A2): his answer drives the reminder; a skip drops the shoulder f
   k = run({ shoulder: { choice: 'skip', at: 1 } });
   assert.equal(k['holds-morning'].body, 'Knees: Wall Hold. 3 × 30 s each, about 6 min a round.');
   assert.doesNotMatch(k.evening.body, /shoulder/);
+});
+
+test('Sat 10/24: one holds stream on a rest day: two reminders, a few check-ins further apart in new words, knees said once', () => {
+  // Fri 10/23: holds 9:30 AM and 9:30 PM, round-up 10:30 PM, bed 12:00 AM; nothing done all day. It sent 11 holds
+  // messages in near the same words, two streams, and "knees ..., knees ..." in the round-up.
+  const settings = { notify: { holdsMorning: '09:30', holdsEvening: '21:30', eveningCheck: '22:30', bedHm: '00:00', wakeHm: '10:00' } };
+  const last = { dayType: 'legs', date: '2026-01-19', streak: 3 };
+  const run = (rounds = {}, days = {}) => remindersFor({ ...base, date: '2026-01-20', last, days, settings, rounds });
+  const items = run();
+  const holds = items.filter((i) => i.kind === 'holds');
+  assert.deepEqual(holds.map((i) => [i.id, new Date(i.at).toISOString()]), [
+    ['holds-morning:2026-01-20', new Date(at('2026-01-20', '09:30')).toISOString()],
+    ['holds-check:2026-01-20:morning:1', new Date(at('2026-01-20', '11:30')).toISOString()],
+    ['holds-check:2026-01-20:morning:2', new Date(at('2026-01-20', '15:30')).toISOString()],
+    ['holds-evening:2026-01-20', new Date(at('2026-01-20', '21:30')).toISOString()],
+    ['holds-check:2026-01-20:evening:1', new Date(at('2026-01-20', '22:45')).toISOString()],
+  ]);
+  // One stream: all in it; the two reminders aren't nudged again; the check-ins are one group (the latest only if late).
+  assert.ok(holds.every((i) => i.stream === 'holds:2026-01-20' && i.due));
+  assert.ok(holds.filter((i) => !i.group).every((i) => i.again === false));
+  assert.ok(holds.filter((i) => i.group).every((i) => i.group === 'holds-check:2026-01-20' && i.streamGapMin === 60 && !i.fixed));
+  // Every message different; the gaps grow through the day.
+  const said = holds.map((i) => `${i.title}. ${i.body}`);
+  assert.equal(new Set(said).size, said.length);
+  assert.equal(holds[1].body, "Knees: Wall Hold. About 6 min and it's off the list.");
+  assert.equal(holds[1].title, "Holds: haven't heard from you");
+  assert.equal(holds[2].body, 'Knees: Wall Hold. One round now, the next at 9:30 PM. About 6 min.');
+  // The rest-day question: in the morning and evening reminders, not in every check-in.
+  assert.match(holds[0].body, /Shoulder: the gym for the Raise Hold hold, another hold, or skip today\?/);
+  assert.ok(holds.filter((i) => i.group).every((i) => !/Shoulder/.test(i.body)));
+  // The evening one says all that's left today, the morning round too, knees once with its count.
+  assert.equal(holds[3].body, 'Knees: Wall Hold, 2 rounds, not back to back. 3 × 30 s each, about 6 min a round. Shoulder: the gym for the Raise Hold hold, another hold, or skip today?');
+  assert.equal(holds[4].body, 'Knees: Wall Hold, 2 rounds, not back to back. Get them in before bed and log them.');
+  // The round-up doesn't list them again (the holds stream asks); nothing else open: just tomorrow.
+  assert.equal(items.find((i) => i.kind === 'evening').body, 'Tomorrow: Pull. No time set yet.');
+  // Morning round done: the morning check-ins stop; the evening ones are about one round.
+  const k = byKind(run({ knees: { '2026-01-20': 1 } }).filter((i) => i.kind === 'holds' && i.due).map((i) => ({ ...i, id: i.id.replace('holds-check:2026-01-20:', 'check-') })));
+  assert.deepEqual(Object.keys(k), ['holds-morning', 'holds-evening', 'check-evening']);
+  assert.equal(k['check-evening'].body, 'Knees: Wall Hold. Get them in before bed and log them.');
+  // Both rounds done and the shoulder answered: nothing due.
+  const done = run({ knees: { '2026-01-20': 2 } }, { '2026-01-20': { date: '2026-01-20', restHolds: { shoulder: { choice: 'skip', at: 1 } } } });
+  assert.deepEqual(done.filter((i) => i.kind === 'holds' && i.due), []);
+});
+
+test('Sat 10/24: holds check-ins stay before the evening time and before bed, never past midnight', () => {
+  const last = { dayType: 'legs', date: '2026-01-19', streak: 3 };
+  const ids = (notify) => remindersFor({ ...base, date: '2026-01-20', last, days: {}, settings: { notify } }).filter((i) => i.kind === 'holds').map((i) => i.id.split(':').slice(2).join(':') || i.id.split(':')[0]);
+  // Evening at 2:00 PM: only the first morning check-in (11:30 AM) is an hour or more before it.
+  assert.deepEqual(ids({ holdsMorning: '09:30', holdsEvening: '14:00', bedHm: '23:00' }), ['holds-morning', 'morning:1', 'holds-evening', 'evening:1']);
+  // Bed at 10:30 PM: no check-in at 10:45 PM.
+  assert.deepEqual(ids({ holdsMorning: '09:30', holdsEvening: '21:30', bedHm: '22:30' }), ['holds-morning', 'morning:1', 'morning:2', 'holds-evening']);
+  // Bed at 2:00 AM, evening at 11:30 PM: 12:45 AM is tomorrow, so none.
+  assert.deepEqual(ids({ holdsMorning: '09:30', holdsEvening: '23:30', bedHm: '02:00' }), ['holds-morning', 'morning:1', 'morning:2', 'holds-evening']);
 });
 
 test('settings: kinds switched off, own times', () => {
@@ -159,6 +214,74 @@ test('the Mac notifier: sends what is due once, skips what is stale, nothing wit
     assert.deepEqual((await n.tick()).map((i) => i.id), ['evening:2026-01-20']);
     assert.ok(plan(store, now, TZ).some((i) => i.id === 'holds-evening:2026-01-20'));
     assert.ok(Object.keys(store.getMeta('notify:sent')).length === 3);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Sat 10/24: the Mac on a rest day with no holds done sends one holds stream: 5 messages, not 11; none too close', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { startNotifier } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-holds-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('programme', 'meta', meta);
+    for (const a of areas) store.writeLocal('tendons', `area.${a.id}`, a);
+    store.writeLocal('tendons', 'readiness', { kind: 'readiness', ...table });
+    [['pull', '2026-01-17'], ['push', '2026-01-18'], ['legs', '2026-01-19']].forEach(([dayType, d], i) =>
+      store.writeLocal('sessions', `hevy.${i}`, { id: `hevy.${i}`, kind: 'workout', status: 'done', dayType, startedAt: at(d, '05:00') }));
+    store.writeLocal('settings', 'main', { notify: { holdsMorning: '09:30', holdsEvening: '21:30', eveningCheck: '22:30', wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 0, kinds: { supps: false, meals: false } } });
+    let now = 0;
+    const sent = [];
+    const push = { list: () => [{ deviceId: 'a1b2c3d4e5f6' }], notify: async (m) => { sent.push({ ...m, at: now }); return { sent: 1, failed: 0, dropped: 0 }; } };
+    const n = startNotifier({ store, push, tz: TZ, now: () => now, everyMs: 1e9 });
+    n.stop();
+    const hm = (t) => new Date(t).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+    for (now = at('2026-01-20', '08:00'); now < at('2026-01-21', '00:30'); now += 5 * 60000) await n.tick();
+    const holds = sent.filter((m) => /hold/i.test(m.body));
+    // 9:30 AM is before he wakes (10:00 AM): the morning one comes at 10:00 AM, as on Fri 10/23 (10:01 AM).
+    assert.deepEqual(holds.map((m) => hm(m.at)), ['10:00 AM', '11:30 AM', '3:30 PM', '9:30 PM', '10:45 PM']);
+    assert.equal(new Set(holds.map((m) => m.body.replace(/ [^.?!]*[.?!]$/, ''))).size, 5, 'each in its own words');
+    assert.ok(!sent.some((m) => /Still open: knees/.test(m.body)), 'the round-up leaves the holds to their stream');
+    assert.ok(holds.every((m) => (m.body.match(/Knees/g) || []).length <= 1), 'knees said once a message');
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Sat 10/24: a holds check-in within an hour of the last holds message (or due with it) is counted, not sent', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { startNotifier } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-holds-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    store.writeLocal('programme', 'meta', meta);
+    for (const a of areas) store.writeLocal('tendons', `area.${a.id}`, a);
+    store.writeLocal('tendons', 'readiness', { kind: 'readiness', ...table });
+    [['pull', '2026-01-17'], ['push', '2026-01-18'], ['legs', '2026-01-19']].forEach(([dayType, d], i) =>
+      store.writeLocal('sessions', `hevy.${i}`, { id: `hevy.${i}`, kind: 'workout', status: 'done', dayType, startedAt: at(d, '05:00') }));
+    store.writeLocal('settings', 'main', { notify: { holdsMorning: '09:30', holdsEvening: '21:30', wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 0, kinds: { supps: false, meals: false, evening: false } } });
+    let now = at('2026-01-20', '11:30');
+    const sent = [];
+    const push = { list: () => [{ deviceId: 'a1b2c3d4e5f6' }], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0, dropped: 0 }; } };
+    const n = startNotifier({ store, push, tz: TZ, now: () => now, everyMs: 1e9 });
+    n.stop();
+    // The morning reminder went out late, at 11:00 AM (held for his morning): the 11:30 AM check-in is skipped.
+    store.setMeta('notify:sent', { 'holds-morning:2026-01-20': at('2026-01-20', '11:00') });
+    assert.deepEqual((await n.tick()).filter((i) => i.kind === 'holds'), []);
+    assert.ok(store.getMeta('notify:sent')['holds-check:2026-01-20:morning:1'], 'counted as sent');
+    assert.ok(!sent.some((m) => /hold/i.test(m.body)));
+    // The next one, hours later, goes out.
+    now = at('2026-01-20', '15:30');
+    assert.deepEqual((await n.tick()).filter((i) => i.kind === 'holds').map((i) => i.id), ['holds-check:2026-01-20:morning:2']);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });
@@ -234,7 +357,7 @@ test('supplements (6.6): at his times, again every 45 minutes until answered, op
   assert.equal(sup[5].body, "Magnesium still unticked. It's a rest day, so 750 mg.");
   const evening = items.find((i) => i.kind === 'evening');
   assert.match(evening.body, /Supplements still open: creatine, vitamin C, magnesium, collagen\./);
-  assert.equal(evening.url, '#/holds');
+  assert.equal(evening.url, '#/supps', 'open holds have their own stream: the round-up goes to supplements');
   // Answered: no more asking; skipped counts as answered.
   const log = [logEntry({ supp: supplements[0], date, dayKind: 'rest', status: 'taken', at: 1 }), logEntry({ supp: supplements[1], date, dayKind: 'rest', status: 'skipped', reason: 'ran out', at: 1 })];
   items = remindersFor({ ...base, date, last: { dayType: 'legs', date: '2026-01-19', streak: 3 }, supplements, suppLog: log });

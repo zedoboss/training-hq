@@ -68,7 +68,8 @@ export function coachReminder(item, opts = {}) {
 }
 
 // Which planned reminders are nudged again while still open: [key prefix, priority, minutes between nudges].
-const AGAIN = { readiness: ['checkin', 85, 20], holds: ['holds', 50, 60], meals: ['meals', 55, 30], supps: ['supps', 60, 45], recovery: ['recovery', 40, 120] };
+// Not holds (Sat 10/24): they have their own few check-ins (lib/reminders.js HOLDS_CHECK), not every hour.
+const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps: ['supps', 60, 45], recovery: ['recovery', 40, 120] };
 
 /**
  * Everything worth a nudge right now, most important first.
@@ -180,20 +181,11 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     // A one-off message (again: false) is not nudged again (Thu 10/22 audit: "Head home", the step-up question and the
     // after photo came back every half hour or hour); repeats the planner sends itself (group) aren't doubled.
     if (!a || !r.due || r.again === false || r.group || r.at > now || r.at < now - 16 * 3600000) continue;
-    let title = String(r.title || '').replace(/[.:]?\s*$/, '');
-    const body = r.body;
-    let tail = '';
-    // Holds an hour or more past their time say so (Tue 10/20, his words: it said "Morning holds" in the afternoon).
-    // A late morning round: one now, the evening one at its time, not back to back (brief section 4, line 8).
     // A meal ask isn't nudged here: its own check-ins follow it (lib/fuel-reminders.js; Fri 10/23, "First meal is late"
     // came on top of them, and after the last meal's time).
-    if (r.kind === 'holds' && now - r.at >= 60 * 60000) {
-      title = `${title} still not done (due ${formatHm(hmOf(new Date(r.at), tz))})`;
-      const evening = r.id.startsWith('holds-morning:') ? reminders.find((x) => x.id === r.id.replace('holds-morning:', 'holds-evening:')) : null;
-      if (evening?.at > now) tail = ` One round now, the evening one at ${formatHm(hmOf(new Date(evening.at), tz))}. Not back to back.`;
-    }
+    const title = String(r.title || '').replace(/[.:]?\s*$/, '');
     out.push({ key: `${a[0]}:${r.tag || r.id}`, priority: a[1], gapMin: a[2], url: r.url || '#/', calm: CALM_KINDS.has(r.kind),
-      text: `${[/[?!]$/.test(title) ? title : `${title}.`, body].filter(Boolean).join(' ')}${tail}` });
+      text: [/[?!]$/.test(title) ? title : `${title}.`, r.body].filter(Boolean).join(' ') });
   }
 
   // Food behind the day's pace (wake up to 2 hours before bed).
