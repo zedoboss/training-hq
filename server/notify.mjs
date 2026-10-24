@@ -649,7 +649,7 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `walk:${due.kind}` });
   // Too hot or bright: the coach planned (or moved) the walk itself; quiet until then.
   const asked = withAsk(doc, date, due.kind, now);
-  store.writeLocal('walks', date, due.planAt ? withAnswer(asked, date, { action: 'plan', at: due.planAt, said: 'planned by the coach for cooler weather' }, now) : asked);
+  store.writeLocal('walks', date, due.planAt ? withAnswer(asked, date, { action: 'plan', at: due.planAt, by: 'coach' }, now) : asked);
   store.setMeta(LAST, now);
   log(`walk ${due.kind}: ${v.body.slice(0, 80)} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
   return { key: `walk:${due.kind}`, body: v.body };

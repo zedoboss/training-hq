@@ -373,7 +373,7 @@ test('Fri 10/23: an unanswered meal ask is not nudged again on top of its check-
   assert.ok(cands('16:45', skipped).some((x) => x.key === 'food'));
 });
 
-test('walk tick (Tue 10/20): asks, 5 minutes later asks for a time, stays quiet once he gives one, then "walk time"', async () => {
+test('walk tick (Tue 10/20): asks, 20 minutes later asks for a time, stays quiet once he gives one, then "walk time"', async () => {
   const { mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -393,13 +393,14 @@ test('walk tick (Tue 10/20): asks, 5 minutes later asks for a time, stays quiet 
     assert.match(sent[0].body, /^Walk: 3,000 of 8,000 steps as of 2:00 PM: 5,000 to go, about 50 minutes of walking\. Go out for a walk now\. When are you going\?/);
     assert.equal(sent[0].url, '#/coach', 'tapping it opens Talk to answer');
     assert.equal(await tick('14:33'), null);
-    assert.equal((await tick('14:35')).key, 'walk:follow');
+    assert.equal(await tick('14:35'), null);
+    assert.equal((await tick('14:50')).key, 'walk:check');
     assert.match(sent[1].body, /^No answer on the walk\. When are you going\? Tell me a time and I leave you alone until then\./);
     // He answers "in an hour" (the coach's walk tool): quiet until 3:36 PM.
     const doc = store.getRecord('walks', D).data;
-    store.writeLocal('coach-messages', 'u1', { id: 'u1', role: 'user', text: "I'll go in an hour", at: at(D, '14:36') });
-    store.writeLocal('walks', D, withAnswer(doc, D, { action: 'plan', at: at(D, '15:36'), said: "I'll go in an hour" }, at(D, '14:36')));
-    assert.equal(await tick('14:50'), null);
+    store.writeLocal('coach-messages', 'u1', { id: 'u1', role: 'user', text: "I'll go in an hour", at: at(D, '14:52') });
+    store.writeLocal('walks', D, withAnswer(doc, D, { action: 'plan', at: at(D, '15:36'), said: "I'll go in an hour" }, at(D, '14:52')));
+    assert.equal(await tick('15:00'), null);
     assert.equal(await tick('15:30'), null);
     assert.equal((await tick('15:36')).key, 'walk:plan');
     assert.equal(store.listRecords('coach-messages').filter((r) => r.data.kind === 'nudge').length, 3, 'each one is in Talk too');

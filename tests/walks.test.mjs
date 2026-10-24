@@ -8,7 +8,7 @@ const at = (hm, d = D) => Date.parse(`${d}T${hm}:00+07:00`);
 const base = { tz: TZ, goal: 8000, wakeHm: '10:00', bedHm: '00:00' };
 const steps = (n, hm) => ({ steps: n, asOf: at(hm) });
 
-test('walks: ask, 5 minutes later ask for a time, then every 15 minutes until he answers', () => {
+test('walks: ask, then 3 check-ins (20, 60, 120 minutes), each in new words, then quiet until he answers', () => {
   let doc = null;
   const due = (hm, o = {}) => walkDue({ ...base, now: at(hm), doc, steps: steps(3000, '14:00'), ...o });
   assert.equal(due('10:30'), null, 'not in the first hour after he wakes');
@@ -16,12 +16,20 @@ test('walks: ask, 5 minutes later ask for a time, then every 15 minutes until he
   assert.equal(a.kind, 'ask');
   assert.equal(a.text, 'Walk: 3,000 of 8,000 steps as of 2:00 PM: 5,000 to go, about 50 minutes of walking. Go out for a walk now. When are you going?');
   doc = withAsk(doc, D, 'ask', at('14:30'));
-  assert.equal(due('14:34'), null);
-  assert.deepEqual(due('14:35'), { kind: 'follow', text: 'No answer on the walk. When are you going? Tell me a time and I leave you alone until then.' });
-  doc = withAsk(doc, D, 'follow', at('14:35'));
-  assert.equal(due('14:45'), null);
-  assert.equal(due('14:50').kind, 'nag');
+  assert.equal(due('14:35'), null, 'not after 5 minutes any more (Sun 10/25)');
+  assert.equal(due('14:49'), null);
+  assert.deepEqual(due('14:50'), { kind: 'check', text: 'No answer on the walk. When are you going? Tell me a time and I leave you alone until then.' });
   assert.equal(due('14:50', { busy: true }), null, 'never during a workout or the sauna');
+  doc = withAsk(doc, D, 'check', at('14:50'));
+  assert.equal(due('15:29'), null);
+  assert.match(due('15:30').text, /^Still no time for your walk\. 3,000 of 8,000 steps/);
+  doc = withAsk(doc, D, 'check', at('15:30'));
+  assert.equal(due('16:29'), null);
+  assert.equal(due('16:30').text, 'Last check on the walk: going, a time, or skipping it today?');
+  doc = withAsk(doc, D, 'check', at('16:30'));
+  assert.equal(due('17:00'), null, 'then it stops');
+  assert.equal(due('21:00'), null, 'all evening');
+  assert.equal(due('21:30', { lastUserAt: at('21:00') }).kind, 'ask', 'he talks again: a fresh ask 30 minutes on');
   assert.equal(due('23:30'), null, 'not in the last hour before bed');
 });
 
@@ -35,7 +43,8 @@ test('walks: "I\'ll go in an hour": quiet until then, walk time, then the follow
   assert.equal(p.kind, 'plan');
   assert.match(p.text, /^Walk time: you said "I'll go in an hour"\. Go now\./);
   doc = withAsk(doc, D, 'plan', at('15:32'));
-  assert.equal(due('15:37').kind, 'plan-follow');
+  assert.equal(due('15:37'), null, 'no 5-minute follow-up (Sun 10/25)');
+  assert.equal(due('15:52').text, 'Walk: you said 3:32 PM. Out yet? Going now, or a new time?');
   doc = withAnswer(doc, D, { action: 'going' }, at('15:38'));
   assert.equal(due('16:10'), null, 'out walking');
   assert.deepEqual(due('16:18'), { kind: 'back', text: 'Back from the walk? How many minutes did you go?' });
@@ -148,4 +157,31 @@ test('rain is a forecast until confirmed (Thu 10/22: "drizzle, take an umbrella"
   const high = { current: { at: at('19:00'), precip: 0, code: 3 }, hours: [hour('19:00', 73, [0.5, 0.6, 0.4, 0])], obs: storm };
   assert.equal(umbrellaWorth(high, at('19:10')), false, 'a forecast stays a forecast');
   assert.equal(umbrellaWorth({ ...high, seen: { at: at('19:05'), raining: true, said: 'pouring' } }, at('19:10')), true, 'his word confirms it');
+});
+
+test('Sun 10/25: a walk the coach planned for the weather: 3 check-ins, new words, then stop; never "you set" or "you said"', () => {
+  // Saturday 10/24: planned at 2:02 PM for 6:00 PM (too hot), then the same "walk you set for 6:00 PM" every 15 minutes
+  // till 10:56 PM, and at 6:00 PM "you said "planned by the coach for cooler weather"".
+  const plan = { action: 'plan', at: at('18:00'), by: 'coach' };
+  for (const start of [withAnswer(withAsk(null, D, 'planned', at('14:02')), D, plan, at('14:02')),
+    // A record from before the change: the coach's note in "said".
+    withAnswer(withAsk(null, D, 'planned', at('14:02')), D, { ...plan, by: undefined, said: 'planned by the coach for cooler weather' }, at('14:02'))]) {
+    let doc = start;
+    const sent = [];
+    for (let m = 18 * 60; m < 23 * 60; m++) {
+      const hm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const due = walkDue({ ...base, now: at(hm), doc, steps: steps(1820, '17:00'), lastUserAt: at('13:00') });
+      if (!due) continue;
+      sent.push({ hm, ...due });
+      doc = withAsk(doc, D, due.kind, at(hm));
+    }
+    assert.deepEqual(sent.map((x) => `${x.hm} ${x.kind}`), ['18:00 plan', '18:20 check', '19:00 check', '20:00 check']);
+    assert.match(sent[0].text, /^Walk time: 6:00 PM, the hour I picked for the weather\. Go now\./);
+    assert.equal(new Set(sent.map((x) => x.text.slice(0, 40))).size, 4, 'each one in new words');
+    for (const x of sent) assert.doesNotMatch(x.text, /you set|you said|planned by the coach/i, x.text);
+    assert.match(walkLines([doc], { today: D, now: at('19:00'), tz: TZ })[0], /the app planned it for 6:00 PM \(for the weather;/);
+  }
+  // His own time keeps his words.
+  const mine = withAnswer(null, D, { action: 'plan', at: at('18:00'), said: 'at 6' }, at('14:02'));
+  assert.match(walkDue({ ...base, now: at('18:00'), doc: mine, steps: steps(1820, '17:00') }).text, /^Walk time: you said "at 6"\./);
 });

@@ -145,7 +145,7 @@ function allEvents(s) {
 
   // Walks.
   for (const w of s.list('walks')) {
-    if (w.plan?.setAt) ev(w.plan.setAt, 'walks', `Walk planned for ${t(w.plan.at)}${w.plan.said ? ` ("${clip(w.plan.said, 120)}")` : ''}`);
+    if (w.plan?.setAt) ev(w.plan.setAt, 'walks', `Walk planned for ${t(w.plan.at)}${w.plan.by === 'coach' ? ' (by the app, for the weather)' : ''}${w.plan.said ? ` ("${clip(w.plan.said, 120)}")` : ''}`);
     if (w.going?.at) ev(w.going.at, 'walks', 'Out walking');
     for (const x of w.walks || []) ev(x.at, 'walks', `Walk done${x.minutes ? `: ${x.minutes} min` : ''}${x.steps ? `, ${x.steps} steps` : ''}`);
     for (const x of w.skips || []) ev(x.at, 'walks', `Walk skipped${x.reason ? `: ${clip(x.reason, 120)}` : ''}`);
