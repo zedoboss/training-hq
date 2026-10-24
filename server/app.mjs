@@ -88,7 +88,7 @@ function readRaw(req, limit) {
  * @param {() => number} [o.now]
  * @param {(msg: string) => void} [o.log]
  */
-export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, calendar = null, icloud = null, evolt = null, restPush = null, onSync = null, now = () => Date.now(), log = () => {} }) {
+export function createApp({ store, appDir, allowedOrigins = [], demos = null, imports = null, push = null, health = null, coach = null, voice = null, tts = null, arrive = null, calendar = null, icloud = null, evolt = null, restPush = null, onSync = null, onOpened = null, now = () => Date.now(), log = () => {} }) {
   const failedPairs = [];
 
   const originAllowed = (origin, host) => {
@@ -526,6 +526,15 @@ export function createApp({ store, appDir, allowedOrigins = [], demos = null, im
       if (!voice) throw new HttpError(404, 'voice not available');
       const bytes = await readRaw(req, MAX_CLIP_BYTES);
       return voiceCall(() => voice.test({ bytes, kind: url.searchParams.get('kind') }));
+    },
+
+    // Sat 10/24: the app came on screen on this device; the phone's first open of his day gets the coach's greeting
+    // (notify.mjs morningTick), written into Talk before this answers, so the sync right after brings it.
+    'POST /api/app/opened': async (req) => {
+      const device = auth(req);
+      const { phone } = await readJson(req);
+      if (phone === true && onOpened) await onOpened({ device, at: now() });
+      return { ok: true };
     },
 
     'POST /api/sync': async (req) => {

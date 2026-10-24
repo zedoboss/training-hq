@@ -97,7 +97,8 @@ const ASKS_BODY = /\b(back|body|sore\w*|knees?|pain|hurts?|hurting)\b[^.!?]*\?/i
 
 /**
  * The first sign he's up today, from 5:00 AM: his message, a meal or his answer to a meal question, a supplement
- * ticked, a workout or holds round started, his sleep log's wake time, the app opened (its zone report, Apple Health).
+ * ticked, a workout or holds round started, his sleep log's wake time, the app opened (its zone report, its open report),
+ * Apple Health.
  * A workout started after midnight counts too (his sessions start from 3:00 AM): with no answer to "Are you up?" the
  * day now waits for him, so an early session must not leave it waiting.
  */
@@ -115,6 +116,7 @@ export function upAtToday(store, now, tz) {
     ...list('supp-log').map((e) => e.at),
     ...list('sessions').filter((x) => x.status !== 'discarded').map((x) => x.startedAt),
     ...list('here').filter((h) => h.phone).map((h) => h.at),
+    ...appOpens(store, now, tz),
     ...list('health').map((d) => d.fileAt),
   ].filter((t) => Number.isFinite(t) && t >= from && t <= now).concat(workout);
   return signs.length ? Math.min(...signs) : null;
@@ -126,7 +128,7 @@ export function morningGate(store, now, tz) {
   const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
   const m = store.getMeta(MORNING_STATE);
   const state = m?.date === date ? m : { date };
-  const off = { hold: false, open: true, ask: null, state, date, openAt: null };
+  const off = { hold: false, open: true, ask: null, state, date, openAt: null, off: true };
   // Nudges off or paused, or he asked the coach to hold off everything: no morning questions, nothing held.
   if (!n.nudgeEveryMin || now < (n.nudgePausedUntil || 0) || heldOff('morning', holdsOf(store), now)) return off;
   const list = (col) => recordsOf(store, col);
@@ -151,9 +153,28 @@ export function morningGate(store, now, tz) {
   return { ...step, state, date, openAt: step.open ? state.open || now : null };
 }
 
+// Sat 10/24, his words: "Auto greet when i open the app Too by the coach speaking pls". He opened the app at 2:23 PM
+// (no answer to "Are you up?" at 10:00 AM) and the coach said nothing until he spoke. Now the phone tells the Mac each
+// time the app comes on screen (POST /api/app/opened), and the first time in his day (after midnight before he has
+// slept still counts for the day before), before he has written, the coach greets him: "Morning." with the morning's
+// next question in the same message, written into Talk and said out loud (lib/voice.js watchNudges). No notification:
+// he is in the app. Once a day; not when the morning is off or held off, not during a workout or the sauna, not if he
+// wrote first. A greeting this many minutes after the open (the Mac asleep or restarting) is old news: not sent.
+export const GREET = { text: 'Morning.', freshMin: 10 };
+export const APP_OPENS = 'app:opens';
+
+/** The phone opened the app (came on screen) at `at`: kept for that day (the last 50). */
+export function noteAppOpen(store, at, tz) {
+  const date = isoDate(new Date(at), tz);
+  const m = store.getMeta(APP_OPENS);
+  const list = (m?.date === date ? m.at : []).concat(at).slice(-50);
+  store.setMeta(APP_OPENS, { date, at: list });
+}
+const appOpens = (store, now, tz) => { const m = store.getMeta(APP_OPENS); return m?.date === isoDate(new Date(now), tz) ? m.at.filter((t) => t <= now) : []; };
+
 /**
  * Once a minute, first: notes when the morning started holding and when it opened, and asks the next question when
- * it's time (pushed and written into Talk). Returns what was sent, or null.
+ * it's time (pushed and written into Talk). His first open of the day gets the greeting. Returns what was sent, or null.
  */
 export async function morningTick({ store, push, log = () => {}, now, tz }) {
   const g = morningGate(store, now, tz);
@@ -164,16 +185,25 @@ export async function morningTick({ store, push, log = () => {}, now, tz }) {
   if (g.hold && !st.from) st.from = now - start < 30 * 60000 ? Math.min(start, now) : now;
   if (g.open && st.from && !st.open) st.open = g.openAt;
   let out = null;
-  if (g.ask && !busyNow((col) => recordsOf(store, col), now)) {
-    const v = coachVoice(g.ask.text, { calm: true });
-    const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: `morning-${g.ask.key}` }) : { sent: 0 };
-    sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `morning:${g.ask.key}` });
-    st[g.ask.key] = now;
+  const busy = busyNow((col) => recordsOf(store, col), now);
+  const today = (at) => foodDayOf(store, at, tz) === g.date;
+  const opened = Math.max(0, ...appOpens(store, now, tz).filter(today)) || null;
+  const wrote = recordsOf(store, MSGS).some((m) => m.role === 'user' && m.at >= zonedTime(g.date, '05:00', tz) && m.at <= now && today(m.at));
+  const greet = !g.off && !st.greet && !busy && !wrote && opened != null && now - opened < GREET.freshMin * 60000;
+  const ask = g.ask && g.ask.key !== 'up' ? g.ask : null; // he opened the app: he's up, no need to ask
+  if (greet || (g.ask && !busy)) {
+    const key = greet ? (ask ? `greet:${ask.key}` : 'greet') : g.ask.key;
+    const v = coachVoice(greet ? [GREET.text, ask?.text].filter(Boolean).join(' ') : g.ask.text, { calm: true });
+    const r = !greet && push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: `morning-${key}` }) : { sent: 0 };
+    sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `morning:${key}` });
+    if (greet) st.greet = now;
+    const asked = greet ? ask : g.ask;
+    if (asked) st[asked.key] = now;
     // The nudges' own sleep question is this one: not again today.
-    if (g.ask.key === 'sleep') { const ns = store.getMeta(NUDGES) || { last: 0, byKey: {} }; ns.byKey.sleep = now; store.setMeta(NUDGES, ns); }
+    if (asked?.key === 'sleep') { const ns = store.getMeta(NUDGES) || { last: 0, byKey: {} }; ns.byKey.sleep = now; store.setMeta(NUDGES, ns); }
     store.setMeta(LAST, now);
-    log(`morning ${g.ask.key}: ${v.body.slice(0, 80)} (${r.sent} sent)`);
-    out = { key: `morning:${g.ask.key}`, body: v.body };
+    log(`morning ${key}: ${v.body.slice(0, 80)} (${r.sent} sent)`);
+    out = { key: `morning:${key}`, body: v.body };
   }
   if (JSON.stringify(st) !== JSON.stringify(g.state)) store.setMeta(MORNING_STATE, st);
   return out;

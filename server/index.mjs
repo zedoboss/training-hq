@@ -11,7 +11,7 @@ import { openImports } from './imports.mjs';
 import { openImportInbox } from './import-inbox.mjs';
 import { scheduleNightly } from './backup.mjs';
 import { openPush, DEFAULT_SUBJECT } from './push.mjs';
-import { startNotifier, phoneZone, sessionBusy, morningGate } from './notify.mjs';
+import { startNotifier, phoneZone, sessionBusy, morningGate, noteAppOpen } from './notify.mjs';
 import { openWeather } from './weather.mjs';
 import { openArrive } from './arrive.mjs';
 import { openCalendar } from './calendar.mjs';
@@ -156,7 +156,9 @@ const voice = openVoice({ store, dataDir: p.dataDir, engine, whisper, coach, log
 const tts = openTts({ configDir: p.configDir, log });
 log(`voice: ${engine.status().missing.length ? `models missing (${engine.status().missing.join(', ')}): run node scripts/voice-setup.mjs` : 'models ready'}`);
 
-const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, calendar, icloud, evolt, restPush, onSync, log });
+// The phone opened the app: noted, and the morning runs now (his first open of the day gets the greeting at once).
+const onOpened = async ({ at }) => { noteAppOpen(store, at, phoneZone(store)); await notifier.tick(); };
+const server = createApp({ store, appDir: APP_DIR, allowedOrigins: config.allowedOrigins, demos, imports, push, health, coach, voice, tts, arrive, calendar, icloud, evolt, restPush, onSync, onOpened, log });
 server.listen(config.port, '127.0.0.1', () => {
   log(`Training HQ server on http://127.0.0.1:${config.port} (app ${version}, data in ${p.dataDir})`);
 });

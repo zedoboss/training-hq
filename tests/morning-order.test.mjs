@@ -10,7 +10,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { morningStep, morningBodyText, lastWorkoutPain, nudgeCandidates, pickNudge, MORNING_UP_TEXT } from '../app/js/lib/nudges.js';
 import { openStore } from '../server/store.mjs';
-import { startNotifier, morningGate, morningContext } from '../server/notify.mjs';
+import { startNotifier, morningGate, morningContext, noteAppOpen, GREET } from '../server/notify.mjs';
+import { createApp } from '../server/app.mjs';
+import { APP_DIR } from '../server/config.mjs';
 
 const TZ = 'Asia/Ho_Chi_Minh';
 const D = '2026-03-20';
@@ -208,4 +210,108 @@ test('a workout before 5:00 AM counts as up: no "Are you up?", the day goes on',
     await f.run('10:06', '10:40');
     assert.equal(morningGate(f.store, T('10:40'), TZ).hold, false);
   } finally { f.done(); }
+});
+
+// Sat 10/24, his words: "Auto greet when i open the app Too by the coach speaking pls". He opened the app at 2:23 PM and
+// the coach said nothing until he spoke. Now his first open of the day gets "Morning." with the morning's next
+// question, in Talk (said out loud there, lib/voice.js), no notification; once a day.
+const talkOf = (store) => store.listRecords('coach-messages').map((r) => r.data).filter((m) => m.role === 'assistant').sort((a, b) => a.at - b.at);
+const opens = (f, hm) => { f.store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: T(hm) }); noteAppOpen(f.store, T(hm), TZ); };
+
+test('he opens the app at 2:30 PM, no answer to "Are you up?": "Morning." and the sleep question, in Talk, once', async () => {
+  const f = friday();
+  try {
+    await f.run('09:58', '14:29');
+    opens(f, '14:30');
+    await f.run('14:30', '14:30');
+    const greet = talkOf(f.store).at(-1);
+    assert.equal(greet.text, 'Morning. How did you sleep? When did you go to bed and when did you wake up?');
+    assert.equal(greet.ref, 'morning:greet:sleep');
+    assert.equal(hmOf(greet.at), '2:30 PM');
+    assert.deepEqual(f.sent.map((m) => m.body), ['Morning. Are you up?'], 'no notification: he is in the app');
+    // The sleep question isn't asked again; his answer leads to his back, as before.
+    await f.run('14:31', '14:40');
+    assert.equal(talkOf(f.store).filter((m) => /How did you sleep/.test(m.text)).length, 1);
+    f.say('14:41', 'bed 3:30, up 2:15');
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: T('03:30'), wake: T('14:15'), source: 'coach', at: T('14:42') });
+    await f.run('14:41', '14:45');
+    assert.match(f.sent.at(-1).body, /^How's your lower back today\?/);
+    // He opens it again later: no second greeting.
+    opens(f, '16:00');
+    await f.run('16:00', '16:05');
+    assert.equal(talkOf(f.store).filter((m) => /^morning:greet/.test(m.ref || '')).length, 1);
+  } finally { f.done(); }
+});
+
+test('opening before his wake time: the greeting, and no "Are you up?" later', async () => {
+  const f = friday();
+  try {
+    opens(f, '08:00');
+    await f.run('08:00', '10:30');
+    assert.equal(talkOf(f.store)[0].text, 'Morning. How did you sleep? When did you go to bed and when did you wake up?');
+    assert.equal(talkOf(f.store).some((m) => /Are you up/.test(m.text)), false);
+  } finally { f.done(); }
+});
+
+test('sleep and his body known already: "Morning." alone, then the day', async () => {
+  const f = friday();
+  try {
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, wake: T('08:20'), source: 'coach', at: T('08:21') });
+    f.store.writeLocal('days', D, { date: D, readiness: { at: T('08:22') } });
+    opens(f, '08:30');
+    await f.run('08:30', '08:31');
+    assert.equal(talkOf(f.store)[0].text, GREET.text);
+    assert.equal(talkOf(f.store)[0].ref, 'morning:greet');
+  } finally { f.done(); }
+});
+
+test('no greeting: he wrote first, a workout runs, nudges are off, the Mac saw the open too late, or he hasn\'t slept yet', async () => {
+  const greeted = (f) => talkOf(f.store).some((m) => /^morning:greet/.test(m.ref || ''));
+  // He wrote before the open was seen: the coach answers him; no greeting on top.
+  let f = friday();
+  try { f.say('11:00', 'yo'); opens(f, '11:01'); await f.run('11:01', '11:10'); assert.equal(greeted(f), false, 'wrote first'); } finally { f.done(); }
+  // Mid-workout.
+  f = friday();
+  try {
+    f.store.writeLocal('sessions', 'pull1', { id: 'pull1', dayType: 'pull', status: 'active', startedAt: T('10:30'), exercises: [] });
+    opens(f, '11:00'); await f.run('11:00', '11:20');
+    assert.equal(greeted(f), false, 'workout');
+  } finally { f.done(); }
+  // Nudges off: no morning, no greeting.
+  f = friday();
+  try {
+    f.store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 0 } });
+    opens(f, '11:00'); await f.run('11:00', '11:05');
+    assert.equal(greeted(f), false, 'nudges off');
+  } finally { f.done(); }
+  // The Mac first looks 15 minutes after the open (asleep): old news.
+  f = friday();
+  try { opens(f, '11:00'); f.set(T('11:15')); await f.run('11:15', '11:15'); assert.equal(greeted(f), false, 'late'); } finally { f.done(); }
+  // 5:30 AM, up all night, not slept: that's still his day before; the greeting comes when he opens it after sleeping.
+  f = friday();
+  try {
+    opens(f, '05:30'); await f.run('05:30', '05:40');
+    assert.equal(greeted(f), false, 'not slept yet');
+    opens(f, '13:00'); await f.run('13:00', '13:00');
+    assert.match(talkOf(f.store).at(-1).text, /^Morning\./);
+  } finally { f.done(); }
+});
+
+test('POST /api/app/opened: the phone\'s open reaches the Mac; another device\'s doesn\'t', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-opened-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  const seen = [];
+  const server = createApp({ store, appDir: APP_DIR, onOpened: async (o) => { seen.push(o); } });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const { code } = store.createPairingCode();
+    const { token } = await (await fetch(`${base}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, deviceId: 'a1b2c3d4e5f6', name: 'iPhone' }) })).json();
+    assert.ok(token);
+    const call = (body, t = token) => fetch(`${base}/api/app/opened`, { method: 'POST', headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}) }, body: JSON.stringify(body) });
+    assert.equal((await call({ phone: true }, 'made-up')).status, 401);
+    assert.equal((await call({ phone: true })).status, 200);
+    assert.equal((await call({ phone: false })).status, 200);
+    assert.equal(seen.length, 1);
+  } finally { server.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

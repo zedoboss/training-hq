@@ -350,11 +350,25 @@ function scheduleSync(ms) {
   timer = setTimeout(() => { syncNow().finally(() => scheduleSync(30000)); }, ms);
 }
 
+// Sat 10/24 ("Auto greet when i open the app Too by the coach speaking"): each time the app comes on screen the Mac is
+// told (at most once a minute); his first open of the day gets the coach's greeting, and the sync right after brings it.
+let openedAt = 0;
+async function reportOpen() {
+  if (Date.now() - openedAt < 60000) return;
+  openedAt = Date.now();
+  await ready;
+  if (!(await repo.getMeta('token')) || !(await repo.getMeta('macUrl'))) return;
+  const phone = /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+  const r = await post('/api/app/opened', { phone });
+  if (r.status === 200) scheduleSync(0);
+}
+
 function startLoop() {
   reportZone().catch(() => {});
   scheduleSync(300);
+  reportOpen().catch(() => {});
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { reportZone().catch(() => {}); scheduleSync(300); }
+    if (document.visibilityState === 'visible') { reportZone().catch(() => {}); scheduleSync(300); reportOpen().catch(() => {}); }
   });
   window.addEventListener('online', () => scheduleSync(300));
 }

@@ -280,17 +280,22 @@ export function speakText(text) {
 /**
  * Mon 10/19: the coach says its nudges and reminders out loud too, when the app is open and listening is on (they
  * arrive by sync within about 30 seconds). Only new ones: what was already there when the app opened stays quiet.
+ * Sat 10/24: its greeting when he opens the app (ref morning:greet...) is said even with listening off (the speak
+ * setting still decides); if iPhone holds the sound back until a tap, it plays at his first tap.
  */
+export const spokenAlways = (m) => /^morning:greet\b/.test(m?.ref || '');
 export function watchNudges(repo) {
   const said = new Set();
   let primed = false;
+  const started = Date.now() - 5000; // a greeting synced in before the first look is still this open's
   const check = async () => {
     const msgs = (await repo.list('coach-messages')).filter((m) => m && m.role === 'assistant' && (m.kind === 'nudge' || m.kind === 'reminder' || m.kind === 'initiative'));
     for (const m of msgs) {
       if (said.has(m.id)) continue;
       said.add(m.id);
       const fresh = Date.now() - (m.at || 0) < 3 * 60000;
-      if (primed && fresh && listening() && document.visibilityState === 'visible') speakText(m.text);
+      const greet = spokenAlways(m);
+      if ((primed || (greet && m.at >= started)) && fresh && (listening() || greet) && document.visibilityState === 'visible') speakText(m.text);
     }
     primed = true;
   };
