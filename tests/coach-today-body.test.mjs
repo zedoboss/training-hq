@@ -88,3 +88,9 @@ test('a skip without a reason still shows, and a holds round with pain counts to
   assert.match(line, /Legs \(open now\): SKIPPED Leg Curl at 9:20 AM, his reason: none given/);
   assert.match(line, /holds round \(Knees\): Wall Squat Hold 30 s, pain 3\/10/);
 });
+
+test('a workout still open after midnight keeps its skips in the line', () => {
+  pull();
+  const line = todayBodyLine(s(at('2026-03-18', '00:20')));
+  assert.match(line, /Pull \(open now\): SKIPPED Cable Row[^|]*"Lower back pain can be felt"/);
+});

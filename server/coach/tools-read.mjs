@@ -105,7 +105,7 @@ const bodyTalk = (t) => PAIN_WORDS.test(t) || BODY_WORDS.test(t);
 export function todayBodyLine(s) {
   const clip = (t, n) => { const x = String(t).replace(/\s+/g, ' ').trim(); return x.length > n ? `${x.slice(0, n - 1)}…` : x; };
   const parts = [];
-  const sessions = s.list('sessions').filter((x) => x.startedAt && x.status !== 'discarded' && s.date(x.startedAt) === s.today).sort((a, b) => a.startedAt - b.startedAt);
+  const sessions = s.list('sessions').filter((x) => x.startedAt && x.status !== 'discarded' && (s.date(x.startedAt) === s.today || (x.status === 'active' && s.now - x.startedAt < 12 * 3600e3))).sort((a, b) => a.startedAt - b.startedAt);
   for (const se of sessions) {
     const name = se.kind === 'holds' ? `holds round (${se.area || se.title || 'holds'})` : `${se.title || LABEL[se.dayType] || 'workout'}${se.status === 'active' ? ' (open now)' : ''}`;
     const sets = s.setsOf(se.id).filter((x) => x.done);
