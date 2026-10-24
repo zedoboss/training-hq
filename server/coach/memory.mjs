@@ -7,6 +7,7 @@ import { formatTime, formatDay, formatHm, isoDate, zonedTime } from '../../app/j
 import { addDays, LABEL } from '../../app/js/lib/rotation.js';
 import { kg as k } from '../../app/js/lib/loads.js';
 import { oneArm, armOf } from './shared.mjs';
+import { coachPlanned } from '../../app/js/lib/walks.js';
 
 /** What the timeline can show; kinds: [...] picks some. */
 export const TIMELINE_KINDS = ['sleep', 'messages', 'notifications', 'meals', 'supplements', 'workouts', 'holds', 'checkins', 'health', 'walks', 'scans', 'sauna', 'squats', 'notes', 'reminders', 'changes', 'holdoffs', 'days', 'diary'];
@@ -145,7 +146,7 @@ function allEvents(s) {
 
   // Walks.
   for (const w of s.list('walks')) {
-    if (w.plan?.setAt) ev(w.plan.setAt, 'walks', `Walk planned for ${t(w.plan.at)}${w.plan.by === 'coach' ? ' (by the app, for the weather)' : ''}${w.plan.said ? ` ("${clip(w.plan.said, 120)}")` : ''}`);
+    if (w.plan?.setAt) ev(w.plan.setAt, 'walks', `Walk planned for ${t(w.plan.at)}${coachPlanned(w.plan) ? ' (by the app, for the weather)' : ''}${w.plan.said && !coachPlanned(w.plan) ? ` ("${clip(w.plan.said, 120)}")` : ''}`);
     if (w.going?.at) ev(w.going.at, 'walks', 'Out walking');
     for (const x of w.walks || []) ev(x.at, 'walks', `Walk done${x.minutes ? `: ${x.minutes} min` : ''}${x.steps ? `, ${x.steps} steps` : ''}`);
     for (const x of w.skips || []) ev(x.at, 'walks', `Walk skipped${x.reason ? `: ${clip(x.reason, 120)}` : ''}`);
@@ -273,7 +274,7 @@ function sayings(s) {
   }
   for (const d of s.list('days')) if (d.fast?.said) add(d.fast.at, 'fasting', d.fast.said);
   for (const w of s.list('walks')) {
-    if (w.plan?.said) add(w.plan.setAt || w.plan.at, 'walk plan', w.plan.said);
+    if (w.plan?.said && !coachPlanned(w.plan)) add(w.plan.setAt || w.plan.at, 'walk plan', w.plan.said);
     for (const x of w.skips || []) if (x.reason) add(x.at, 'walk skipped', x.reason);
   }
   for (const x of s.list('sauna')) {

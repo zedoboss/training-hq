@@ -160,3 +160,11 @@ test('the coach has both tools, read only, and the rule to look things up instea
   assert.match((await rc.run({ query: 'buy water' }, ctx)).text, /reminder: Buy water/);
   assert.match(RULES, /the timeline tool has everything that happened, to the minute; recall finds anything he wrote or was told/);
 });
+
+test('Sun 10/25: a walk time the app picked is never his words, also in records from before "by"', () => {
+  w('walks', '2026-03-17', { id: '2026-03-17', date: '2026-03-17', asks: [], walks: [], skips: [], plan: { at: at('18:00'), said: 'planned by the coach for cooler weather', setAt: at('14:02') } });
+  const ev = timelineText(s(), { date: '2026-03-17', kinds: ['walks'] });
+  assert.match(ev, /Walk planned for 6:00 PM \(by the app, for the weather\)/);
+  assert.doesNotMatch(ev, /planned by the coach/);
+  assert.equal(recallHits(s(), { query: 'cooler weather' }).total, 0, 'not recalled as something he said');
+});
