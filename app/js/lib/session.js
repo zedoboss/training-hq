@@ -1,6 +1,6 @@
 // Building and summarising a workout session. Pure functions; the views save the results.
 // A session holds its exercise list; every set is its own record (so sync can never lose one).
-import { targetFor, stepFor, lastNotes } from './targets.js';
+import { targetFor, stepFor, lastNotes, loadable, jumpFrom } from './targets.js';
 import { weekColumn } from './programme.js';
 import { effectiveKg } from './exercise-types.js';
 import { newId, newKey, defaultSets } from './routines.js';
@@ -105,6 +105,9 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
         // Hurt last time after a jump: the last load that didn't hurt, plus a step (his example: 51 -> 61 hurt -> 54).
         const good = notes.pain?.prevGood?.kg;
         if (kind === 'working' && notes.pain && kgGuess != null && good != null && kgGuess > good + step + 1e-9) kgGuess = Math.round((good + step) * 100) / 100;
+        // Sat 10/24: a jump last time (over 30% on the weeks before, lib/targets.js jumpOf) isn't the new start.
+        const j = !notes.pain && !notes.skipped ? jumpFrom(notes.jump, step) : null;
+        if (kind === 'working' && j && kgGuess != null && kgGuess > j.limit + 1e-9) kgGuess = Math.max(j.base.kg, Math.min(Math.round((j.base.kg + step) * 100) / 100, loadable(j.limit, { barKg: ex.barKg ?? null, smallestPlate })));
         if (easy && kind === 'working') {
           kgGuess = lighterKg(kgGuess, { params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
           reps = shortReps(reps, lighter.params?.repsShort ?? 2);

@@ -52,17 +52,61 @@ export function painIn(note) {
  * you did 61 for the first set, and before that it was 51, so you added 10 kg: go lower... since you did 51 before the
  * 61, add 2.5 and do 54... you skipped that exercise last time, so just go with the same weight you did before that").
  * entries: history.all(name), newest first. skipped: {reason} when the last workout of this kind skipped it.
- * Returns {pain: {note, kg, prevGood}|null, skipped} for targetFor.
+ * Returns {pain: {note, kg, prevGood}|null, skipped, jump?, others?} for targetFor (jump, others: jumpOf).
  */
 export function lastNotes(entries = [], { skipped = null } = {}) {
   const [last, ...older] = entries;
   const note = last ? painIn(last.note) : '';
   const prevGood = older.find((e) => e.heaviest?.kg != null && !painIn(e.note))?.heaviest || null;
-  return { pain: note && last?.heaviest?.kg != null ? { note, kg: last.heaviest.kg, prevGood } : null, skipped: skipped || null };
+  return { pain: note && last?.heaviest?.kg != null ? { note, kg: last.heaviest.kg, prevGood } : null, skipped: skipped || null, ...jumpOf(last, older) };
 }
 
 /** The highest load allowed by the cap, before rounding to a loadable weight. */
 export const capOf = (lastKg) => Math.round(lastKg * (1 + CAP) * 100) / 100;
+
+const workSets = (e) => (e?.sets || []).filter((x) => x.kg != null && !x.hold && x.type !== 'warmup' && x.type !== 'hold' && x.type !== 'dropset');
+/**
+ * A jump last time (Sat 10/24, his words: "I accidentally did 50 last workout. He didn't check what I was doing before
+ * that... he should have recommended me to go back lower"): last session's top load more than 30% over the heaviest of
+ * the 4 weeks before it (else the session right before) is not his new start. One step is never a jump (7.5 -> 10 kg
+ * dumbbells is 33%): jumpFrom checks it with the exercise's step. Also kept for targetFor: the other sets last time.
+ */
+export function jumpOf(last, older = []) {
+  const top = last?.heaviest;
+  if (top?.kg == null) return {};
+  const sets = workSets(last);
+  const i = sets.findIndex((x) => x.kg === top.kg);
+  const second = sets.filter((_, j) => j !== i).reduce(bestSet, null);
+  const out = second ? { others: second } : {};
+  const from = new Date(`${last.date}T12:00:00Z`); from.setUTCDate(from.getUTCDate() - 28);
+  const since = from.toISOString().slice(0, 10);
+  const prior = older.filter((e) => e.heaviest?.kg != null && e.date < last.date);
+  const window = prior.filter((e) => e.date >= since);
+  const pool = window.length ? window : prior.slice(0, 1);
+  if (!pool.length) return out;
+  const b = pool.reduce((a, e) => (e.heaviest.kg > a.heaviest.kg ? e : a));
+  if (top.kg <= capOf(b.heaviest.kg) + 1e-9) return out;
+  return { ...out, jump: { kg: top.kg, reps: top.reps ?? null, date: last.date, basis: { kg: b.heaviest.kg, reps: b.heaviest.reps ?? null, date: b.date }, sets: sets.map((x) => ({ kg: x.kg, reps: x.reps ?? null })) } };
+}
+
+const bestSet = (m, x) => (!m || x.kg > m.kg || (x.kg === m.kg && (x.reps ?? 0) > (m.reps ?? 0)) ? { kg: x.kg, reps: x.reps ?? null } : m);
+/**
+ * The jump with this exercise's step, or null when it was one step or less. limit: the cap over the earlier load (at
+ * least one step); base: his heaviest set last time inside it (rear delt fly 50 × 6, 36 × 12 after 29 -> 36 × 12), else
+ * the earlier load.
+ */
+export function jumpFrom(jump, step) {
+  if (!jump) return null;
+  const limit = Math.max(capOf(jump.basis.kg), Math.round((jump.basis.kg + step) * 100) / 100);
+  if (jump.kg <= limit + 1e-9) return null;
+  const inside = jump.sets.filter((x) => x.kg <= limit + 1e-9).reduce(bestSet, null);
+  const base = inside || { kg: jump.basis.kg, reps: jump.basis.reps };
+  return { ...jump, limit, base, baseText: inside ? `your other set, ${setOf(base)}` : `your ${setOf(base)} on ${dayOf(jump.basis.date)}`, over: Math.round(((jump.kg - jump.basis.kg) / jump.basis.kg) * 100) };
+}
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const dayOf = (iso) => { const d = new Date(`${iso}T12:00:00Z`); return `${DAYS[d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`; };
+const setOf = (x) => `${x.kg} kg${x.reps != null ? ` × ${x.reps}` : ''}`;
 
 /**
  * Week cell from the programme: weeks 1-4. Past week 4: week 4's reps and sets with the number he confirmed for
@@ -108,12 +152,18 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
   const step = stepFor({ barKg, equipment, name: name || plan.name || '', smallestPlate });
   const r2 = (x) => Math.round(x * 100) / 100;
   const stepText = barKg != null ? `+${step} kg (${step / 2} a side)` : `+${step} kg`;
+  // Sat 10/24: a jump last time isn't the new start (jumpOf); today builds on the earlier history, under its cap.
+  const jump = last && !notes?.pain && !notes?.skipped ? jumpFrom(notes?.jump, step) : null;
+  const lead = jump ? `Last time's ${setOf(jump)} was a jump: ${jump.over}% over your ${jump.basis.kg} kg on ${dayOf(jump.basis.date)}, past the 30% cap, so not your new start. ` : '';
+  if (jump) { last = { ...jump.base, date: jump.date }; out.jumpLast = true; }
+  const jumpCap = jump ? loadable(jump.limit, { barKg, smallestPlate }) ?? jump.limit : Infinity;
+  const fromText = jump ? `From ${jump.baseText}` : 'Last time';
   // Below the bottom of the rep range last time: the same weight until he gets there.
   const short = last?.reps != null && Array.isArray(out.reps) && last.reps < out.reps[0];
   // Decision 3 (calf raises) and exercises without a table: one step up from the last load (decision 33).
   if (!cell || /decision 3/.test(rule) || cell.load == null) {
-    out.kg = last?.kg != null ? (short ? last.kg : r2(last.kg + step)) : null;
-    out.why = last?.kg != null ? (short ? `Same as last time (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first` : `Last time ${last.kg} kg, ${stepText}`) : 'No plan number and no history yet';
+    out.kg = last?.kg != null ? (short ? last.kg : Math.min(r2(last.kg + step), Math.max(jumpCap, last.kg))) : null;
+    out.why = last?.kg != null ? lead + (short ? `Same as ${jump ? 'that set' : 'last time'} (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first` : out.kg < r2(last.kg + step) ? `${fromText}, ${stepText} reaches the 30% cap: ${out.kg} kg` : `${fromText} ${jump ? '' : `${last.kg} kg`}`.trim() + `, ${stepText}`) : 'No plan number and no history yet';
     return out;
   }
   if (cell.load.type === 'bodyweight') { out.bodyweight = true; out.why = 'bodyweight'; return out; }
@@ -129,9 +179,18 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     out.why = gatedNotStarted ? 'Week 1: not started yet, form focus' : `${plan_}: ${table} kg (no previous load)`;
     return out;
   }
-  if (last.kg >= table) {
-    out.kg = last.kg;
-    out.why = `You're ahead of the ${src} (${table} kg): stay at your last ${last.kg} kg`;
+  // Ahead of the table with only one set: the others fell below it, so that one set isn't where he is (Sat 10/24).
+  const lone = !jump && last.kg >= table && notes?.others && notes.others.kg < table ? notes.others : null;
+  if (last.kg >= table && !lone) {
+    out.kg = jump ? Math.min(last.kg, jumpCap) : last.kg;
+    out.why = jump ? `${lead}${jump.baseText[0].toUpperCase()}${jump.baseText.slice(1)}, is at the ${src} (${table} kg): ${out.kg} kg today` : `You're ahead of the ${src} (${table} kg): stay at your last ${last.kg} kg`;
+    return out;
+  }
+  if (lone) {
+    out.kg = Math.min(r2(lone.kg + step), table);
+    if (lone.reps != null && Array.isArray(out.reps) && lone.reps < out.reps[0]) out.kg = lone.kg;
+    out.why = `Only one set at ${last.kg} kg last time, the other was ${setOf(lone)}: ${out.kg === lone.kg ? `same weight, get to ${out.reps[0]} reps first` : `${stepText} from there`}, ${out.kg} kg. Goal: ${table} kg`;
+    out.loneLast = true;
     return out;
   }
   if (plan.capClass === 'main') out.capKg = capOf(last.kg);
@@ -153,14 +212,16 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     out.skippedLast = true;
     return out;
   }
-  const ceiling = Math.min(table, out.capKg ?? Infinity);
+  const ceiling = Math.min(table, out.capKg ?? Infinity, jump ? jump.limit : Infinity);
   // A step on top of what he lifted is loadable as it is (1.25 a side more); a ceiling is rounded down to his plates.
   out.kg = up <= ceiling ? up : loadable(ceiling, { barKg, smallestPlate }) ?? ceiling;
+  if (jump && out.kg < last.kg && !short) out.kg = last.kg;
   // Thu 10/22, his words: "why is it telling me to do 40?": the table's number is the goal, not today's load.
   const goal = week > 4 && progressKg != null ? `Goal (week ${week}, confirmed): ${table} kg` : `Goal (The Comeback, week ${out.week}): ${table} kg`;
-  out.why = short ? `Same as last time (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first. ${goal}`
-    : up <= ceiling ? `Last time ${last.kg} kg, ${stepText}. ${goal}`
-      : `Last time ${last.kg} kg, ${stepText} reaches the ${table <= (out.capKg ?? Infinity) ? 'plan' : '30% cap'}: ${out.kg} kg`;
+  const capFirst = Math.min(out.capKg ?? Infinity, jump ? jump.limit : Infinity);
+  out.why = lead + (short ? `Same as ${jump ? 'that set' : 'last time'} (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first. ${goal}`
+    : up <= ceiling ? `${fromText}${jump ? '' : ` ${last.kg} kg`}, ${stepText}. ${goal}`
+      : `${fromText}${jump ? '' : ` ${last.kg} kg`}, ${stepText} reaches the ${table <= capFirst ? 'plan' : '30% cap'}: ${out.kg} kg`);
   return out;
 }
 
