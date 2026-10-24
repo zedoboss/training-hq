@@ -240,7 +240,45 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
     .map((i) => (waits(i) && !awake(i.at) ? { ...i, at: toWake(i.at) } : i))
     .map((i) => (g.hold && held(i) && i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, morning: 'waiting' }
       : !g.hold && g.state.from && g.openAt && held(i) && i.at < g.openAt ? { ...i, at: g.openAt, morning: 'after', heldAt: i.at } : i));
-  return afterMeals(items, mealSpansFor(store, now, tz), st.coachReminders);
+  return afterMeals(afterWorkouts(items, workoutSpans(st, recordsOf(store, 'sessions'), now, tz), now, waits), mealSpansFor(store, now, tz), st.coachReminders);
+}
+
+// ---- A workout in progress (Sat 10/24, his words: "Why did you randomly remind me about holds... when I'm mid-workout?
+// Make sure the notifications are actually being analyzed properly if I'm mid-workout"): the holds check-in "One round
+// now" went out at 3:30 PM, 42 minutes into Pull. The nudges, the walk and the dishes waited for a workout (busyNow); the
+// day's reminders didn't. Now what waits for his wake time (holds, supplements, meals, the evening round-up...) also
+// waits while a workout runs (up to 4 hours, as sessionBusy), and what came due in it goes out once the gym is done: a
+// minute after the "head home" nudge (so after the Evolt ask), together as one message. Reminders he set, the sauna, and
+// the check-in, session and scan reminders at a time he chose keep their time.
+export const WORKOUT_HOLD = { afterHomeMin: 1 };
+
+/**
+ * His workouts (not holds rounds, not discarded) of the last 2 days as spans: {start, end, open, release}. Open = still
+ * running (end: the 4-hour cap); release = when what came due in it goes out (after the gym order, lib/reminders.js
+ * afterGym; else a minute after it ended).
+ */
+export function workoutSpans(st, sessions, now, tz) {
+  return sessions.filter((x) => x && x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt) && x.startedAt <= now && now - x.startedAt < 2 * 86400000)
+    .map((x) => {
+      const cap = x.startedAt + WORKOUT_BUSY_MIN * 60000;
+      if (x.status === 'active') return { start: x.startedAt, end: cap, open: now < cap, release: cap };
+      if (x.status !== 'done' || !Number.isFinite(x.endedAt)) return null;
+      const ag = afterGym({ date: isoDate(new Date(x.startedAt), tz), activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan, photoScanIds: st.photoScanIds });
+      const release = (ag && ag.doneAt >= x.endedAt ? ag.homeAt : x.endedAt) + WORKOUT_HOLD.afterHomeMin * 60000;
+      return { start: x.startedAt, end: x.endedAt, open: false, release };
+    }).filter(Boolean);
+}
+
+/** Reminders that wait (`waits`) due while a workout runs: held while it's on, then at its release, together. */
+export function afterWorkouts(items, spans, now, waits) {
+  if (!spans.length) return items;
+  return items.map((i) => {
+    if (!waits(i)) return i;
+    const s = spans.find((x) => i.at >= x.start && i.at < x.end);
+    if (!s) return i;
+    if (s.open) return i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, workout: 'waiting' } : i;
+    return { ...i, at: s.release, workout: 'after', heldAt: i.heldAt ?? i.at };
+  });
 }
 
 // ---- Reminders he set that land in a meal (Thu 10/22, his words: "check those reminders if they are within the frame
@@ -721,7 +759,9 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       // A run of repeats due at once (a meal's check-ins, the Mac asleep a while): the latest only; the
       // rest count as sent.
       const latest = new Map();
-      for (const i of due) if (i.group && !(latest.get(i.group)?.at >= i.at)) latest.set(i.group, i);
+      // (Held for his morning or a workout, they're due at once: the latest by when it was meant for.)
+      const meant = (i) => i.heldAt ?? i.at;
+      for (const i of due) if (i.group && !(latest.has(i.group) && meant(latest.get(i.group)) >= meant(i))) latest.set(i.group, i);
       for (const i of due) if (i.group && latest.get(i.group) !== i) sent[i.id] = t;
       // A check-in too soon after the last message of its stream (Sat 10/24: the holds reminder held for his morning,
       // then its check-in minutes later): counted, not sent.
@@ -731,12 +771,17 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       // A meal ask his own reminder about the meal says at the same time: counted, not sent.
       const covered = coveredMealAsks(due, all, { sent, now: t, reminders: recordsOf(store, 'coach-reminders') });
       for (const [id, by] of covered) { sent[id] = t; log(`notify ${id}: not sent (his reminder ${by} says it)`); }
-      if (covered.size || spaced.size) store.setMeta(SENT, sent);
-      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !spaced.has(i));
+      // Held through a workout, a reminder and its own follow-ups (one tag) come due together: the first only.
+      const firstOfTag = new Map();
+      for (const i of due.filter((x) => x.workout === 'after' && (!x.group || latest.get(x.group) === x)).sort((a, b) => a.heldAt - b.heldAt)) if (!firstOfTag.has(i.tag)) firstOfTag.set(i.tag, i);
+      const repeats = new Set(due.filter((i) => i.workout === 'after' && firstOfTag.has(i.tag) && firstOfTag.get(i.tag) !== i));
+      for (const i of repeats) sent[i.id] = t;
+      if (covered.size || spaced.size || repeats.size) store.setMeta(SENT, sent);
+      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !spaced.has(i) && !repeats.has(i));
       if (items.length) {
         const opts = voiceOpts(store);
-        // What waited for his morning: one message, in the order it was due, one line in his moods at the end.
-        const after = items.filter((i) => i.morning === 'after');
+        // What waited for his morning or a workout: one message, in the order it was due, one line in his moods at the end.
+        const after = items.filter((i) => i.morning === 'after' || i.workout === 'after');
         if (after.length > 1) {
           const said = after.sort((a, b) => a.heldAt - b.heldAt).map((i) => coachReminder(i, { ...opts, calm: true }).body);
           const v = coachVoice(`Your plan now: ${said.join(' Then: ')}`, { ...opts, calm: after.some((i) => i.calm) });

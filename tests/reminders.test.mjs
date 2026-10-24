@@ -311,6 +311,71 @@ test('Sat 10/24: a holds check-in within an hour of the last holds message (or d
   }
 });
 
+test('Sat 10/24: mid-workout no holds or other day reminders; they come once the gym is done; his own reminders on time', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('../server/store.mjs');
+  const { startNotifier, plan } = await import('../server/notify.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'thq-holds-gym-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    const D = '2026-01-20';
+    store.writeLocal('programme', 'meta', meta);
+    for (const a of areas) store.writeLocal('tendons', `area.${a.id}`, a);
+    store.writeLocal('tendons', 'readiness', { kind: 'readiness', ...table });
+    [['push', '2026-01-18'], ['legs', '2026-01-19']].forEach(([dayType, d], i) =>
+      store.writeLocal('sessions', `hevy.${i}`, { id: `hevy.${i}`, kind: 'workout', status: 'done', dayType, startedAt: at(d, '05:00'), endedAt: at(d, '06:00') }));
+    store.writeLocal('settings', 'main', { notify: { holdsMorning: '09:30', holdsEvening: '21:30', wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 0, kinds: { meals: false, evening: false } } });
+    // A timed supplement due mid-workout waits too.
+    store.writeLocal('supplements', 'supp.c', { id: 'supp.c', kind: 'supplement', name: 'Vitamin C', short: 'Vitamin C', dose: '500 mg', days: { type: 'daily' }, status: 'active', order: 1, time: '15:15', perTake: { train: 1, rest: 1 } });
+    // His own reminder for 3:10 PM, set before: on time, workout or not.
+    store.writeLocal('coach-reminders', 'rem-1', { id: 'rem-1', at: at(D, '15:10'), date: D, hm: '15:10', text: 'Text the landlord.', createdAt: at(D, '09:00'), by: 'coach' });
+    // The morning holds went out at 10:00 AM, the first check-in at 11:30 AM; nothing done. Pull starts at 2:48 PM.
+    store.setMeta('notify:sent', { [`holds-morning:${D}`]: at(D, '10:00'), [`holds-check:${D}:morning:1`]: at(D, '11:30') });
+    store.writeLocal('sessions', 'w1', { id: 'w1', kind: 'workout', status: 'active', dayType: 'pull', startedAt: at(D, '14:48'), exercises: [] });
+    let now = 0;
+    const sent = [];
+    const push = { list: () => [{ deviceId: 'a1b2c3d4e5f6' }], notify: async (m) => { sent.push({ ...m, at: now }); return { sent: 1, failed: 0, dropped: 0 }; } };
+    const n = startNotifier({ store, push, tz: TZ, now: () => now, everyMs: 1e9 });
+    n.stop();
+    const hm = (t) => new Date(t).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+    for (now = at(D, '14:40'); now <= at(D, '16:20'); now += 60000) {
+      if (now === at(D, '16:20')) break;
+      await n.tick();
+    }
+    // Through 4:20 PM, the workout still on: his reminder only.
+    assert.deepEqual(sent.map((m) => `${hm(m.at)} ${m.body.split('.')[0]}`), ['3:10 PM Text the landlord']);
+    const p = plan(store, now, TZ);
+    assert.equal(p.find((i) => i.id === `holds-check:${D}:morning:2`).workout, 'waiting');
+    assert.ok(p.find((i) => i.id === `holds-check:${D}:morning:2`).at > now, 'not due while he trains');
+    // He finishes at 4:25 PM: the gym order first (the Evolt ask), then what waited, one message, the holds still open.
+    store.writeLocal('sessions', 'w1', { id: 'w1', kind: 'workout', status: 'done', dayType: 'pull', startedAt: at(D, '14:48'), endedAt: at(D, '16:25'), exercises: [] });
+    const end = at(D, '16:25');
+    for (; now <= at(D, '17:30'); now += 60000) await n.tick();
+    const after = sent.filter((m) => m.at >= end);
+    const held = after.filter((m) => /Holds still open today/.test(m.body));
+    assert.equal(held.length, 1, after.map((m) => `${hm(m.at)} ${m.body}`).join(' | '));
+    assert.match(held[0].body, /Vitamin C/, 'the supplement in the same message');
+    // (Its 4:00 PM follow-up, held too, isn't said again; the ones after the workout come as usual.)
+    assert.equal(after.filter((m) => /Vitamin C/.test(m.body) && m.at < at(D, '16:45')).length, 1, after.map((m) => `${hm(m.at)} ${m.body}`).join(' | '));
+    const scan = after.find((m) => /Evolt/.test(m.body));
+    if (scan) assert.ok(scan.at < held[0].at, 'the Evolt ask first');
+    assert.ok(held[0].at - end <= 30 * 60000, `soon after the gym, not dropped (${hm(held[0].at)})`);
+    // The evening holds at 9:30 PM during an evening workout wait the same way; a discarded workout holds nothing.
+    store.writeLocal('sessions', 'w2', { id: 'w2', kind: 'workout', status: 'active', dayType: 'push', startedAt: at(D, '21:00'), exercises: [] });
+    assert.equal(plan(store, at(D, '21:30'), TZ).find((i) => i.id === `holds-evening:${D}`).workout, 'waiting');
+    store.writeLocal('sessions', 'w2', { id: 'w2', kind: 'workout', status: 'discarded', dayType: 'push', startedAt: at(D, '21:00'), exercises: [] });
+    assert.equal(plan(store, at(D, '21:30'), TZ).find((i) => i.id === `holds-evening:${D}`).at, at(D, '21:30'));
+    // A workout left open past 4 hours holds nothing more.
+    store.writeLocal('sessions', 'w2', { id: 'w2', kind: 'workout', status: 'active', dayType: 'push', startedAt: at(D, '17:00'), exercises: [] });
+    assert.equal(plan(store, at(D, '21:30'), TZ).find((i) => i.id === `holds-evening:${D}`).at, at(D, '21:30'));
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('meals (6.3): nothing logged near a meal time asks 45 minutes later; cooking asks again; after photo at 25 min', async () => {
   const { mealReminders } = await import('../app/js/lib/fuel-reminders.js');
   const date = '2026-01-20';
