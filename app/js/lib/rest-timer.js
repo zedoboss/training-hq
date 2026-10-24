@@ -26,7 +26,7 @@ export const ring = () => play(sounds().restEnd, sounds().timerVolume, { alarm: 
 
 const emit = () => { for (const fn of listeners) fn(status()); };
 /** When the rest ends, or null: on start, ±15 s and skip (the Mac sends "Rest over" then; Thu 10/22). */
-const plan = () => { for (const fn of planners) { try { fn(state ? { endsAt: state.endsAt, label: state.label } : null); } catch { /* a listener */ } } };
+const plan = () => { for (const fn of planners) { try { fn(state ? { endsAt: state.endsAt, label: state.label, next: state.next || '' } : null); } catch { /* a listener */ } } };
 
 function loop() {
   clearInterval(tick);
@@ -49,9 +49,10 @@ export function status() {
   return { ...state, leftMs: left, fraction: state.totalMs ? 1 - left / state.totalMs : 1 };
 }
 
-export function start(seconds, label = '') {
+/** A rest of `seconds` after `label` (the exercise just ticked); `next` is the set it leads to, in words (lib/session.js nextAfterText). */
+export function start(seconds, label = '', next = '') {
   if (!seconds) { clear(); return; }
-  state = { endsAt: Date.now() + seconds * 1000, totalMs: seconds * 1000, label, rang: false };
+  state = { endsAt: Date.now() + seconds * 1000, totalMs: seconds * 1000, label, next, rang: false };
   store(state); loop(); emit(); plan();
 }
 

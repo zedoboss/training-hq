@@ -163,7 +163,7 @@ ready.then(async () => {
   rest.onPlan((p) => {
     if (!getState().paired) return;
     const url = /^#\/session\//.test(location.hash) ? location.hash : '#/train';
-    macPost('/api/rest', p ? { endsAt: p.endsAt, label: p.label, url } : { endsAt: null }).catch(() => {});
+    macPost('/api/rest', p ? { endsAt: p.endsAt, label: p.label, next: p.next, url } : { endsAt: null }).catch(() => {});
   });
 }).catch(() => {});
 // Thu 10/22: how the timer sounds went on this phone, into the Mac's log (lib/diag.js).

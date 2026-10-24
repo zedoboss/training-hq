@@ -89,7 +89,7 @@ export function runAction(a, deps) {
     }
     case 'mic-off': if (!deps.micOff) return false; deps.micOff(); return true;
     case 'reload': if (!deps.reload) return false; deps.reload(); return true;
-    case 'rest': if (a.seconds > 0) { deps.rest.start(a.seconds, a.label || 'Rest'); return true; } return false;
+    case 'rest': if (a.seconds > 0) { deps.rest.start(a.seconds, a.label || 'Rest', a.next || ''); return true; } return false;
     case 'rest-add': deps.rest.adjust(Number(a.seconds) || 0); return true;
     case 'rest-skip': deps.rest.clear(); return true;
     case 'sync': deps.sync(); return true;

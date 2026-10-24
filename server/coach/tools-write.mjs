@@ -8,7 +8,7 @@ import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByNa
 import { offered, saidNow, toldToStart, confirmedNow } from './tools-app.mjs';
 import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal, holdsDueText } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
-import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId } from '../../app/js/lib/session.js';
+import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId, nextAfter, nextAfterText } from '../../app/js/lib/session.js';
 import { guardCheck } from '../../app/js/lib/targets.js';
 import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../../app/js/lib/finish.js';
 import { restFor, restText, withDefaults } from '../../app/js/lib/settings.js';
@@ -87,6 +87,12 @@ const valuesText = (ex, x) => (x.type === 'hold' ? `hold ${x.durationS ?? '?'} s
   : BODYWEIGHT_TYPES.includes(ex.type) ? `${x.kg ? `${ex.type === 'assisted_bodyweight' ? '-' : '+'}${k(x.kg)} kg` : 'bodyweight'} × ${x.reps ?? '?'}`
     : `${loadText(x.kg, ex.barKg)} × ${x.reps ?? '?'}`);
 
+/** What a rest after `fromKey` leads to, in words, for the phone's "Rest over" (Sat 10/24: it said the exercise just done). */
+function restNext(s, session, sets, fromKey) {
+  const n = nextAfter(session.exercises, sets, fromKey);
+  return nextAfterText(n, sets, Boolean(n) && oneArm(s, n.ex.name, [n.ex.notes, ...sets.filter((x) => x.exKey === n.ex.key).map((x) => x.note)]));
+}
+
 async function logSet(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
   const session = s.active();
@@ -130,7 +136,7 @@ async function logSet(a, ctx) {
   const pairNext = arm?.arm === 'right' && next?.exKey === ex.key && next.type !== 'warmup';
   if (!pairNext && !(set.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) {
     const secs = restFor(ex, filled.type, st);
-    if (secs) { ctx.action({ kind: 'rest', seconds: secs, label: ex.name }); restLine = ` Rest ${restText(secs)} started on his phone.`; }
+    if (secs) { ctx.action({ kind: 'rest', seconds: secs, label: ex.name, next: restNext(s, session, [...sets.filter((x) => x.id !== filled.id), filled], ex.key) }); restLine = ` Rest ${restText(secs)} started on his phone.`; }
   }
   const t = set.target || {};
   const allSets = [...sets.filter((x) => x.id !== filled.id), filled].sort((p, q) => p.order - q.order);
@@ -271,16 +277,17 @@ async function restTimer(a, ctx) {
   }
   let secs = num(a.seconds);
   let label = 'Rest';
+  let next = '';
   if (secs === undefined) {
     const session = s.active();
     const sets = session ? s.setsOf(session.id) : [];
     const lastTicked = sets.filter((x) => x.done).sort((p, q) => (q.doneAt || 0) - (p.doneAt || 0))[0];
     const ex = session && (lastTicked ? session.exercises.find((e) => e.key === lastTicked.exKey) : currentExercise(session, sets));
     secs = restFor(ex || { capClass: 'main' }, lastTicked?.type || 'normal', s.settings()) || s.settings().rest.mainS;
-    if (ex) label = ex.name;
+    if (ex) { label = ex.name; next = restNext(s, session, sets, ex.key); }
   }
   secs = Math.max(5, Math.min(3600, Math.round(secs)));
-  ctx.action({ kind: 'rest', seconds: secs, label });
+  ctx.action({ kind: 'rest', seconds: secs, label, ...(next ? { next } : {}) });
   return { text: `Rest timer ${mmss(secs)} started on his phone.`, summary: mmss(secs) };
 }
 

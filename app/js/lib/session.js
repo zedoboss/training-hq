@@ -8,6 +8,7 @@ import { warmupSets } from './plates.js';
 import { activeBridge } from './history.js';
 import { confirmedKg } from './progression.js';
 import { lighterTarget, lighterKg, shortReps } from './readiness.js';
+import { kg as kgText } from './loads.js';
 
 export const newSetId = () => newId('set');
 
@@ -341,4 +342,56 @@ export function nextSetText(session, sets) {
   const what = next.type === 'hold' ? `hold ${next.durationS ?? 30} s` : [kg != null ? `${kg} kg` : '', reps ? `× ${reps}` : ''].filter(Boolean).join(' ');
   const kind = next.type === 'warmup' ? 'warm-up' : next.type === 'hold' ? 'hold' : 'set';
   return [ex?.name || 'Next', `${kind} ${mine.indexOf(next) + 1} of ${mine.length}`, what].filter(Boolean).join(' · ');
+}
+
+// Sat 10/24: an exercise his notes call one-arm ("single arm", "desna pa leva" = right then left) is logged one arm per
+// set, right then left straight after; each pair is one round (the coach's tools read it the same way).
+export const ONE_ARM = /\b(?:single|one)[ -]?arm\b|\bdesna\s+pa\s+leva\b|\bright\s+(?:arm\s+)?(?:then|and then|,)\s*left\b|\bunilateral\b/i;
+
+/** True when his notes on this exercise (today's, or any past session's in `history`) say he logs one arm per set. */
+export const oneArmIn = (history, name, notes = []) => notes.some((n) => ONE_ARM.test(n || '')) || Boolean(history?.all(name).some((e) => ONE_ARM.test(e.note || '')));
+
+/** For a set of a one-arm exercise: { round, arm } from its place among the working sets (a hold's own arm wins). */
+export function armOf(sets, x) {
+  if (x.type === 'warmup') return null;
+  const i = sets.filter((y) => y.exKey === x.exKey && y.type !== 'warmup').sort((a, b) => a.order - b.order).indexOf(x);
+  return i < 0 ? null : { round: Math.floor(i / 2) + 1, arm: x.arm || (i % 2 ? 'left' : 'right') };
+}
+
+// Sat 10/24, his words at the gym: "The set is over and cupping is next. But clearly it's not... My next one is
+// crunches." The rest after his last cupping round said "Rest over. Cupping: next set.": it named the exercise just
+// ticked, never what came next. What a rest leads to: this exercise's next set while it has sets left, else the next
+// exercise on the card with sets left, else one left earlier; an exercise skipped today never.
+export function nextAfter(exercises, sets, fromKey) {
+  const order = (exercises || []).filter((e) => !e.skipped).map((e) => e.key);
+  const i = order.indexOf(fromKey);
+  const keys = i < 0 ? order : [...order.slice(i), ...order.slice(0, i)];
+  for (const key of keys) {
+    const set = sets.filter((x) => x.exKey === key).sort((a, b) => a.order - b.order).find((x) => !x.done);
+    if (set) return { ex: exercises.find((e) => e.key === key), set };
+  }
+  return null;
+}
+
+/**
+ * The next set in words, for "Rest over" and the rest bar: "Crunch (Machine): set 1, 23 kg × 10-15", on a one-arm
+ * exercise "Cupping: round 2, left arm, 9 kg × 15"; when every set is ticked, "Every set ticked: finish the workout".
+ * @param {{ex: object, set: object}|null} n from nextAfter
+ * @param {Array} sets the session's sets
+ * @param {boolean} oneArm his notes call this exercise one-arm (oneArmIn)
+ */
+export function nextAfterText(n, sets, oneArm = false) {
+  if (!n) return 'Every set ticked: finish the workout';
+  const { ex, set } = n;
+  const mine = sets.filter((x) => x.exKey === ex.key).sort((a, b) => a.order - b.order);
+  const t = set.target || {};
+  const arm = oneArm ? armOf(mine, set) : null;
+  const no = mine.filter((x) => x.type !== 'warmup' && x.type !== 'hold').indexOf(set) + 1;
+  const word = set.type === 'warmup' ? 'warm-up' : set.type === 'hold' ? `hold ${set.durationS ?? t.durationS ?? 30} s` : arm ? `round ${arm.round}, ${arm.arm} arm` : set.type === 'dropset' ? 'drop set' : `set ${no}${set.type === 'failure' ? ' (to failure)' : ''}`;
+  const kgv = set.kg ?? t.kg ?? null;
+  const reps = set.type === 'hold' ? '' : rangeText(set.reps ?? t.reps);
+  const bw = Boolean(t.bodyweight) || BODYWEIGHT_TYPES.includes(ex.type);
+  const load = bw ? (ex.type === 'weighted_bodyweight' && kgv > 0 ? `bodyweight +${kgText(kgv)} kg` : 'bodyweight') : kgv != null ? `${kgText(kgv)} kg` : '';
+  const what = [load, reps ? `× ${reps}` : ''].filter(Boolean).join(' ');
+  return `${ex.name}: ${[word, what].filter(Boolean).join(', ')}`;
 }

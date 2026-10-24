@@ -98,4 +98,6 @@ test('log_set says which arm it logged; no rest timer after the right arm, the r
   const left = await run({ exercise: 'preacher curl', kg: 10, reps: 6 });
   assert.match(left, /round 2, left arm/);
   assert.doesNotMatch(left, /No rest timer/);
+  // Sat 10/24: the rest's "Rest over" names the set it leads to (the next round's right arm), not the arm just done.
+  assert.deepEqual(acts.filter((x) => x.kind === 'rest').map((x) => x.next), ['Preacher Curl (Dumbbell): round 3, right arm, 10 kg × 6-8']);
 });

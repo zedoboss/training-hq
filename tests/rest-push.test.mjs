@@ -41,6 +41,9 @@ test('rest over: sent to that phone when the rest ends, moved by ±15 s, cancell
     assert.equal(await r.tick(), 0);
     assert.equal(sent.length, 2);
     assert.equal(restBody(''), 'Rest over. Next set.');
+    // Sat 10/24: the phone sends the set the rest leads to; that is what the notification says.
+    r.set('phone', { endsAt: clock + 120000, label: 'Cupping', next: 'Crunch (Machine): set 1, 23 kg × 10-15', url: '#/session/s1' });
+    assert.equal(r.list().phone.rest[0].body, 'Rest over. Crunch (Machine): set 1, 23 kg × 10-15.');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

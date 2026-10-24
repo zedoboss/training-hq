@@ -8,6 +8,7 @@ import { buildHistory } from '../../app/js/lib/history.js';
 import { rotationDay, lastRotationSession, daysByDate } from '../../app/js/lib/rotation.js';
 import { platesPerSide, kg as k } from '../../app/js/lib/loads.js';
 import { wakingDay } from '../../app/js/lib/waking-day.js';
+import { oneArmIn, armOf } from '../../app/js/lib/session.js';
 
 export { k, formatHm };
 
@@ -55,21 +56,11 @@ export const timeText = (ms, tz) => formatTime(new Date(ms), tz);
 // as two rounds with 1:30 rest between them). On an exercise his notes call one-arm ("single arm", "desna pa leva" =
 // right then left) each logged set is one arm: right, then left straight after, a pair per round. Rest and rep drops
 // count per arm, round to round, never between the two sets of a pair.
-const ONE_ARM = /\b(?:single|one)[ -]?arm\b|\bdesna\s+pa\s+leva\b|\bright\s+(?:arm\s+)?(?:then|and then|,)\s*left\b|\bunilateral\b/i;
 export const ONE_ARM_TEXT = 'one arm per logged set, right then left back to back, each pair is one round; no rest between the arms, rest and rep drops count per arm, round to round (right vs right)';
+export { armOf };
 
 /** True when his notes on this exercise (today's, or any past session's) say he logs one arm per set. */
-export function oneArm(s, name, notes = []) {
-  if (notes.some((n) => ONE_ARM.test(n || ''))) return true;
-  return s.history().all(name).some((e) => ONE_ARM.test(e.note || ''));
-}
-
-/** For a set of a one-arm exercise: { round, arm } from its place among the working sets (a hold's own arm wins). */
-export function armOf(sets, x) {
-  if (x.type === 'warmup') return null;
-  const i = sets.filter((y) => y.exKey === x.exKey && y.type !== 'warmup').sort((a, b) => a.order - b.order).indexOf(x);
-  return i < 0 ? null : { round: Math.floor(i / 2) + 1, arm: x.arm || (i % 2 ? 'left' : 'right') };
-}
+export const oneArm = (s, name, notes = []) => oneArmIn(s.history(), name, notes);
 
 /** "round 1: right 10 kg × 5, left 10 kg × 5; round 2: right ..." for one-arm sets, in order. */
 export function roundsText(sets, text) {

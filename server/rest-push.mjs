@@ -14,8 +14,9 @@ export const MAX_AHEAD_MS = 30 * 60000;
 export const STALE_MS = 2 * 60000;
 export const KINDS = ['rest', 'hold'];
 
-/** The notification for a rest that just ended. */
-export const restBody = (label) => lockScreen(label ? `Rest over. ${label}: next set.` : 'Rest over. Next set.');
+/** The notification for a rest that just ended: the set it leads to ("Rest over. Crunch (Machine): set 1, 23 kg ×
+ *  10-15."; Sat 10/24, "Cupping: next set." came after his last cupping round), else the older "<exercise>: next set". */
+export const restBody = (label, next = '') => lockScreen(next ? `Rest over. ${next.replace(/[.\s]+$/, '')}.` : label ? `Rest over. ${label}: next set.` : 'Rest over. Next set.');
 
 const safeUrl = (url) => (/^#\/[\w/.%-]*$/.test(url || '') ? url : '#/train');
 
@@ -42,9 +43,9 @@ export function openRestPush({ store, push, log = () => {}, now = () => Date.now
     return ok;
   }
 
-  /** The phone's rest: {endsAt, label, url} sets it, endsAt null cancels it. */
-  function set(deviceId, { endsAt = null, label = '', url = '' } = {}) {
-    const [item] = setAlarms(deviceId, 'rest', endsAt ? [{ at: endsAt, title: 'Rest over', body: restBody(String(label || '').slice(0, 80)), url }] : []);
+  /** The phone's rest: {endsAt, label, next, url} sets it, endsAt null cancels it. */
+  function set(deviceId, { endsAt = null, label = '', next = '', url = '' } = {}) {
+    const [item] = setAlarms(deviceId, 'rest', endsAt ? [{ at: endsAt, title: 'Rest over', body: restBody(String(label || '').slice(0, 80), String(next || '').slice(0, 140)), url }] : []);
     return item ? { endsAt: item.at, label: String(label || '').slice(0, 80), url: item.url } : null;
   }
 

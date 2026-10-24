@@ -6,7 +6,7 @@ import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { clockText } from '../lib/records.js';
-import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad } from '../lib/session.js';
+import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad, nextAfter, nextAfterText, oneArmIn } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay, timeAt, zoneOf } from '../lib/time.js';
@@ -290,16 +290,13 @@ export function render(view, params = []) {
   };
 
   // ---- A15: the coach talking during sets (brief decision 30) ----
-  /** The next set he'll do: the rest of this exercise first, then the next exercise with sets left. Timed sets have their own Start. */
-  const nextSetAfter = (ex) => {
-    const order = session.exercises.map((e) => e.key);
-    const keys = [ex.key, ...order.slice(order.indexOf(ex.key) + 1), ...order.slice(0, order.indexOf(ex.key))];
-    for (const k of keys) {
-      const e = session.exercises.find((x) => x.key === k);
-      const open = exSets(k).find((x) => !x.done);
-      if (open) return { ex: e, set: open };
-    }
-    return null;
+  /** The next set he'll do: the rest of this exercise first, then the next exercise with sets left (a skipped one
+   *  never). Timed sets have their own Start. */
+  const nextSetAfter = (ex) => nextAfter(session.exercises, sets, ex.key);
+  /** That set in words, for "Rest over" and the rest bar (Sat 10/24: it said "Cupping" after his last cupping round). */
+  const nextSetWords = (ex) => {
+    const n = nextSetAfter(ex);
+    return nextAfterText(n, sets, Boolean(n) && oneArmIn(ctx.history, n.ex.name, [n.ex.notes, ...exSets(n.ex.key).map((x) => x.note)]));
   };
   // A hold set, or any set of a "... Hold" exercise (Tue 10/20: Bench Press Hold (Smith Machine) started with no GET READY).
   const holdLike = (s, ex) => s.type === 'hold' || /\bhold\b/i.test(ex?.name || '');
@@ -469,7 +466,7 @@ export function render(view, params = []) {
       if (rec) recordBanner(ex, rec);
       if (rec && !editing) sayRecord(ex);
       const next = exSets(ex.key).find((x) => !x.done);
-      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name); planNext(ex); }
+      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name, nextSetWords(ex)); planNext(ex); }
       if (!editing && prefs().show.supersetJump && ex.supersetId && !restAfter(session.exercises, ex.key)) {
         const keys = session.exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
         view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -719,7 +716,7 @@ export function render(view, params = []) {
     if (!st) return;
     bar.querySelector('[data-k="rleft"]').textContent = mmss(st.leftMs);
     // The whole name on its own line (Tue 10/20: "REST · BENCH PRESS (SMITH MACHI" was cut at 24 letters).
-    bar.querySelector('[data-k="rlabel"]').textContent = st.label === 'Countdown' ? 'COUNTDOWN' : `REST · ${st.label.toUpperCase()}`;
+    bar.querySelector('[data-k="rlabel"]').textContent = st.label === 'Countdown' ? 'COUNTDOWN' : st.next ? `REST · NEXT: ${st.next.toUpperCase()}` : `REST · ${st.label.toUpperCase()}`;
     bar.querySelector('[data-k="fill"]').style.width = `${Math.min(100, st.fraction * 100)}%`;
   };
 
