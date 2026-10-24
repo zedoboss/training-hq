@@ -32,6 +32,7 @@ import { restFor, restText } from '../../app/js/lib/settings.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
 import { afterMeals, mealSpansFor, morningContext } from '../notify.mjs';
+import { PAIN_WORDS } from '../../app/js/lib/nudges.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
 import { pathsOf, stageText } from '../../app/js/lib/hold-path.js';
@@ -90,6 +91,51 @@ export function restLine(s, session) {
     return `${e.name} ${restText(restFor(e, 'normal', st))}${e.restSeconds != null ? ' (set on this exercise)' : ''}${arm ? ' (after each round; no rest between the arms)' : ''}`;
   });
   return `Rest times on his phone now: ${items.join(', ')}. ${defaults}. Say rest times only from here (he changes them in the app), never from his profile or memory.`;
+}
+
+// Sat 10/24, his words: "I told u i skipped 2nd exercise where did ur data go?" At 4:02 PM he asked whether his lower
+// back would hurt on hyperextensions and the coach answered from Thursday and Friday only, asking how his back was. At
+// 3:00 PM he had said his lower back hurt on the cable row and skipped it ("Lower back pain can be felt"); that message
+// had dropped out of the recap. Today's skips with his reasons, the pain he logged and what he said about his body today
+// (with your answer) now go with every message.
+const BODY_WORDS = /\b(lower back|upper back|my back|the back|knees?|shoulders?|elbows?|wrists?|hips?|neck|hamstrings?|groin|ankles?)\b/i;
+const bodyTalk = (t) => PAIN_WORDS.test(t) || BODY_WORDS.test(t);
+
+/** "Today so far, his body and skips: ..." from today's sessions and his messages, or '' when there's nothing. */
+export function todayBodyLine(s) {
+  const clip = (t, n) => { const x = String(t).replace(/\s+/g, ' ').trim(); return x.length > n ? `${x.slice(0, n - 1)}…` : x; };
+  const parts = [];
+  const sessions = s.list('sessions').filter((x) => x.startedAt && x.status !== 'discarded' && s.date(x.startedAt) === s.today).sort((a, b) => a.startedAt - b.startedAt);
+  for (const se of sessions) {
+    const name = se.kind === 'holds' ? `holds round (${se.area || se.title || 'holds'})` : `${se.title || LABEL[se.dayType] || 'workout'}${se.status === 'active' ? ' (open now)' : ''}`;
+    const sets = s.setsOf(se.id).filter((x) => x.done);
+    const exs = new Map((se.exercises || []).map((e) => [e.key, e]));
+    const bits = [];
+    for (const e of se.exercises || []) {
+      if (!e.skipped) continue;
+      const done = sets.filter((x) => x.exKey === e.key).map((x) => `${x.kg != null ? `${k(x.kg)} kg` : ''}${x.reps != null ? ` × ${x.reps}` : ''}${x.type === 'warmup' ? ' warm-up' : ''}`.trim()).filter(Boolean);
+      bits.push(`SKIPPED ${e.name}${e.skipped.at ? ` at ${timeText(e.skipped.at, s.tz)}` : ''}${done.length ? ` after ${done.join(', ')}` : ''}, his reason: ${e.skipped.reason ? `"${clip(e.skipped.reason, 160)}"` : 'none given'}`);
+    }
+    for (const x of sets) {
+      const pain = x.pain == null || x.pain === '' || !(Number(x.pain) > 0) ? null : Number(x.pain);
+      const note = x.note && PAIN_WORDS.test(x.note) ? x.note : null;
+      if (pain == null && !note) continue;
+      const what = [x.kg != null ? `${k(x.kg)} kg` : '', x.reps != null ? `× ${x.reps}` : '', x.durationS ? `${x.durationS} s` : ''].filter(Boolean).join(' ');
+      bits.push(`${exs.get(x.exKey)?.name || 'exercise'}${what ? ` ${what}` : ''}${pain != null ? `, pain ${pain}/10` : ''}${note ? `, note "${clip(note, 120)}"` : ''}`);
+    }
+    if (se.note && PAIN_WORDS.test(se.note)) bits.push(`session note "${clip(se.note, 160)}"`);
+    if (bits.length) parts.push(`${name}: ${bits.join('; ')}`);
+  }
+  const msgs = s.list('coach-messages').filter((m) => m.at && s.date(m.at) === s.today && !m.error).sort((a, b) => a.at - b.at);
+  const said = [];
+  msgs.forEach((m, i) => {
+    if (m.role !== 'user' || !m.text || !bodyTalk(m.text)) return;
+    const reply = msgs.slice(i + 1).find((r) => r.role === 'assistant' && !r.kind && r.text);
+    said.push(`${timeText(m.at, s.tz)} "${clip(m.text, 200)}"${reply ? ` (you: "${clip(reply.text, 120)}")` : ''}`);
+  });
+  if (said.length) parts.push(`his words today about his body: ${said.slice(-6).join('; ')}`);
+  if (!parts.length) return '';
+  return `Today so far, his body and skips (read this before you answer about an exercise, pain or how something will feel; answer from it, never ask what it already says, never answer from earlier days only): ${parts.join(' | ')}.`;
 }
 
 /** No session open: the rest defaults, and any rest set on an exercise of the next session's routine. */
@@ -379,6 +425,7 @@ export function contextLine({ store, tz, now, screen = null }) {
   }
   const active = s.active();
   if (active) lines.push(activeText(s, active));
+  lines.push(todayBodyLine(s));
   lines.push(moodLine(s));
   // Thu 10/22: asked "what's up?" he repeated a wrong 2:13 PM notification ("0 of 4 taken") as today's supplements; the
   // live count is here with every message, ahead of what the notifications said.

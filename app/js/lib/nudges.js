@@ -333,7 +333,7 @@ export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
  */
 export const MORNING = { giveUpH: 4, waitMin: 30, quietMin: 3 };
 export const MORNING_UP_TEXT = 'Morning. Are you up?';
-const PAIN_WORDS = /\b(pain\w*|hurts?|hurting|sore\w*|ache[sd]?|aching|tweak\w*|strain\w*)\b/i;
+export const PAIN_WORDS = /\b(pain\w*|hurts?|hurting|sore\w*|ache[sd]?|aching|tweak\w*|strain\w*)\b/i;
 const BODY_PART = /\b(lower back|upper back|back|knees?|shoulders?|elbows?|wrists?|hips?|neck|hamstrings?|quads?|groin|calf|calves|ankles?|chest)\b/gi;
 
 /**
