@@ -85,3 +85,14 @@ test('a bodyweight rep session (no kg) still counts as the last rep session', ()
   assert.equal(h.lastLifted(NAME).date, '2026-10-19');
   assert.deepEqual(h.lifted(NAME).map((e) => e.date), ['2026-10-19', '2026-04-02']);
 });
+
+test('pain written on the hold-only session still keeps today at his last rep weight, no step', () => {
+  const sore = day('2026-10-22', [['hold', 9, null, 30], ['hold', 9, null, 30]]);
+  sore.session.exercises[0].notes = 'shoulder hurt on the last hold';
+  const t = start(hist([...reps, sore])).session.exercises[0].target;
+  assert.equal(t.kg, 9);
+  assert.equal(t.painLast, true);
+  assert.match(t.why, /^Last time 9 kg hurt \("shoulder hurt on the last hold"\)\. Stay at 9 kg, no step/);
+  // No pain on it: the step from Monday's rep sets as before.
+  assert.equal(start(hist([...reps, holds])).session.exercises[0].target.kg, 14);
+});

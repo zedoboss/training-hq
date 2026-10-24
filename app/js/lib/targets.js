@@ -61,6 +61,17 @@ export function lastNotes(entries = [], { skipped = null } = {}) {
   return { pain: note && last?.heaviest?.kg != null ? { note, kg: last.heaviest.kg, prevGood } : null, skipped: skipped || null, ...jumpOf(last, older) };
 }
 
+/**
+ * lastNotes over the last rep sessions (Sat 10/24: a hold-only session in between doesn't count), except pain written on
+ * that hold session: it still holds today's rep weight at the last one, no step.
+ */
+export function repNotes(history, name, opts = {}) {
+  const lifted = history.lifted(name);
+  const latest = history.last(name);
+  const held = latest && lifted[0] && latest !== lifted[0] && painIn(latest.note) ? [{ ...latest, heaviest: lifted[0].heaviest }] : [];
+  return lastNotes([...held, ...lifted], opts);
+}
+
 /** The highest load allowed by the cap, before rounding to a loadable weight. */
 export const capOf = (lastKg) => Math.round(lastKg * (1 + CAP) * 100) / 100;
 

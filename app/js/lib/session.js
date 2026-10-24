@@ -1,6 +1,6 @@
 // Building and summarising a workout session. Pure functions; the views save the results.
 // A session holds its exercise list; every set is its own record (so sync can never lose one).
-import { targetFor, stepFor, lastNotes, loadable, jumpFrom, dayOf } from './targets.js';
+import { targetFor, stepFor, repNotes, loadable, jumpFrom, dayOf } from './targets.js';
 import { weekColumn } from './programme.js';
 import { effectiveKg } from './exercise-types.js';
 import { newId, newKey, defaultSets } from './routines.js';
@@ -54,7 +54,7 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     const latest = history.last(re.name);
     const lastHeaviest = last?.heaviest ? { ...last.heaviest, date: last.date } : null;
     // Thu 10/22: pain written down last time, or skipped last time (routineFromLast), changes today's number.
-    const notes = lastNotes(history.lifted(re.name), { skipped: re.skippedLast || null });
+    const notes = repNotes(history, re.name, { skipped: re.skippedLast || null });
     const entry = {
       key: newKey(), exerciseId: re.exerciseId, name: re.name, type: ex.type || 'weight_reps', capClass: ex.capClass ?? null,
       barKg: ex.barKg ?? null, restSeconds: re.restSeconds ?? ex.restSeconds ?? null, notes: re.notes || '', role: re.role ?? null,
@@ -70,7 +70,7 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
         const l = lighterTarget({ week, targetAt: tAt, params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
         t = { ...t, kg: t.bodyweight ? t.kg : l.kg ?? t.kg, reps: l.reps, why: `${l.why}${t.kg != null && !t.bodyweight ? ` (planned ${t.kg})` : ''}`, lighter: true };
       }
-      if (last && latest && latest !== last && latest.sets.some((x) => x.hold || x.type === 'hold') && t.kg != null && !t.bodyweight) t = { ...t, why: `${dayOf(latest.date)} was holds only, so from your rep sets: ${t.why.replace(/\b[Ll]ast time\b/, dayOf(last.date))}`, holdsLast: true };
+      if (last && latest && latest !== last && latest.sets.some((x) => x.hold || x.type === 'hold') && t.kg != null && !t.bodyweight && !t.painLast) t = { ...t, why: `${dayOf(latest.date)} was holds only, so from your rep sets: ${t.why.replace(/\b[Ll]ast time\b/, dayOf(last.date))}`, holdsLast: true };
       entry.target = t;
       entry.capClass = pe.capClass ?? entry.capClass;
       planned = Array.from({ length: t.sets }, () => ({ type: 'normal', kg: t.bodyweight ? null : t.kg, reps: null, target: { kg: t.kg, reps: t.reps } }));
