@@ -304,7 +304,7 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
       put(CHANGES, c.id, c);
       fixIds.push(c.id);
     });
-    const diary = put(DIARY, date, { id: date, date, status: 'done', at: t, ...v.diary, facts: factIds, expired, fixes: fixIds, morning: v.morning, dropped: v.dropped, ms });
+    const diary = put(DIARY, date, { id: date, date, status: 'done', at: t, ...v.diary, facts: factIds, expired, fixes: fixIds, morning: v.morning, foodKcal: kcalOf(date), dropped: v.dropped, ms });
     log(`nightly ${date}: diary written, ${factIds.length} facts, ${expired.length} expired, ${fixIds.length} fixes filed${v.dropped.length ? `; dropped: ${v.dropped.slice(0, 5).join('; ')}` : ''}`);
     return diary;
   }
@@ -329,6 +329,9 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     try { if (push?.list?.().length) await push.notify({ title: 'Coach', body: short || text, url: '#/coach', tag: ref }); } catch (e) { log(`nightly: notification: ${e.message}`); }
   }
 
+  /** The day's food kcal as the Fuel screen counts it (meals logged to that day). */
+  const kcalOf = (date) => Math.round(dayTotals(store.listRecords('meals').map((r) => r.data).filter((m) => m && !m.deleted), store.listRecords('meal-estimates').map((r) => r.data).filter(Boolean), date).kcal);
+
   /** The changes filed or fixed quietly overnight and not told yet. */
   const quietDone = () => store.listRecords(CHANGES).map((r) => r.data).filter((c) => c && c.announce === 'morning');
 
@@ -349,7 +352,9 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const done = [...new Map([...filed.filter((c) => c.status === 'done'), ...quiet.filter((c) => c.status === 'done')].map((c) => [c.id, c])).values()];
     const building = filed.filter((c) => c.status === 'queued' || c.status === 'working');
     const other = [...filed, ...quiet].filter((c) => c.status === 'failed' || c.status === 'question');
-    const said = diaries.map((d) => d.morning).filter(Boolean);
+    // A meal logged after the review (he logs the night meal once he's up): the morning's "X of Y kcal" is the Fuel total now.
+    const said = diaries.map((d) => (d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
+      ? d.morning.replace(/\b\d[\d,]* of ([\d,]+ kcal)/, `${kcalOf(d.date).toLocaleString('en-US')} of $1`) : d.morning)).filter(Boolean);
     const learned = diaries.reduce((n, d) => n + (d.facts?.length || 0), 0);
     const lines = [
       said.length ? said.join(' ') : '',

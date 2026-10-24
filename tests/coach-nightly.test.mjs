@@ -305,3 +305,16 @@ test('the review of a day comes before 6:00 AM once he slept and got up (sleep l
   w('sessions', 's1', { id: 's1', kind: 'workout', startedAt: at('04:20', '2026-03-18') });
   assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16', '2026-03-17'], 'an early workout started');
 });
+
+test('Sat 10/24: a night meal logged after the review, before the morning message: the morning\'s kcal is the Fuel total now', async () => {
+  w('fuel', 'plan', { id: 'plan', kcal: 3174, proteinG: 242.5 });
+  const { n } = nightly({ answer: { ...ANSWER, fixes: [], morning: 'Pull today. Yesterday: 858 of 3,174 kcal, knee holds 0/2.' } });
+  await n.tick();
+  assert.equal(store.getRecord(DIARY, '2026-03-17').data.foodKcal, 858);
+  // He wakes and logs the 2:40 AM meal to Tuesday 3/17 (his waking day).
+  w('meals', 'ml3', { id: 'ml3', date: '2026-03-17', at: at('02:40', '2026-03-18'), name: 'Second meal', before: { items: [{ name: 'Beef', grams: 500, kcal: 1282, protein: 115.1 }] } });
+  clock = at('13:30', '2026-03-18');
+  msg('m9', 'user', 'Up', '13:30', '2026-03-18');
+  await n.tick();
+  assert.equal(talk()[0].text, 'Pull today. Yesterday: 2,140 of 3,174 kcal, knee holds 0/2.');
+});
