@@ -64,6 +64,8 @@ test('initiative tick: the coach writes it, pushed and in Talk; one per 3 hours;
   try {
     store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('schedule', 'neck', { planned: true, place: 'after-push', on: '2026-03-15' });
+    // He's up: the phone opened the app (Sat 10/24: no sign of him, the day waits for him).
+    store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: at('10:05') });
     store.writeLocal('sessions', 'p1', { id: 'p1', dayType: 'push', status: 'done', startedAt: at('11:30', '2026-03-17'), endedAt: at('12:30', '2026-03-17') });
     const sent = []; const asked = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };

@@ -42,7 +42,7 @@ test('pain from his last workout comes first in the body question', () => {
   assert.equal(morningBodyText(null, D, TZ), 'How does your body feel today? Knees, legs, back: 0 to 3.');
 });
 
-test('the morning steps: up, then sleep, then body; one at a time; never a silent day', () => {
+test('the morning steps: up, then sleep, then body; one at a time; quiet until he is up', () => {
   const wakeAt = T('10:00');
   const step = (o) => morningStep({ wakeAt, bodyText: 'BODY?', ...o });
   // Before his wake time: nothing (the wake-time rules hold things already).
@@ -50,8 +50,10 @@ test('the morning steps: up, then sleep, then body; one at a time; never a silen
   // No sign he's up: "Are you up?" once, then quiet, and the day waits.
   assert.deepEqual(step({ now: T('10:00') }).ask, { key: 'up', text: MORNING_UP_TEXT });
   assert.deepEqual(step({ now: T('11:00'), state: { up: T('10:00') } }), { hold: true, open: false, ask: null });
-  // Still nothing 4 hours after his wake time: the day goes on.
-  assert.deepEqual(step({ now: T('14:00'), state: { up: T('10:00') } }), { hold: false, open: true, ask: null });
+  // Sat 10/24: still nothing 4 hours, or all day, after his wake time: still quiet, still waiting for him.
+  for (const hm of ['14:00', '18:00', '23:59']) assert.deepEqual(step({ now: T(hm), state: { up: T('10:00') } }), { hold: true, open: false, ask: null }, hm);
+  // Up but leaving the questions 4 hours: the day goes on (never stuck once he's there).
+  assert.deepEqual(step({ now: T('14:00'), upAt: T('10:05'), lastUserAt: T('10:05'), state: { up: T('10:00'), sleep: T('10:08'), body: T('10:38') } }), { hold: false, open: true, ask: null });
   // He writes at 11:40 AM: 3 minutes later, sleep.
   const up = { upAt: T('11:40'), lastUserAt: T('11:40'), state: { up: T('10:00') } };
   assert.equal(step({ ...up, now: T('11:41') }).ask, null, 'not on top of his message');
@@ -161,15 +163,49 @@ test('up and talking before his wake time, sleep and check-in known: no morning 
   } finally { f.done(); }
 });
 
-test('no answer at all: the day goes on 4 hours after his wake time, what waited in one message', async () => {
+// Sat 10/24, his words (his Friday rule again): "Morning. Are you up?" at 10:00 AM, no answer, and from 2:00 PM the
+// plan, the walk, the scan checklist and the coach's holds talk went out anyway. Now no answer means quiet until he
+// messages or opens the app; then sleep, his back, the plan.
+test('no answer to "Are you up?": quiet all day; he opens the app at 2:30 PM, then sleep, his back, the plan', async () => {
   const f = friday();
   try {
-    await f.run('09:58', '14:01');
-    const bodies = f.sent.map((m) => [hmOf(m.at), m.body.slice(0, 40)]);
-    assert.equal(bodies[0][1], 'Morning. Are you up?');
-    assert.ok(f.sent.slice(1).every((m) => m.at >= T('14:00')), JSON.stringify(bodies));
+    await f.run('09:58', '14:29');
+    assert.deepEqual(f.sent.map((m) => [hmOf(m.at), m.body]), [['10:00 AM', 'Morning. Are you up?']]);
+    for (const hm of ['14:00', '14:29']) assert.equal(morningGate(f.store, T(hm), TZ).hold, true, hm);
+    // He opens the app at 2:30 PM (its zone report): the sleep question, not the plan.
+    f.store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: T('14:30') });
+    await f.run('14:30', '14:31');
+    assert.deepEqual(f.sent.slice(1).map((m) => [hmOf(m.at), m.body]), [['2:30 PM', 'How did you sleep? When did you go to bed and when did you wake up?']]);
+    f.say('14:32', 'bed 3:30, up 2:15');
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: T('03:30'), wake: T('14:15'), source: 'coach', at: T('14:33') });
+    await f.run('14:32', '14:36');
+    assert.equal(f.sent.length, 3);
+    assert.match(f.sent[2].body, /^How's your lower back today\?/);
+    f.say('14:37', 'back is a 1');
+    await f.run('14:37', '14:41');
     const plan = f.sent.find((m) => m.tag === 'morning-plan');
-    assert.ok(plan, JSON.stringify(bodies));
-    assert.match(plan.body, /^Your plan now: Morning holds\..* Then: Start cooking/);
+    assert.ok(plan && plan.at >= T('14:40'), JSON.stringify(f.sent.map((m) => [hmOf(m.at), m.body.slice(0, 40)])));
+    assert.match(plan.body, /^Your plan now: Morning holds\./);
+  } finally { f.done(); }
+});
+
+test('no sign of him at all: only "Are you up?" all day, nothing until midnight', async () => {
+  const f = friday();
+  try {
+    await f.run('09:58', '23:59');
+    assert.deepEqual(f.sent.map((m) => [hmOf(m.at), m.body]), [['10:00 AM', 'Morning. Are you up?']]);
+  } finally { f.done(); }
+});
+
+test('a workout before 5:00 AM counts as up: no "Are you up?", the day goes on', async () => {
+  const f = friday();
+  try {
+    f.store.writeLocal('sessions', 'pull1', { id: 'pull1', dayType: 'pull', status: 'done', startedAt: T('04:00'), endedAt: T('05:20'), exercises: [] });
+    await f.run('09:58', '10:05');
+    assert.equal(f.sent.some((m) => /Are you up/.test(m.body)), false);
+    assert.match(f.sent[0]?.body || '', /How did you sleep/);
+    // He never answers it: 30 minutes later the day goes on (his body is known, he trained).
+    await f.run('10:06', '10:40');
+    assert.equal(morningGate(f.store, T('10:40'), TZ).hold, false);
   } finally { f.done(); }
 });

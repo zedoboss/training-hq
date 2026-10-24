@@ -321,8 +321,13 @@ export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
 // scan checklist 4 times, "How did you sleep?" only at 11:18 AM and nothing about his back. Now one question at a
 // time, in a human order: are you up, then sleep, then his body (pain from his last workout first), then the day's
 // plan. Nothing else of his day goes out before that. ----
+// Sat 10/24, his words (again): "you should have asked me if I'm awake... Since I haven't messaged you... you shouldn't
+// keep on messaging me": "Are you up?" went out at 10:00 AM, no answer, and at 2:00 PM the day went on anyway (the plan,
+// the walk, the scan, the coach's holds talk). Now no answer to "Are you up?" means quiet until he messages or opens
+// the app, however long; then sleep, his body, the plan.
 /**
- * giveUpH: no answer this long after his wake time, the day goes on as usual (Claude's default: never a silent day).
+ * giveUpH: once he's up, the morning questions left this long after his wake time (or after he got up, if later),
+ * the day goes on as usual. Never while he hasn't shown he's up.
  * waitMin: a question he leaves this long counts as passed over, the next one comes. quietMin: after his message or
  * the coach's reply, this long before the next question.
  */
@@ -387,8 +392,8 @@ export function morningStep({ now, wakeAt, upAt = null, sleepKnown = false, body
   if (state.open) return { hold: false, open: true, ask: null };
   // Before his day starts: the wake-time rules hold things already.
   if (now < Math.min(wakeAt, upAt ?? Infinity)) return { hold: false, open: false, ask: null };
-  if (now - Math.max(wakeAt, upAt ?? 0) >= MORNING.giveUpH * 3600000) return { hold: false, open: true, ask: null };
   if (!upAt) return { hold: true, open: false, ask: state.up ? null : { key: 'up', text: MORNING_UP_TEXT } };
+  if (now - Math.max(wakeAt, upAt) >= MORNING.giveUpH * 3600000) return { hold: false, open: true, ask: null };
   const quiet = now - Math.max(lastUserAt || 0, lastCoachAt || 0) >= MORNING.quietMin * 60000;
   const steps = [['sleep', sleepKnown, 'How did you sleep? When did you go to bed and when did you wake up?'], ['body', bodyKnown, bodyText]];
   for (const [key, known, text] of steps) {

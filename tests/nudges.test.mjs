@@ -128,6 +128,8 @@ test('the Mac sends a nudge from the coach, writes it into Talk, and keeps quiet
   try {
     store.writeLocal('settings', 'main', { notify: { nudgeEveryMin: 20, wakeHm: '04:40', bedHm: '18:00' } });
     store.writeLocal('fuel', 'plan', { kcal: 3174, proteinG: 242.5 });
+    // He's up: the phone opened the app (Sat 10/24: no sign of him, the day waits for him).
+    store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: at(D, '05:00') });
     const sent = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     let r = await nudgeTick({ store, push, now: at(D, '14:00'), tz: TZ });

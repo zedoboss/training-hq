@@ -210,6 +210,8 @@ test('the Mac notifier: sends what is due once, skips what is stale, nothing wit
     store.writeLocal('tendons', 'readiness', { kind: 'readiness', ...table });
     store.writeLocal('sessions', 'hevy.x', { id: 'hevy.x', kind: 'workout', status: 'done', dayType: 'push', startedAt: at('2026-01-18', '05:00') });
     store.writeLocal('days', '2026-01-20', { date: '2026-01-20', sessionTime: '04:30' });
+    // He's up through the day: the phone opened the app (Sat 10/24: no sign of him, the day waits for him).
+    store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: at('2026-01-20', '05:05') });
     let now = at('2026-01-20', '04:01');
     const sent = [];
     let devices = [];

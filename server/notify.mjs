@@ -98,11 +98,15 @@ const ASKS_BODY = /\b(back|body|sore\w*|knees?|pain|hurts?|hurting)\b[^.!?]*\?/i
 /**
  * The first sign he's up today, from 5:00 AM: his message, a meal or his answer to a meal question, a supplement
  * ticked, a workout or holds round started, his sleep log's wake time, the app opened (its zone report, Apple Health).
+ * A workout started after midnight counts too (his sessions start from 3:00 AM): with no answer to "Are you up?" the
+ * day now waits for him, so an early session must not leave it waiting.
  */
 export function upAtToday(store, now, tz) {
   const date = isoDate(new Date(now), tz);
   const from = zonedTime(date, '05:00', tz);
   const list = (col) => recordsOf(store, col);
+  const workout = list('sessions').filter((x) => x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt)
+    && x.startedAt <= now && isoDate(new Date(x.startedAt), tz) === date).map((x) => x.startedAt);
   const signs = [
     store.getRecord('sleep-log', date)?.data?.wake,
     ...list('coach-messages').filter((m) => m.role === 'user').map((m) => m.at),
@@ -112,7 +116,7 @@ export function upAtToday(store, now, tz) {
     ...list('sessions').filter((x) => x.status !== 'discarded').map((x) => x.startedAt),
     ...list('here').filter((h) => h.phone).map((h) => h.at),
     ...list('health').map((d) => d.fileAt),
-  ].filter((t) => Number.isFinite(t) && t >= from && t <= now);
+  ].filter((t) => Number.isFinite(t) && t >= from && t <= now).concat(workout);
   return signs.length ? Math.min(...signs) : null;
 }
 
