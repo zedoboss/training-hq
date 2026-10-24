@@ -28,6 +28,7 @@ import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
 import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time.js';
+import { restFor, restText } from '../../app/js/lib/settings.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
 import { afterMeals, mealSpansFor, morningContext } from '../notify.mjs';
@@ -72,7 +73,33 @@ export function activeText(s, session) {
   const sum = summarize(session, sets);
   const cur = currentExercise(session, sets);
   const ticked = sets.filter((x) => x.done).length;
-  return `Session in progress: ${session.title}, started ${timeText(session.startedAt, s.tz)} (${Math.round(elapsedMs(session, s.now) / 60000)} min), ${ticked} of ${sets.length} sets ticked, volume ${sum.volume.toLocaleString('en-US')} kg.${cur ? ` Now: ${nextSetText(cur, sets, s)}.` : ' Every set is ticked: finish it on the phone.'}`;
+  return `Session in progress: ${session.title}, started ${timeText(session.startedAt, s.tz)} (${Math.round(elapsedMs(session, s.now) / 60000)} min), ${ticked} of ${sets.length} sets ticked, volume ${sum.volume.toLocaleString('en-US')} kg.${cur ? ` Now: ${nextSetText(cur, sets, s)}.` : ' Every set is ticked: finish it on the phone.'}\n${restLine(s, session)}`;
+}
+
+/**
+ * Sat 10/24, his words: "the rest is set to 2m ur data is outdated or u didnt Check" (the coach said 1:30 on hammer and
+ * preacher curls from his profile's old rule, while today's session had 2:00 set on both). The rest each exercise really
+ * gets on his phone: the exercise's own time, else the Settings default for its class (restFor, as the phone does it).
+ */
+export function restLine(s, session) {
+  const st = s.settings(); const r = st.rest;
+  const defaults = `Settings defaults: main lifts ${restText(r.mainS)}, light work ${restText(r.lightS)}, warm-up sets ${restText(r.warmupS)}, between holds ${restText(r.holdS)}`;
+  if (session.kind === 'holds') return `Rest between holds on his phone: ${restText(r.holdS)}. Say rest times only from here, never from his profile or memory.`;
+  const items = (session.exercises || []).filter((e) => !e.skipped).map((e) => {
+    const arm = oneArm(s, e.name, [e.notes, ...s.setsOf(session.id).filter((x) => x.exKey === e.key).map((x) => x.note)]);
+    return `${e.name} ${restText(restFor(e, 'normal', st))}${e.restSeconds != null ? ' (set on this exercise)' : ''}${arm ? ' (after each round; no rest between the arms)' : ''}`;
+  });
+  return `Rest times on his phone now: ${items.join(', ')}. ${defaults}. Say rest times only from here (he changes them in the app), never from his profile or memory.`;
+}
+
+/** No session open: the rest defaults, and any rest set on an exercise of the next session's routine. */
+function restDefaultsLine(s) {
+  const st = s.settings(); const r = st.rest;
+  const rot = s.rotation();
+  const type = rot.today.kind !== 'rest' && rot.today.dayType ? rot.today.dayType : rot.next?.dayType;
+  const routine = type && s.list('routines').find((x) => x.dayType === type);
+  const own = (routine?.exercises || []).filter((e) => e.restSeconds != null).map((e) => `${e.name} ${restText(e.restSeconds)}`);
+  return `Rest times in the app (Settings defaults): main lifts ${restText(r.mainS)}, light work ${restText(r.lightS)}, warm-up sets ${restText(r.warmupS)}, between holds ${restText(r.holdS)}.${own.length ? ` Set on the exercise in his ${routine.title || LABEL[type]} routine: ${own.join(', ')}.` : ''} An exercise in a session can have its own time; once a session is open the session line gives each one. Never quote rest times from his profile or memory.`;
 }
 
 // ---- today --------------------------------------------------------------------------------------------------------
@@ -321,7 +348,7 @@ export function todayText(s) {
   const arrived = s.days()[s.today]?.arrivedAt;
   if (arrived) lines.push(`At the gym since ${timeText(arrived, s.tz)} (his iPhone arrival automation).`);
   const active = s.active();
-  if (active) lines.push(activeText(s, active));
+  lines.push(active ? activeText(s, active) : restDefaultsLine(s));
   lines.push(...holdLines(s), suppLine(s), foodLine(s), mealTimesLine(s), ...walkTextLines(s, { week: true }), scanLine(s));
   const neck = s.one('schedule', 'neck');
   if (s.list('routines').some((r) => r.dayType === 'neck')) {
