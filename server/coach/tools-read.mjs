@@ -667,7 +667,8 @@ function sessionText(s, session, lib, { detail = true } = {}) {
   const ex = (session.exercises || []).map((e) => {
     const mine = sets.filter((x) => x.exKey === e.key);
     if (!mine.length) return null;
-    const note = e.notes ? ` (note: ${e.notes})` : '';
+    // Sat 10/24 ("the rest is set to 2m"): a finished session keeps the rest set on its exercise, so a look back is right.
+    const note = `${e.restSeconds != null ? ` (rest ${restText(e.restSeconds)}, set on this exercise)` : ''}${e.notes ? ` (note: ${e.notes})` : ''}`;
     if (!oneArm(s, e.name, [e.notes, ...mine.map((x) => x.note)])) return `  ${e.name}: ${mine.map((x) => setText(x, e.type)).join(', ')}${note}`;
     const warm = mine.filter((x) => x.type === 'warmup');
     return `  ${e.name} (${ONE_ARM_TEXT}): ${[...warm.map((x) => setText(x, e.type)), roundsText(mine.filter((x) => x.type !== 'warmup'), (x) => setText(x, e.type))].join(', ')}${note}`;

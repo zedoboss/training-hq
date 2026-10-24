@@ -78,3 +78,10 @@ test('a holds session gives the hold rest only', () => {
 test('the rules say rest times come only from the app', () => {
   assert.match(RULES, /Rest times \(his words, Sat 10\/24[^\n]*never from his profile or memory/i);
 });
+
+test('a finished session still shows the rest set on its exercises when he looks back', async () => {
+  openSession();
+  w('sessions', 'now', { ...s().one('sessions', 'now'), status: 'done', endedAt: at('2026-03-17', '15:40') });
+  const hist = await TOOLS.find((t) => t.name === 'history').run({ exercise: null }, { store, tz: TZ, now: () => NOW, action: () => {} });
+  assert.match(typeof hist === 'string' ? hist : hist.text, /Hammer Curl \(Dumbbell\): [^\n]*\(rest 2:00, set on this exercise\)/);
+});
