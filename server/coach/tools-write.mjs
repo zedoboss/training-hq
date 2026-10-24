@@ -125,15 +125,17 @@ async function logSet(a, ctx) {
   const after = withNew.map((x) => (x.id === filled.id ? filled : x));
   const next = after.find((x) => !x.done);
   let restLine = '';
-  if (!(set.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) {
+  const arm = oneArm(s, ex.name, [ex.notes, ...after.map((x) => x.note)]) ? armOf(after, filled) : null;
+  // Sat 10/24: on a one-arm exercise the left arm follows the right straight away, so no rest timer after the right.
+  const pairNext = arm?.arm === 'right' && next?.exKey === ex.key && next.type !== 'warmup';
+  if (!pairNext && !(set.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) {
     const secs = restFor(ex, filled.type, st);
     if (secs) { ctx.action({ kind: 'rest', seconds: secs, label: ex.name }); restLine = ` Rest ${restText(secs)} started on his phone.`; }
   }
   const t = set.target || {};
   const allSets = [...sets.filter((x) => x.id !== filled.id), filled].sort((p, q) => p.order - q.order);
   const nowEx = currentExercise(session, allSets);
-  const arm = oneArm(s, ex.name, [ex.notes, ...after.map((x) => x.note)]) ? armOf(after, filled) : null;
-  const lines = [`Logged ${ex.name}, set ${setNo(after, filled)} of ${after.length}${arm ? ` (round ${arm.round}, ${arm.arm} arm)` : ''}${added ? ' (an extra set)' : ''}${filled.type !== 'normal' ? ` (${filled.type})` : ''}: ${valuesText(ex, filled)}.${t.kg != null || t.reps ? ` Target was ${t.kg != null ? k(t.kg) : '?'} × ${repsText(t.reps) || '?'}.` : ''}${restLine}`];
+  const lines = [`Logged ${ex.name}, set ${setNo(after, filled)} of ${after.length}${arm ? ` (round ${arm.round}, ${arm.arm} arm)` : ''}${added ? ' (an extra set)' : ''}${filled.type !== 'normal' ? ` (${filled.type})` : ''}: ${valuesText(ex, filled)}.${t.kg != null || t.reps ? ` Target was ${t.kg != null ? k(t.kg) : '?'} × ${repsText(t.reps) || '?'}.` : ''}${restLine}${pairNext ? ' No rest timer: the left arm goes straight after the right.' : ''}`];
   if (guard) lines.push(guard);
   else if (t.kg > 0 && filled.kg != null && filled.kg > t.kg * 1.5 && filled.type !== 'warmup') lines.push(`Check it: ${k(filled.kg)} kg is far above today's target of ${k(t.kg)} kg on ${ex.name}.`);
   if (rec) lines.push(`New record${rec.kinds.length > 1 ? 's' : ''} on ${ex.name}: ${rec.kinds.map((x) => `${x.label === 'Volume' ? 'best set volume' : x.label === '1RM' ? 'best 1RM (est.)' : x.label === 'Weight' ? 'heaviest weight' : x.label.toLowerCase()} ${['heaviest', 'e1rm', 'bestSet'].includes(x.key) ? `${k(x.value)} kg` : x.value}${x.previous != null ? ` (before ${['heaviest', 'e1rm', 'bestSet'].includes(x.key) ? `${k(x.previous)} kg` : x.previous})` : ''}, ${x.allTime ? 'all-time' : 'since the comeback'}`).join('; ')}.`);

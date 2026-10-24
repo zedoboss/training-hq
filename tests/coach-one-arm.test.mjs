@@ -87,8 +87,15 @@ test('the session in progress says the next set (4 of 7, after the warm-up) is r
   assert.match(activeText(snap, snap.active()), /Now: Preacher Curl \(Dumbbell\), set 4 of 7 \(round 2, right arm; one arm per logged set/);
 });
 
-test('log_set says which arm it logged', async () => {
-  const text = await call('log_set', { exercise: 'preacher curl', kg: 10, reps: 6 });
+test('log_set says which arm it logged; no rest timer after the right arm, the rest comes after the left', async () => {
+  const acts = [];
+  const run = async (args) => { const r = await TOOLS.find((t) => t.name === 'log_set').run(args, { ...ctx(), action: (x) => acts.push(x) }); return typeof r === 'string' ? r : r.text; };
+  const text = await run({ exercise: 'preacher curl', kg: 10, reps: 6 });
+  assert.equal(acts.filter((x) => x.kind === 'rest').length, 0);
+  assert.match(text, /No rest timer: the left arm goes straight after the right/);
   assert.match(text, /Logged Preacher Curl \(Dumbbell\), set \d of \d+ \(round 2, right arm\)/);
   assert.match(text, /Next: Preacher Curl \(Dumbbell\), set \d of \d+ \(round 2, left arm;/);
+  const left = await run({ exercise: 'preacher curl', kg: 10, reps: 6 });
+  assert.match(left, /round 2, left arm/);
+  assert.doesNotMatch(left, /No rest timer/);
 });
