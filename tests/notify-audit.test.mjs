@@ -25,8 +25,8 @@ test('one-off messages are never nudged again; the planner\'s own repeats are no
 
 test('food nudges: his meal answer stops the after-workout one; a meal still being read is not "behind"', () => {
   const b = { ...base, workoutEndedAt: at('11:40'), targets: { kcal: 3000, protein: 240 }, eaten: { kcal: 0, protein: 0, unread: 0 } };
-  assert.ok(nudgeCandidates({ ...b, now: at('12:30') }).some((c) => c.key === 'meal-after'));
-  assert.equal(nudgeCandidates({ ...b, now: at('12:30'), mealAnsweredAt: at('12:10') }).some((c) => c.key === 'meal-after'), false);
+  assert.ok(nudgeCandidates({ ...b, now: at('12:30') }).some((c) => c.key.startsWith('meal-after:')));
+  assert.equal(nudgeCandidates({ ...b, now: at('12:30'), mealAnsweredAt: at('12:10') }).some((c) => c.key.startsWith('meal-after:')), false);
   const late = { ...base, now: at('17:00'), targets: { kcal: 3000, protein: 240 } };
   assert.ok(nudgeCandidates({ ...late, eaten: { kcal: 300, protein: 20, unread: 0 } }).some((c) => c.key === 'food'));
   assert.equal(nudgeCandidates({ ...late, eaten: { kcal: 300, protein: 20, unread: 1 } }).some((c) => c.key === 'food'), false);

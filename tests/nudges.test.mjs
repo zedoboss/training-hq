@@ -193,14 +193,51 @@ test('after the workout (Tue 10/20): 20 minutes of quiet, then the first meal be
     targets: { kcal: 3000, protein: 240 }, eaten: { kcal: 105, protein: 1 }, suppsUntimed: { total: 8, open: ['Creatine'] }, workoutEndedAt: at(D, '12:30') };
   assert.deepEqual(nudgeCandidates({ ...base, now: at(D, '12:45') }), [], 'shower time');
   const c = nudgeCandidates({ ...base, now: at(D, '12:51') });
-  assert.equal(c[0].key, 'meal-after');
+  assert.equal(c[0].key, `meal-after:${at(D, '12:30')}:0`);
   assert.equal(c[0].text, 'Workout done at 12:30 PM. Time for your first meal: 1 of 240 g protein so far today. Tell me what you eat.');
   const later = nudgeCandidates({ ...base, now: at(D, '13:40') });
-  assert.ok(later.findIndex((x) => x.key === 'supps-untimed') > later.findIndex((x) => x.key === 'meal-after'), 'supplements after the meal');
-  assert.equal(nudgeCandidates({ ...base, now: at(D, '13:10'), lastMealAt: at(D, '13:00') }).some((x) => x.key === 'meal-after'), false, 'ate: done');
+  assert.ok(later.findIndex((x) => x.key === 'supps-untimed') > later.findIndex((x) => x.key.startsWith('meal-after:')), 'supplements after the meal');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '13:10'), lastMealAt: at(D, '13:00') }).some((x) => x.key.startsWith('meal-after:')), false, 'ate: done');
   // Thu 10/22: and not before the after-gym order lets meals in (Evolt, then "head home", then 5 minutes).
   assert.deepEqual(nudgeCandidates({ ...base, now: at(D, '12:55'), mealAfterGymAt: at(D, '13:05') }), [], 'Evolt and home first');
-  assert.equal(nudgeCandidates({ ...base, now: at(D, '13:05'), mealAfterGymAt: at(D, '13:05') })[0].key, 'meal-after');
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '13:05'), mealAfterGymAt: at(D, '13:05') })[0].key, `meal-after:${at(D, '12:30')}:0`);
+});
+
+test('after the workout (Sun 10/25): one stream of meal check-ins, each in new words, then quiet', async () => {
+  const { pickNudge, nudgeDue } = await import('../app/js/lib/nudges.js');
+  const { mealReminders } = await import('../app/js/lib/fuel-reminders.js');
+  const base = { tz: TZ, rot: { today: { kind: 'done', dayType: 'pull' } }, wakeHm: '10:00', bedHm: '00:00', session: { started: true, done: true },
+    targets: { kcal: 3174, protein: 242.5 }, eaten: { kcal: 0, protein: 0, unread: 0 }, workoutEndedAt: at(D, '16:41') };
+  // The Mac's clock, minute by minute: what goes out.
+  const replay = (o, from, to) => {
+    const sent = []; const byKey = {}; let last = 0;
+    for (let now = at(D, from); now <= at(D, to); now += 60000) {
+      if (!nudgeDue({ now, everyMin: 20, lastNudgeAt: last })) continue;
+      const pick = pickNudge(nudgeCandidates({ ...o, now }).filter((c) => c.key.startsWith('meal-after:')), byKey, now);
+      if (pick) { sent.push(pick.text); byKey[pick.key] = now; last = now; }
+    }
+    return sent;
+  };
+  // No meal time asking: the ask, 3 check-ins, all different, then nothing more however long he stays quiet.
+  const alone = replay(base, '16:41', '21:00');
+  assert.equal(alone.length, 4);
+  assert.equal(new Set(alone).size, 4, 'never the same line again');
+  assert.match(alone[0], /^Workout done at 4:41 PM\. Time for your first meal: 0 of 242\.5 g protein/);
+  assert.match(alone[3], /^Last check/);
+  // Saturday 10/24: his first meal of the day at 4:30 PM, 5:00 PM at the latest, asked while he trained: its check-ins
+  // run after the workout, so they are the one stream; the after-workout one says nothing.
+  const reminders = mealReminders({ date: D, tz: TZ, mealTimes: [{ name: 'First meal', time: '16:30', latest: '17:00' }] });
+  assert.deepEqual(replay({ ...base, reminders }, '16:41', '21:00'), []);
+  // A meal time later on: the after-workout check-ins until it starts, then its own questions only.
+  const later = mealReminders({ date: D, tz: TZ, mealTimes: [{ name: 'Second meal', time: '18:30', latest: '19:00' }] });
+  assert.equal(replay({ ...base, reminders: later }, '16:41', '21:00').length, 3, 'ask at 5:01, check-ins at 5:21 and 6:01; 7:01 would be after the 6:30 PM meal ask');
+  assert.equal(nudgeCandidates({ ...base, reminders: later, now: at(D, '18:31') }).some((c) => c.key.startsWith('meal-after:')), false);
+  // A meal time already answered or eaten (not due) doesn't silence it; nor does one whose questions ended before the workout.
+  const lunch = mealReminders({ date: D, tz: TZ, mealTimes: [{ name: 'Lunch', time: '12:00' }] });
+  assert.equal(replay({ ...base, reminders: lunch }, '16:41', '21:00').length, 4);
+  // His answer, or a logged meal, ends it at once.
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '17:21'), mealAnsweredAt: at(D, '17:10') }).some((c) => c.key.startsWith('meal-after:')), false);
+  assert.equal(nudgeCandidates({ ...base, now: at(D, '17:21'), lastMealAt: at(D, '17:15') }).some((c) => c.key.startsWith('meal-after:')), false);
 });
 
 test('the dishes (Tue 10/20): 2 minutes after a meal is logged, or after its after photo; once; never for old meals', async () => {

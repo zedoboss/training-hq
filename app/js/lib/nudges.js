@@ -8,6 +8,7 @@
 import { pickLine } from './coach-talk.js';
 import { hmOf, formatHm, zonedTime, isoDate } from './time.js';
 import { LABEL } from './rotation.js';
+import { MEAL_NUDGE } from './fuel-reminders.js';
 
 export const NUDGE_DEFAULTS = { everyMin: 20, wakeHm: '07:00', bedHm: '22:00' };
 export const NUDGE_EVERY = [[15, 'Every 15 minutes'], [20, 'Every 20 minutes'], [30, 'Every 30 minutes'], [0, 'Off']];
@@ -122,9 +123,22 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   const quietTo = Math.max(workoutEndedAt ? workoutEndedAt + AFTER_WORKOUT_QUIET_MIN * 60000 : 0, mealAfterGymAt || 0);
   if (workoutEndedAt && now >= workoutEndedAt && now < quietTo) return [];
   // His answer to the meal question (cooking, skipping...) counts as much as a logged meal (Thu 10/22 audit).
+  // Sun 10/25 (Saturday's "Workout done at 4:41 PM. Time for your first meal..." 7 times, 5:10 to 8:19 PM, on top of
+  // the meal-time asks at 4:52, 5:30 and 6:30 PM): one stream of meal check-ins, his Fri 10/23 rule. The ask, then
+  // check-ins at the meal times' own spacing (MEAL_NUDGE.checkInMin), each in its own words, then quiet; and none
+  // once his meal time's questions (lib/fuel-reminders.js) speak after the workout: they are the stream then.
   if (workoutEndedAt && now - workoutEndedAt < 4 * 3600000 && !(lastMealAt > workoutEndedAt) && !(mealAnsweredAt > workoutEndedAt)) {
-    out.push({ key: 'meal-after', priority: 89, gapMin: 30, url: '#/fuel',
-      text: `Workout done at ${formatHm(hmOf(new Date(workoutEndedAt), tz))}. Time for your first meal${targets?.protein && !eaten.unread ? `: ${nf(eaten.protein)} of ${targets.protein} g protein so far today` : ''}. Tell me what you eat.` });
+    const handOver = Math.min(Infinity, ...reminders.filter((r) => r.kind === 'meals' && r.due && /^meal(-again)?:/.test(String(r.id)) && r.at > workoutEndedAt).map((r) => r.at));
+    const times = [0, ...MEAL_NUDGE.checkInMin].map((m) => quietTo + m * 60000);
+    const k = times.findLastIndex((t) => t <= now);
+    const doneHm = formatHm(hmOf(new Date(workoutEndedAt), tz));
+    const said = [
+      `Workout done at ${doneHm}. Time for your first meal${targets?.protein && !eaten.unread ? `: ${nf(eaten.protein)} of ${targets.protein} g protein so far today` : ''}. Tell me what you eat.`,
+      'Your meal after the gym: haven\'t heard from you. Eaten, cooking, or skipping it?',
+      `Still nothing logged since your ${doneHm} workout. When are you eating, or are you skipping it?`,
+      'Last check on your meal after the gym. Eating now, or skipping it today?',
+    ];
+    if (k >= 0 && now < handOver) out.push({ key: `meal-after:${workoutEndedAt}:${k}`, priority: 89, gapMin: ONCE_MIN, url: '#/fuel', text: said[k] });
   }
   const nowHm = formatHm(hmOf(new Date(now), tz));
   const sinceWake = ((minOf(hmOf(new Date(now), tz)) - minOf(wakeHm)) + 1440) % 1440;
