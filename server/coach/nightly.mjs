@@ -1,5 +1,6 @@
 // The coach reviews each day at night (Thu 10/22, his words: "make it as smart as possible... auto-improving,
-// auto-learning... as up-to-date as possible, self-learning"). Once a day, after it ends (1:30 AM; a day missed while
+// auto-learning... as up-to-date as possible, self-learning"). Once a day, after it ends (1:30 AM at the earliest, and
+// only once his waking day is over: he slept and got up, or 6:00 AM, lib/waking-day.js; a day missed while
 // the Mac slept is caught up when it wakes, the last 3 at most), one Claude run reads the whole day (the timeline to the
 // minute and every message) and answers with JSON that the server checks before anything is kept:
 // - the day's diary (coach-diary/<date>): a summary, his words that mattered, his decisions, the threads left open;
@@ -17,13 +18,15 @@ import { newChange, asksOf, COL as CHANGES, MSGS } from './changes.mjs';
 import { formatDay, formatTime, isoDate, zonedTime } from '../../app/js/lib/time.js';
 import { addDays } from '../../app/js/lib/rotation.js';
 import { heldOff } from '../../app/js/lib/holdoffs.js';
+import { wakingDay } from '../../app/js/lib/waking-day.js';
+import { dayTotals, mealTotals } from '../../app/js/lib/meals.js';
 
 export const DIARY = 'coach-diary';
 /** The first day the nightly review covers (meta). */
 export const SINCE = 'nightly:since';
 export const NOTES = 'coach-notes';
 export const MODEL = { model: 'claude-opus-5-5', effort: 'high' };
-/** The run for a day starts this long after it ends (his time). */
+/** The run for a day starts this long after it ends (his time) at the earliest, and not before his waking day is over. */
 export const RUN_HM = '01:30';
 export const CATCH_UP_DAYS = 3;
 export const MAX_TRIES = 3;
@@ -44,6 +47,7 @@ export const SYSTEM = `You are the nightly review of the coach inside Training H
 RULES
 - Only what the day shows: his words, what he logged, what the app and the coach said and did. Never invent, never guess a number.
 - The records win: where a message (the coach's, the app's, a line of the build log) says something the timeline or STATE NOW contradicts (a reminder "cancelled" that is still set, a set "logged" at another weight), go by the records, and name the difference only if it matters to him.
+- Food for the day (diary, facts, morning): the totals and meals in FOOD THAT DAY, never added up from the timeline. A meal eaten after midnight before he slept counts for the day he woke up on (his waking day), wherever its time falls.
 - diary.summary: at most ${SUMMARY_WORDS} words, plain: what he did (training, food, supplements, walks, sleep, holds), what he asked for, what went wrong, how the day ended. diary.line: the day in one or two short sentences, for the coach's memory. diary.words: up to 12 of his own sentences that matter (a decision, a preference, a complaint, a plan), copied exactly from his messages, with their time. diary.decisions: what he decided, one line each. diary.open: threads left open (a question not answered, something he said he'd do, a problem not fixed yet).
 - facts: lasting things about him the coach should know from now on (a habit, a preference, his schedule, how he wants things done, what he eats at which meal), one line each, with the date of the day they come from and the source (his words or what happened, with the time). Not one-day events (the timeline keeps those) and not what the coach's notes or his corrections below already say. When a learned fact below is no longer true, give the new one with replaces: its id. A learned fact that is simply no longer true, with nothing new: expire, with why. At most ${MAX_FACTS}; none is fine.
 - fixes: something he said should change about how the coach or the app talks or behaves, a wrong message or a bug, that no change request below already covers; or a clear mistake of the coach or the app in the day's messages (a wrong date, time or number, a message that contradicts what he had just said, a reminder at the wrong moment). At most ${MAX_FIXES}, the clearest first; none is fine and most days have none. quote: his words, or the wrong message, copied exactly from the day's messages. Never a new feature he didn't ask for, never a rule made from one day's timing, never anything that weakens a safety rule (the 30% cap, the readiness table, his tendon pain limit, the sauna ladder and hard stops, no supplement advice, no medical advice).
@@ -82,6 +86,7 @@ export function inputFor(s, date, { profile = '', fixedOnMac = '' } = {}) {
   const openChanges = s.list(CHANGES).filter((c) => c.status === 'queued' || c.status === 'working').map((c) => `[${c.id}] ${c.status}: "${clip(c.said, 160)}"`);
   return [
     `DAY: ${dayName(date)} (${date}), time zone ${s.tz}.`,
+    '', foodOf(s, date),
     '', 'THE DAY, TO THE MINUTE (from the app\'s records; the messages follow in full below):', timeline,
     '', 'EVERY MESSAGE, IN FULL (oldest first):', msgs.join('\n') || '(none)',
     '', 'WHAT THE COACH ALREADY KNOWS (don\'t give these as new facts):',
@@ -95,6 +100,23 @@ export function inputFor(s, date, { profile = '', fixedOnMac = '' } = {}) {
     '', `CHANGES HE ASKED FOR, that day and the 2 days before (a fix must not repeat one of these):\n${changes.join('\n') || 'none'}`,
     fixedOnMac ? `\nFIXED THAT DAY IN CHATS ON THE MAC (from the build log; already done, never a fix again):\n${fixedOnMac}` : '',
   ].filter((x) => x !== null).join('\n');
+}
+
+/**
+ * Sat 10/24 (his words: "We literally logged the extra meal... and that's not registered here"): the day's food as the
+ * Fuel screen counts it: every meal logged to that day (his waking day), also one eaten after midnight before he slept.
+ */
+export function foodOf(s, date) {
+  const plan = s.one('fuel', 'plan') || {};
+  const meals = s.list('meals').filter((m) => m.date === date).sort((a, b) => a.at - b.at);
+  const t = dayTotals(meals, s.list('meal-estimates'), date);
+  const n = (x) => Math.round(x).toLocaleString('en-US');
+  const each = meals.map((m) => {
+    const one = mealTotals(m, s.list('meal-estimates'));
+    const night = isoDate(new Date(m.at), s.tz) !== date ? ` ${formatDay(new Date(m.at), s.tz)}` : '';
+    return `${m.name || 'meal'} ${formatTime(new Date(m.at), s.tz)}${night} ${one.known ? `${n(one.kcal)} kcal` : 'being read'}`;
+  });
+  return `FOOD THAT DAY (his waking day, as the Fuel screen counts it; the day's only food numbers): ${n(t.kcal)} kcal of ${plan.kcal ? n(plan.kcal) : '?'}, ${t.protein} g protein of ${plan.proteinG ?? '?'} g${meals.length ? ` (${each.join('; ')})` : ' (no meals logged)'}${t.estimated ? `, ${t.estimated} still estimates` : ''}.`;
 }
 
 /**
@@ -201,14 +223,19 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
   // outside the change queue, so a review of them would file those again).
   const first = since || store.getMeta(SINCE) || (() => { const d = isoDate(new Date(now()), tz()); store.setMeta(SINCE, d); return d; })();
 
-  /** Days due: ended at least until runHm of the next day, the last 3 at most, oldest first, not done yet. */
+  /**
+   * Days due: ended at least until runHm of the next day and his waking day over (Sat 10/24: a meal he ate at 2:40 AM
+   * before sleeping counts for the day before, so its review waits until he slept and got up, or 6:00 AM), the last 3
+   * at most, oldest first, not done yet.
+   */
   function dueDays(t = now()) {
     const zone = tz();
     const today = isoDate(new Date(t), zone);
+    const awakeDay = wakingDay(t, { tz: zone, sleepLog: one('sleep-log', today), health: one('health', today), sessions: store.listRecords('sessions').map((r) => r.data).filter(Boolean) });
     const out = [];
     for (let i = CATCH_UP_DAYS; i >= 1; i--) {
       const date = addDays(today, -i);
-      if (date < first || t < zonedTime(addDays(date, 1), runHm, zone)) continue;
+      if (date < first || t < zonedTime(addDays(date, 1), runHm, zone) || date >= awakeDay) continue;
       const d = one(DIARY, date);
       if (d && (d.status === 'done' || d.status === 'empty' || (d.tries || 0) >= MAX_TRIES)) continue;
       // A failed run is tried again after 20 minutes, 3 times at most.

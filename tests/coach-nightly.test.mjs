@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
 import { snapshot } from '../server/coach/shared.mjs';
-import { openNightly, validate, correctionsOf, inputFor, fixedOnMacFrom, DIARY, SUMMARY_WORDS, SINCE } from '../server/coach/nightly.mjs';
+import { openNightly, validate, correctionsOf, inputFor, fixedOnMacFrom, DIARY, SUMMARY_WORDS, SINCE, SYSTEM } from '../server/coach/nightly.mjs';
 import { openChanges, COL as CHANGES } from '../server/coach/changes.mjs';
 import { READ_TOOLS, contextLine } from '../server/coach/tools-read.mjs';
 
@@ -22,7 +22,7 @@ const talk = () => recs('coach-messages').filter((m) => m.kind === 'nightly' || 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'thq-nightly-'));
   store = openStore(join(dir, 'db.sqlite'));
-  clock = at('01:30', '2026-03-18');
+  clock = at('06:00', '2026-03-18');
   msg('m1', 'user', 'I eat beef at my last meal, always. Eggs are the first meal.', '16:37');
   msg('m2', 'assistant', 'Reminder set for 4:40 PM. It will remind you of the butter step for the eggs.', '16:37');
   msg('m3', 'user', 'From now on I walk at 4 PM every day.', '17:10');
@@ -62,7 +62,9 @@ test('a day is reviewed after it ends: input written, diary kept, dated facts wi
   const { n, runs } = nightly();
   clock = at('01:29', '2026-03-18');
   assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16'], 'Tuesday 3/17 not before 1:30 AM');
-  clock = at('01:30', '2026-03-18');
+  clock = at('05:59', '2026-03-18');
+  assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16'], 'no sign he slept: food until 6:00 AM still counts for Tuesday 3/17');
+  clock = at('06:00', '2026-03-18');
   assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16', '2026-03-17']);
   await n.tick();
   assert.equal(runs.length, 1, 'the empty days are passed over without a run');
@@ -76,7 +78,7 @@ test('a day is reviewed after it ends: input written, diary kept, dated facts wi
   assert.match(input, /Learned facts \(current; replaces or expire by id\): \[note-old\] \(from 2026-03-01\) He walks around 6 PM\./);
   assert.match(input, /His corrections in his profile \(rules already made\):\n- Thursday: no apology lines\.\n/);
   assert.match(input, /\[chg\.water\] done: "Stop telling me to drink water after every set" -> Done: no water line after sets\./);
-  assert.match(input, /STATE NOW \(Wednesday 3\/18, 1:30 AM; the records, true now\):\nReminders still set \(not sent, not cancelled\): none\nHold-offs running: none\nChange requests not finished: none/);
+  assert.match(input, /STATE NOW \(Wednesday 3\/18, 6:00 AM; the records, true now\):\nReminders still set \(not sent, not cancelled\): none\nHold-offs running: none\nChange requests not finished: none/);
   assert.ok(existsSync(join(dir, 'logs', 'memory', '2026-03-17.result.json')));
   const d = store.getRecord(DIARY, '2026-03-17').data;
   assert.equal(d.status, 'done');
@@ -170,7 +172,7 @@ test('fixes filed at night build quietly; one morning message once he is up, the
   const launched = []; const alive = new Set();
   const q = openChanges({ store, codeDir: '/code', privateDir: dir, tz: () => TZ, now: () => clock, heads: () => ({ code: 'c', private: 'p' }),
     launch: (a) => { launched.push(a); alive.add(launched.length); return launched.length; }, isAlive: (p) => alive.has(p) });
-  clock = at('02:00', '2026-03-18');
+  clock = at('06:30', '2026-03-18');
   await q.tick();
   assert.match(launched[0].prompt, /The coach filed this on its own \(the nightly review of his day\)/);
   const { writeFileSync } = await import('node:fs');
@@ -178,7 +180,7 @@ test('fixes filed at night build quietly; one morning message once he is up, the
   alive.clear();
   await q.tick();
   assert.equal(store.getRecord(CHANGES, fix.id).data.announce, 'morning');
-  assert.deepEqual(talk(), [], 'nothing at 2 AM');
+  assert.deepEqual(talk(), [], 'nothing while he sleeps');
   await n.tick();
   assert.deepEqual(talk(), [], 'he is asleep');
   // 9:05 AM: he writes. The morning message comes once, with what was learned and fixed.
@@ -227,11 +229,11 @@ test('the coach\'s context: learned facts dated, the last days in a line each, t
   assert.doesNotMatch(/Your notes on him[^\n]*/.exec(line)[0], /learned|4 PM every day/);
   const ctx = { store, tz: TZ, now: () => clock, action: () => {} };
   const diary = (a) => READ_TOOLS.find((x) => x.name === 'diary').run(a, ctx);
-  assert.match((await diary({ date: '2026-03-17' })).text, /^Diary for Tuesday 3\/17 \(written Wednesday 3\/18, 1:30 AM\):\nAte eggs[\s\S]*His words that mattered: 5:10 PM "From now on I walk at 4 PM every day\."[\s\S]*Learned: [\s\S]*Fixes it filed: "It will remind you of the butter step for the eggs\." -> queued/);
+  assert.match((await diary({ date: '2026-03-17' })).text, /^Diary for Tuesday 3\/17 \(written Wednesday 3\/18, 6:00 AM\):\nAte eggs[\s\S]*His words that mattered: 5:10 PM "From now on I walk at 4 PM every day\."[\s\S]*Learned: [\s\S]*Fixes it filed: "It will remind you of the butter step for the eggs\." -> queued/);
   assert.match((await diary({})).text, /^The nightly diary, newest first:\n- Tuesday 3\/17: Eggs at 1:15 PM/);
   assert.match((await diary({ date: '2026-03-18' })).text, /No diary for Wednesday 3\/18: the day isn't over/);
   const notes = (await READ_TOOLS.find((x) => x.name === 'notes').run({}, ctx)).text;
-  assert.match(notes, /Expired \(kept for the record, NOT true now\):\n- He walks around 6 PM\. \(expired Wednesday 3\/18, 1:30 AM, replaced by note-learned-/);
+  assert.match(notes, /Expired \(kept for the record, NOT true now\):\n- He walks around 6 PM\. \(expired Wednesday 3\/18, 6:00 AM, replaced by note-learned-/);
 });
 
 test('his corrections come from his profile; the input says what the coach knows', () => {
@@ -265,4 +267,41 @@ test('the input says how things stand now: a reminder the coach once called canc
   assert.match(input, /Reminders still set \(not sent, not cancelled\): \[r1\] Wednesday 3\/18 5:00 PM \(waits until his meal is done if it lands in one\): "Mall run"\n/);
   assert.doesNotMatch(/STATE NOW[\s\S]*?\n\n/.exec(input)[0], /\[r2\]/, 'a cancelled one is in the timeline, not in how things stand');
   assert.match(input, /Hold-offs running: sauna until Wednesday 3\/18 11:00 PM \("busy"\)/);
+});
+
+test('Sat 10/24: a meal eaten after midnight before he slept is in that day\'s review; the review waits until his waking day is over', async () => {
+  store.writeLocal('meals', 'meal1', null, { deleted: true });
+  w('fuel', 'plan', { id: 'plan', kcal: 3174, proteinG: 242.5 });
+  const meal = (id, name, hm, d, kcal, protein) => w('meals', id, { id, date: '2026-03-17', at: at(hm, d), name, before: { items: [{ name, grams: 100, kcal, protein }] } });
+  meal('ml1', 'Last meal', '16:59', '2026-03-17', 1199, 95);
+  meal('ml2', 'Snack', '17:31', '2026-03-17', 146, 4);
+  const { n, runs } = nightly();
+  clock = at('01:30', '2026-03-18');
+  assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16'], 'still up at 1:30 AM as far as the app knows: not yet');
+  await n.tick();
+  assert.equal(runs.length, 0);
+  // 2:40 AM: he eats his second meal before sleeping; the app puts it on Tuesday 3/17 at its real time.
+  meal('ml3', 'Second meal', '02:40', '2026-03-18', 1282, 115.1);
+  clock = at('05:59', '2026-03-18');
+  assert.deepEqual(n.dueDays(), [], 'the empty days are done; Tuesday 3/17 still his day');
+  clock = at('06:00', '2026-03-18');
+  await n.tick();
+  assert.equal(runs.length, 1);
+  assert.match(runs[0].content, /FOOD THAT DAY \(his waking day, as the Fuel screen counts it; the day's only food numbers\): 2,627 kcal of 3,174, 214\.1 g protein of 242\.5 g \(Last meal 4:59 PM 1,199 kcal; Snack 5:31 PM 146 kcal; Second meal 2:40 AM Wednesday 3\/18 1,282 kcal\)\./);
+  assert.match(SYSTEM, /Food for the day \(diary, facts, morning\): the totals and meals in FOOD THAT DAY, never added up from the timeline/);
+  // The next day's review doesn't count it again: its timeline says whose day it is, its food line leaves it out.
+  const next = inputFor(snapshot(store, { tz: TZ, now: at('06:00', '2026-03-19') }), '2026-03-18');
+  assert.match(next, /FOOD THAT DAY [^\n]*: 0 kcal of 3,174, 0 g protein of 242\.5 g \(no meals logged\)\./);
+  assert.match(next, /2:40 AM \[meals\] Meal: Second meal: [^\n]*\(for 2026-03-17, his waking day\)/);
+});
+
+test('the review of a day comes before 6:00 AM once he slept and got up (sleep logged, or a workout started)', () => {
+  const { n } = nightly();
+  clock = at('04:31', '2026-03-18');
+  assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16']);
+  w('sleep-log', '2026-03-18', { id: '2026-03-18', date: '2026-03-18', bed: at('22:30'), wake: at('04:30', '2026-03-18') });
+  assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16', '2026-03-17'], 'woke at 4:30 AM');
+  store.writeLocal('sleep-log', '2026-03-18', null, { deleted: true });
+  w('sessions', 's1', { id: 's1', kind: 'workout', startedAt: at('04:20', '2026-03-18') });
+  assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16', '2026-03-17'], 'an early workout started');
 });

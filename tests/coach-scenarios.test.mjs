@@ -152,7 +152,7 @@ test('a fact that changes = the old one expired with a date, kept, and out of th
   store.writeLocal('coach-messages', 'm', { id: 'm', role: 'user', text: 'I walk at 4 PM now', at: at('10:00', '2026-03-18'), tz: TZ });
   const n = openNightly({ store, privateDir: dir, since: '2026-03-01', tz: () => TZ, now: () => clock,
     run: async () => ({ text: JSON.stringify({ diary: { summary: 'Walk moved.' }, facts: [{ text: 'He walks at 4 PM.', from: '2026-03-18', replaces: 'note-walk', source: '10:00 AM, his words' }] }) }) });
-  clock = at('01:30', '2026-03-19');
+  clock = at('06:00', '2026-03-19');
   await n.tick();
   const old = store.getRecord('coach-notes', 'note-walk').data;
   assert.equal(old.expiredOn, '2026-03-18');
@@ -162,7 +162,7 @@ test('a fact that changes = the old one expired with a date, kept, and out of th
   const line = contextLine({ store, tz: TZ, now: at('10:00') });
   assert.match(line, /\[from Wednesday 3\/18\] He walks at 4 PM\./);
   assert.doesNotMatch(line, /6 PM\./);
-  assert.match((await tool('timeline').run({ date: '2026-03-19', kinds: ['notes'] }, ctx())).text, /1:30 AM \[notes\] Fact expired \(replaced by note-learned-[^)]+\): He walks at 6 PM\./);
+  assert.match((await tool('timeline').run({ date: '2026-03-19', kinds: ['notes'] }, ctx())).text, /6:00 AM \[notes\] Fact expired \(replaced by note-learned-[^)]+\): He walks at 6 PM\./);
 });
 
 test('the nightly run can\'t file a big feature he never asked for', async () => {
@@ -174,7 +174,7 @@ test('the nightly run can\'t file a big feature he never asked for', async () =>
       { quote: 'Logged. Legs done.', want: 'Add a heart-rate zone chart', kind: 'behaviour' },
       { quote: 'He would like a nutrition AI planner', want: 'a planner', kind: 'bug' },
     ] }) }) });
-  clock = at('01:30', '2026-03-19');
+  clock = at('06:00', '2026-03-19');
   await n.tick();
   const filed = changes();
   // The first quotes his words, so it is filed, but the builder is told to do only what his words ask, and to change
