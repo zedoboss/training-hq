@@ -75,11 +75,44 @@ function guardFor(s, session, ex, kgVal) {
   return g ? `Over his 30% cap: ${g.basis.window === '7 days' ? 'heaviest in the last 7 days' : 'last session'} was ${k(g.basis.kg)} kg (${dayText(g.basis.date, s.today)}); ${k(kgVal)} kg is ${g.over}% more; the cap is ${k(g.capKg)} kg. ${k(g.suggest)} kg keeps him under it.` : null;
 }
 
-function pickExercise(session, sets, name) {
+// Sat 10/24, his words: "I don't see a note on the cupping hold, add it there." Cupping was on his card twice (rep
+// sets, then the hold after Back Extension) and the name alone always found the first. When a name is on the card more
+// than once: occurrence picks it (1 = first on the card), else a hold (type hold, or "hold" in the name he said) picks
+// the one with holds, rep sets the one with rep sets; log_set takes the first with sets left; otherwise ask which.
+const HOLD_WORD = /\bholds?\b/i;
+const REP_WORD = /\b(reps?|rep sets?)\b/i;
+const holdsOf = (sets, e) => sets.some((x) => x.exKey === e.key && x.type === 'hold');
+const repsOf = (sets, e) => sets.some((x) => x.exKey === e.key && x.type !== 'hold' && x.type !== 'warmup');
+const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+const twinText = (twins, sets) => twins.map((e, i) => {
+  const mine = sets.filter((x) => x.exKey === e.key && x.type !== 'warmup');
+  const h = mine.filter((x) => x.type === 'hold').length;
+  return `occurrence ${i + 1} = ${e.name} (${[mine.length - h ? plural(mine.length - h, 'rep set') : '', h ? plural(h, 'hold') : ''].filter(Boolean).join(', ') || 'no sets'})`;
+}).join('; ');
+
+function pickExercise(session, sets, name, { occurrence, type, open = false } = {}) {
   if (!name) return { ex: currentExercise(session, sets) };
-  const { item, ambiguous } = findByName(session.exercises, name);
-  if (item) return { ex: item };
-  return { error: ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : `"${name}" isn't in this session. Its exercises: ${session.exercises.map((e) => e.name).join('; ')}.` };
+  let { item, ambiguous } = findByName(session.exercises, name);
+  // "cupping hold": the card's name is just "Cupping".
+  if (!item && (HOLD_WORD.test(name) || REP_WORD.test(name))) ({ item, ambiguous } = findByName(session.exercises, name.replace(HOLD_WORD, ' ').replace(REP_WORD, ' ')));
+  if (!item) return { error: ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : `"${name}" isn't in this session. Its exercises: ${session.exercises.map((e) => e.name).join('; ')}.` };
+  const twins = session.exercises.filter((e) => sameName(e.name, item.name));
+  if (twins.length < 2) return { ex: item };
+  if (occurrence) return twins[occurrence - 1] ? { ex: twins[occurrence - 1] } : { error: `${item.name} is on the card ${twins.length} times: ${twinText(twins, sets)}.` };
+  const wantHold = type === 'hold' || HOLD_WORD.test(name);
+  const wantReps = (type && type !== 'hold' && type !== 'warmup') || REP_WORD.test(name);
+  const fit = wantHold ? twins.filter((e) => holdsOf(sets, e)) : wantReps ? twins.filter((e) => repsOf(sets, e)) : twins;
+  if (fit.length === 1) return { ex: fit[0] };
+  if (open) { const left = fit.find((e) => sets.some((x) => x.exKey === e.key && !x.done)); if (left) return { ex: left }; }
+  return { error: `${item.name} is on the card ${twins.length} times: ${twinText(twins, sets)}. Say which with occurrence.` };
+}
+
+/** Sat 10/24 ("a note never overwrites an existing note"): a new note is added to the one already there. */
+export function addNote(old, add) {
+  const a = String(old || '').trim(); const b = String(add || '').trim().slice(0, 300);
+  if (!a || b.includes(a)) return b || a;
+  if (!b || a.includes(b)) return a;
+  return `${a}${/[.!?)]$/.test(a) ? '' : '.'} ${b}`.slice(0, 1000);
 }
 
 function setNo(sets, set) { return sets.filter((x) => x.exKey === set.exKey).findIndex((x) => x.id === set.id) + 1; }
@@ -98,7 +131,7 @@ async function logSet(a, ctx) {
   const session = s.active();
   if (!session) return refuse('No session in progress. Start one first (start_session), or log it on the phone.');
   const sets = s.setsOf(session.id);
-  const { ex, error } = pickExercise(session, sets, a.exercise);
+  const { ex, error } = pickExercise(session, sets, a.exercise, { occurrence: a.occurrence, type: a.type, open: true });
   if (error) return refuse(error);
   if (!ex) return refuse('Every set of this session is ticked. Add an exercise on the phone, or finish the session there.');
   const mine = sets.filter((x) => x.exKey === ex.key);
@@ -116,7 +149,7 @@ async function logSet(a, ctx) {
   if (num(a.seconds) !== undefined) patch.durationS = Math.round(num(a.seconds));
   if (a.type) patch.type = a.type;
   if (num(a.rpe) !== undefined) patch.rpe = num(a.rpe);
-  if (a.note) patch.note = String(a.note).slice(0, 300);
+  if (a.note) patch.note = addNote(set.note, a.note);
   const st = s.settings();
   const history = s.history(session.id);
   const prevAll = history.previous(ex.name, st.previousFrom === 'same-routine' ? { routineId: session.routineId, dayType: session.dayType } : null);
@@ -161,15 +194,44 @@ async function correctSet(a, ctx) {
   const session = sessionToFix(s);
   if (!session) return refuse('No session in progress or finished in the last 24 hours. Older sessions are edited on the phone (History).');
   const sets = s.setsOf(session.id);
-  const { ex, error } = pickExercise(session, sets, a.exercise);
+  const { ex, error } = pickExercise(session, sets, a.exercise, { occurrence: a.occurrence, type: a.type });
   if (error || !ex) return refuse(error || 'Which exercise?');
-  const mine = sets.filter((x) => x.exKey === ex.key);
-  const set = a.set ? mine[a.set - 1] : [...mine].filter((x) => x.done).sort((p, q) => (q.doneAt || 0) - (p.doneAt || 0))[0];
-  if (!set) return refuse(`${ex.name} has ${plural(mine.length, 'set')}${a.set ? `; there is no set ${a.set}` : ' and none is ticked yet'}.`);
+  const mine = sets.filter((x) => x.exKey === ex.key).sort((p, q) => p.order - q.order);
+  const isOneArm = Boolean(ex.oneArm || oneArm(s, ex.name, [ex.notes, ...mine.map((x) => x.note)]));
+  // A one-arm set by its round and arm ("round 2, left arm"): among the holds for a hold, else among the rep sets.
+  const hold = a.type ? a.type === 'hold' : !mine.some((x) => x.type !== 'hold' && x.type !== 'warmup');
+  const kind = mine.filter((x) => x.type !== 'warmup' && (x.type === 'hold') === hold);
+  let set; let at = null;
+  if (a.round) {
+    at = (a.round - 1) * 2 + (a.arm === 'left' ? 1 : 0);
+    set = a.arm ? kind.find((x) => { const r = armOf(kind, x); return r.round === a.round && r.arm === a.arm; }) : kind.filter((x) => armOf(kind, x).round === a.round).at(-1);
+  } else set = a.set ? mine[a.set - 1] : [...mine].filter((x) => x.done).sort((p, q) => (q.doneAt || 0) - (p.doneAt || 0))[0];
+  // Sat 10/24: a set he did that never got logged (his round 2 left-arm hold, after the workout was finished) is added.
+  if (!set && a.add) {
+    const want = a.round ? at : a.set ? a.set - 1 : null;
+    const count = a.round ? kind.length : mine.length;
+    if (want != null && want > count) return refuse(`${ex.name} has ${plural(count, hold ? 'hold' : 'set')} logged; ${a.round ? `round ${a.round}${a.arm ? `, ${a.arm} arm` : ''}` : `set ${a.set}`} would skip ${plural(want - count, 'set')} before it. Add those first.`);
+    const last = (kind.length ? kind : mine).at(-1);
+    const after = last ? sets.filter((x) => x.order > last.order).map((x) => x.order) : [];
+    const order = !last ? Math.max(-1, ...sets.map((x) => x.order)) + 1 : after.length ? (last.order + Math.min(...after)) / 2 : last.order + 1;
+    const fresh = { id: newSetId(), sessionId: session.id, exKey: ex.key, order, done: true, doneAt: s.now, rpe: num(a.rpe) ?? null, note: a.note ? addNote('', a.note) : '',
+      type: a.type || last?.type || (hold ? 'hold' : 'normal'), kg: num(a.kg) ?? last?.kg ?? null, reps: num(a.reps) !== undefined ? Math.round(num(a.reps)) : (hold ? null : last?.reps ?? null),
+      durationS: num(a.seconds) !== undefined ? Math.round(num(a.seconds)) : last?.durationS ?? null, target: last?.target ?? null, ...(a.arm && isOneArm ? { arm: a.arm } : {}) };
+    put(s, 'sets', fresh.id, fresh);
+    const r = isOneArm ? armOf([...kind, fresh], fresh) : null;
+    const guard = fresh.type !== 'warmup' && fresh.type !== 'hold' ? guardFor(s, session, ex, fresh.kg) : null;
+    return wrote(`Added to ${session.title}${session.status === 'done' ? ' (finished)' : ''}: ${ex.name}${r ? ` round ${r.round}, ${r.arm} arm` : ''}, ${valuesText(ex, fresh)}, ticked${fresh.note ? `, note: "${fresh.note}"` : ''}.${guard ? `\n${guard}` : ''}`, `${ex.name} set added: ${valuesText(ex, fresh)}`);
+  }
+  if (!set) {
+    const what = a.round ? `round ${a.round}${a.arm ? `, ${a.arm} arm` : ''} of the ${hold ? 'holds' : 'rep sets'}` : a.set ? `set ${a.set}` : 'a ticked set';
+    return refuse(`${ex.name} has ${plural(mine.length, 'set')} and no ${what}. If he did it, add: true logs it.`);
+  }
   const n = setNo(sets, set);
+  const r = isOneArm ? armOf(kind.includes(set) ? kind : mine, set) : null;
+  const which = `${ex.name} set ${n}${r ? ` (round ${r.round}, ${r.arm} arm)` : ''}`;
   if (a.remove) {
     del(s, 'sets', set.id);
-    return wrote(`Removed ${ex.name} set ${n} (${valuesText(ex, set)}) from ${session.title}.`, `${ex.name} set ${n} removed`);
+    return wrote(`Removed ${which} (${valuesText(ex, set)}) from ${session.title}.`, `${ex.name} set ${n} removed`);
   }
   const next = { ...set };
   if (num(a.kg) !== undefined) next.kg = num(a.kg);
@@ -177,12 +239,14 @@ async function correctSet(a, ctx) {
   if (num(a.seconds) !== undefined) next.durationS = Math.round(num(a.seconds));
   if (a.type) next.type = a.type;
   if (num(a.rpe) !== undefined) next.rpe = num(a.rpe);
-  if (a.note !== undefined) next.note = String(a.note).slice(0, 300);
+  // A note is added to the one there; replace_note only when he asks to rewrite or clear it.
+  if (a.note !== undefined) next.note = a.replace_note ? String(a.note).slice(0, 300) : addNote(set.note, a.note);
   if (a.done === true && !set.done) { next.done = true; next.doneAt = s.now; }
   if (a.done === false) { next.done = false; next.doneAt = null; }
   put(s, 'sets', set.id, next);
   const guard = next.kg !== set.kg && next.type !== 'warmup' && next.type !== 'hold' ? guardFor(s, session, ex, next.kg) : null;
-  return wrote(`${ex.name} set ${n} of ${session.title} is now ${valuesText(ex, next)}${next.done ? '' : ' (not ticked)'} (was ${valuesText(ex, set)}).${guard ? `\n${guard}` : ''}`, `${ex.name} set ${n}: ${valuesText(ex, next)}`);
+  const noteLine = next.note !== (set.note || '') ? ` Note now: "${next.note}"${set.note && !a.replace_note ? ' (added to the note already there)' : ''}.` : '';
+  return wrote(`${which} of ${session.title} is now ${valuesText(ex, next)}${next.done ? '' : ' (not ticked)'} (was ${valuesText(ex, set)}).${noteLine}${guard ? `\n${guard}` : ''}`, `${ex.name} set ${n}: ${valuesText(ex, next)}`);
 }
 
 
@@ -1369,8 +1433,8 @@ export const WRITE_TOOLS = [
   write('log_sleep', 'Sleep', "Last night's sleep as he tells it (no watch, so you ask each morning): bed and wake times, 24-hour; date = the morning he woke up (default today); awakeMin when he says he lay awake; quality 1-5 only if he gives one. Shows on Body as last night.", obj({ bed: HM, wake: HM, date: ISO, awakeMin: { type: 'integer', minimum: 0, maximum: 600 }, quality: { type: 'integer', minimum: 1, maximum: 5 }, note: { type: 'string' } }, ['bed', 'wake']), logSleep),
   write('nudges', 'Nudges', "The notifications you send him through the day: how often (everyMin 15, 20 or 30; 0 = off), his waking hours (wakeHm, bedHm; none outside them), a pause in minutes when he says stop for a while or he's going to bed early (pauseMin), or resume. With nothing set, says the current settings.", obj({ everyMin: { type: 'integer', enum: [0, 15, 20, 30] }, wakeHm: HM, bedHm: HM, pauseMin: { type: 'integer', minimum: 5, maximum: 1440 }, resume: { type: 'boolean' } }), nudgeSettings),
   write('start_session', 'Start a session', "Start a workout exactly like Train > Start: today's targets, the check-in's lighter targets, warm-ups. Default: the next session in the rotation; or a day type, a routine name, or empty. When he told you to start one ('start Push', 'go start a new workout', 'Jarvis, start legs'), it starts at once and opens on his phone. Otherwise it asks first (his rule): that call doesn't start it and gives you the question to ask him; call again with the same choice only after his yes in his next message. Refuses while another session is in progress. Opens it on his phone.", obj({ dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'neck'] }, routine: { type: 'string' }, empty: { type: 'boolean' }, template: { type: 'boolean', description: 'Start from the routine template instead of a copy of his last workout of that kind (his choice, only when he asks)' } }), startSession),
-  write('log_set', 'Log a set', 'Tick the next set of the session in progress with what he did ("80 for 8" = kg 80, reps 8). kg is the TOTAL including the bar as he says it; for weighted pull-ups the added kg (0 = bodyweight). Missing values come from the target or last time. Default exercise: the one he is on. Returns the 30% cap warning and records if any, starts his rest timer, and names the next set.', obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600, description: 'for holds and timed sets' }, type: SET_TYPE, set: { type: 'integer', minimum: 1, description: 'set number, if he names one' }, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' } }), logSet),
-  write('correct_set', 'Correct a set', 'Change or remove a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise.', obj({ exercise: { type: 'string' }, set: { type: 'integer', minimum: 1 }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, done: { type: 'boolean' }, remove: { type: 'boolean' } }, ['exercise']), correctSet),
+  write('log_set', 'Log a set', 'Tick the next set of the session in progress with what he did ("80 for 8" = kg 80, reps 8). kg is the TOTAL including the bar as he says it; for weighted pull-ups the added kg (0 = bodyweight). Missing values come from the target or last time. Default exercise: the one he is on; an exercise on the card twice: occurrence (1 = first on the card) or type hold picks it. A note is added to any note on the set. Returns the 30% cap warning and records if any, starts his rest timer, and names the next set.', obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600, description: 'for holds and timed sets' }, type: SET_TYPE, set: { type: 'integer', minimum: 1, description: 'set number, if he names one' }, occurrence: { type: 'integer', minimum: 1, description: 'which one when the exercise is on the card more than once: 1 = first on the card' }, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' } }), logSet),
+  write('correct_set', 'Correct a set', 'Change, remove or add a set of the session in progress, or of the session he finished in the last 24 hours. Default set: the last one he ticked of that exercise. An exercise on the card twice (cupping rep sets, then the cupping hold): occurrence picks it (1 = first on the card), or type hold / "hold" in the name picks the one with holds. A one-arm set: round + arm (right goes first). A set he did that was never logged (e.g. the left arm of a round): add: true with its round and arm or set number. A note is added to the note already there, never replacing it; replace_note: true only when he asks to rewrite or clear it.', obj({ exercise: { type: 'string' }, occurrence: { type: 'integer', minimum: 1, description: 'which one when the exercise is on the card more than once: 1 = first on the card' }, set: { type: 'integer', minimum: 1 }, round: { type: 'integer', minimum: 1, description: 'one-arm round, with arm' }, arm: { type: 'string', enum: ['right', 'left'] }, kg: { type: 'number', minimum: 0 }, reps: { type: 'integer', minimum: 0, maximum: 200 }, seconds: { type: 'integer', minimum: 1, maximum: 3600 }, type: SET_TYPE, rpe: { type: 'number', minimum: 1, maximum: 10 }, note: { type: 'string' }, replace_note: { type: 'boolean' }, done: { type: 'boolean' }, remove: { type: 'boolean' }, add: { type: 'boolean', description: 'log a set he did that is missing' } }, ['exercise']), correctSet),
   write('next_exercise', 'Next exercise', 'Move his phone to the next exercise with sets left and say its next set.', obj(), nextExercise),
   write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
   write('log_meal', 'Log a meal', 'Log a meal he describes or shows in a photo in Talk, one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers. Time defaults to now. Leave date out for today: after midnight, before he has slept, the app puts the meal on his waking day (the day before) by itself, at its real time; a date he names with a time after midnight is the night after that day. photo: the id of a photo he sent in Talk that shows this meal; leave time out then (the meal then gets the time the photo was taken) unless he says when he ate. away: true when he ate it out, not at home (a restaurant, "going out to eat"): his supplements are at home, so the app then says take them once home and reminds him later, and sends no dishes message. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, photo: { type: 'string', description: 'id of the photo he sent in Talk (cphoto....)' }, away: { type: 'boolean', description: 'he ate it out, away from home' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
