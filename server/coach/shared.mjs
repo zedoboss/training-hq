@@ -51,6 +51,36 @@ export function dayText(iso, today = null) {
 export const whenText = (ms, tz, today = null) => `${dayText(isoDate(new Date(ms), tz), today)}, ${formatTime(new Date(ms), tz)}`;
 export const timeText = (ms, tz) => formatTime(new Date(ms), tz);
 
+// Sat 10/24, his words: "Theres no 1:30 there first set is right arm then left" (the coach read two preacher curl sets
+// as two rounds with 1:30 rest between them). On an exercise his notes call one-arm ("single arm", "desna pa leva" =
+// right then left) each logged set is one arm: right, then left straight after, a pair per round. Rest and rep drops
+// count per arm, round to round, never between the two sets of a pair.
+const ONE_ARM = /\b(?:single|one)[ -]?arm\b|\bdesna\s+pa\s+leva\b|\bright\s+(?:arm\s+)?(?:then|and then|,)\s*left\b|\bunilateral\b/i;
+export const ONE_ARM_TEXT = 'one arm per logged set, right then left back to back, each pair is one round; no rest between the arms, rest and rep drops count per arm, round to round (right vs right)';
+
+/** True when his notes on this exercise (today's, or any past session's) say he logs one arm per set. */
+export function oneArm(s, name, notes = []) {
+  if (notes.some((n) => ONE_ARM.test(n || ''))) return true;
+  return s.history().all(name).some((e) => ONE_ARM.test(e.note || ''));
+}
+
+/** For a set of a one-arm exercise: { round, arm } from its place among the working sets (a hold's own arm wins). */
+export function armOf(sets, x) {
+  if (x.type === 'warmup') return null;
+  const i = sets.filter((y) => y.exKey === x.exKey && y.type !== 'warmup').sort((a, b) => a.order - b.order).indexOf(x);
+  return i < 0 ? null : { round: Math.floor(i / 2) + 1, arm: x.arm || (i % 2 ? 'left' : 'right') };
+}
+
+/** "round 1: right 10 kg × 5, left 10 kg × 5; round 2: right ..." for one-arm sets, in order. */
+export function roundsText(sets, text) {
+  const out = [];
+  sets.forEach((x, i) => {
+    const t = `${x.arm || (i % 2 ? 'left' : 'right')} ${text(x)}`;
+    if (i % 2) out[out.length - 1] += `, ${t}`; else out.push(`round ${i / 2 + 1}: ${t}`);
+  });
+  return out.join('; ');
+}
+
 /** "60 kg total (20 kg bar + 20 kg a side)", or "25 kg". */
 export function loadText(kgVal, barKg = null) {
   if (kgVal == null) return 'no load';

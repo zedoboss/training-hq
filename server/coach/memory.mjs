@@ -6,6 +6,7 @@
 import { formatTime, formatDay, formatHm, isoDate, zonedTime } from '../../app/js/lib/time.js';
 import { addDays, LABEL } from '../../app/js/lib/rotation.js';
 import { kg as k } from '../../app/js/lib/loads.js';
+import { oneArm, armOf } from './shared.mjs';
 
 /** What the timeline can show; kinds: [...] picks some. */
 export const TIMELINE_KINDS = ['sleep', 'messages', 'notifications', 'meals', 'supplements', 'workouts', 'holds', 'checkins', 'health', 'walks', 'scans', 'sauna', 'squats', 'notes', 'reminders', 'changes', 'holdoffs', 'days', 'diary'];
@@ -102,12 +103,15 @@ function allEvents(s) {
     const title = holds ? `Holds round (${se.area || se.title || 'holds'}${se.round ? `, ${se.round}` : ''})` : `Workout: ${se.title || LABEL[se.dayType] || 'session'}${se.week ? ` (week ${se.week})` : ''}`;
     ev(se.startedAt, kind, `${title} started${from}${se.status === 'active' ? ' (still open)' : se.status === 'discarded' ? ' (discarded)' : ''}`);
     const n = new Map();
+    // Sat 10/24: a one-arm exercise (his notes: "single arm", "desna pa leva") says each set's round and arm.
+    const arms = new Map((se.exercises || []).map((e) => [e.key, holds ? false : oneArm(s, e.name, [e.notes, ...mine.filter((x) => x.exKey === e.key).map((x) => x.note)])]));
     const setText = (x) => {
       const e = exs.get(x.exKey) || {};
+      const arm = arms.get(x.exKey) ? armOf(mine, x) : null;
       const c = (n.get(x.exKey) || 0) + (x.type === 'warmup' ? 0 : 1); n.set(x.exKey, c);
       const load = x.kg != null ? `${k(x.kg)} kg` : '';
       const what = [load, x.reps != null ? `× ${x.reps}` : '', x.durationS ? `${x.durationS} s` : ''].filter(Boolean).join(' ') || 'done';
-      return `${e.name || 'exercise'} ${x.type === 'warmup' ? 'warm-up' : `set ${c}`}: ${what}${x.type && x.type !== 'normal' && x.type !== 'warmup' ? ` (${TYPE_WORD[x.type] || x.type})` : ''}${num(x.rpe) != null ? `, RPE ${x.rpe}` : ''}${num(x.pain) != null ? `, pain ${x.pain}/10` : ''}${num(x.shaking) != null ? `, shaking ${x.shaking}` : ''}${x.arm ? `, ${x.arm} arm` : ''}${x.note ? `. Note: ${clip(x.note, 200)}` : ''}`;
+      return `${e.name || 'exercise'} ${x.type === 'warmup' ? 'warm-up' : `set ${c}`}${arm ? ` (round ${arm.round}, ${arm.arm} arm)` : ''}: ${what}${x.type && x.type !== 'normal' && x.type !== 'warmup' ? ` (${TYPE_WORD[x.type] || x.type})` : ''}${num(x.rpe) != null ? `, RPE ${x.rpe}` : ''}${num(x.pain) != null ? `, pain ${x.pain}/10` : ''}${num(x.shaking) != null ? `, shaking ${x.shaking}` : ''}${x.arm && !arm ? `, ${x.arm} arm` : ''}${x.note ? `. Note: ${clip(x.note, 200)}` : ''}`;
     };
     const timed = mine.filter((x) => x.doneAt);
     for (const x of timed) ev(x.doneAt, kind, setText(x));

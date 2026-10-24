@@ -2,7 +2,7 @@
 // meals, supplements, body scans, sauna, squat sessions, notes. Each answers in short lines with the formats he
 // asked for, computed by the app's own rules (the same modules the phone uses), so the coach repeats them instead of
 // working anything out.
-import { snapshot, dayText, whenText, timeText, loadText, repsText, mmss, plural, findByName, k, formatHm } from './shared.mjs';
+import { snapshot, dayText, whenText, timeText, loadText, repsText, mmss, plural, findByName, k, formatHm, oneArm, armOf, roundsText, ONE_ARM_TEXT } from './shared.mjs';
 import { LABEL, addDays, sessionTomorrow, afterRestDay } from '../../app/js/lib/rotation.js';
 import { weekColumn } from '../../app/js/lib/programme.js';
 import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js';
@@ -54,8 +54,8 @@ export function currentExercise(session, sets) {
   return session.exercises.find((e) => open(e.key)) || null;
 }
 
-/** "set 2 of 3: 60 kg total (...) × 8-10 (target)" for the next set of an exercise. */
-export function nextSetText(ex, sets) {
+/** "set 2 of 3: 60 kg total (...) × 8-10 (target)" for the next set of an exercise (with s: its round and arm on a one-arm exercise). */
+export function nextSetText(ex, sets, s = null) {
   const mine = sets.filter((x) => x.exKey === ex.key);
   const i = mine.findIndex((x) => !x.done);
   if (i < 0) return `${ex.name}: all ${mine.length} sets done`;
@@ -63,7 +63,8 @@ export function nextSetText(ex, sets) {
   const t = x.target || {};
   const kgv = x.kg ?? t.kg;
   const what = x.type === 'hold' ? `hold ${x.durationS ?? 30} s${kgv != null ? ` at ${loadText(kgv, ex.barKg)}` : ''}` : `${kgv != null ? loadText(kgv, ex.barKg) : ex.type === 'reps_only' ? 'bodyweight' : 'no load set'}${t.reps ? ` × ${repsText(t.reps)}` : ''}`;
-  return `${ex.name}, set ${i + 1} of ${mine.length}${x.type !== 'normal' ? ` (${x.type})` : ''}: ${what}`;
+  const arm = s && oneArm(s, ex.name, [ex.notes, ...mine.map((y) => y.note)]) ? armOf(mine, x) : null;
+  return `${ex.name}, set ${i + 1} of ${mine.length}${x.type !== 'normal' ? ` (${x.type})` : ''}${arm ? ` (round ${arm.round}, ${arm.arm} arm; ${ONE_ARM_TEXT})` : ''}: ${what}`;
 }
 
 export function activeText(s, session) {
@@ -71,7 +72,7 @@ export function activeText(s, session) {
   const sum = summarize(session, sets);
   const cur = currentExercise(session, sets);
   const ticked = sets.filter((x) => x.done).length;
-  return `Session in progress: ${session.title}, started ${timeText(session.startedAt, s.tz)} (${Math.round(elapsedMs(session, s.now) / 60000)} min), ${ticked} of ${sets.length} sets ticked, volume ${sum.volume.toLocaleString('en-US')} kg.${cur ? ` Now: ${nextSetText(cur, sets)}.` : ' Every set is ticked: finish it on the phone.'}`;
+  return `Session in progress: ${session.title}, started ${timeText(session.startedAt, s.tz)} (${Math.round(elapsedMs(session, s.now) / 60000)} min), ${ticked} of ${sets.length} sets ticked, volume ${sum.volume.toLocaleString('en-US')} kg.${cur ? ` Now: ${nextSetText(cur, sets, s)}.` : ' Every set is ticked: finish it on the phone.'}`;
 }
 
 // ---- today --------------------------------------------------------------------------------------------------------
@@ -638,7 +639,11 @@ function sessionText(s, session, lib, { detail = true } = {}) {
   if (!detail) return head;
   const ex = (session.exercises || []).map((e) => {
     const mine = sets.filter((x) => x.exKey === e.key);
-    return mine.length ? `  ${e.name}: ${mine.map((x) => setText(x, e.type)).join(', ')}${e.notes ? ` (note: ${e.notes})` : ''}` : null;
+    if (!mine.length) return null;
+    const note = e.notes ? ` (note: ${e.notes})` : '';
+    if (!oneArm(s, e.name, [e.notes, ...mine.map((x) => x.note)])) return `  ${e.name}: ${mine.map((x) => setText(x, e.type)).join(', ')}${note}`;
+    const warm = mine.filter((x) => x.type === 'warmup');
+    return `  ${e.name} (${ONE_ARM_TEXT}): ${[...warm.map((x) => setText(x, e.type)), roundsText(mine.filter((x) => x.type !== 'warmup'), (x) => setText(x, e.type))].join(', ')}${note}`;
   }).filter(Boolean);
   return [head, ...ex, ...(session.note ? [`  Session note: ${session.note}`] : [])].join('\n');
 }
@@ -656,7 +661,9 @@ function historyText(s, { exercise = null, from = null, to = null, dayType = nul
     const type = [...lib.values()].find((e) => e.name === item.name)?.type || 'weight_reps';
     const n = Math.min(limit || 8, 30);
     const lines = [`${item.name}: ${plural(entries.length, 'session')} in his history.`];
-    for (const e of entries.slice(0, n)) lines.push(`${dayText(e.date, s.today)} (${SOURCE_LABEL[e.source] || e.source}): ${e.sets.map((x) => setText(x, type)).join(', ')}`);
+    const arms = oneArm(s, item.name);
+    if (arms) lines.push(`How he logs it: ${ONE_ARM_TEXT}.`);
+    for (const e of entries.slice(0, n)) lines.push(`${dayText(e.date, s.today)} (${SOURCE_LABEL[e.source] || e.source}): ${arms ? [...e.sets.filter((x) => x.type === 'warmup').map((x) => setText(x, type)), roundsText(e.sets.filter((x) => x.type !== 'warmup'), (x) => setText(x, type))].join(', ') : e.sets.map((x) => setText(x, type)).join(', ')}`);
     const pts = sessionPoints(entries, type);
     const rec = records(pts, type);
     if (rec.length) lines.push(`Records: ${rec.map((r) => `${r.label} ${k(r.value)}${r.unit ? ` ${r.unit}` : ''}${r.set ? ` (${setText(r.set, type)})` : ''}, ${dayText(r.date, s.today)}`).join('; ')}.`);

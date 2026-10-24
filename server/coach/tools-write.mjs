@@ -4,7 +4,7 @@
 // write, with the same rule code, on the Mac; the phone gets them at once by sync. Things only the phone can do (its
 // rest timer, showing a screen) go to it as actions. Nothing here can bend a fixed rule: the 30% guard warns, the
 // sauna ladder and hard stops are untouched, supplements are only what he says he took.
-import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByName, wrote, refuse, k, formatHm } from './shared.mjs';
+import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByName, wrote, refuse, k, formatHm, oneArm, armOf } from './shared.mjs';
 import { offered, saidNow, toldToStart, confirmedNow } from './tools-app.mjs';
 import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal, holdsDueText } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
@@ -132,11 +132,12 @@ async function logSet(a, ctx) {
   const t = set.target || {};
   const allSets = [...sets.filter((x) => x.id !== filled.id), filled].sort((p, q) => p.order - q.order);
   const nowEx = currentExercise(session, allSets);
-  const lines = [`Logged ${ex.name}, set ${setNo(after, filled)} of ${after.length}${added ? ' (an extra set)' : ''}${filled.type !== 'normal' ? ` (${filled.type})` : ''}: ${valuesText(ex, filled)}.${t.kg != null || t.reps ? ` Target was ${t.kg != null ? k(t.kg) : '?'} × ${repsText(t.reps) || '?'}.` : ''}${restLine}`];
+  const arm = oneArm(s, ex.name, [ex.notes, ...after.map((x) => x.note)]) ? armOf(after, filled) : null;
+  const lines = [`Logged ${ex.name}, set ${setNo(after, filled)} of ${after.length}${arm ? ` (round ${arm.round}, ${arm.arm} arm)` : ''}${added ? ' (an extra set)' : ''}${filled.type !== 'normal' ? ` (${filled.type})` : ''}: ${valuesText(ex, filled)}.${t.kg != null || t.reps ? ` Target was ${t.kg != null ? k(t.kg) : '?'} × ${repsText(t.reps) || '?'}.` : ''}${restLine}`];
   if (guard) lines.push(guard);
   else if (t.kg > 0 && filled.kg != null && filled.kg > t.kg * 1.5 && filled.type !== 'warmup') lines.push(`Check it: ${k(filled.kg)} kg is far above today's target of ${k(t.kg)} kg on ${ex.name}.`);
   if (rec) lines.push(`New record${rec.kinds.length > 1 ? 's' : ''} on ${ex.name}: ${rec.kinds.map((x) => `${x.label === 'Volume' ? 'best set volume' : x.label === '1RM' ? 'best 1RM (est.)' : x.label === 'Weight' ? 'heaviest weight' : x.label.toLowerCase()} ${['heaviest', 'e1rm', 'bestSet'].includes(x.key) ? `${k(x.value)} kg` : x.value}${x.previous != null ? ` (before ${['heaviest', 'e1rm', 'bestSet'].includes(x.key) ? `${k(x.previous)} kg` : x.previous})` : ''}, ${x.allTime ? 'all-time' : 'since the comeback'}`).join('; ')}.`);
-  lines.push(nowEx ? `Next: ${nextSetText(nowEx, allSets)}.` : 'That was the last set of the session: he finishes it on the phone (summary and records).');
+  lines.push(nowEx ? `Next: ${nextSetText(nowEx, allSets, s)}.` : 'That was the last set of the session: he finishes it on the phone (summary and records).');
   return wrote(lines.join('\n'), `${ex.name} ${valuesText(ex, filled)}${guard ? ' · over 30% cap' : ''}`);
 }
 
@@ -236,7 +237,7 @@ async function startSession(a, ctx) {
   if (routine?.dayType && !rd) notes.push('Check-in not done today.');
   if (copied) notes.push(`A copy of his last ${LABEL[routine.dayType] || routine.title} (${dayText(s.date(copied.startedAt), s.today)}); template: true starts from the template.`);
   if (lighter) notes.push(`Lighter from today's check-in (rule ${lighter.rule}).`);
-  return wrote(`Started ${session.title}${session.week ? ` (week ${session.week} column)` : ''}: ${plural(session.exercises.length, 'exercise')}, ${plural(sets.length, 'set')}. It is open on his phone.${first ? ` First: ${nextSetText(first, sets)}.` : ''}${notes.length ? ` ${notes.join(' ')}` : ''}`, `${session.title} started`);
+  return wrote(`Started ${session.title}${session.week ? ` (week ${session.week} column)` : ''}: ${plural(session.exercises.length, 'exercise')}, ${plural(sets.length, 'set')}. It is open on his phone.${first ? ` First: ${nextSetText(first, sets, s)}.` : ''}${notes.length ? ` ${notes.join(' ')}` : ''}`, `${session.title} started`);
 }
 
 async function nextExercise(a, ctx) {
@@ -254,7 +255,7 @@ async function nextExercise(a, ctx) {
   const after = session.exercises.slice(i + 1).find(isOpen) || session.exercises.slice(0, Math.max(0, i)).find(isOpen) || cur;
   ctx.action({ kind: 'focus', sessionId: session.id, exKey: after.key });
   const left = cur && cur.key !== after.key ? sets.filter((x) => x.exKey === cur.key && !x.done).length : 0;
-  return { text: `Next: ${nextSetText(after, sets)}.${left ? ` (${cur.name} still has ${plural(left, 'set')} unticked.)` : ''}`, summary: after.name };
+  return { text: `Next: ${nextSetText(after, sets, s)}.${left ? ` (${cur.name} still has ${plural(left, 'set')} unticked.)` : ''}`, summary: after.name };
 }
 
 async function restTimer(a, ctx) {
