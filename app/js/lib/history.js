@@ -66,6 +66,13 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
     /** Newest entry for an exercise name, or null. */
     last: (name) => byName.get(name)?.[0] ?? null,
     all: (name) => byName.get(name) ?? [],
+    /**
+     * Sessions with rep sets (not holds or warm-ups only), newest first (Sat 10/24, his words: "Why is there no previous weight on
+     * cupping??"): an exercise he does both as reps and as a hold builds today's weight on his last rep sets, not on a
+     * hold-only session in between.
+     */
+    lifted: (name) => (byName.get(name) || []).filter((e) => e.sets.some(isWorking)),
+    lastLifted: (name) => (byName.get(name) || []).find((e) => e.sets.some(isWorking)) ?? null,
     /** [{date, kg}] heaviest working set per session, for the 30% guard. */
     guardHistory: (name) => (byName.get(name) || []).filter((e) => e.heaviest?.kg != null).map((e) => ({ date: e.date, kg: e.heaviest.kg })),
     /**
@@ -73,13 +80,17 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
      * same: {routineId, dayType} to use only sessions of the same routine (Settings: previous column).
      */
     previous: (name, same = null) => {
-      const list = byName.get(name) || [];
-      const e = same ? list.find((x) => sameRoutine(x, same)) : list[0];
-      if (!e) return { warmup: [], working: [], hold: [] };
+      const list = (byName.get(name) || []).filter((x) => !same || sameRoutine(x, same));
+      if (!list.length) return { warmup: [], working: [], hold: [] };
+      // Rep rows from the last session with rep sets, hold rows from the last one with holds (Sat 10/24: a hold-only
+      // session doesn't blank the rep rows' previous).
+      const isHold = (s) => s.hold || s.type === 'hold';
+      const e = list.find((x) => x.sets.some(isWorking)) || list[0];
+      const h = list.find((x) => x.sets.some(isHold)) || list[0];
       return {
         warmup: e.sets.filter((s) => s.type === 'warmup' && !s.hold),
         working: e.sets.filter(isWorking),
-        hold: e.sets.filter((s) => s.hold || s.type === 'hold'),
+        hold: h.sets.filter(isHold),
       };
     },
   };

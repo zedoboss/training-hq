@@ -687,7 +687,7 @@ export function render(view, params = []) {
       for (const n of picked) {
         const entry = { key: newKey(), exerciseId: n.id, name: n.name, type: n.type || 'weight_reps', capClass: n.capClass ?? null, barKg: n.barKg ?? null, restSeconds: n.restSeconds ?? null, notes: '', role: null, target: null };
         list.push(entry);
-        const last = ctx.history.last(n.name);
+        const last = ctx.history.lastLifted(n.name);
         for (const s of setsForAdded(session.id, entry, last?.heaviest, order)) { await saveSet(s); order++; }
       }
       await saveSession({ exercises: list });

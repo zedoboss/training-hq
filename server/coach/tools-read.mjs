@@ -634,15 +634,18 @@ function programmeText(s, { dayType = null, week = null } = {}) {
       const reps = t.reps || work[0]?.target?.reps;
       const load = t.bodyweight ? 'bodyweight' : t.added ? `+${k(kgv)} kg added` : kgv != null ? loadText(kgv, ex.barKg) : 'no load yet';
       const last = history.last(ex.name);
-      lines.push(`${i + 1}. ${ex.name}: ${plural(work.length, 'set')}${warm ? ` (+${warm} warm-up)` : ''} × ${repsText(reps) || '?'} at ${load}${t.why ? `. Why: ${t.why}` : ''}${t.gated ? ' (gated on form on video)' : ''}${last ? `. Last: ${dayText(last.date, s.today)}, ${last.sets.filter((x) => x.type !== 'warmup').map((x) => setText(x, ex.type)).join(', ')}` : ''}.`);
+      const lifted = history.lastLifted(ex.name);
+      const lastText = (e) => `${dayText(e.date, s.today)}, ${e.sets.filter((x) => x.type !== 'warmup').map((x) => setText(x, ex.type)).join(', ')}`;
+      // Sat 10/24: a hold-only last session, so the rep sets the weight comes from are said too.
+      lines.push(`${i + 1}. ${ex.name}: ${plural(work.length, 'set')}${warm ? ` (+${warm} warm-up)` : ''} × ${repsText(reps) || '?'} at ${load}${t.why ? `. Why: ${t.why}` : ''}${t.gated ? ' (gated on form on video)' : ''}${last ? `. Last: ${lastText(last)}` : ''}${lifted && lifted !== last ? `. Last rep sets: ${lastText(lifted)}` : ''}.`);
     });
   } else {
     for (const [i, re] of routine.exercises.entries()) {
       const pe = re.plan ? progDocs.find((d) => d.id === re.plan.routine)?.exercises.find((e) => e.comebackName === re.plan.name) : null;
       const ex = lib.get(re.exerciseId) || { barKg: null };
       if (!pe) { lines.push(`${i + 1}. ${re.name}: not in the table (follows his last load).`); continue; }
-      const last = history.last(re.name);
-      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date } : null, notes: lastNotes(history.all(re.name)), barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null, equipment: ex.equipment ?? null, name: re.name });
+      const last = history.lastLifted(re.name);
+      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date } : null, notes: lastNotes(history.lifted(re.name)), barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null, equipment: ex.equipment ?? null, name: re.name });
       const cell = pe.weeks?.find((w) => w.week === Math.min(4, wk));
       lines.push(`${i + 1}. ${re.name}: ${t.bodyweight ? 'bodyweight' : t.kg != null ? loadText(t.kg, ex.barKg) : '?'} × ${repsText(t.reps)}, ${plural(t.sets ?? 0, 'set')}. Why: ${t.why}.${cell ? ` Table: ${cell.text}.` : ''}`);
     }
