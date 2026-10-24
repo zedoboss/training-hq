@@ -63,7 +63,11 @@ export async function saveHomeZone(tz) {
 async function reportZone() {
   const tz = deviceTimeZone();
   const last = await repo.getMeta('zoneReported');
-  if (last?.tz === tz && Date.now() - last.at < 12 * 3600000) return;
+  // Sat 10/24: the Mac reads the first report from 5:00 AM as "he's up" (no answer to "Are you up?" = quiet till then),
+  // so the first open after 5:00 AM always reports, even if the last report was a few hours earlier, at night.
+  const five = new Date(); five.setHours(5, 0, 0, 0);
+  const fresh = last?.at >= five.getTime() || Date.now() < five.getTime();
+  if (last?.tz === tz && Date.now() - last.at < 12 * 3600000 && fresh) return;
   const phone = /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
   await repo.put('here', repo.device, { device: repo.device, tz, at: Date.now(), phone });
   await repo.setMeta('zoneReported', { tz, at: Date.now() });
