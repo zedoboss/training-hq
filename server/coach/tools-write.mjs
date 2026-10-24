@@ -8,7 +8,7 @@ import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByNa
 import { offered, saidNow, toldToStart, confirmedNow } from './tools-app.mjs';
 import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal, holdsDueText } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
-import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId, nextAfter, nextAfterText } from '../../app/js/lib/session.js';
+import { buildSession, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId, nextAfter, nextAfterText, oneArmHoldRounds } from '../../app/js/lib/session.js';
 import { guardCheck } from '../../app/js/lib/targets.js';
 import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../../app/js/lib/finish.js';
 import { restFor, restText, withDefaults } from '../../app/js/lib/settings.js';
@@ -90,7 +90,7 @@ const valuesText = (ex, x) => (x.type === 'hold' ? `hold ${x.durationS ?? '?'} s
 /** What a rest after `fromKey` leads to, in words, for the phone's "Rest over" (Sat 10/24: it said the exercise just done). */
 function restNext(s, session, sets, fromKey) {
   const n = nextAfter(session.exercises, sets, fromKey);
-  return nextAfterText(n, sets, Boolean(n) && oneArm(s, n.ex.name, [n.ex.notes, ...sets.filter((x) => x.exKey === n.ex.key).map((x) => x.note)]));
+  return nextAfterText(n, sets, Boolean(n) && (n.ex.oneArm || oneArm(s, n.ex.name, [n.ex.notes, ...sets.filter((x) => x.exKey === n.ex.key).map((x) => x.note)])));
 }
 
 async function logSet(a, ctx) {
@@ -131,7 +131,7 @@ async function logSet(a, ctx) {
   const after = withNew.map((x) => (x.id === filled.id ? filled : x));
   const next = after.find((x) => !x.done);
   let restLine = '';
-  const arm = oneArm(s, ex.name, [ex.notes, ...after.map((x) => x.note)]) ? armOf(after, filled) : null;
+  const arm = ex.oneArm || oneArm(s, ex.name, [ex.notes, ...after.map((x) => x.note)]) ? armOf(after, filled) : null;
   // Sat 10/24: on a one-arm exercise the left arm follows the right straight away, so no rest timer after the right.
   const pairNext = arm?.arm === 'right' && next?.exKey === ex.key && next.type !== 'warmup';
   if (!pairNext && !(set.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) {
@@ -230,6 +230,7 @@ async function startSession(a, ctx) {
     routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((d) => d.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now,
     smallestPlate: s.minPlate(), gym: st.gym.name, warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine',
     bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter,
+    holdRounds: oneArmHoldRounds(s.list('tendons')),
   });
   // Neck at home (Wed 10/21): no plates, so each exercise says which water bottle and how.
   if (routine?.dayType === 'neck') Object.assign(session, withHomeNotes(session, sets, s.one('schedule', 'neck')));
@@ -373,7 +374,7 @@ async function checkIn(a, ctx) {
   if (d.action.startsWith('lighter') && routine) {
     // The lighter targets, exactly as Start will set them.
     const st = s.settings();
-    const { session, sets } = buildSession({ routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((x) => x.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now, smallestPlate: s.minPlate(), warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine', bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter: { all: d.action === 'lighter-all', names, params: rec.params, rule: d.rule } });
+    const { session, sets } = buildSession({ routine, meta: s.meta(), programmeRoutines: s.list('programme').filter((x) => x.kind === 'routine'), lib: s.lib(), history: s.history(), today: s.today, now: s.now, smallestPlate: s.minPlate(), warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine', bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress: s.list('progression'), lighter: { all: d.action === 'lighter-all', names, params: rec.params, rule: d.rule }, holdRounds: oneArmHoldRounds(s.list('tendons')) });
     const easy = session.exercises.filter((e) => e.target?.lighter);
     if (easy.length) lines.push(`Lighter today: ${easy.map((e) => { const w = sets.find((x) => x.exKey === e.key && x.type !== 'warmup'); return `${e.name} ${e.target.kg != null ? loadText(e.target.kg, e.barKg) : w?.kg != null ? loadText(w.kg, e.barKg) : ''} × ${repsText(e.target.reps || w?.target?.reps)} (${e.target.why})`; }).join('; ')}.`);
   }

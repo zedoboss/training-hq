@@ -50,7 +50,7 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
       const date = isoDate(new Date(s.startedAt));
       // Thu 10/22: his notes that day (the exercise's and the sets'), so the next target can see "back pain" and such.
       const note = [ex.notes, ...ss.filter((x) => x.exKey === ex.key && x.note).map((x) => x.note)].filter(Boolean).join(' | ');
-      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine), ...(note ? { note } : {}) });
+      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine), ...(note ? { note } : {}), ...(ex.oneArm ? { oneArm: true } : {}) });
       ownDates.set(`${ex.name}|${date}`, true);
     }
   }

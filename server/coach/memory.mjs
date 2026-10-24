@@ -104,7 +104,7 @@ function allEvents(s) {
     ev(se.startedAt, kind, `${title} started${from}${se.status === 'active' ? ' (still open)' : se.status === 'discarded' ? ' (discarded)' : ''}`);
     const n = new Map();
     // Sat 10/24: a one-arm exercise (his notes: "single arm", "desna pa leva") says each set's round and arm.
-    const arms = new Map((se.exercises || []).map((e) => [e.key, holds ? false : oneArm(s, e.name, [e.notes, ...mine.filter((x) => x.exKey === e.key).map((x) => x.note)])]));
+    const arms = new Map((se.exercises || []).map((e) => [e.key, holds ? false : e.oneArm || oneArm(s, e.name, [e.notes, ...mine.filter((x) => x.exKey === e.key).map((x) => x.note)])]));
     const setText = (x) => {
       const e = exs.get(x.exKey) || {};
       const arm = arms.get(x.exKey) ? armOf(mine, x) : null;

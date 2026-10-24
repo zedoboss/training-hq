@@ -65,7 +65,7 @@ export function nextSetText(ex, sets, s = null) {
   const t = x.target || {};
   const kgv = x.kg ?? t.kg;
   const what = x.type === 'hold' ? `hold ${x.durationS ?? 30} s${kgv != null ? ` at ${loadText(kgv, ex.barKg)}` : ''}` : `${kgv != null ? loadText(kgv, ex.barKg) : ex.type === 'reps_only' ? 'bodyweight' : 'no load set'}${t.reps ? ` × ${repsText(t.reps)}` : ''}`;
-  const arm = s && oneArm(s, ex.name, [ex.notes, ...mine.map((y) => y.note)]) ? armOf(mine, x) : null;
+  const arm = ex.oneArm || (s && oneArm(s, ex.name, [ex.notes, ...mine.map((y) => y.note)])) ? armOf(mine, x) : null;
   return `${ex.name}, set ${i + 1} of ${mine.length}${x.type !== 'normal' ? ` (${x.type})` : ''}${arm ? ` (round ${arm.round}, ${arm.arm} arm; ${ONE_ARM_TEXT})` : ''}: ${what}`;
 }
 
@@ -87,7 +87,7 @@ export function restLine(s, session) {
   const defaults = `Settings defaults: main lifts ${restText(r.mainS)}, light work ${restText(r.lightS)}, warm-up sets ${restText(r.warmupS)}, between holds ${restText(r.holdS)}`;
   if (session.kind === 'holds') return `Rest between holds on his phone: ${restText(r.holdS)}. Say rest times only from here, never from his profile or memory.`;
   const items = (session.exercises || []).filter((e) => !e.skipped).map((e) => {
-    const arm = oneArm(s, e.name, [e.notes, ...s.setsOf(session.id).filter((x) => x.exKey === e.key).map((x) => x.note)]);
+    const arm = e.oneArm || oneArm(s, e.name, [e.notes, ...s.setsOf(session.id).filter((x) => x.exKey === e.key).map((x) => x.note)]);
     return `${e.name} ${restText(restFor(e, 'normal', st))}${e.restSeconds != null ? ' (set on this exercise)' : ''}${arm ? ' (after each round; no rest between the arms)' : ''}`;
   });
   return `Rest times on his phone now: ${items.join(', ')}. ${defaults}. Say rest times only from here (he changes them in the app), never from his profile or memory.`;
@@ -719,7 +719,7 @@ function sessionText(s, session, lib, { detail = true } = {}) {
     if (!mine.length) return null;
     // Sat 10/24 ("the rest is set to 2m"): a finished session keeps the rest set on its exercise, so a look back is right.
     const note = `${e.restSeconds != null ? ` (rest ${restText(e.restSeconds)}, set on this exercise)` : ''}${e.notes ? ` (note: ${e.notes})` : ''}`;
-    if (!oneArm(s, e.name, [e.notes, ...mine.map((x) => x.note)])) return `  ${e.name}: ${mine.map((x) => setText(x, e.type)).join(', ')}${note}`;
+    if (!e.oneArm && !oneArm(s, e.name, [e.notes, ...mine.map((x) => x.note)])) return `  ${e.name}: ${mine.map((x) => setText(x, e.type)).join(', ')}${note}`;
     const warm = mine.filter((x) => x.type === 'warmup');
     return `  ${e.name} (${ONE_ARM_TEXT}): ${[...warm.map((x) => setText(x, e.type)), roundsText(mine.filter((x) => x.type !== 'warmup'), (x) => setText(x, e.type))].join(', ')}${note}`;
   }).filter(Boolean);

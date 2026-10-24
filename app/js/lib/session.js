@@ -36,8 +36,9 @@ const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmu
  * @param {number|null} [o.bodyweightKg] bodyweight for bodyweight exercises (Settings now, Apple Health in step 7)
  * @param {Array} [o.progress]    confirmed week 5+ numbers (collection 'progression', decision 8)
  * @param {{all:boolean, names:string[], params:object, rule:number}|null} [o.lighter]  today's check-in said "go lighter"
+ * @param {Map|null} [o.holdRounds] his one-arm tendon holds, name -> rounds (oneArmHoldRounds)
  */
-export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null, progress = [], lighter = null }) {
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null, progress = [], lighter = null, holdRounds = null }) {
   const id = newId('session');
   const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
   const session = {
@@ -131,10 +132,13 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
       const ws = work ? warmupSets(work.kg, { barKg: entry.barKg, steps: warmupSteps, smallestPlate }) : [];
       planned = [...ws.map((w) => ({ type: 'warmup', kg: w.kg, reps: null, target: { kg: w.kg, reps: [w.reps, w.reps] } })), ...planned];
     }
+    // Sat 10/24: one arm per set (his notes, or a tendon hold he does one arm at a time): rounds of right then left.
+    const holdsOnly = planned.some((p) => p.type === 'hold') && planned.every((p) => p.type === 'hold' || p.type === 'warmup');
+    if (oneArmIn(history, re.name, [re.notes]) || (holdsOnly && holdRounds?.get(re.name))) entry.oneArm = true;
     session.exercises.push(entry);
-    for (const p of planned) {
-      sets.push({ id: newSetId(), sessionId: id, exKey: entry.key, order: order++, done: false, doneAt: null, rpe: null, note: '', ...p });
-    }
+    let mine = planned.map((p, i) => ({ id: newSetId(), sessionId: id, exKey: entry.key, order: i, done: false, doneAt: null, rpe: null, note: '', ...p }));
+    if (entry.oneArm) mine = [...mine, ...pairUpRows(mine, { rounds: entry.target?.sets ?? null, holdRounds: holdRounds?.get(re.name) ?? null })].sort((a, b) => a.order - b.order);
+    for (const x of mine) sets.push({ ...x, order: order++ });
   }
   return { session, sets };
 }
@@ -341,20 +345,75 @@ export function nextSetText(session, sets) {
   const reps = rangeText(next.target?.reps);
   const what = next.type === 'hold' ? `hold ${next.durationS ?? 30} s` : [kg != null ? `${kg} kg` : '', reps ? `× ${reps}` : ''].filter(Boolean).join(' ');
   const kind = next.type === 'warmup' ? 'warm-up' : next.type === 'hold' ? 'hold' : 'set';
-  return [ex?.name || 'Next', `${kind} ${mine.indexOf(next) + 1} of ${mine.length}`, what].filter(Boolean).join(' · ');
+  // Sat 10/24: a one-arm exercise counts rounds, "round 2 of 3 · left arm".
+  const arm = ex?.oneArm ? armOf(mine, next) : null;
+  const work = mine.filter((x) => x.type !== 'warmup' && (x.type === 'hold') === (next.type === 'hold'));
+  const where = arm ? `${next.type === 'hold' ? 'hold round' : 'round'} ${arm.round} of ${Math.ceil(work.length / 2)} · ${arm.arm} arm` : `${kind} ${mine.indexOf(next) + 1} of ${mine.length}`;
+  return [ex?.name || 'Next', where, what].filter(Boolean).join(' · ');
 }
 
 // Sat 10/24: an exercise his notes call one-arm ("single arm", "desna pa leva" = right then left) is logged one arm per
 // set, right then left straight after; each pair is one round (the coach's tools read it the same way).
 export const ONE_ARM = /\b(?:single|one)[ -]?arm\b|\bdesna\s+pa\s+leva\b|\bright\s+(?:arm\s+)?(?:then|and then|,)\s*left\b|\bunilateral\b/i;
 
-/** True when his notes on this exercise (today's, or any past session's in `history`) say he logs one arm per set. */
-export const oneArmIn = (history, name, notes = []) => notes.some((n) => ONE_ARM.test(n || '')) || Boolean(history?.all(name).some((e) => ONE_ARM.test(e.note || '')));
+const YEAR_MS = 365 * 86400000;
+/**
+ * True when his notes on this exercise (today's, or a past session's in `history` from the year before its latest)
+ * say he logs one arm per set, or a past session of it was marked one-arm. Older notes don't count: a 2024 bench note
+ * "then one arm 100 kg" isn't how he benches now.
+ */
+export function oneArmIn(history, name, notes = []) {
+  if (notes.some((n) => ONE_ARM.test(n || ''))) return true;
+  const all = history?.all(name) || [];
+  const since = Math.max(0, ...all.map((e) => e.at || 0)) - YEAR_MS;
+  return all.some((e) => e.oneArm || ((e.at || 0) >= since && ONE_ARM.test(e.note || '')));
+}
 
-/** For a set of a one-arm exercise: { round, arm } from its place among the working sets (a hold's own arm wins). */
+/** His tendon holds done one arm at a time (sides "Right arm", "Left arm"): exercise name -> rounds (its sets). */
+export function oneArmHoldRounds(tendonDocs = []) {
+  const out = new Map();
+  for (const a of tendonDocs || []) for (const h of a?.holds || []) if (h?.exercise && (h.sides?.length ?? 0) > 1 && h.sets) out.set(h.exercise, h.sets);
+  return out;
+}
+
+/**
+ * Sat 10/24, his words at the gym: "My feature didnt get built??? 2 sets per round two arms". On a one-arm exercise a
+ * round is two sets, right then left: the rep sets and the holds each come in pairs, at least `rounds` x 2 rep sets (the
+ * table's sets are rounds) and `holdRounds` x 2 holds (his cupping hold, 3 x 30 s = 6 sets). The rows to add, each a
+ * copy of the same arm's row a round earlier; a kind he has none of, or has ticked every set of, gets none.
+ * @param {Array} mine this exercise's sets
+ * @returns {Array} new sets (ids, orders after that kind's last row)
+ */
+export function pairUpRows(mine, { rounds = null, holdRounds = null } = {}) {
+  const out = [];
+  const sorted = [...mine].sort((a, b) => a.order - b.order);
+  for (const hold of [false, true]) {
+    const rows = sorted.filter((x) => x.type !== 'warmup' && (x.type === 'hold') === hold);
+    if (!rows.length || rows.every((x) => x.done)) continue;
+    const want = (hold ? holdRounds : rounds) || 0;
+    let need = Math.max(rows.length, want * 2);
+    need += need % 2;
+    const last = rows.at(-1);
+    for (let i = rows.length; i < need; i++) {
+      const src = [...rows, ...out.filter((x) => (x.type === 'hold') === hold)][i - 2] || last;
+      out.push({ id: newSetId(), sessionId: src.sessionId, exKey: src.exKey, order: last.order + (i - rows.length + 1) / 100, done: false, doneAt: null, rpe: null, note: '',
+        type: src.type, kg: src.kg ?? null, reps: null, durationS: src.durationS ?? null, target: src.target ?? null });
+    }
+  }
+  return out;
+}
+
+/** "1R", "1L", "H2R": a one-arm set's row label, round and arm (its type letter first). */
+export function armLabel(sets, x, short = null) {
+  const a = armOf(sets, x);
+  return a ? `${short || ''}${a.round}${a.arm === 'left' ? 'L' : 'R'}` : null;
+}
+
+/** For a set of a one-arm exercise: { round, arm } from its place among the working sets, or among the holds for a
+ *  hold (a hold's own arm wins). */
 export function armOf(sets, x) {
   if (x.type === 'warmup') return null;
-  const i = sets.filter((y) => y.exKey === x.exKey && y.type !== 'warmup').sort((a, b) => a.order - b.order).indexOf(x);
+  const i = sets.filter((y) => y.exKey === x.exKey && y.type !== 'warmup' && (y.type === 'hold') === (x.type === 'hold')).sort((a, b) => a.order - b.order).findIndex((y) => y === x || (x.id != null && y.id === x.id));
   return i < 0 ? null : { round: Math.floor(i / 2) + 1, arm: x.arm || (i % 2 ? 'left' : 'right') };
 }
 
@@ -387,7 +446,8 @@ export function nextAfterText(n, sets, oneArm = false) {
   const t = set.target || {};
   const arm = oneArm ? armOf(mine, set) : null;
   const no = mine.filter((x) => x.type !== 'warmup' && x.type !== 'hold').indexOf(set) + 1;
-  const word = set.type === 'warmup' ? 'warm-up' : set.type === 'hold' ? `hold ${set.durationS ?? t.durationS ?? 30} s` : arm ? `round ${arm.round}, ${arm.arm} arm` : set.type === 'dropset' ? 'drop set' : `set ${no}${set.type === 'failure' ? ' (to failure)' : ''}`;
+  const hold = `hold ${set.durationS ?? t.durationS ?? 30} s`;
+  const word = set.type === 'warmup' ? 'warm-up' : arm ? `round ${arm.round}, ${arm.arm} arm${set.type === 'hold' ? `, ${hold}` : ''}` : set.type === 'hold' ? hold : set.type === 'dropset' ? 'drop set' : `set ${no}${set.type === 'failure' ? ' (to failure)' : ''}`;
   const kgv = set.kg ?? t.kg ?? null;
   const reps = set.type === 'hold' ? '' : rangeText(set.reps ?? t.reps);
   const bw = Boolean(t.bodyweight) || BODYWEIGHT_TYPES.includes(ex.type);

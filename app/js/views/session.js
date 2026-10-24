@@ -6,7 +6,7 @@ import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { clockText } from '../lib/records.js';
-import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad, nextAfter, nextAfterText, oneArmIn } from '../lib/session.js';
+import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad, nextAfter, nextAfterText, oneArmIn, oneArmHoldRounds, pairUpRows, armOf, armLabel } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay, timeAt, zoneOf } from '../lib/time.js';
@@ -107,7 +107,7 @@ async function startSession(view, routineId, logFor = null, from = null) {
     return;
   }
   let routine = routineId === 'empty' ? null : await repo.get('routines', routineId);
-  const [meta, progDocs, ctx, progress, todayDoc, healthDocs, measurements] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null), repo.list('progression'), repo.get('days', isoDate(new Date())), repo.list('health'), repo.list('measurements')]);
+  const [meta, progDocs, ctx, progress, todayDoc, healthDocs, measurements, tendons] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null), repo.list('progression'), repo.get('days', isoDate(new Date())), repo.list('health'), repo.list('measurements'), repo.list('tendons')]);
   // Thu 10/22: a copy of his last workout of this kind since the comeback, unless he asked for the template.
   if (routine && from !== 'template') routine = await copyOfLast(repo, routine, ctx.sessions, comebackStartOf(meta));
   // Today's check-in said "go lighter" for this day type: the session's targets follow it (readiness table rules 4 and 5).
@@ -119,6 +119,7 @@ async function startSession(view, routineId, logFor = null, from = null) {
     smallestPlate: minPlate(), gym: prefs().gym.name, warmupSteps: prefs().warmup.steps, sameRoutine: prefs().previousFrom === 'same-routine',
     // Decision 12: bodyweight from Apple Health (the latest weigh-in), unless he typed a newer one himself.
     bodyweightKg: currentBodyweight({ healthDocs, measurements, manual: prefs().bodyweight })?.kg ?? null, progress, lighter,
+    holdRounds: oneArmHoldRounds(tendons),
   });
   // Logged after the fact from the calendar (P12): the finish screen starts on that date.
   if (/^\d{4}-\d{2}-\d{2}$/.test(logFor || '') && logFor < isoDate(new Date())) session.logFor = logFor;
@@ -290,13 +291,15 @@ export function render(view, params = []) {
   };
 
   // ---- A15: the coach talking during sets (brief decision 30) ----
+  /** One arm per set, right then left, a pair per round (Sat 10/24): marked when the workout started, or his notes say so. */
+  const isOneArm = (ex) => Boolean(ex.oneArm) || oneArmIn(ctx.history, ex.name, [ex.notes, ...exSets(ex.key).map((x) => x.note)]);
   /** The next set he'll do: the rest of this exercise first, then the next exercise with sets left (a skipped one
    *  never). Timed sets have their own Start. */
   const nextSetAfter = (ex) => nextAfter(session.exercises, sets, ex.key);
   /** That set in words, for "Rest over" and the rest bar (Sat 10/24: it said "Cupping" after his last cupping round). */
   const nextSetWords = (ex) => {
     const n = nextSetAfter(ex);
-    return nextAfterText(n, sets, Boolean(n) && oneArmIn(ctx.history, n.ex.name, [n.ex.notes, ...exSets(n.ex.key).map((x) => x.note)]));
+    return nextAfterText(n, sets, Boolean(n) && isOneArm(n.ex));
   };
   // A hold set, or any set of a "... Hold" exercise (Tue 10/20: Bench Press Hold (Smith Machine) started with no GET READY).
   const holdLike = (s, ex) => s.type === 'hold' || /\bhold\b/i.test(ex?.name || '');
@@ -339,12 +342,13 @@ export function render(view, params = []) {
   const setRow = (ex, s, all) => {
     const fields = setFields(ex.type, s.type);
     const prev = previousFor(prevOf(ex), all, s);
-    const label = s.type === 'normal' ? String(all.filter((x) => x.type !== 'warmup' && x.type !== 'hold' && x.order <= s.order).length) : SET_TYPES[s.type].short;
+    // Sat 10/24: one-arm rows read as rounds, "1R", "1L", "H2R".
+    const label = (isOneArm(ex) && armLabel(all, s, SET_TYPES[s.type].short)) || (s.type === 'normal' ? String(all.filter((x) => x.type !== 'warmup' && x.type !== 'hold' && x.order <= s.order).length) : SET_TYPES[s.type].short);
     const prevText = prev ? (fields.includes('durationS') && !fields.includes('reps') ? `${prev.kg != null ? `${showKg(ex, prev.kg)} · ` : ''}${prev.durationS ?? 30}s` : `${prev.kg != null ? showKg(ex, prev.kg) : 'BW'} × ${prev.reps ?? '–'}${prev.rpe ? ` @${prev.rpe}` : ''}`) : '–';
     const second = fields.includes('reps') ? 'reps' : fields.includes('durationS') ? 'durationS' : fields.includes('distanceM') ? 'distanceM' : null;
     const placeholder = second === 'reps' ? rangeText(s.target?.reps) || (prev?.reps ?? '') : second === 'durationS' ? '30' : '';
     return `<div class="set-row ${s.done ? 'is-done' : ''} type-${s.type}" data-set="${esc(s.id)}">
-      <button class="set-label" data-a="type" type="button" aria-label="Set ${esc(label)}: change type or delete">${esc(label)}</button>
+      <button class="set-label" data-a="type" type="button" aria-label="Set ${esc(label)}${/\d[RL]$/.test(label) ? ` (round ${label.match(/(\d+)[RL]$/)[1]}, ${label.endsWith('L') ? 'left' : 'right'} arm)` : ''}: change type or delete">${esc(label)}</button>
       <button class="set-prev" data-a="prev" type="button" ${prev && !s.done ? '' : 'disabled'} aria-label="${s.done ? `Previous ${esc(prevText)} (this set is logged)` : `Copy previous ${esc(prevText)}`}">${esc(prevText)}</button>
       ${fields.includes('kg') || fields.includes('distanceM') && !fields.includes('kg')
         ? `<input class="set-in" data-f="${fields.includes('kg') ? 'kg' : 'distanceM'}" inputmode="decimal" value="${esc(fields.includes('kg') ? showKg(ex, s.kg) : s.distanceM != null ? toDistance(s.distanceM, distUnit()) : '')}" placeholder="${fields.includes('kg') ? (s.target?.kg != null ? showKg(ex, s.target.kg) : unitOf(ex)) : distUnit()}" aria-label="${fields.includes('kg') ? unitOf(ex) : distUnit()}">`
@@ -354,6 +358,13 @@ export function render(view, params = []) {
       ${fields.includes('durationS') && !s.done && !editing && prefs().show.inlineTimer ? timerLine(s, prev) : ''}
       ${s.rpe || s.note || s.depth ? `<div class="set-meta">${[s.depth ? `<span class="c-green">${esc(depthText(s.depth))}</span>` : '', s.rpe ? `RPE ${s.rpe}` : '', s.note ? esc(s.note) : ''].filter(Boolean).join(' · ')}</div>` : ''}
     </div>`;
+  };
+
+  /** "3 rounds, right then left; rest after the left arm" (holds and rep sets counted apart). */
+  const oneArmHint = (all) => {
+    const n = (hold) => Math.ceil(all.filter((x) => x.type !== 'warmup' && (x.type === 'hold') === hold).length / 2);
+    const parts = [n(false) ? `${n(false)} round${n(false) > 1 ? 's' : ''}` : '', n(true) ? `${n(true)} hold round${n(true) > 1 ? 's' : ''}` : ''].filter(Boolean);
+    return `${parts.join(' + ') || 'Rounds'}: right arm, then left straight after. Rest after the left.`;
   };
 
   const exCard = (ex, i) => {
@@ -387,7 +398,8 @@ export function render(view, params = []) {
         <button class="icon-mini" data-a="ex-more" type="button" aria-label="Exercise options">···</button></span></div>
       ${pinned ? `<div class="pinned small">${esc(pinned)}</div>` : ''}
       ${ex.notes ? `<div class="hint">${esc(ex.notes)}</div>` : ''}
-      ${t && (t.kg != null || t.reps) ? `<div class="target">TARGET ${t.bodyweight ? 'BW' : t.added ? `+${showKg(ex, t.kg)} ${unit}` : t.kg != null ? `${t.approx ? '~' : ''}${showKg(ex, t.kg)} ${unit}` : ''}${t.reps ? ` · ${rangeText(t.reps)}` : ''}${t.sets ? ` · ${t.sets} SET${t.sets > 1 ? 'S' : ''}` : ''}${t.gated ? ' <span class="c-amber">· ONLY IF FORM IS CONSISTENT ON VIDEO</span>' : ''}</div>${t.why ? `<div class="target-why">${esc(t.why)}${unit !== 'KG' && /\d/.test(t.why) ? ' (in kg)' : ''}.</div>` : ''}` : ''}
+      ${isOneArm(ex) ? `<div class="hint">${oneArmHint(all)}</div>` : ''}
+      ${t && (t.kg != null || t.reps) ? `<div class="target">TARGET ${t.bodyweight ? 'BW' : t.added ? `+${showKg(ex, t.kg)} ${unit}` : t.kg != null ? `${t.approx ? '~' : ''}${showKg(ex, t.kg)} ${unit}` : ''}${t.reps ? ` · ${rangeText(t.reps)}` : ''}${t.sets ? ` · ${t.sets} ${isOneArm(ex) ? `ROUND${t.sets > 1 ? 'S' : ''} · RIGHT THEN LEFT` : `SET${t.sets > 1 ? 'S' : ''}`}` : ''}${t.gated ? ' <span class="c-amber">· ONLY IF FORM IS CONSISTENT ON VIDEO</span>' : ''}</div>${t.why ? `<div class="target-why">${esc(t.why)}${unit !== 'KG' && /\d/.test(t.why) ? ' (in kg)' : ''}.</div>` : ''}` : ''}
       <div class="set-row set-headrow"><span>SET</span><span>PREVIOUS</span><span>${fields.includes('kg') ? unit : fields.includes('distanceM') ? distUnit().toUpperCase() : ''}</span><span>${fields.includes('reps') ? 'REPS' : fields.includes('durationS') ? 'SEC' : ''}</span><span></span></div>
       ${all.map((s) => setRow(ex, s, all)).join('')}
       <div class="s-ex-foot"><span class="hud c-muted">${per != null ? `${fmtKg(ex.barKg)} BAR + ${fmtKg(per)} KG / SIDE` : ''}</span>
@@ -413,6 +425,22 @@ export function render(view, params = []) {
     header();
   };
 
+  /** Sat 10/24, his words: "2 sets per round two arms": a workout started before rounds (his cupping hold came with
+   *  3 holds) gets the missing arms on its one-arm exercises; a skipped or finished one stays as it is. */
+  const pairOpen = async () => {
+    const rounds = oneArmHoldRounds(await repo.list('tendons'));
+    let marked = false;
+    for (const e of session.exercises) {
+      const mine = exSets(e.key);
+      const holdsOnly = mine.some((x) => x.type === 'hold') && mine.every((x) => x.type === 'hold' || x.type === 'warmup');
+      if (!isOneArm(e) && !(holdsOnly && rounds.get(e.name))) continue;
+      if (!e.oneArm) { e.oneArm = true; marked = true; }
+      if (e.skipped) continue;
+      for (const x of pairUpRows(mine, { rounds: e.target?.sets ?? null, holdRounds: rounds.get(e.name) ?? null })) await saveSet(x);
+    }
+    if (marked) await saveSession({ exercises: session.exercises.map((e) => ({ ...e })) });
+  };
+
   const onSetAction = async (setId, action) => {
     const s = sets.find((x) => x.id === setId);
     const ex = session.exercises.find((e) => e.key === s.exKey);
@@ -433,9 +461,12 @@ export function render(view, params = []) {
       talkRun = talk.run(script, { t0: now, force }); scriptFor = s.id; upcoming = null;
       // Thu 10/22, his words: "send a notification when I'm supposed to start... and when I need to stop, when zero
       // appears... I want both": the Mac sends both, heard even when this page's ding isn't.
+      // Sat 10/24: on a one-arm exercise they say the round and the arm.
+      const arm = isOneArm(ex) ? armOf(exSets(ex.key), s) : null;
+      const who = arm ? `${ex.name}, round ${arm.round}, ${arm.arm} arm` : ex.name;
       if (getReadyS || targetS) sendTimerAlarms([
-        ...(getReadyS ? [{ at: now + getReadyS * 1000, title: 'Hold: go', body: `${ex.name}: hold ${targetS} s now.` }] : []),
-        { at: now + (getReadyS + targetS) * 1000, title: 'Hold: stop', body: `${ex.name}: ${targetS} s done. Stop.` },
+        ...(getReadyS ? [{ at: now + getReadyS * 1000, title: 'Hold: go', body: `${who}: hold ${targetS} s now.` }] : []),
+        { at: now + (getReadyS + targetS) * 1000, title: 'Hold: stop', body: `${who}: ${targetS} s done. Stop.${arm?.arm === 'right' && exSets(ex.key).some((x) => !x.done && x.id !== s.id) ? ' Left arm next, no rest.' : ''}` },
       ]);
       redrawCard(ex.key);
       runSetTimer();
@@ -466,7 +497,10 @@ export function render(view, params = []) {
       if (rec) recordBanner(ex, rec);
       if (rec && !editing) sayRecord(ex);
       const next = exSets(ex.key).find((x) => !x.done);
-      if (!editing && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name, nextSetWords(ex)); planNext(ex); }
+      // Sat 10/24, his words: "no rest timer after the right arm, rest only after each pair": the left arm follows.
+      const arm = isOneArm(ex) ? armOf(exSets(ex.key), filled) : null;
+      const pairNext = arm?.arm === 'right' && next && next.type !== 'warmup';
+      if (!editing && !pairNext && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name, nextSetWords(ex)); planNext(ex); }
       if (!editing && prefs().show.supersetJump && ex.supersetId && !restAfter(session.exercises, ex.key)) {
         const keys = session.exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
         view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -755,6 +789,7 @@ export function render(view, params = []) {
     if (session.status !== 'active' && !(editing && session.status === 'done')) { location.replace(`#/finish/${id}`); return; }
     sets = (await repo.list('sets')).filter((s) => s.sessionId === id);
     ctx = await context(repo, id);
+    if (!editing) await pairOpen();
     typicalMs = typicalDurationMs(session.dayType, { sessions: ctx.sessions, bridge: ctx.bridge, now: session.startedAt });
     draw();
     drawRest(rest.status());
