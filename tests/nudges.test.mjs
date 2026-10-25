@@ -41,7 +41,7 @@ test('nudges: the morning sleep question, the session and the Evolt, food behind
   const base = { tz: TZ, wakeHm: '04:40', bedHm: '18:00', rot: legsDay, targets: { kcal: 3174, protein: 242.5 }, eaten: { kcal: 0, protein: 0 } };
   // 5:30 AM, no sleep logged, no session time: sleep first, then the session with the Evolt.
   let c = nudgeCandidates({ ...base, now: at(D, '05:30'), sleepLogged: false });
-  assert.deepEqual(keys(c), ['sleep', 'session']);
+  assert.deepEqual(keys(c), ['sleep', `session:${D}:0`]);
   assert.match(c[0].text, /your schedule: 6:00 PM to 4:40 AM/);
   assert.match(c[1].text, /^Legs today and no time set\. When are you going\? Evolt first/);
   // Session time 6:00 AM: an hour before it says the time; after it, that it's waiting.
@@ -177,7 +177,7 @@ test('his morning (Tue 10/20): the routine once after he wakes, the gym window f
   const m = c.find((x) => x.key === 'morning');
   assert.equal(m.text, 'Morning: Banana, bathroom, stretch, sunlight. Gym 10:40 AM to 11:10 AM.');
   assert.equal(m.gapMin, 18 * 60, 'once a day');
-  assert.match(c.find((x) => x.key === 'session').text, /no time set\. When are you going\? Your plan: 10:40 AM to 11:10 AM\. Evolt first/);
+  assert.match(c.find((x) => x.key === `session:${D}:0`).text, /no time set\. When are you going\? Your plan: 10:40 AM to 11:10 AM\. Evolt first/);
   // No sleep log yet: from his usual wake time.
   c = nudgeCandidates({ ...base, now: at(D, '10:20') });
   assert.match(c.find((x) => x.key === 'morning').text, /Gym 11:00 AM to 11:30 AM\.$/);

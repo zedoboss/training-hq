@@ -707,7 +707,7 @@ export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const awake = awakeAt(now, tz, inp.n.wakeHm, inp.n.bedHm) && !morningGate(store, now, tz).hold;
   if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy, pausedUntil: inp.n.nudgePausedUntil })) return null;
   const holds = holdsOf(store);
-  const pick = pickNudge(nudgeCandidates(inp.args).filter((c) => !heldOff(c.key, holds, now)), state.byKey, now);
+  const pick = pickNudge(nudgeCandidates({ ...inp.args, sent: state.byKey }).filter((c) => !heldOff(c.key, holds, now)), state.byKey, now);
   if (!pick) return null;
   const v = coachVoice(pick.text, { ...voiceOpts(store), calm: pick.calm });
   const r = await push.notify({ title: v.title, body: v.body, url: pick.url, tag: `nudge-${pick.key.split(':')[0]}` });

@@ -100,11 +100,12 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.mealAfterGymAt  no meal nudge before this after the gym (reminders.js afterGym), ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
+ * @param {Object<string, number>} [o.sent]  nudge key -> when it went out (the nudge state's byKey): counts check-ins
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, fasting = false }) {
+  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, fasting = false, sent = {} }) {
   const out = [];
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
   // A fasting day (Wed 10/21): nothing about food or supplements.
@@ -191,8 +192,15 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       const at = zonedTime(isoDate(new Date(now), tz), sessionHm, tz);
       if (now >= at) out.push({ key: 'session', priority: 80, gapMin: 30, url: '#/train', text: `${label} was due at ${formatHm(sessionHm)}. Go now, or tell me the new time. Evolt first.` });
       else if (now >= at - 60 * 60000) out.push({ key: 'session', priority: 70, gapMin: 45, url: '#/train', text: `${label} at ${formatHm(sessionHm)}. Evolt first when you get there, then train.` });
-    } else {
-      out.push({ key: 'session', priority: 65, gapMin: 90, url: '#/train', text: `${label} today and no time set. When are you going?${gymText ? ` Your plan: ${gymText}.` : ''} Evolt first when you get there.` });
+    } else if (!lateEvening(now, tz, bedHm)) {
+      // Mon 10/26 (Sunday: "Push today and no time set... Your plan: 1:40 PM to 2:10 PM" 6 times, 2:40 to 11:35 PM, the
+      // same words, a plan he had woken too late for): SESSION_CHECKS check-ins, new words each, his plan only while it
+      // is still ahead, then quiet; none late in the evening (the day rolls to tomorrow).
+      const day = `session:${isoDate(new Date(now), tz)}:`;
+      const k = Object.keys(sent || {}).filter((x) => x.startsWith(day)).length;
+      const planEnd = after ? (wokeAt || zonedTime(isoDate(new Date(now), tz), wakeHm, tz)) + after[1] * 60000 : 0;
+      const text = sessionOpenText(k, label, now < planEnd ? gymText : null);
+      if (text) out.push({ key: `${day}${k}`, priority: 65, gapMin: ONCE_MIN, spaceMin: SESSION_CHECKS.spaceMin, url: '#/train', text });
     }
   }
   // Not all evening: up to 3 hours after the workout (Thu 10/22 audit: every 40 minutes until bed, with no way to say no).
@@ -246,6 +254,25 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       text: `Steps: ${nf(steps.steps)} by ${formatHm(hmOf(new Date(steps.asOf), tz))}, goal ${nf(stepGoal)}. Walk 15 minutes.` });
   }
   return out.sort((a, b) => b.priority - a.priority);
+}
+
+// ---- Today's session with no time set ----
+/** Unanswered "when are you going?": this many check-ins, at least spaceMin apart; none from lateMin before his bedtime. */
+export const SESSION_CHECKS = { count: 3, spaceMin: 90, lateMin: 180 };
+
+/** Late in the evening (SESSION_CHECKS.lateMin or less before his bedtime): today's session rolls to tomorrow. */
+export function lateEvening(now, tz, bedHm = NUDGE_DEFAULTS.bedHm) {
+  return (minOf(bedHm) - minOf(hmOf(new Date(now), tz)) + 1440) % 1440 <= SESSION_CHECKS.lateMin;
+}
+
+/** The k-th "no time set" check-in, each in its own words; plan: his gym window, only while it is still ahead. Null after the last. */
+export function sessionOpenText(k, label = 'Your session', plan = null) {
+  if (k >= SESSION_CHECKS.count) return null;
+  return [
+    `${label} today and no time set. When are you going?${plan ? ` Your plan: ${plan}.` : ''} Evolt first when you get there.`,
+    `Still no time for ${label} today. Tell me when you're going and I'll leave it till then.`,
+    `Last check on ${label} today. Going later, or does it move to tomorrow?`,
+  ][k];
 }
 
 // ---- The dishes after a meal (Tue 10/20, his words: "as soon as I finish a meal and I log it, obviously I tend to
