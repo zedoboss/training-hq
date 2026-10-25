@@ -112,3 +112,11 @@ test('through the Mac\'s nudge clock: a push day, woke 12:40 PM, no time set, no
     for (const m of s) assert.doesNotMatch(m.body, /Your plan|1:40 PM|2:10 PM/);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('no time set, no day type: "your session" mid-sentence, lower case', async () => {
+  const { sessionOpenText } = await import('../app/js/lib/nudges.js');
+  assert.match(sessionOpenText(0), /^Your session today and no time set/);
+  assert.equal(sessionOpenText(1), "Still no time for your session today. Tell me when you're going and I'll leave it till then.");
+  assert.equal(sessionOpenText(2), 'Last check on your session today. Going later, or does it move to tomorrow?');
+  assert.equal(sessionOpenText(3), null);
+});

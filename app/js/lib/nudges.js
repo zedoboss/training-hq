@@ -268,10 +268,11 @@ export function lateEvening(now, tz, bedHm = NUDGE_DEFAULTS.bedHm) {
 /** The k-th "no time set" check-in, each in its own words; plan: his gym window, only while it is still ahead. Null after the last. */
 export function sessionOpenText(k, label = 'Your session', plan = null) {
   if (k >= SESSION_CHECKS.count) return null;
+  const mid = label === 'Your session' ? 'your session' : label;
   return [
     `${label} today and no time set. When are you going?${plan ? ` Your plan: ${plan}.` : ''} Evolt first when you get there.`,
-    `Still no time for ${label} today. Tell me when you're going and I'll leave it till then.`,
-    `Last check on ${label} today. Going later, or does it move to tomorrow?`,
+    `Still no time for ${mid} today. Tell me when you're going and I'll leave it till then.`,
+    `Last check on ${mid} today. Going later, or does it move to tomorrow?`,
   ][k];
 }
 
