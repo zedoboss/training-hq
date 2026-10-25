@@ -94,6 +94,8 @@ export function heldPlanText(items, { now, tz, max = 150 } = {}) {
       const what = items.find((x) => x.tag === i.tag && /^holds-(morning|evening):/.test(x.id))?.body || i.body;
       return `${name} now${what && !short ? ` (${first(what)})` : ''}.`;
     }
+    // A question stays a question (a supplement or check-in ask), its passed times dropped.
+    if (/\?$/.test(i.title || '')) return `${noTimes(i.title.replace(/\?$/, ''))}?`;
     const head = noTimes(i.title).replace(/[.?!:]$/, '');
     const body = noTimes(first(i.body));
     return `${[head, body && !short && !body.toLowerCase().includes(head.toLowerCase()) ? body : ''].filter(Boolean).join(': ') || body}.`;

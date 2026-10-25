@@ -381,6 +381,8 @@ test('held reminders as one ask: the latest of each thing, passed times dropped,
   assert.ok(three.length <= 150);
   // A reminder whose title has a time: the time goes, the rest stays.
   assert.equal(said([H('x', 'neck', 'neck-x', 'Neck at 10:00 AM', '', '10:00'), cook], '13:58'), "Neck. Then eat your first meal by 2:00 PM, or tell me you're skipping it.");
+  // A question stays a question.
+  assert.equal(said([H('q', 'supps', 'q', 'Supplements: planning to get anything?', 'Tap to answer.', '10:00'), cook], '13:58'), "Supplements: planning to get anything? Then eat your first meal by 2:00 PM, or tell me you're skipping it.");
   // Many things: the ones that fit, the rest left to the app.
   const many = Array.from({ length: 8 }, (_, k) => H(`s${k}`, 'supps', `supps-${k}`, `Supplement group number ${k} still open`, '', '10:00'));
   const cut = said(many, '13:58');
