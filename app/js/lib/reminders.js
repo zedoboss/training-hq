@@ -29,7 +29,7 @@ export const KINDS = [
   ['scan', 'Body scan: on the day (every training day), or the evenings before when it is every 4 weeks'],
   ['coach', 'Reminders you asked the coach for'],
   ['recovery', 'Recovery: the weekly check-in until the checkup, things to do, photos every few weeks'],
-  ['dishes', 'The dishes: 2 minutes after you log a meal, get up and wash up'],
+  ['dishes', 'The dishes: 2 minutes after you log a meal you cooked at home (never a snack, takeout or a meal out), get up and wash up'],
   ['walk', 'Walks: asked through the day until your step goal is done; no answer in 5 minutes, it asks when you\'ll go'],
   ['flex', 'Flexibility: your stretch routine after a workout (or at your evening time) and the weekly kick test'],
   ['combat', 'Boxing / kickboxing: before each class, and how it went after'],
