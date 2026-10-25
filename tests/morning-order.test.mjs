@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { morningStep, morningBodyText, lastWorkoutPain, nudgeCandidates, pickNudge, MORNING_UP_TEXT } from '../app/js/lib/nudges.js';
+import { morningStep, morningBodyText, lastWorkoutPain, nudgeCandidates, pickNudge, heldPlanText, MORNING_UP_TEXT } from '../app/js/lib/nudges.js';
 import { openStore } from '../server/store.mjs';
 import { startNotifier, morningGate, morningContext, noteAppOpen, GREET } from '../server/notify.mjs';
 import { createApp } from '../server/app.mjs';
@@ -187,7 +187,7 @@ test('no answer to "Are you up?": quiet all day; he opens the app at 2:30 PM, th
     await f.run('14:37', '14:41');
     const plan = f.sent.find((m) => m.tag === 'morning-plan');
     assert.ok(plan && plan.at >= T('14:40'), JSON.stringify(f.sent.map((m) => [hmOf(m.at), m.body.slice(0, 40)])));
-    assert.match(plan.body, /^Your plan now: Morning holds\./);
+    assert.match(plan.body, /^Morning holds now \(Knees: Toes Wall Squat Hold\)\. Then eat your first meal now, or tell me you're skipping it\./);
   } finally { f.done(); }
 });
 
@@ -314,4 +314,76 @@ test('POST /api/app/opened: the phone\'s open reaches the Mac; another device\'s
     assert.equal((await call({ phone: false })).status, 200);
     assert.equal(seen.length, 1);
   } finally { server.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Mon 10/26, his words on Sunday's 1:58 PM notification ("Your plan now: Morning holds... Then: Start cooking: first meal
+// at 12:30 PM... Then: First meal time. 12:30 PM, nothing logged yet today... Then: Still nothing..."): four overdue
+// reminders read back, past times and all, far over 150 characters. Wants one short current ask, no passed times.
+test('his Sunday replayed: what waited for his morning comes as one short ask of what to do now, no passed times', async () => {
+  const f = friday();
+  try {
+    await f.run('09:58', '13:44');
+    f.store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: T('13:45') });
+    await f.run('13:45', '13:46');
+    f.say('13:47', 'slept 4 to 12:40');
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: T('04:00'), wake: T('12:40'), source: 'coach', at: T('13:47') });
+    await f.run('13:47', '13:51');
+    f.say('13:52', 'back is fine, 0');
+    await f.run('13:52', '13:59');
+    const plan = f.sent.filter((m) => m.tag === 'morning-plan');
+    assert.equal(plan.length, 1, JSON.stringify(f.sent.map((m) => [hmOf(m.at), m.body])));
+    assert.equal(hmOf(plan[0].at), '1:55 PM');
+    assert.match(plan[0].body, /^Morning holds now \(Knees: Toes Wall Squat Hold\)\. Then eat your first meal by 2:00 PM, or tell me you're skipping it\./);
+    assert.ok(plan[0].body.length <= 150, plan[0].body);
+    assert.doesNotMatch(plan[0].body, /12:30|9:30|Then:|Your plan now|Still nothing|Start cooking/);
+    // Nothing else came out with it: the meal's cook, ask and check-ins were in that one line.
+    assert.deepEqual(f.sent.filter((m) => m.at === plan[0].at).length, 1);
+  } finally { f.done(); }
+});
+
+test('only his meal waited for his morning: one ask, not its 12:00 PM cooking and 12:30 PM times read back', async () => {
+  const f = friday();
+  try {
+    f.store.writeLocal('tendons', 'area.knees', { kind: 'area', id: 'knees', label: 'Knees', phase: 'heal', holds: [], loadsArea: { exercises: [] } });
+    await f.run('09:58', '11:59');
+    f.store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: T('12:00') });
+    await f.run('12:00', '12:01');
+    f.say('12:02', 'slept fine');
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: T('03:00'), wake: T('11:50'), source: 'coach', at: T('12:02') });
+    await f.run('12:02', '12:06');
+    f.say('12:40', 'back is 0');
+    await f.run('12:07', '12:44');
+    const out = f.sent.filter((m) => m.at >= T('12:40'));
+    assert.ok(out.length >= 1, JSON.stringify(f.sent.map((m) => [hmOf(m.at), m.body])));
+    assert.doesNotMatch(out.map((m) => m.body).join(' | '), /12:30|12:00/);
+    assert.match(out[0].body, /^Eat your first meal by 2:00 PM, or tell me you're skipping it\./);
+  } finally { f.done(); }
+});
+
+test('held reminders as one ask: the latest of each thing, passed times dropped, whole asks that fit', () => {
+  const H = (id, kind, tag, title, body, hm, more = {}) => ({ id, kind, tag, title, body, heldAt: T(hm), at: T('13:58'), ...more });
+  const holds = H(`holds-morning:${D}`, 'holds', `holds-${D}-morning`, 'Morning holds', 'Knees: Toes Wall Squat Hold. 3 × 30 s each, about 6 min a round.', '09:30');
+  const check = H(`holds-check:${D}:morning:1`, 'holds', `holds-${D}-morning`, 'Holds: one round now', 'Knees: one round.', '10:30');
+  const meal = { meal: 'First meal', latestAt: T('14:00') };
+  const cook = H(`meal-cook:${D}:1230`, 'cook', `meal-${D}-1230`, 'Start cooking: first meal at 12:30 PM', '30 minutes to get it on the plate; 2:00 PM at the latest.', '12:00', meal);
+  const ask = H(`meal:${D}:1230`, 'meals', `meal-${D}-1230`, 'First meal', '12:30 PM, nothing logged yet today. 2:00 PM at the latest. Eaten, cooking, or skipping?', '12:30', meal);
+  const again = H(`meal-again:${D}:1230:2`, 'meals', `meal-${D}-1230`, 'Still nothing on your first meal', '2:00 PM is the latest you set.', '13:30', meal);
+  const supps = H(`supps:${D}:1000`, 'supps', `supps-${D}-1000`, 'Morning supplements', 'Creatine 5 g, Vitamin C 500 mg, Omega-3 3 softgels. Tap to tick them off.', '10:00');
+  const said = (items, hm) => heldPlanText(items, { now: T(hm), tz: TZ });
+  // (A check-in the latest of the holds: plain "Holds", what they are from the holds reminder.)
+  assert.equal(said([holds, check, cook, ask, again], '13:58'), "Holds now (Knees: Toes Wall Squat Hold). Then eat your first meal by 2:00 PM, or tell me you're skipping it.");
+  assert.equal(said([holds, cook, ask, again], '13:58'), "Morning holds now (Knees: Toes Wall Squat Hold). Then eat your first meal by 2:00 PM, or tell me you're skipping it.");
+  // Past his latest time: eat now, no time at all.
+  assert.equal(said([holds, cook, ask], '14:20'), "Morning holds now (Knees: Toes Wall Squat Hold). Then eat your first meal now, or tell me you're skipping it.");
+  // More than fits: shorter asks, still every thing, still at most 150 characters.
+  const three = said([holds, supps, cook, ask, again], '13:58');
+  assert.equal(three, "Morning holds now. Then morning supplements. Then eat your first meal by 2:00 PM, or tell me you're skipping it.");
+  assert.ok(three.length <= 150);
+  // A reminder whose title has a time: the time goes, the rest stays.
+  assert.equal(said([H('x', 'neck', 'neck-x', 'Neck at 10:00 AM', '', '10:00'), cook], '13:58'), "Neck. Then eat your first meal by 2:00 PM, or tell me you're skipping it.");
+  // Many things: the ones that fit, the rest left to the app.
+  const many = Array.from({ length: 8 }, (_, k) => H(`s${k}`, 'supps', `supps-${k}`, `Supplement group number ${k} still open`, '', '10:00'));
+  const cut = said(many, '13:58');
+  assert.ok(cut.length <= 150, cut);
+  assert.match(cut, /\d more open in the app\.$/);
 });

@@ -354,7 +354,7 @@ test('Sat 10/24: mid-workout no holds or other day reminders; they come once the
     const end = at(D, '16:25');
     for (; now <= at(D, '17:30'); now += 60000) await n.tick();
     const after = sent.filter((m) => m.at >= end);
-    const held = after.filter((m) => /Holds still open today/.test(m.body));
+    const held = after.filter((m) => /holds now \(Knees: Wall Hold\)/i.test(m.body));
     assert.equal(held.length, 1, after.map((m) => `${hm(m.at)} ${m.body}`).join(' | '));
     assert.match(held[0].body, /Vitamin C/, 'the supplement in the same message');
     // (Its 4:00 PM follow-up, held too, isn't said again; the ones after the workout come as usual.)

@@ -6,7 +6,7 @@
 //   nudged within its own gap. Nothing while a session or sauna runs, right after another notification, or while he
 //   is talking to the coach. Nothing open, nothing sent.
 import { pickLine } from './coach-talk.js';
-import { hmOf, formatHm, zonedTime, isoDate } from './time.js';
+import { hmOf, formatHm, formatTime, zonedTime, isoDate } from './time.js';
 import { LABEL } from './rotation.js';
 import { MEAL_NUDGE } from './fuel-reminders.js';
 import { isSnack } from './meals.js';
@@ -67,6 +67,46 @@ export function coachReminder(item, opts = {}) {
   const said = (t) => t.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
   const text = item.body && head && said(item.body).includes(said(head)) ? item.body : [head, item.body].filter(Boolean).join(' ');
   return coachVoice(text, { ...opts, calm: opts.calm || item.calm || CALM_KINDS.has(item.kind) });
+}
+
+/**
+ * Reminders held for his morning or a workout that come out together, as one short ask of what to do now (Mon 10/26,
+ * his words on Sunday's 1:58 PM "Your plan now: Morning holds... Then: Start cooking: first meal at 12:30 PM... Then:
+ * First meal time. 12:30 PM, nothing logged yet today... Then: Still nothing..."): four overdue reminders read back, past
+ * times and all, far over the lock screen. Now one line per thing (a meal's cook, ask and check-ins are one thing, the
+ * latest of each), no clock time that has passed, whole asks while they fit in `max`, the rest left to the app.
+ */
+export function heldPlanText(items, { now, tz, max = 150 } = {}) {
+  const latest = new Map();
+  for (const i of [...items].sort((a, b) => (a.heldAt ?? a.at) - (b.heldAt ?? b.at))) latest.set(i.tag || i.id, i);
+  const first = (t) => String(t || '').split(/(?<=[.!?])\s+/)[0].replace(/[.!?]\s*$/, '');
+  const noTimes = (t) => String(t || '').replace(/\s*\b(?:at|by|from|since)?\s*\d{1,2}:\d{2}\s?[AP]M\b/gi, '').replace(/[.:;,]?\s*$/, '').replace(/^[\s,.;:]+/, '');
+  // Short: without what the holds are or what a reminder lists, when all of it doesn't fit.
+  const ask = (i, short) => {
+    if (i.meal) {
+      const by = Number.isFinite(i.latestAt) && i.latestAt > now ? ` by ${formatTime(new Date(i.latestAt), tz)}` : ' now';
+      return `Eat your ${i.meal.toLowerCase()}${by}, or tell me you're skipping it.`;
+    }
+    if (i.kind === 'holds') {
+      // Its own reminder by its name ("Morning holds"), a check-in as plain holds; a rest-day question as it was asked.
+      if (/\?$/.test(i.title || '')) return i.title;
+      const name = /^holds-(morning|evening):/.test(i.id) ? i.title : 'Holds';
+      const what = items.find((x) => x.tag === i.tag && /^holds-(morning|evening):/.test(x.id))?.body || i.body;
+      return `${name} now${what && !short ? ` (${first(what)})` : ''}.`;
+    }
+    const head = noTimes(i.title).replace(/[.?!:]$/, '');
+    const body = noTimes(first(i.body));
+    return `${[head, body && !short && !body.toLowerCase().includes(head.toLowerCase()) ? body : ''].filter(Boolean).join(': ') || body}.`;
+  };
+  const join = (xs) => xs.map((a, k) => (k ? `Then ${a[0].toLowerCase()}${a.slice(1)}` : a)).join(' ');
+  const things = [...latest.values()];
+  const full = join(things.map((i) => ask(i, false)));
+  if (full.length <= max) return full;
+  const asks = things.map((i) => ask(i, true));
+  let n = asks.length;
+  const more = (k) => (k < asks.length ? ` ${asks.length - k} more open in the app.` : '');
+  while (n > 1 && (join(asks.slice(0, n)) + more(n)).length > max) n--;
+  return join(asks.slice(0, n)) + more(n);
 }
 
 // Which planned reminders are nudged again while still open: [key prefix, priority, minutes between nudges].

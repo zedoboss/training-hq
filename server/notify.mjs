@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, awaySuppsText, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, awaySuppsText, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay } from '../app/js/lib/waking-day.js';
@@ -52,6 +52,9 @@ function recoveryFrom(one, list) {
 
 // Tue 10/20: a 7:30 AM holds reminder woke him (he gets up at 9 now). These kinds wait for his wake time; the sauna
 // alarm, reminders he set with the coach, and the check-in and session reminders at a time he chose never move.
+// A reminder held for his morning or a workout this long past its time, naming a time, is said as what to do now
+// (heldPlanText).
+const HELD_OVERDUE_MIN = 30;
 const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'cook', 'evening', 'neck', 'recovery', 'scan', 'flex']);
 
 /**
@@ -783,17 +786,19 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !spaced.has(i) && !repeats.has(i));
       if (items.length) {
         const opts = voiceOpts(store);
-        // What waited for his morning or a workout: one message, in the order it was due, one line in his moods at the end.
-        const after = items.filter((i) => i.morning === 'after' || i.workout === 'after');
-        if (after.length > 1) {
-          const said = after.sort((a, b) => a.heldAt - b.heldAt).map((i) => coachReminder(i, { ...opts, calm: true }).body);
-          const v = coachVoice(`Your plan now: ${said.join(' Then: ')}`, { ...opts, calm: after.some((i) => i.calm) });
+        // What waited for his morning or a workout: one short ask of what to do now (heldPlanText: one line a thing, no
+        // passed times; Mon 10/26), one line in his moods at the end.
+        // A single one too, half an hour overdue, when its words name a clock time (it would read back a passed one).
+        const after = items.filter((i) => i.morning === 'after' || i.workout === 'after').sort((a, b) => a.heldAt - b.heldAt);
+        const merged = after.length > 1 || after.some((i) => t - i.heldAt >= HELD_OVERDUE_MIN * 60000 && /\d:\d\d\s?[AP]M/i.test(`${i.title} ${i.body}`));
+        if (merged) {
+          const v = coachVoice(heldPlanText(after, { now: t, tz: zone }), { ...opts, calm: after.some((i) => i.calm) });
           const r = await push.notify({ title: v.title, body: v.body, url: after[0].url, tag: 'morning-plan' });
           for (const i of after) sent[i.id] = t;
           sayInTalk(store, { text: v.body, at: t, tz: zone, kind: 'reminder', ref: after.map((i) => i.id).join(',') });
           log(`notify morning plan: ${after.map((i) => i.id).join(', ')} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);
         }
-        for (const i of after.length > 1 ? items.filter((x) => !after.includes(x)) : items) {
+        for (const i of merged ? items.filter((x) => !after.includes(x)) : items) {
           // The coach says it (Mon 10/19): title "Coach", the reminder's facts, one short line in his moods. A coach
           // reminder can carry live facts (Wed 10/21: "are my steps counted?" gets what the Shortcut really sent).
           const v = coachReminder(i.facts === 'health' ? { ...i, body: `${i.body} ${healthSendsText(store, { since: i.since, now: t, tz: zone })}` } : i, opts);

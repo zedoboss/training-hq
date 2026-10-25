@@ -66,7 +66,7 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
       // Once, at its time: start cooking so it's on the plate at the meal time.
       out.push({
         id: `meal-cook:${date}:${hmId(slot.time)}`, kind: 'cook', at: slotAt - slot.cookMin * 60000, url: '#/fuel',
-        tag: `meal-${date}-${hmId(slot.time)}`, fixed: false,
+        tag: `meal-${date}-${hmId(slot.time)}`, fixed: false, meal: label, ...(slot.latest ? { latestAt: zonedTime(date, slot.latest, tz) } : {}),
         title: firstOfDay ? 'Nothing eaten yet today' : `Start cooking: ${slot.name.toLowerCase()} at ${formatHm(slot.time)}`,
         body: firstOfDay
           ? `Start cooking now: ${slot.cookMin} minutes and it's on the plate by ${formatHm(slot.time)}${slot.latest ? `; ${formatHm(slot.latest)} at the latest` : ''}.`
@@ -81,7 +81,7 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
       // The last meal by its time, not its name (Tue 10/20: "Lunch time ... nothing logged since lunch", his 2:22 PM
       // meal had been named Lunch before he set his meal times).
       body: `${formatHm(askHm)}, nothing logged ${before ? `since your ${formatTime(new Date(before.at), tz)} meal` : 'yet today'}.${slot.latest ? ` ${formatHm(slot.latest)} at the latest.` : ''} Eaten, cooking, or skipping?`,
-      again: false, due: open,
+      again: false, due: open, meal: label,
       ...(slot.latest ? { latestAt: zonedTime(date, slot.latest, tz), name: label } : {}),
     });
     // No answer: a few check-ins like a coach, further apart, each said differently, until he answers or logs a meal,
@@ -101,6 +101,7 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
       out.push({
         id: `meal-again:${date}:${hmId(slot.time)}:${k + 1}`, kind: 'meals', at, url: `#/fuel/check/${date}/${hmId(slot.time)}`,
         tag: `meal-${date}-${hmId(slot.time)}`, group: `meal-again:${date}:${hmId(slot.time)}`, fixed: false, title, body, due: open,
+        meal: label, ...(slot.latest ? { latestAt: zonedTime(date, slot.latest, tz) } : {}),
       });
     });
     // His answer, then (Thu 10/22, his words): about to cook ("soon") asks again in 5 minutes whether he's cooking;
@@ -118,7 +119,7 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
         out.push({
           id: `meal-${check.answer}:${date}:${hmId(slot.time)}:${check.at}${k ? `:${k}` : ''}`, kind: 'meals', at: first + min * 60000,
           url: `#/fuel/check/${date}/${hmId(slot.time)}`, tag: `meal-${date}-${hmId(slot.time)}`, group: `meal-${check.answer}:${date}:${hmId(slot.time)}`, fixed: false,
-          title: said[k][0], body: said[k][1], due: !today.some((m) => m.at >= check.at),
+          title: said[k][0], body: said[k][1], due: !today.some((m) => m.at >= check.at), meal: label,
         });
       });
     }
