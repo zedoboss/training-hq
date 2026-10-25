@@ -59,6 +59,9 @@ test('the coach sees the eggs\' weight in his presets, his next meal, the meals 
     assert.match(contextLine({ store, tz: TZ, now }), new RegExp(`Meals today.*First meal 2:31 AM \\(${W.source}, Butter 10 g`));
     assert.match(timelineText(snapshot(store, { tz: TZ, now }), { date: '2026-01-20' }), new RegExp(`Meal: First meal: ${W.source}, Butter 10 g`));
 
+    // What's still open from his planned day lists eggs with their weight too.
+    store.writeLocal('fuel', 'plan', { kind: 'plan', kcal: 3000, proteinG: 240, foods: [{ ...EGGS, gramsPerDay: 840 }, ALMONDS, BUTTER] });
+    assert.match((await call('log_meal', { items: [{ name: 'almonds', grams: 30 }], time: '02:40' })).text, /Not logged yet today from his planned day: Eggs 4 eggs \(272 g with shells, about 240 g of egg\)/);
     const id = logged.text.match(/\[id ([^\]]+)\]/)[1];
     assert.match((await call('meal_preset', { meal: id, name: 'First meal' })).text, new RegExp(`^Preset "First meal" replaced: ${W.source}, Butter 10 g`));
   } finally { store.close?.(); rmSync(dir, { recursive: true, force: true }); }

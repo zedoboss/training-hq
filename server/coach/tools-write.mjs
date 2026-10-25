@@ -945,7 +945,7 @@ function planLeftText(s, cooking = false) {
     return { f, g: Math.round(Number(f.gramsPerDay) - had) };
   }).filter((x) => x.g >= Math.max(5, Number(x.f.gramsPerDay) * 0.1));
   if (!left.length) return '';
-  return `\nNot logged yet today from his planned day: ${left.map((x) => `${x.f.name} ${x.g} g${x.f.usual?.text ? ` (usually ${x.f.usual.text})` : ''}`).join('; ')}. In the same answer, ${cooking ? 'first his cooking reminder (his profile) for what he is about to cook from these, then ' : ''}remind him of the add-ons still open here, with amounts, the way his profile says.`;
+  return `\nNot logged yet today from his planned day: ${left.map((x) => `${x.f.name} ${itemAmount({ name: x.f.name, fdcId: x.f.fdcId, grams: x.g }, [x.f])}${x.f.usual?.text ? ` (usually ${x.f.usual.text})` : ''}`).join('; ')}. In the same answer, ${cooking ? 'first his cooking reminder (his profile) for what he is about to cook from these, then ' : ''}remind him of the add-ons still open here, with amounts, the way his profile says.`;
 }
 
 /** What he wants the app to leave alone for a while (Wed 10/21): areas, until when, his reason. */
