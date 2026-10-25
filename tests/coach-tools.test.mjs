@@ -601,10 +601,10 @@ test('log_meal by packs and counts (A7): his foods sized from his packs; unknown
     { name: 'Eggs', fdcId: 171287, unit: { grams: 50, label: 'egg', plural: 'eggs' } },
   ] });
   const r = await call('log_meal', { items: [{ name: 'almonds', packs: 0.5 }, { name: 'eggs', count: 3 }], time: '02:00' });
-  assert.match(r.text, /Raw almonds ½ pack \(100 g\), Eggs 3 eggs \(150 g\); 794 kcal, 40 g protein \(USDA values\)/);
+  assert.match(r.text, /Raw almonds ½ pack \(100 g\), Eggs 3 eggs \(171 g with shells, about 150 g of egg\); 794 kcal, 40 g protein \(USDA values\)/);
   const items = list('meals')[0].before.items;
   assert.deepEqual(items.map((x) => [x.name, x.grams, x.portion, x.fdcId, x.source]), [['Raw almonds', 100, '½ pack', 170567, 'usda'], ['Eggs', 150, '3 eggs', 171287, 'usda']]);
-  assert.match(await call('meals').then((m) => m.text), /No kitchen scale: he goes by packs and counts: Raw almonds, pack 200 g; Eggs, 1 egg = 50 g/);
+  assert.match(await call('meals').then((m) => m.text), /No kitchen scale: he goes by packs and counts: Raw almonds, pack 200 g; Eggs, 1 egg = 50 g \(57 g with shell\)/);
   assert.match((await call('log_meal', { items: [{ name: 'cashews', packs: 1 }] })).text, /No grams for "cashews"/);
 });
 

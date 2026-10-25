@@ -195,6 +195,35 @@ export function amountText(food, amount) {
   return amount.grams != null ? `${Math.round(amount.grams)} g` : '';
 }
 
+// Mon 10/26 (his words: "why aren't the egg sizes mentioned they weigh in total 680 grams so add that"): a counted
+// food weighed with its shell (unit.shellGrams each; eggs without it: USDA's 12% shell refuse) is listed with both
+// weights wherever it is listed: "10 eggs (680 g with shells, about 600 g of egg)".
+const head = (name) => String(name || '').split(/[,(]/)[0];
+const SHELL_SHARE = 0.88;
+const shellEach = (food) => {
+  if (!food?.unit?.grams) return 0;
+  if (food.unit.shellGrams) return Number(food.unit.shellGrams) || 0;
+  return tokens(head(food.name)).join(' ') === 'egg' ? Math.round(food.unit.grams / SHELL_SHARE) : 0;
+};
+
+/** The amount of a meal item in words: "10 eggs (680 g with shells, about 600 g of egg)", "½ pack (100 g)", "450 g". */
+export function itemAmount(item, foods = []) {
+  const g = Math.round(Number(item?.grams) || 0);
+  const food = /white|yolk/i.test(item?.name || '') ? null : foods.find((f) => shellEach(f)
+    && ((item.fdcId && Number(item.fdcId) === f.fdcId) || sameFood(head(item.name), head(f.name))));
+  if (food && g > 0) {
+    const shell = shellEach(food);
+    const of = food.unit.label;
+    const n = Number(String(item.portion || '').match(/^\d+(?:\.\d+)?/)?.[0]) || g / food.unit.grams;
+    if (Math.abs(n - Math.round(n)) < 0.1 && Math.round(n) >= 1) {
+      const c = Math.round(n);
+      return `${c} ${c === 1 ? of : food.unit.plural || `${of}s`} (${c * shell} g with shell${c === 1 ? '' : 's'}, about ${g} g of ${of})`;
+    }
+    return `${g} g of ${of} (about ${Math.round(g / food.unit.grams * shell)} g with shells)`;
+  }
+  return item?.portion ? `${item.portion} (${g} g)` : `${g} g`;
+}
+
 /** Quick amounts to tap for one of his foods: fractions of a pack or counts, then his usual day's amount. */
 export function amountChoices(food) {
   if (!food) return [];
@@ -209,7 +238,7 @@ export function amountChoices(food) {
 /** His usual amounts in words, for the Mac reading a photo and for the coach. */
 export function amountsLine(plan) {
   return (plan?.foods || []).filter((f) => f.pack || f.unit || f.usual).map((f) => [
-    f.name, f.pack ? `pack ${f.pack.grams} g${/raw/i.test(f.pack.label || '') ? ' raw' : ''}` : '', f.unit ? `1 ${f.unit.label} = ${f.unit.grams} g` : '',
+    f.name, f.pack ? `pack ${f.pack.grams} g${/raw/i.test(f.pack.label || '') ? ' raw' : ''}` : '', f.unit ? `1 ${f.unit.label} = ${f.unit.grams} g${shellEach(f) ? ` (${shellEach(f)} g with shell)` : ''}` : '',
     f.usual ? `usually ${f.usual.text || amountText(f, f.usual)}` : '',
   ].filter(Boolean).join(', ')).join('; ');
 }

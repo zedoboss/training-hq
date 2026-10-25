@@ -14,7 +14,7 @@ import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
 import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks, itemTotals, presetsOf, isEmptyMeal } from '../../app/js/lib/meals.js';
-import { amountsLine } from '../../app/js/lib/foods.js';
+import { amountsLine, itemAmount, myFoods } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
@@ -300,7 +300,8 @@ export function mealsNowLine(s) {
   // An empty meal (no photo, no items) counts as no meal (Thu 10/22, lib/meals.js isEmptyMeal).
   const day = s.foodDay();
   const meals = s.list('meals').filter((m) => m.date === day && !isEmptyMeal(m)).sort((a, b) => a.at - b.at);
-  const items = (m) => (m.before?.items || []).map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g`).join(', ') || 'items being read';
+  const mine = myFoods(s.one('fuel', 'plan'));
+  const items = (m) => (m.before?.items || []).map((x) => `${x.name} ${itemAmount(x, mine)}`).join(', ') || 'items being read';
   const had = meals.length ? meals.map((m) => `${m.name} ${timeText(m.at, s.tz)} (${items(m)})`).join('; ') : 'nothing logged yet';
   if (!slots.length) return `Meals today${wakingNote(s)}: ${had}.`;
   // Each real meal (not a snack) and each answer "eaten" or "skipped" uses up the next meal time, in order.
@@ -312,7 +313,7 @@ export function mealsNowLine(s) {
   const slot = slots[nextIdx];
   const presets = presetsOf(s.one('fuel', 'presets'));
   const preset = presets.find((p) => p.name.toLowerCase() === slot.name.toLowerCase()) || presets[nextIdx] || null;
-  const usual = preset ? ` What he usually eats then (his preset "${preset.name}"): ${preset.items.map((x) => `${x.name} ${Math.round(Number(x.grams) || 0)} g`).join(', ')}.` : '';
+  const usual = preset ? ` What he usually eats then (his preset "${preset.name}"): ${preset.items.map((x) => `${x.name} ${itemAmount(x, mine)}`).join(', ')}.` : '';
   return `Meals today${wakingNote(s)}: ${had}. Next meal: ${slot.name} (${formatHm(slot.time)}${slot.latest ? `, ${formatHm(slot.latest)} at the latest` : ''}).${usual} A cooking tip or a note about a food (like the eggs' butter step) goes only with the meal that has that food and only while it isn't logged today; never assume what he's cooking from a note.`;
 }
 
@@ -819,6 +820,7 @@ export function mealsText(s, { date = null }) {
   const meals = s.list('meals').filter((m) => m.date === d).sort((a, b) => a.at - b.at);
   const est = s.list('meal-estimates');
   const plan = s.one('fuel', 'plan') || {};
+  const mine = myFoods(plan);
   const t = dayTotals(s.list('meals'), est, d);
   const lines = [`${dayText(d, s.today)}: ${t.kcal.toLocaleString('en-US')} kcal, ${t.protein} g protein (targets ${plan.kcal ?? '?'} kcal, ${plan.proteinG ?? '?'} g protein; his September plan).`];
   for (const m of meals) {
@@ -826,7 +828,7 @@ export function mealsText(s, { date = null }) {
     const l = leftovers(m, est);
     const eaten = b.items ? netItems(b.items, l.items) : null;
     const mt = mealTotals(m, est);
-    lines.push(`- ${m.name} ${timeText(m.at, s.tz)} [id ${m.id}] (${STATE_SHORT[mealState(m, est, s.now)] || mealState(m, est, s.now)}${b.estimated && b.items ? ', estimate' : ''}): ${eaten ? eaten.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') || 'nothing' : 'being read'}${mt.known ? `; ${mt.kcal} kcal, ${mt.protein} g protein` : ''}${m.note ? `; note: ${m.note}` : ''}`);
+    lines.push(`- ${m.name} ${timeText(m.at, s.tz)} [id ${m.id}] (${STATE_SHORT[mealState(m, est, s.now)] || mealState(m, est, s.now)}${b.estimated && b.items ? ', estimate' : ''}): ${eaten ? eaten.map((x) => `${x.name} ${itemAmount(x, mine)}`).join(', ') || 'nothing' : 'being read'}${mt.known ? `; ${mt.kcal} kcal, ${mt.protein} g protein` : ''}${m.note ? `; note: ${m.note}` : ''}`);
   }
   if (!meals.length) lines.push('No meals logged.');
   lines.push(mealTimesLine(s));
@@ -834,7 +836,7 @@ export function mealsText(s, { date = null }) {
   const amounts = amountsLine(plan);
   if (amounts) lines.push(`No kitchen scale: he goes by packs and counts: ${amounts}.`);
   const presets = presetsOf(s.one('fuel', 'presets'));
-  if (presets.length) lines.push(`His presets (log_meal preset; one tap on Fuel): ${presets.map((p) => { const t = itemTotals(p.items); return `${p.name}: ${p.items.map((x) => `${x.name} ${x.portion || `${Math.round(x.grams)} g`}`).join(', ')} (${t.kcal} kcal, ${t.protein} g protein)`; }).join('; ')}.`);
+  if (presets.length) lines.push(`His presets (log_meal preset; one tap on Fuel): ${presets.map((p) => { const t = itemTotals(p.items); return `${p.name}: ${p.items.map((x) => `${x.name} ${itemAmount(x, mine)}`).join(', ')} (${t.kcal} kcal, ${t.protein} g protein)`; }).join('; ')}.`);
   return lines.join('\n');
 }
 

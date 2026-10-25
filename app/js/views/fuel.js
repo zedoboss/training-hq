@@ -20,7 +20,7 @@ import { checklist } from '../lib/supplements.js';
 import { toast } from '../ui/toast.js';
 import { fastingOn, withFast } from '../lib/fast.js';
 import { daysByDate } from '../lib/rotation.js';
-import { loadFoods, planItems, SOURCE_NOTE } from '../lib/foods.js';
+import { loadFoods, planItems, SOURCE_NOTE, myFoods, itemAmount } from '../lib/foods.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const CAMERA = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
@@ -162,6 +162,7 @@ export function render(view, params) {
     const tg = targetsOf(plan);
     const times = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes);
     const presets = presetsOf(presetDoc);
+    const mine = myFoods(plan);
     const dayChecks = checks.filter((c) => c.date === date && c.answer !== 'eaten');
     const n1 = (x) => String(Math.round((x || 0) * 10) / 10);
     const bar = (label, val, target, unit, cls, f = n0) => `<div class="fuel-bar"><span class="hud c-muted">${label}</span>
@@ -195,7 +196,7 @@ export function render(view, params) {
       ${date === today ? `<div class="fuel-log">
         <label class="btn-primary fuel-cam file-btn" for="f-cam">${CAMERA}<span>LOG MEAL</span></label>
         <button class="btn-ghost" id="f-manual" type="button">No photo</button></div>
-        ${presets.length ? `<div class="fuel-presets" id="f-presets"><span class="hud c-muted">SAME AS USUAL · ONE TAP LOGS IT</span>${presets.map((p) => { const pt = itemTotals(p.items); return `<button class="btn-ghost fuel-preset" type="button" data-preset="${esc(p.id)}"><b>${esc(p.name)}</b><small>${esc(p.items.map((x) => x.portion || x.name.split(/[,(]/)[0].trim()).join(', '))} · ${n0(pt.kcal)} kcal · ${pt.protein} g protein</small></button>`; }).join('')}</div>` : ''}
+        ${presets.length ? `<div class="fuel-presets" id="f-presets"><span class="hud c-muted">SAME AS USUAL · ONE TAP LOGS IT</span>${presets.map((p) => { const pt = itemTotals(p.items); return `<button class="btn-ghost fuel-preset" type="button" data-preset="${esc(p.id)}"><b>${esc(p.name)}</b><small>${esc(p.items.map((x) => { const w = itemAmount(x, mine); return /with shell/.test(w) ? w : x.portion || x.name.split(/[,(]/)[0].trim(); }).join(', '))} · ${n0(pt.kcal)} kcal · ${pt.protein} g protein</small></button>`; }).join('')}</div>` : ''}
         ${!fasting ? '<button class="link-btn" id="f-fast-start" type="button">Fasting today?</button>' : ''}
         <p class="hint">Take the before photo. The Mac names the foods and estimates grams from your packs and usual amounts; kcal and protein come from USDA values. You confirm or fix (Fix has one-tap packs and counts).</p>` : ''}
       ${queued ? '<p class="hint c-amber">Mac unreachable: photos are kept on this phone and read when it is back.</p>' : ''}

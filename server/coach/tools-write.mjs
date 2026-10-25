@@ -30,7 +30,7 @@ import { saveSeen } from '../weather.mjs';
 import { fastingOn, withFast } from '../../app/js/lib/fast.js';
 import { answerNeck, placeLabel, NECK_PLACES, withHomeNotes, bottleFor, HOME_HOW } from '../../app/js/lib/neck.js';
 import { AREA_NAMES } from '../../app/js/lib/holdoffs.js';
-import { withUsda, sameFood, gramsFor, amountText } from '../../app/js/lib/foods.js';
+import { withUsda, sameFood, gramsFor, amountText, itemAmount } from '../../app/js/lib/foods.js';
 import { foodsDb, myFoods } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
@@ -475,7 +475,8 @@ function mealItems(s, items) {
   return { items: out, unknown, noSize: [] };
 }
 const sizeRefusal = (noSize) => `No grams for ${noSize.map((x) => `"${x.name}"`).join(', ')}: packs and counts work only for his foods that have them (the meals tool lists them). Ask him for the grams. Nothing saved.`;
-const itemText = (x) => `${x.name} ${x.portion ? `${x.portion} (${Math.round(x.grams)} g)` : `${Math.round(x.grams)} g`}${x.source === 'usda' ? '' : x.source === 'label' ? ' (his pack label)' : x.source === 'typed' ? ' (his numbers)' : ' (estimate)'}`;
+// Each item with its amount; his eggs with their weight too (Mon 10/26, lib/foods.js itemAmount).
+const itemText = (s) => { const mine = myFoods(s.one('fuel', 'plan')); return (x) => `${x.name} ${itemAmount(x, mine)}${x.source === 'usda' ? '' : x.source === 'label' ? ' (his pack label)' : x.source === 'typed' ? ' (his numbers)' : ' (estimate)'}`; };
 
 /**
  * The moment of "HH:MM" on a day. A day he names with a time after midnight (Sat 10/24: "2:40 AM, for Friday", before
@@ -528,7 +529,7 @@ async function logMeal(a, ctx) {
   put(s, 'meals', id, meal);
   const t = itemTotals(items);
   const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
-  return wrote(`Logged ${meal.name}${preset ? ` (his preset "${preset.name}")` : ''}, ${timeText(at, s.tz)}${meal.date !== s.date(at) ? ` (counts for ${dayText(meal.date, s.today)}, his waking day)` : meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.foodDay() ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+  return wrote(`Logged ${meal.name}${preset ? ` (his preset "${preset.name}")` : ''}, ${timeText(at, s.tz)}${meal.date !== s.date(at) ? ` (counts for ${dayText(meal.date, s.today)}, his waking day)` : meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText(s)).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.foodDay() ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
 }
 
 /** Thu 10/22: save a logged meal as one of his presets, to log again by name or with one tap on Fuel. */
@@ -542,7 +543,7 @@ async function mealPreset(a, ctx) {
   const old = findPreset(s.one('fuel', 'presets'), name);
   put(s, 'fuel', 'presets', withPreset(s.one('fuel', 'presets'), { name, items, at: s.now, fromMeal: meal.id }));
   const t = itemTotals(items);
-  return wrote(`Preset "${name}" ${old ? 'replaced' : 'saved'}: ${items.map(itemText).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein. He logs it with one tap on Fuel, or by telling you (log_meal preset).`, `preset ${name} saved`);
+  return wrote(`Preset "${name}" ${old ? 'replaced' : 'saved'}: ${items.map(itemText(s)).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein. He logs it with one tap on Fuel, or by telling you (log_meal preset).`, `preset ${name} saved`);
 }
 
 async function correctMeal(a, ctx) {
@@ -566,7 +567,7 @@ async function correctMeal(a, ctx) {
   if (a.ateAll) next.after = { photoId: null, at: s.now, none: true, leftovers: [], confirmedAt: s.now, by: 'coach' };
   put(s, 'meals', meal.id, next);
   const t = itemTotals(next.before?.items || []);
-  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map(itemText).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${next.after?.none ? ', all eaten' : meal.after ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
+  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map(itemText(s)).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${next.after?.none ? ', all eaten' : meal.after ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
 }
 
 // ---- supplements --------------------------------------------------------------------------------------------------

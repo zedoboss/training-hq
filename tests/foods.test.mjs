@@ -128,7 +128,7 @@ test('no scale (A7): packs, counts and usual amounts to grams and words; the pho
   assert.deepEqual(amountChoices(nuts).map((c) => c.label), ['¼ pack · 50 g', '½ pack · 100 g', '1 pack · 200 g', '2 packs · 400 g']);
   assert.equal(amountChoices(eggs).at(-1).label, 'usual day: 10 eggs · 500 g');
   assert.deepEqual(amountChoices(rice).map((c) => c.label), ['usual day: 450 g cooked · 450 g']);
-  assert.match(amountsLine(plan), /^Nuts, pack 200 g, usually half a pack a day; Eggs, 1 egg = 50 g, usually 10 eggs; Rice, usually 450 g$/);
+  assert.match(amountsLine(plan), /^Nuts, pack 200 g, usually half a pack a day; Eggs, 1 egg = 50 g \(57 g with shell\), usually 10 eggs; Rice, usually 450 g$/);
   const [x] = wu(db, [{ name: 'Nuts', fdcId: 170567, grams: 100, portion: '½ pack' }]);
   assert.equal(x.portion, '½ pack'); assert.equal(x.kcal, 579);
   assert.match(promptText({ kind: 'before', meal: { hint: '' }, plan }), /His packs, counts and usual amounts \(no kitchen scale\): Nuts, pack 200 g/);

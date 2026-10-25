@@ -15,7 +15,7 @@ import { mealTimesOf } from '../lib/fuel-reminders.js';
 import { hmOf } from '../lib/time.js';
 import { wakingDayAt } from '../lib/waking-day.js';
 import { actionSheet, confirmSheet, promptText, promptLong, overlay } from '../ui/sheet.js';
-import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE, myFoods, labelItem, sameFood, amountChoices } from '../lib/foods.js';
+import { loadFoods, searchFoods, foodItem, withUsda, per100, shortName, SOURCE_NOTE, myFoods, labelItem, sameFood, amountChoices, itemAmount } from '../lib/foods.js';
 
 const SOURCE_LABEL = 'SR Legacy and Foundation Foods';
 import { toast } from '../ui/toast.js';
@@ -299,8 +299,11 @@ export function render(view, [id]) {
     const meal = await repo.get('meals', id);
     if (!alive) return;
     if (!meal) { body.innerHTML = '<div class="lib-head"><a class="pill" href="#/fuel">Fuel</a></div><p class="hint">This meal was deleted.</p>'; return; }
-    const [photos, estimates] = await Promise.all([repo.list('meal-photos'), repo.list('meal-estimates')]);
+    const [photos, estimates, plan] = await Promise.all([repo.list('meal-photos'), repo.list('meal-estimates'), repo.get('fuel', 'plan')]);
     if (!alive) return;
+    // His eggs with their weight beside the count (Mon 10/26); other items keep their portion words.
+    const foods = myFoods(plan);
+    const amountOf = (x) => { const w = itemAmount(x, foods); return /with shell/.test(w) ? w : x.portion || ''; };
     const photo = (pid) => photos.find((p) => p.id === pid);
     const before = photo(meal.before?.photoId);
     const after = photo(meal.after?.photoId);
@@ -342,7 +345,7 @@ export function render(view, [id]) {
         <span class="meal-scale-in"><input class="input" id="m-scale" inputmode="decimal" value="${scaleG ?? ''}" aria-label="Grams on the scale"><span class="c-muted">g</span></span></label>` : ''}
       <section class="card meal-est">
         <div class="meal-est-head hud c-muted"><span>${headTag}</span><span>G · KCAL · PROTEIN</span></div>
-        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${x.portion ? ` <span class="c-faint">${esc(x.portion)}</span>` : ''}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'label' ? '<span class="src-tag">LABEL</span>' : x.source === 'estimate' ? '<span class="src-tag">EST.</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
+        ${items.length ? items.map((x, i) => `<div class="meal-row"><span>${esc(x.name)}${amountOf(x) ? ` <span class="c-faint">${esc(amountOf(x))}</span>` : ''}${x.unsure && b.estimated ? ' <span class="tag-unsure">UNSURE</span>' : ''}${x.source === 'usda' ? '<span class="src-tag">USDA</span>' : x.source === 'label' ? '<span class="src-tag">LABEL</span>' : x.source === 'estimate' ? '<span class="src-tag">EST.</span>' : ''}</span><span class="mono">${n0(x.grams)} · ${n0(x.kcal)} · ${n1(x.protein)}</span></div>`).join('')
           : `<p class="hint">${waiting ? 'Waiting for the estimate.' : meal.source === 'manual' ? 'Nothing yet. Tap Fix to type what you ate.' : 'No items.'}</p>`}
         ${l.items.length ? `<div class="meal-left hud c-amber">LEFT ON THE PLATE${l.estimated ? ' · ESTIMATE' : ''}</div>${l.items.map((x) => `<div class="meal-row c-muted"><span>− ${esc(leftName(x.index) || x.name)}</span><span class="mono">${n0(x.grams)} g</span></div>`).join('')}` : ''}
         ${l.pending && meal.after?.photoId ? '<p class="hint">Leftovers: waiting for the Mac to read the after photo.</p>' : ''}
