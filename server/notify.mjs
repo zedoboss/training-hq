@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, awaySuppsText, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay } from '../app/js/lib/waking-day.js';
@@ -462,7 +462,7 @@ export function nudgeInputs(store, now, tz) {
       // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
       // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
       suppsUntimed: untimed.length ? { total: groups.flatMap((g) => g.items).length, taken: groups.flatMap((g) => g.items).filter((i) => i.entry?.status === 'taken').length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
-      suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt, away: ateOut(firstMeal, holdsOf(store)) } : null,
+      suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt, away: ateOut(firstMeal, holdsOf(store)), toldAt: store.getMeta(DISHES)?.seen?.[firstMeal.id] || null } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
@@ -547,7 +547,8 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     const open2 = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' }).filter((g) => g.afterMeal2)
       .flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
     const w = state.after2?.[date]?.id === second.id ? state.after2[date] : null;
-    // Eaten out (Fri 10/23): take it once home, asked again every 30 minutes, not every 5.
+    // Eaten out (Fri 10/23): take it once home, asked 30 minutes later, not every 5; then (Mon 10/26) the few check-ins
+    // of lib/nudges.js AWAY_CHECK_MIN in new words, then quiet (after2GapMin).
     const away = ateOut(second, holds);
     const say = async (text, tag) => {
       const opts = voiceOpts(store);
@@ -568,10 +569,12 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     } else if (w?.asked && !w.done) {
       if (!open2.length) w.done = now;
       // Not before the time he set himself for being home or taking it (Fri 10/23, ownSuppsTime).
-      else if (now - w.last >= (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)
+      else if (now - w.last >= after2GapMin(w) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)
         && now >= ownSuppsTime(list('coach-reminders').filter((r) => isoDate(new Date(r.at || 0), tz) >= date), open2, second.at)) {
         w.last = now;
-        await say(w.everyMin ? `Back home yet? Take your ${open2.join(', ')} now.` : `Still waiting: ${open2.join(', ')}. Get up and take it now${leavesDishes(second, holds) ? ', then the dishes' : ''}.`, 'supps-after-meal-2');
+        const k = w.n || 0;
+        if (w.everyMin) w.n = k + 1;
+        await say(w.everyMin ? awaySuppsText(k, open2, false) : `Still waiting: ${open2.join(', ')}. Get up and take it now${leavesDishes(second, holds) ? ', then the dishes' : ''}.`, 'supps-after-meal-2');
       }
     }
     const w2 = state.after2?.[date];
@@ -727,7 +730,7 @@ export function nextDueAt(store, now, tz, withinMs = 60000) {
   // Waiting for his collagen after the second meal: the next bump on the second, and a look every 10 seconds so the
   // dishes follow at once when he ticks it.
   const w = ds.after2?.[isoDate(new Date(now), tz)];
-  const waiting = w?.asked && !w.done ? [w.last + (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000, now + 10000] : [];
+  const waiting = w?.asked && !w.done ? [w.last + after2GapMin(w) * 60000, now + 10000] : [];
   const times = [
     ...waiting,
     ...plan(store, now, tz).filter((i) => i.due && !sent[i.id]).map((i) => i.at),

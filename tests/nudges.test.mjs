@@ -781,11 +781,12 @@ test('Fri 10/23: a meal eaten out says take the supplements once home, no dishes
     assert.equal(sent[0].body, 'Last meal logged. You ate out, so take your supplements when you\'re back home: Vitamin D3 + K2. I\'ll remind you later.');
     assert.equal(await dishesTick({ store, push, now: at(D, '17:11'), tz: TZ }), null, 'no dishes after a meal out');
     assert.equal(sent.length, 1);
-    // Later: the nudge asks whether he's home, not before 30 minutes after the meal.
+    // Later: the nudge asks whether he's home, not before 30 minutes after he logged it (5:08 PM; Mon 10/26).
     const inp = nudgeInputs(store, at(D, '17:20'), TZ);
     assert.equal(inp.args.suppsAfterMeal.away, true);
-    assert.equal(nudgeCandidates({ ...inp.args, now: at(D, '17:20') }).some((x) => x.key === 'supps-after-meal'), false, 'too soon to be home');
-    const later = nudgeCandidates({ ...nudgeInputs(store, at(D, '17:30'), TZ).args, now: at(D, '17:30') }).find((x) => x.key === 'supps-after-meal');
+    assert.equal(nudgeCandidates({ ...inp.args, now: at(D, '17:20') }).some((x) => x.key.startsWith('supps-after-meal:')), false, 'too soon to be home');
+    assert.equal(nudgeCandidates({ ...nudgeInputs(store, at(D, '17:37'), TZ).args, now: at(D, '17:37') }).some((x) => x.key.startsWith('supps-after-meal:')), false, '"I\'ll remind you later" is 30 minutes, not 11');
+    const later = nudgeCandidates({ ...nudgeInputs(store, at(D, '17:38'), TZ).args, now: at(D, '17:38') }).find((x) => x.key.startsWith('supps-after-meal:'));
     assert.equal(later.text, 'Back home yet? Take your supplements now: Vitamin D3 + K2. Tell me when they\'re down.');
 
     // The second meal eaten out too (its own mark): collagen once home, asked again every 30 minutes, not every 5.
@@ -836,7 +837,7 @@ test('Fri 10/23: his own time for being home / the supplements holds the "back h
     store.writeLocal('coach-reminders', 'r1', rem('r1', '17:30', 'Back home yet? D3 + K2, omega-3 and ashwagandha are still open.', { createdAt: at(D, '17:10'), firedAt: at(D, '17:30') }));
     store.writeLocal('coach-reminders', 'r2', rem('r2', '17:44', 'Decathlon: heading over?'));
     store.writeLocal('coach-reminders', 'r3', rem('r3', '17:59', 'Back home? D3 + K2, omega-3 and ashwagandha are still open.'));
-    const home = (hm) => nudgeCandidates({ ...nudgeInputs(store, at(D, hm), TZ).args, now: at(D, hm) }).find((x) => x.key === 'supps-after-meal');
+    const home = (hm) => nudgeCandidates({ ...nudgeInputs(store, at(D, hm), TZ).args, now: at(D, hm) }).find((x) => x.key.startsWith('supps-after-meal:'));
     for (const hm of ['17:29', '17:41', '17:59', '18:15', '18:28']) assert.equal(home(hm), undefined, `nothing of the app's own at ${hm}`);
     assert.match(home('18:29').text, /^Back home yet\? Take your supplements now: Vitamin D3 \+ K2 \(MK-7\), Ashwagandha KSM-66\./);
     // He moves it: cancelled, nothing of his left after the 5:30 PM one, so the nudge can come 30 minutes after that.

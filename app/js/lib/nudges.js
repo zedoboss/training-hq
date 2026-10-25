@@ -96,7 +96,7 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
  * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
  * @param {number|null} [o.healthAt]  when Apple Health last reached the Mac (the newest file), ms; null = never; left out = don't say
- * @param {{open: string[], mealAt: number, away?: boolean}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, when that meal was logged, and whether he ate it out
+ * @param {{open: string[], mealAt: number, away?: boolean, toldAt?: number}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, when that meal was eaten, whether he ate it out, and when the Mac first saw it logged
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.mealAfterGymAt  no meal nudge before this after the gym (reminders.js afterGym), ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
@@ -111,11 +111,21 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   if (fasting) { suppsAfterMeal = null; suppsUntimed = null; targets = null; workoutEndedAt = workoutEndedAt && lastMealAt > workoutEndedAt ? workoutEndedAt : null; }
   // Eaten out (Fri 10/23): not before he can be home, and asked as "back home yet?". Not before the time he set himself
   // for being home or taking them either (ownSuppsTime).
-  if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt + (suppsAfterMeal.away ? AWAY_REMIND_MIN * 60000 : 0)
+  // Mon 10/26 (Sunday's pizza out: "Back home yet?" 11 times, 5:42 to 11:55 PM, every 30 to 45 minutes, the same
+  // words): a meal out gets AWAY_CHECK_MIN's few check-ins, each in new words, the first AWAY_REMIND_MIN after he told
+  // me about the meal, then quiet.
+  if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && suppsAfterMeal.away) {
+    const own = ownSuppsTime(reminders, suppsAfterMeal.open, suppsAfterMeal.mealAt);
+    const start = Math.max(Math.max(suppsAfterMeal.mealAt, suppsAfterMeal.toldAt || 0) + AWAY_REMIND_MIN * 60000, own);
+    const k = AWAY_CHECK_MIN.findLastIndex((m) => now >= start + m * 60000);
+    if (k >= 0) {
+      out.push({ key: `supps-after-meal:${suppsAfterMeal.mealAt}:${k}`, priority: 91, gapMin: ONCE_MIN, url: '#/supps',
+        spaceMin: AWAY_SPACE_MIN, text: awaySuppsText(k, suppsAfterMeal.open) });
+    }
+  } else if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt
     && now >= ownSuppsTime(reminders, suppsAfterMeal.open, suppsAfterMeal.mealAt)) {
     out.push({ key: 'supps-after-meal', priority: 91, gapMin: 30, url: '#/supps',
-      text: suppsAfterMeal.away ? `Back home yet? Take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.`
-        : `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });
+      text: `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });
   }
   // After the workout (Tue 10/20, his words: "I'm usually not hungry immediately and I obviously need to take a
   // shower... wait 20 minutes after my workout is finished and then he should bump me about my first meal"): quiet
@@ -277,6 +287,36 @@ export function mealEatenAt(m, seenAt) {
 // after a meal out the message says take them once home, no dishes, and the reminder comes later. ----
 /** How long after a meal out before "back home yet?". */
 export const AWAY_REMIND_MIN = 30;
+/**
+ * Unanswered "back home yet?" (Mon 10/26, his rule: "about 3 check-ins, further apart, new words each, then quiet"):
+ * the check-ins this many minutes after the first one, then nothing more about it that day.
+ */
+export const AWAY_CHECK_MIN = [0, 60, 120];
+/** At least this long between two of them (one held back by a session or a quiet spell doesn't bunch with the next). */
+const AWAY_SPACE_MIN = 45;
+
+/** The k-th "back home yet?" check-in (AWAY_CHECK_MIN), each in its own words; null after the last. */
+export function awaySuppsText(k, names = [], first = true) {
+  const list = names.join(', ');
+  const them = first || names.length > 1 ? 'them' : 'it';
+  return [
+    first ? `Back home yet? Take your supplements now: ${list}. Tell me when they're down.` : `Back home yet? Take your ${list} now.`,
+    `Home by now? Still open from your meal out: ${list}. Take ${them} once you're in.`,
+    `Last check on your ${first ? `supplements from the meal out: ${list}` : `${list} from the meal out`}. Taken, or skipping ${them} today?`,
+  ][k] ?? null;
+}
+
+/**
+ * Minutes from the last ask about the second meal's supplements to the next: every AFTER_MEAL2_BUMP_MIN at home until
+ * ticked; after a meal out AWAY_REMIND_MIN, then AWAY_CHECK_MIN's spacing, then never (Infinity).
+ * @param {{everyMin?: number, n?: number}} w  dishes state after2 for the day (n: check-ins sent so far)
+ */
+export function after2GapMin(w) {
+  if (!w?.everyMin) return AFTER_MEAL2_BUMP_MIN;
+  const k = w.n || 0;
+  if (k >= AWAY_CHECK_MIN.length) return Infinity;
+  return k ? AWAY_CHECK_MIN[k] - AWAY_CHECK_MIN[k - 1] : w.everyMin;
+}
 const OUT_WORDS = /\b(eat(ing)?|ate|lunch|dinner|breakfast|meal|food)\s+(out|outside)\b|\bout to eat\b|\brestaurant\b/i;
 
 /**
@@ -337,7 +377,10 @@ export function nudgeDue({ now, everyMin = NUDGE_DEFAULTS.everyMin, awake = true
 
 /** The candidate to send: the most important one not nudged within its own gap, or null. */
 export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
-  return candidates.find((c) => now - (sentByKey[c.key] || 0) >= c.gapMin * 60000) || null;
+  // spaceMin: also this long since any nudge of the same stream (its key up to the last ':').
+  const stream = (k) => k.slice(0, k.lastIndexOf(':') + 1);
+  const spaced = (c) => !c.spaceMin || !Object.entries(sentByKey).some(([k, at]) => k !== c.key && stream(k) && stream(k) === stream(c.key) && now - at < c.spaceMin * 60000);
+  return candidates.find((c) => now - (sentByKey[c.key] || 0) >= c.gapMin * 60000 && spaced(c)) || null;
 }
 
 // ---- The start of his day (Fri 10/23, his words: "you should have asked me if I'm awake... Since I haven't messaged
