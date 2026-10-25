@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay } from '../app/js/lib/waking-day.js';
@@ -571,7 +571,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       else if (now - w.last >= (w.everyMin || AFTER_MEAL2_BUMP_MIN) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)
         && now >= ownSuppsTime(list('coach-reminders').filter((r) => isoDate(new Date(r.at || 0), tz) >= date), open2, second.at)) {
         w.last = now;
-        await say(w.everyMin ? `Back home yet? Take your ${open2.join(', ')} now.` : `Still waiting: ${open2.join(', ')}. Get up and take it now, then the dishes.`, 'supps-after-meal-2');
+        await say(w.everyMin ? `Back home yet? Take your ${open2.join(', ')} now.` : `Still waiting: ${open2.join(', ')}. Get up and take it now${leavesDishes(second, holds) ? ', then the dishes' : ''}.`, 'supps-after-meal-2');
       }
     }
     const w2 = state.after2?.[date];
@@ -582,10 +582,10 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   // the dishes?" His 1:15 PM meal's came at 1:59 PM, after the coach's own reminder at 1:34 PM): counted, not sent.
   const said = list('coach-messages').filter((x) => x.role === 'assistant' && x.kind !== 'nudge' && /\bdish/i.test(x.text || ''));
   const dueAt = (m) => (m.id in readyAt ? readyAt[m.id] : mealEatenAt(m, state.seen[m.id]) + DISHES_AFTER_MIN * 60000);
-  // A meal eaten out (Fri 10/23) left no dishes at home.
-  const skip = ready.filter((m) => now - dueAt(m) > DISHES_LATE_MIN * 60000 || said.some((x) => x.at >= state.seen[m.id]) || ateOut(m, holds));
+  // Only a meal he cooked at home leaves dishes (Fri 10/23 eaten out; Sun 10/25 a Snack or takeout: leavesDishes).
+  const skip = ready.filter((m) => now - dueAt(m) > DISHES_LATE_MIN * 60000 || said.some((x) => x.at >= state.seen[m.id]) || !leavesDishes(m, holds));
   for (const m of skip) state.sent[m.id] = now;
-  if (skip.length) log(`dishes after ${skip.map((m) => m.name || m.id).join(', ')}: not sent (late, eaten out, or the coach already said it)`);
+  if (skip.length) log(`dishes after ${skip.map((m) => m.name || m.id).join(', ')}: not sent (late, a snack, not cooked at home, or the coach already said it)`);
   const due = ready.filter((m) => !skip.includes(m));
   if (due.length) {
     for (const m of due) state.sent[m.id] = now;

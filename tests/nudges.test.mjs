@@ -542,13 +542,13 @@ test('Thu 10/22: the dishes are not sent late, nor after the coach already said 
     await dishesTick({ store, push, now: at(D, '13:30'), tz: TZ });
     store.writeLocal('coach-messages', 'c1', { id: 'c1', role: 'assistant', kind: 'reminder', text: 'Reminder. Get up and clean the dishes.', at: at(D, '13:31') });
     assert.equal((await dishesTick({ store, push, now: at(D, '13:33'), tz: TZ }))?.key, undefined, 'the coach already said it');
-    // A snack, and the Mac busy until 25 minutes later: too late, not sent.
-    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '16:30'), name: 'Snack', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
+    // A cooked meal, and the Mac busy until 25 minutes later: too late, not sent.
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at(D, '16:30'), name: 'Lunch', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     await dishesTick({ store, push, now: at(D, '16:30'), tz: TZ });
     assert.equal((await dishesTick({ store, push, now: at(D, '16:55'), tz: TZ }))?.key, undefined, 'late');
     assert.equal(sent.filter((m) => m.tag === 'dishes').length, 0);
     // On time it still comes.
-    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '18:00'), name: 'Snack', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
+    store.writeLocal('meals', 'm3', { id: 'm3', date: D, at: at(D, '18:00'), name: 'Dinner', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     await dishesTick({ store, push, now: at(D, '18:00'), tz: TZ });
     assert.equal((await dishesTick({ store, push, now: at(D, '18:02'), tz: TZ }))?.key, 'dishes');
     // The restart after a coach change: a holds round open 2 hours doesn't count; a workout does, for 4 hours.

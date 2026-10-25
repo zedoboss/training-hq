@@ -9,6 +9,7 @@ import { pickLine } from './coach-talk.js';
 import { hmOf, formatHm, zonedTime, isoDate } from './time.js';
 import { LABEL } from './rotation.js';
 import { MEAL_NUDGE } from './fuel-reminders.js';
+import { isSnack } from './meals.js';
 
 export const NUDGE_DEFAULTS = { everyMin: 20, wakeHm: '07:00', bedHm: '22:00' };
 export const NUDGE_EVERY = [[15, 'Every 15 minutes'], [20, 'Every 20 minutes'], [30, 'Every 30 minutes'], [0, 'Off']];
@@ -307,6 +308,16 @@ export function ownSuppsTime(reminders = [], names = [], since = 0) {
   const mine = reminders.filter((r) => r && (r.kind === 'coach' || (r.kind == null && 'text' in r)) && r.due !== false && !r.cancelledAt
     && !r.trigger && r.at >= since && about(r.body ?? r.text ?? ''));
   return mine.length ? Math.max(...mine.map((r) => r.at)) + AWAY_REMIND_MIN * 60000 : 0;
+}
+
+/**
+ * Did this meal leave dishes at home? Only a meal he cooked at home himself (Sun 10/25, his words: "no reason to get
+ * dishes noti when i ate lays thats a snack... Cooking a meal only then it should be active so no takeout either like
+ * the pizza i had earlier"): never a Snack, a meal eaten out, or one he didn't cook (takeout, delivery, ready-made:
+ * its mark cooked: false, from log_meal or correct_meal).
+ */
+export function leavesDishes(m, holds = []) {
+  return Boolean(m) && !isSnack(m) && m.cooked !== false && !ateOut(m, holds);
 }
 
 // ---- After the second meal (Thu 10/22, his words: "after my second meal have it prompt first notification that i

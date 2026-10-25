@@ -346,6 +346,12 @@ test('Fri 10/23: a meal photo he sent in Talk goes with the meal, at the time it
   // Fri 10/23: a meal he ate out is marked, so the after-meal messages say "when you're back home".
   const out = await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], time: '02:40', away: true });
   assert.equal(list('meals').find((m) => out.text.includes(m.id)).away, true);
+  // Sun 10/25: takeout eaten at home is marked not cooked (no dishes); correct_meal can mark it afterwards too.
+  const take = await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], time: '02:45', cooked: false });
+  const tid = list('meals').find((m) => take.text.includes(m.id)).id;
+  assert.equal(list('meals').find((m) => m.id === tid).cooked, false);
+  await call('correct_meal', { meal: tid, cooked: true, away: true });
+  assert.deepEqual([list('meals').find((m) => m.id === tid).cooked, list('meals').find((m) => m.id === tid).away], [true, true]);
 });
 
 test('sauna: a symptom ends the running session at once; the hard-stop words come back', async () => {
