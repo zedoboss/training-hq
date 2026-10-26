@@ -120,7 +120,7 @@ function signsOf(store, since, now) {
     ...list('sessions').filter((x) => x.status !== 'discarded').map((x) => x.startedAt),
     ...list('here').filter((h) => h.phone).map((h) => h.at),
     ...(store.getMeta(APP_OPENS)?.at || []),
-    ...list('health').map((d) => d.fileAt),
+    // Not Apple Health: its Shortcut also runs on timers (10:30 AM, 7:30 PM, 11:59 PM) while he sleeps.
   ].filter((t) => Number.isFinite(t) && t >= since && t <= now).sort((a, b) => a - b);
 }
 
@@ -144,7 +144,7 @@ const wokeBy = (store, t, tz) => {
 /**
  * The first sign he's up today, from 5:00 AM, after a night's sleep (SLEEP): his message, a meal or his answer to a
  * meal question, a supplement ticked, a workout or holds round started, the app opened (its zone report, its open
- * report), Apple Health. His sleep log's wake time counts as it is.
+ * report); not an Apple Health send (it runs on timers too). His sleep log's wake time counts as it is.
  * A workout started after midnight counts too (his sessions start from 3:00 AM): with no answer to "Are you up?" the
  * day now waits for him, so an early session must not leave it waiting.
  */

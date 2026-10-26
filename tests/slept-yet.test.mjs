@@ -142,3 +142,20 @@ test('his sleep log or a workout still count as up whatever came before', () => 
     assert.equal(upAtToday(f.store, T('05:45'), TZ), T('05:40'));
   } finally { f.done(); }
 });
+
+test('an Apple Health send on its 10:30 AM timer while he sleeps is not him up: the sleep question waits for him', async () => {
+  const f = night();
+  try {
+    hisNight(f);
+    f.say(T('04:00'));
+    // Asleep from 4:00 AM; the Shortcut's timer sends Health at 10:30 AM.
+    f.store.writeLocal('health', D, { date: D, steps: 120, fileAt: T('10:30') });
+    await f.run('10:30', '12:39');
+    assert.equal(upAtToday(f.store, T('12:39'), TZ), null);
+    assert.deepEqual(f.asked().filter((x) => /sleep/.test(x)), []);
+    f.opens(T('12:40'));
+    await f.run('12:40', '12:41');
+    assert.equal(upAtToday(f.store, T('12:41'), TZ), T('12:40'));
+    assert.deepEqual(f.asked().filter((x) => /sleep/.test(x)).length, 1);
+  } finally { f.done(); }
+});
