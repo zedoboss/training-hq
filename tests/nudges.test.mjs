@@ -901,4 +901,12 @@ test('Tue 10/27: food behind pace gets 3 check-ins, 2 hours apart, new words eac
   for (let i = 1; i < again.length; i++) assert.notEqual(again[i].text.split('.')[0], again[i - 1].text.split('.')[0]);
   // On pace: nothing at all.
   assert.deepEqual(run('17:32', '23:59', { meals: [[lunch, 2800, 200]] }), []);
+  // Up past midnight (bed 2:00 AM): the day's three are spent, no fresh round after 12:00 AM.
+  const late = {};
+  const D2 = '2026-01-21';
+  for (const t of [at(D, '17:42'), at(D, '19:42'), at(D, '21:42'), at(D2, '00:30'), at(D2, '01:00')]) {
+    const p = pickNudge(nudgeCandidates({ now: t, tz: TZ, wakeHm: '10:00', bedHm: '02:00', targets, eaten: { kcal: 1028, protein: 40 }, lastMealAt: lunch, sent: late }), late, t);
+    if (p) late[p.key] = t;
+  }
+  assert.equal(Object.keys(late).length, 3, 'nothing after midnight');
 });

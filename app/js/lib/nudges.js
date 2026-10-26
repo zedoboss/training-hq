@@ -281,7 +281,9 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     // 9:50 PM, the same words, while he was quiet): FOOD_CHECKS check-ins, further apart, new words each, then quiet.
     // A meal he logs is his answer: if he's still behind after it, a new round (the spacing holds across rounds).
     if (eaten.kcal < expect * 0.7 && expect - eaten.kcal >= 400) {
-      const round = `food:${isoDate(new Date(now), tz)}:${lastMealAt || 0}-`;
+      // His day, not the calendar's: past midnight (before his wake time) is still the same day, so no fresh round then.
+      const day = isoDate(new Date(minOf(hmOf(new Date(now), tz)) < minOf(wakeHm) ? now - 86400000 : now), tz);
+      const round = `food:${day}:${lastMealAt || 0}-`;
       const k = Object.keys(sent || {}).filter((x) => x.startsWith(round)).length;
       const text = foodPaceText(k, { eaten, targets, nowHm, expect });
       if (text) out.push({ key: `${round}${k}`, priority: 55, gapMin: ONCE_MIN, spaceMin: FOOD_CHECKS.spaceMin, url: '#/fuel', text });
