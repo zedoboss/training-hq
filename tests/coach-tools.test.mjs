@@ -329,18 +329,25 @@ test('a meal he describes is logged with confirmed items, and can be corrected',
   assert.match((await call('log_meal', { items: [{ name: 'Nuoc cham', grams: 20 }] })).text, /No USDA match for "Nuoc cham"\. .*Nothing logged yet/);
 });
 
-test('Fri 10/23: a meal photo he sent in Talk goes with the meal, at the time it was taken, with no after-photo ask', async () => {
+test('Fri 10/23: a meal photo he sent in Talk goes with the meal, at the time he sent it, with no after-photo ask', async () => {
   const JPEG = 'data:image/jpeg;base64,/9j/4AAQ';
-  store.writeLocal('coach-photos', 'cphoto.a.0x', { id: 'cphoto.a.0x', messageId: 'cm.1', dataUrl: JPEG, at: NOW - 20 * 60000, sentAt: NOW });
+  // Tue 10/27, his words: "I ate at 6:45 Wdym 6:31???": the full plate photographed 14 min before "I just ate".
+  store.writeLocal('coach-photos', 'cphoto.a.0x', { id: 'cphoto.a.0x', messageId: 'cm.1', dataUrl: JPEG, at: NOW - 14 * 60000, sentAt: NOW - 60000 });
   const r = await call('log_meal', { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }], photo: 'cphoto.a.0x' });
-  assert.match(r.text, /^Logged [A-Za-z]+, 2:40 AM \[id meal-/, 'when the photo was taken, not when he sent it');
+  assert.match(r.text, /^Logged [A-Za-z]+, 2:59 AM \[id meal-/, 'when he sent it, not when the photo was taken (2:46 AM)');
   const meal = list('meals')[0];
+  assert.equal(meal.at, NOW - 60000);
   assert.ok(meal.before.confirmedAt, 'the photo reader leaves it alone');
   assert.equal(meal.source, 'manual', 'no "after photo" reminder');
   const mp = store.getRecord('meal-photos', meal.before.photoId).data;
-  assert.deepEqual([mp.mealId, mp.kind, mp.dataUrl, mp.at], [meal.id, 'before', JPEG, NOW - 20 * 60000]);
-  // A time he gives beats the photo's; an unknown photo id is refused, nothing logged.
+  assert.deepEqual([mp.mealId, mp.kind, mp.dataUrl, mp.at], [meal.id, 'before', JPEG, NOW - 14 * 60000], 'the photo keeps when it was taken');
+  // A time he gives ("this was lunch at 2:50") beats it; an unknown photo id is refused, nothing logged.
   assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.a.0x', time: '02:50' })).text, /2:50 AM/);
+  // An older photo record with no sentAt keeps its taken time; never later than now.
+  store.writeLocal('coach-photos', 'cphoto.b.0x', { id: 'cphoto.b.0x', messageId: 'cm.0', dataUrl: JPEG, at: NOW - 30 * 60000 });
+  const old = await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.b.0x' });
+  assert.match(old.text, /^Logged [A-Za-z]+, 2:30 AM /);
+  await call('correct_meal', { meal: list('meals').find((m) => old.text.includes(m.id)).id, remove: true });
   assert.match((await call('log_meal', { items: [{ name: 'Rice', grams: 100, kcal: 130, protein: 2.5 }], photo: 'cphoto.nope' })).text, /No photo cphoto\.nope from Talk\..*Nothing logged yet/);
   assert.equal(list('meals').length, 2);
   // Fri 10/23: a meal he ate out is marked, so the after-meal messages say "when you're back home".

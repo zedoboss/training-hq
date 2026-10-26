@@ -39,7 +39,10 @@ export function photoNote(photos, { tz, plan = null }) {
   if (!photos.length) return '';
   const list = photos.map((p) => `${p.id} (taken ${formatTime(new Date(p.at), tz)})`).join(', ');
   const foods = planLines(plan);
-  return [`[He attached ${photos.length === 1 ? 'a photo' : `${photos.length} photos`} in Talk: ${list}. They are above.]`,
+  const sent = photos[0].sentAt;
+  // Tue 10/27: a meal from them is at when he sent them, not when taken (he eats after the photo).
+  const when = sent ? ` Sent ${formatTime(new Date(sent), tz)}: a meal from them is logged at that time (leave time out), not when taken, unless he says he ate earlier.` : '';
+  return [`[He attached ${photos.length === 1 ? 'a photo' : `${photos.length} photos`} in Talk: ${list}. They are above.${when}]`,
     foods.length ? `For a meal photo:\n${foods.join('\n')}` : ''].filter(Boolean).join('\n');
 }
 

@@ -90,7 +90,7 @@ test('photos sent in Talk: saved for every device, sent to Claude as images with
   assert.ok(Array.isArray(body), 'content blocks, not a string');
   assert.deepEqual(body[0], { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: '/9j/4AAQSkZJRg==' } });
   assert.equal(body[1].type, 'text');
-  assert.match(body[1].text, new RegExp(`^\\[He attached a photo in Talk: ${photo.id.replace(/\./g, '\\.')} \\(taken 9:48 AM\\)\\. They are above\\.\\]`));
+  assert.match(body[1].text, new RegExp(`^\\[He attached a photo in Talk: ${photo.id.replace(/\./g, '\\.')} \\(taken 9:48 AM\\)\\. They are above\\. Sent 9:58 AM: a meal from them is logged at that time \\(leave time out\\), not when taken, unless he says he ate earlier\\.\\]`));
   assert.match(body[1].text, /Foods he often eats .*Eggs \[fdcId 1\]/);
   assert.match(body[1].text, /He cooks Eggs in about 10 g of Butter/);
   assert.match(body[1].text, /\nlunch\n\n<context>/);
