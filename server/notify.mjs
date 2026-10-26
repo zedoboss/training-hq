@@ -73,12 +73,14 @@ export function wakeHmToday(store, now, tz, wakeHm) {
   const date = isoDate(new Date(now), tz);
   const from = zonedTime(date, '05:00', tz);
   const list = (col) => recordsOf(store, col);
+  const ok = (t) => Number.isFinite(t) && t >= from && t <= now && isoDate(new Date(t), tz) === date;
+  // Tue 10/27: a message or meal while he's still up from the night isn't him waking (SLEEP).
+  const said = [...list('coach-messages').filter((m) => m.role === 'user').map((m) => m.at), ...list('meals').map((m) => m.at)];
   const signs = [
     store.getRecord('sleep-log', date)?.data?.wake,
-    ...list('coach-messages').filter((m) => m.role === 'user').map((m) => m.at),
-    ...list('meals').map((m) => m.at),
+    ...said.filter((t) => ok(t) && wokeBy(store, t, tz)),
     ...list('sessions').filter((x) => x.status !== 'discarded').map((x) => x.startedAt),
-  ].filter((t) => Number.isFinite(t) && t >= from && t <= now && isoDate(new Date(t), tz) === date);
+  ].filter(ok);
   if (!signs.length) return wakeHm;
   const up = hmOf(new Date(Math.min(...signs)), tz);
   return up < wakeHm ? up : wakeHm;
@@ -98,32 +100,69 @@ const COACH_REPLY = (m) => m.role === 'assistant' && !m.kind && !m.error;
 const ASKS_SLEEP = /\b(sleep|slept|bed)\b[^.!?]*\?/i;
 const ASKS_BODY = /\b(back|body|sore\w*|knees?|pain|hurts?|hurting)\b[^.!?]*\?/i;
 
-/**
- * The first sign he's up today, from 5:00 AM: his message, a meal or his answer to a meal question, a supplement
- * ticked, a workout or holds round started, his sleep log's wake time, the app opened (its zone report, its open report),
- * Apple Health.
- * A workout started after midnight counts too (his sessions start from 3:00 AM): with no answer to "Are you up?" the
- * day now waits for him, so an early session must not leave it waiting.
- */
-export function upAtToday(store, now, tz) {
-  const date = isoDate(new Date(now), tz);
-  const from = zonedTime(date, '05:00', tz);
+// Tue 10/27, his words: "under which assumption did you assume that I went to bed when I messaged you at 1:46 AM and
+// when I'm messaging you now? Isn't it more obvious to assume that I haven't slept": he was on the app at 2:16 AM, it
+// opened again at 5:18 AM and "How did you sleep?" went out, the open being the first sign from 5:00 AM. He hadn't
+// slept. Now a sign counts as him waking only after a real sleep gap: gapH hours with no sign of him at all (a message,
+// a meal, a tick, the app opened...), the gap ending from wakeFromHm on (his bedtimes run to about 4:00 AM; a quiet
+// evening isn't a night's sleep). Up through the night with no such gap: he hasn't slept, no sleep question.
+// activeH: with no wake sign, a sign this recent means he's still up (not asleep): no "Are you up?" either.
+export const SLEEP = { gapH: 4, wakeFromHm: '03:00', activeH: 2 };
+
+/** Every sign of him from `since` to now, sorted: his messages, meals, meal answers, ticks, workouts, the app. */
+function signsOf(store, since, now) {
   const list = (col) => recordsOf(store, col);
-  const workout = list('sessions').filter((x) => x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt)
-    && x.startedAt <= now && isoDate(new Date(x.startedAt), tz) === date).map((x) => x.startedAt);
-  const signs = [
-    store.getRecord('sleep-log', date)?.data?.wake,
+  return [
     ...list('coach-messages').filter((m) => m.role === 'user').map((m) => m.at),
     ...list('meals').map((m) => m.at),
     ...list('meal-checks').map((c) => c.at),
     ...list('supp-log').map((e) => e.at),
     ...list('sessions').filter((x) => x.status !== 'discarded').map((x) => x.startedAt),
     ...list('here').filter((h) => h.phone).map((h) => h.at),
-    ...appOpens(store, now, tz),
+    ...(store.getMeta(APP_OPENS)?.at || []),
     ...list('health').map((d) => d.fileAt),
-  ].filter((t) => Number.isFinite(t) && t >= from && t <= now).concat(workout);
+  ].filter((t) => Number.isFinite(t) && t >= since && t <= now).sort((a, b) => a - b);
+}
+
+/** When his stretch awake that includes `t` began: back over every gap shorter than SLEEP.gapH. */
+function awakeSince(signs, t) {
+  let s = t;
+  for (let i = signs.length - 1; i >= 0; i--) {
+    if (signs[i] >= s) continue;
+    if (s - signs[i] >= SLEEP.gapH * 3600000) break;
+    s = signs[i];
+  }
+  return s;
+}
+
+/** A sign at `t` is him up after sleeping: his stretch awake began after a sleep gap ending from SLEEP.wakeFromHm. */
+const wokeBy = (store, t, tz) => {
+  const date = isoDate(new Date(t), tz);
+  return awakeSince(signsOf(store, t - 86400000, t), t) >= zonedTime(date, SLEEP.wakeFromHm, tz);
+};
+
+/**
+ * The first sign he's up today, from 5:00 AM, after a night's sleep (SLEEP): his message, a meal or his answer to a
+ * meal question, a supplement ticked, a workout or holds round started, the app opened (its zone report, its open
+ * report), Apple Health. His sleep log's wake time counts as it is.
+ * A workout started after midnight counts too (his sessions start from 3:00 AM): with no answer to "Are you up?" the
+ * day now waits for him, so an early session must not leave it waiting.
+ */
+export function upAtToday(store, now, tz) {
+  const date = isoDate(new Date(now), tz);
+  const from = zonedTime(date, '05:00', tz);
+  const early = zonedTime(date, SLEEP.wakeFromHm, tz);
+  const workout = recordsOf(store, 'sessions').filter((x) => x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt)
+    && x.startedAt <= now && isoDate(new Date(x.startedAt), tz) === date).map((x) => x.startedAt);
+  const all = signsOf(store, from - 86400000, now);
+  const woke = all.find((t) => t >= from && awakeSince(all, t) >= early);
+  const logged = store.getRecord('sleep-log', date)?.data?.wake;
+  const signs = [logged, woke].filter((t) => Number.isFinite(t) && t >= from && t <= now).concat(workout);
   return signs.length ? Math.min(...signs) : null;
 }
+
+/** A sign of him within SLEEP.activeH: with no sign he woke today, he's still up from the night, not asleep. */
+const stillUp = (store, now) => signsOf(store, now - SLEEP.activeH * 3600000, now).length > 0;
 
 /** Where his morning is now (read only): morningStep's {hold, open, ask}, with today's state and when it opened. */
 export function morningGate(store, now, tz) {
@@ -145,7 +184,7 @@ export function morningGate(store, now, tz) {
   const sessions = list('sessions');
   const trainedToday = sessions.some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && isoDate(new Date(x.startedAt), tz) === date);
   const step = morningStep({
-    now, wakeAt, upAt, state,
+    now, wakeAt, upAt, state, upNoSleep: !upAt && stillUp(store, now),
     sleepKnown: Boolean(health?.sleep || store.getRecord('sleep-log', date)?.data),
     bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness) || trainedToday,
     coachAsked: { sleep: askedBy(ASKS_SLEEP), body: askedBy(ASKS_BODY) },
@@ -153,7 +192,7 @@ export function morningGate(store, now, tz) {
     lastCoachAt: Math.max(store.getMeta(LAST) || 0, ...msgs.filter((x) => x.role === 'assistant').map((x) => x.at || 0)),
     bodyText: morningBodyText(lastWorkoutPain({ sessions, sets: list('sets'), today: date, tz }), date, tz),
   });
-  return { ...step, state, date, openAt: step.open ? state.open || now : null };
+  return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt };
 }
 
 // Sat 10/24, his words: "Auto greet when i open the app Too by the coach speaking pls". He opened the app at 2:23 PM
@@ -166,14 +205,15 @@ export function morningGate(store, now, tz) {
 export const GREET = { text: 'Morning.', freshMin: 10 };
 export const APP_OPENS = 'app:opens';
 
-/** The phone opened the app (came on screen) at `at`: kept for that day (the last 50). */
+/** The phone opened the app (came on screen) at `at`: kept 36 hours (the last 100). */
 export function noteAppOpen(store, at, tz) {
   const date = isoDate(new Date(at), tz);
   const m = store.getMeta(APP_OPENS);
-  const list = (m?.date === date ? m.at : []).concat(at).slice(-50);
+  // Tue 10/27: the last 36 hours, across midnight, so a sleep gap shows (SLEEP).
+  const list = (m?.at || []).filter((t) => at - t < 36 * 3600000).concat(at).slice(-100);
   store.setMeta(APP_OPENS, { date, at: list });
 }
-const appOpens = (store, now, tz) => { const m = store.getMeta(APP_OPENS); return m?.date === isoDate(new Date(now), tz) ? m.at.filter((t) => t <= now) : []; };
+const appOpens = (store, now, tz) => { const d = isoDate(new Date(now), tz); return (store.getMeta(APP_OPENS)?.at || []).filter((t) => t <= now && isoDate(new Date(t), tz) === d); };
 
 /**
  * Once a minute, first: notes when the morning started holding and when it opened, and asks the next question when
@@ -191,8 +231,9 @@ export async function morningTick({ store, push, log = () => {}, now, tz }) {
   const busy = busyNow((col) => recordsOf(store, col), now);
   const today = (at) => foodDayOf(store, at, tz) === g.date;
   const opened = Math.max(0, ...appOpens(store, now, tz).filter(today)) || null;
-  const wrote = recordsOf(store, MSGS).some((m) => m.role === 'user' && m.at >= zonedTime(g.date, '05:00', tz) && m.at <= now && today(m.at));
-  const greet = !g.off && !st.greet && !busy && !wrote && opened != null && now - opened < GREET.freshMin * 60000;
+  // Wrote first: since he woke (Tue 10/27: a message while still up from the night is not his day yet).
+  const wrote = recordsOf(store, MSGS).some((m) => m.role === 'user' && m.at >= (g.upAt ?? zonedTime(g.date, '05:00', tz)) && m.at <= now && today(m.at));
+  const greet = !g.off && g.upAt != null && !st.greet && !busy && !wrote && opened != null && now - opened < GREET.freshMin * 60000;
   const ask = g.ask && g.ask.key !== 'up' ? g.ask : null; // he opened the app: he's up, no need to ask
   if (greet || (g.ask && !busy)) {
     const key = greet ? (ask ? `greet:${ask.key}` : 'greet') : g.ask.key;
@@ -470,7 +511,8 @@ export function nudgeInputs(store, now, tz) {
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
         || scanTakenOn(list('body-scans'), date, list('scan-photos').map((p) => p.scanId)),
-      sleepLogged: Boolean(health?.sleep || one('sleep-log', date)),
+      // Tue 10/27: "How did you sleep?" only once he has slept and is up (upAtToday), never while he's still up.
+      sleepLogged: Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null,
       wokeAt: one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && isoDate(new Date(x.endedAt), tz) === date).map((x) => x.endedAt)) || null,
       mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan })?.mealAt ?? null,

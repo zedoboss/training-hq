@@ -516,7 +516,9 @@ const formatDayIso = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('e
  * @param {object} o
  * @param {number} o.now
  * @param {number} o.wakeAt      his usual wake time today (Settings), ms
- * @param {number|null} o.upAt   the first sign he's up today (a message, a meal, a workout, the app opened...), ms
+ * @param {number|null} o.upAt   the first sign he's up today after a night's sleep (a message, a meal, a workout, the
+ *   app opened... after hours with none), ms
+ * @param {boolean} o.upNoSleep  no such sign, but he's active now: still up from the night (Tue 10/27), no questions
  * @param {boolean} o.sleepKnown last night's sleep logged
  * @param {boolean} o.bodyKnown  today's check-in done, or he trained today already
  * @param {{up?: number, sleep?: number, body?: number, open?: number}} o.state  when each was asked today; open = done
@@ -526,10 +528,12 @@ const formatDayIso = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('e
  * @param {string} o.bodyText    the body question
  * @returns {{hold: boolean, open: boolean, ask: {key: string, text: string}|null}}
  */
-export function morningStep({ now, wakeAt, upAt = null, sleepKnown = false, bodyKnown = false, state = {}, coachAsked = {}, lastUserAt = 0, lastCoachAt = 0, bodyText = morningBodyText(null) }) {
+export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, sleepKnown = false, bodyKnown = false, state = {}, coachAsked = {}, lastUserAt = 0, lastCoachAt = 0, bodyText = morningBodyText(null) }) {
   if (state.open) return { hold: false, open: true, ask: null };
   // Before his day starts: the wake-time rules hold things already.
   if (now < Math.min(wakeAt, upAt ?? Infinity)) return { hold: false, open: false, ask: null };
+  // Up all night, not slept yet: no "Are you up?", no "How did you sleep?"; they wait till he has slept.
+  if (!upAt && upNoSleep) return { hold: false, open: false, ask: null };
   if (!upAt) return { hold: true, open: false, ask: state.up ? null : { key: 'up', text: MORNING_UP_TEXT } };
   if (now - Math.max(wakeAt, upAt) >= MORNING.giveUpH * 3600000) return { hold: false, open: true, ask: null };
   const quiet = now - Math.max(lastUserAt || 0, lastCoachAt || 0) >= MORNING.quietMin * 60000;
