@@ -26,8 +26,8 @@ test('a fast: on until a meal after it; no meal-time, cook or supplement reminde
   assert.ok(!kinds(days).some((k) => ['cook', 'meals', 'supps'].includes(k)));
   const args = { now: at('16:00'), tz: TZ, wakeHm: '10:00', bedHm: '00:00', eaten: { kcal: 0, protein: 0 }, targets: { kcal: 3174, protein: 242.5 }, suppsUntimed: { total: 5, open: ['Vitamin C'] } };
   const keys = (o) => nudgeCandidates({ ...args, ...o }).map((c) => c.key);
-  assert.ok(keys({}).includes('food') && keys({}).includes('supps-untimed'));
-  assert.deepEqual(keys({ fasting: true }).filter((k) => ['food', 'supps-untimed'].includes(k)), []);
+  assert.ok(keys({}).some((k) => k.startsWith('food:')) && keys({}).includes('supps-untimed'));
+  assert.deepEqual(keys({ fasting: true }).filter((k) => k.startsWith('food:') || k === 'supps-untimed'), []);
 });
 
 test('hold-offs: by area until a time; the sauna alarms and his own reminders never wait', () => {

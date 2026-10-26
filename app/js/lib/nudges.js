@@ -277,9 +277,14 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   const mealAsked = reminders.some((r) => r.kind === 'meals' && String(r.id).startsWith('meal:') && r.due && r.at <= now);
   if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked) {
     const expect = targets.kcal * frac;
+    // Tue 10/27 (Monday's "Food: 1,028 of 3,174 kcal... You should be near 2,300 kcal by now. Eat." every hour, 5:42 to
+    // 9:50 PM, the same words, while he was quiet): FOOD_CHECKS check-ins, further apart, new words each, then quiet.
+    // A meal he logs is his answer: if he's still behind after it, a new round (the spacing holds across rounds).
     if (eaten.kcal < expect * 0.7 && expect - eaten.kcal >= 400) {
-      out.push({ key: 'food', priority: 55, gapMin: 60, url: '#/fuel',
-        text: `Food: ${nf(eaten.kcal)} of ${nf(targets.kcal)} kcal and ${nf(eaten.protein)} of ${targets.protein} g protein at ${nowHm}. You should be near ${nf(Math.round(expect / 50) * 50)} kcal by now. Eat.` });
+      const round = `food:${isoDate(new Date(now), tz)}:${lastMealAt || 0}-`;
+      const k = Object.keys(sent || {}).filter((x) => x.startsWith(round)).length;
+      const text = foodPaceText(k, { eaten, targets, nowHm, expect });
+      if (text) out.push({ key: `${round}${k}`, priority: 55, gapMin: ONCE_MIN, spaceMin: FOOD_CHECKS.spaceMin, url: '#/fuel', text });
     }
   }
 
@@ -296,6 +301,20 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       text: `Steps: ${nf(steps.steps)} by ${formatHm(hmOf(new Date(steps.asOf), tz))}, goal ${nf(stepGoal)}. Walk 15 minutes.` });
   }
   return out.sort((a, b) => b.priority - a.priority);
+}
+
+// ---- Food behind the day's pace ----
+/** Unanswered "you're behind on food": this many check-ins after his last meal, at least spaceMin apart. */
+export const FOOD_CHECKS = { count: 3, spaceMin: 120 };
+
+/** The k-th food pace check-in (FOOD_CHECKS), each in its own words; null after the last. */
+export function foodPaceText(k, { eaten, targets, nowHm, expect }) {
+  const left = `${nf(Math.max(0, targets.kcal - eaten.kcal))} kcal and ${nf(Math.max(0, targets.protein - eaten.protein))} g protein`;
+  return [
+    `Food: ${nf(eaten.kcal)} of ${nf(targets.kcal)} kcal and ${nf(eaten.protein)} of ${targets.protein} g protein at ${nowHm}. You should be near ${nf(Math.round(expect / 50) * 50)} kcal by now. Eat.`,
+    `Still behind on food: ${nf(eaten.kcal)} kcal so far, ${left} to go today. What's your next meal, and when?`,
+    `Last food check for now: ${left} still to go today. Get a big meal in before the day ends.`,
+  ][k] ?? null;
 }
 
 // ---- Today's session with no time set ----

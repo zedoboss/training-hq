@@ -28,8 +28,8 @@ test('food nudges: his meal answer stops the after-workout one; a meal still bei
   assert.ok(nudgeCandidates({ ...b, now: at('12:30') }).some((c) => c.key.startsWith('meal-after:')));
   assert.equal(nudgeCandidates({ ...b, now: at('12:30'), mealAnsweredAt: at('12:10') }).some((c) => c.key.startsWith('meal-after:')), false);
   const late = { ...base, now: at('17:00'), targets: { kcal: 3000, protein: 240 } };
-  assert.ok(nudgeCandidates({ ...late, eaten: { kcal: 300, protein: 20, unread: 0 } }).some((c) => c.key === 'food'));
-  assert.equal(nudgeCandidates({ ...late, eaten: { kcal: 300, protein: 20, unread: 1 } }).some((c) => c.key === 'food'), false);
+  assert.ok(nudgeCandidates({ ...late, eaten: { kcal: 300, protein: 20, unread: 0 } }).some((c) => c.key.startsWith('food:')));
+  assert.equal(nudgeCandidates({ ...late, eaten: { kcal: 300, protein: 20, unread: 1 } }).some((c) => c.key.startsWith('food:')), false);
 });
 
 test('"head home" is not sent once he answered the meal question after the gym', () => {

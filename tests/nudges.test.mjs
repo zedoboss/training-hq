@@ -57,7 +57,7 @@ test('nudges: the morning sleep question, the session and the Evolt, food behind
   assert.equal(nudgeCandidates({ ...base, now: at(D, '08:00'), session: { started: true, done: true }, weighedToday: true, eaten: { kcal: 900, protein: 80 } }).length, 0);
   // Food: 2:00 PM with 900 kcal is far behind (near 2,600 expected).
   c = nudgeCandidates({ ...base, now: at(D, '14:00'), session: { done: true }, weighedToday: true, eaten: { kcal: 900, protein: 70 } });
-  assert.deepEqual(keys(c), ['food']);
+  assert.deepEqual(keys(c), [`food:${D}:0-0`]);
   assert.equal(c[0].text, 'Food: 900 of 3,174 kcal and 70 of 242.5 g protein at 2:00 PM. You should be near 2,600 kcal by now. Eat.');
   // Rest day: no session or Evolt nudges.
   assert.deepEqual(keys(nudgeCandidates({ ...base, now: at(D, '09:00'), rot: { today: { kind: 'rest' } }, eaten: { kcal: 1000, protein: 80 } })), []);
@@ -403,11 +403,11 @@ test('Fri 10/23: an unanswered meal ask is not nudged again on top of its check-
     const c = cands(hm);
     assert.ok(!c.some((x) => x.key.startsWith('meals:')), `${hm}: no meal nudge`);
     assert.ok(!c.some((x) => /is late/.test(x.text)), `${hm}: no "is late"`);
-    assert.ok(!c.some((x) => x.key === 'food'), `${hm}: no food pace nudge while a meal question is out`);
+    assert.ok(!c.some((x) => x.key.startsWith('food:')), `${hm}: no food pace nudge while a meal question is out`);
   }
   // Skipped (answered): the food pace nudge may speak again.
   const skipped = mealReminders({ date: D, tz: TZ, meals: [], mealTimes, checks: [{ id: `${D}.1230`, answer: 'skipped', at: at(D, '12:40') }, { id: `${D}.1630`, answer: 'skipped', at: at(D, '16:40') }] });
-  assert.ok(cands('16:45', skipped).some((x) => x.key === 'food'));
+  assert.ok(cands('16:45', skipped).some((x) => x.key.startsWith('food:')));
 });
 
 test('walk tick (Tue 10/20): asks, 20 minutes later asks for a time, stays quiet once he gives one, then "walk time"', async () => {
@@ -864,4 +864,41 @@ test('Fri 10/23: his own time for being home / the supplements holds the "back h
     assert.equal((await dishesTick({ store, push, now: at(D, '21:30'), tz: TZ }))?.key, 'supps-after-meal-2');
     assert.equal(sent.at(-1).body, 'Back home yet? Take your collagen now.');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Tue 10/27: food behind pace gets 3 check-ins, 2 hours apart, new words each, then quiet; a meal starts a new round', () => {
+  // Monday 10/26: lunch 1,028 kcal logged 5:32 PM, then quiet; "Food: ... Eat." went out 5:42, 6:42, 7:43, 8:43, 9:50 PM.
+  const targets = { kcal: 3174, protein: 242.5 };
+  const lunch = at(D, '17:32');
+  const run = (from, to, { meals = [[lunch, 1028, 40]], byKey = {} } = {}) => {
+    const sent = [];
+    let last = 0;
+    for (let t = at(D, from); t <= at(D, to); t += 60000) {
+      if (!nudgeDue({ now: t, everyMin: 20, lastNudgeAt: last, lastNoticeAt: last, lastUserAt: lunch })) continue;
+      const had = meals.filter(([a]) => a <= t);
+      const eaten = { kcal: had.reduce((s, m) => s + m[1], 0), protein: had.reduce((s, m) => s + m[2], 0) };
+      const c = nudgeCandidates({ now: t, tz: TZ, rot: null, wakeHm: '10:00', bedHm: '00:00', targets, eaten, lastMealAt: Math.max(0, ...had.map((m) => m[0])) || null, sent: byKey });
+      const p = pickNudge(c, byKey, t);
+      if (!p) continue;
+      byKey[p.key] = t; last = t;
+      sent.push({ hm: new Date(t).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }), key: p.key, text: p.text });
+    }
+    return sent;
+  };
+  const mon = run('17:32', '23:59');
+  assert.deepEqual(mon.map((s) => s.hm), ['5:42 PM', '7:42 PM', '9:42 PM'], 'three, two hours apart');
+  assert.equal(new Set(mon.map((s) => s.text.split(' ').slice(0, 3).join(' '))).size, 3, 'each opens in its own words');
+  assert.match(mon[0].text, /^Food: 1,028 of 3,174 kcal and 40 of 242\.5 g protein at 5:42 PM\. You should be near 2,050 kcal by now\. Eat\.$/);
+  assert.equal(mon[1].text, "Still behind on food: 1,028 kcal so far, 2,146 kcal and 203 g protein to go today. What's your next meal, and when?");
+  assert.match(mon[2].text, /^Last food check for now: 2,146 kcal and 203 g protein still to go today\./);
+  // Nothing more that day, however long he stays quiet (the same state the next ticks see).
+  const byKey = Object.fromEntries(mon.map((s) => [s.key, at(D, '17:32')]));
+  assert.deepEqual(run('18:00', '23:59', { byKey }), [], 'quiet after the last');
+  // He eats again and is still behind: a new round of check-ins, starting with the numbers.
+  const again = run('17:32', '23:59', { meals: [[lunch, 1028, 40], [at(D, '18:30'), 300, 20]] });
+  assert.deepEqual(again.map((s) => s.hm), ['5:42 PM', '7:42 PM', '9:42 PM', '11:42 PM'], 'still 2 hours apart across rounds');
+  assert.match(again[1].text, /^Food: 1,328 of 3,174 kcal and 60 of 242\.5 g protein at 7:42 PM\./, 'the new round opens with his new numbers');
+  for (let i = 1; i < again.length; i++) assert.notEqual(again[i].text.split('.')[0], again[i - 1].text.split('.')[0]);
+  // On pace: nothing at all.
+  assert.deepEqual(run('17:32', '23:59', { meals: [[lunch, 2800, 200]] }), []);
 });
