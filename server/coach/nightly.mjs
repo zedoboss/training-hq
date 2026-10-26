@@ -41,7 +41,7 @@ const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); 
 const words = (s, n) => { const w = String(s ?? '').trim().split(/\s+/).filter(Boolean); return w.length > n ? `${w.slice(0, n).join(' ')}…` : w.join(' '); };
 /** The morning text without its sentences about fixes (Tue 10/27: written at night as "being fixed", told hours later
  *  next to the same fixes done): the app names each fix itself, once, in its state when he reads it. */
-const FIX_TALK = /\b(being fixed|fixed overnight|fix(es|ing)? (is|are|was|were|filed|queued|coming|in progress)|fixing|fix(es)? for)\b/i;
+const FIX_TALK = /\b((is|are|was|were|be|being|been|got|now) fixed|fixed overnight|fixed(?=\s*:)|fix(es|ing)? (is|are|was|were|filed|queued|coming|in progress)|fixing|fix(es)? for)\b/i;
 export const withoutFixes = (s) => String(s ?? '').trim().split(/(?<=[.!?])\s+/).filter((x) => x && !FIX_TALK.test(x)).join(' ');
 /** A fix's answer as one line: "Done:" said once, by the line's own head. */
 const fixLine = (head, s) => `${head}: ${clip(String(s ?? '').replace(/^\s*(done|fixed|not fixed|question)\s*:\s*/i, ''), 120)}`;

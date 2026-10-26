@@ -238,6 +238,8 @@ test('Tue 10/27: fix talk in the night\'s morning text is dropped, the rest kept
   assert.equal(withoutFixes('Fixing the walk nags tonight. Pull today, 2.5 h after lunch.'), 'Pull today, 2.5 h after lunch.');
   assert.equal(withoutFixes('Fixed overnight: the food nag. Fix for the walk is queued.'), '');
   assert.equal(withoutFixes('Knees at 2 yesterday: holds first. Creatine low.'), 'Knees at 2 yesterday: holds first. Creatine low.');
+  assert.equal(withoutFixes('Push nags are fixed. The walk nag will be fixed tonight. Fixed: the egg tip. Pull today.'), 'Pull today.', 'every way of saying it');
+  assert.equal(withoutFixes('Your squat depth is fine. Pull today.'), 'Your squat depth is fine. Pull today.');
   assert.match(SYSTEM, /Never the fixes \(yours or any change request\): the app adds each one, once/);
   assert.doesNotMatch(SYSTEM, /what is being fixed/);
 });
