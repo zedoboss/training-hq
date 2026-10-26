@@ -142,7 +142,7 @@ test('the Mac asleep at night = the missed days are reviewed when it wakes; thei
   assert.equal(runs.length, 2, 'both missed days, once each');
   assert.equal(changes().filter((c) => c.by === 'nightly').length, 1, 'the same complaint on both days: one fix');
   assert.match(store.getRecord('coach-diary', '2026-03-18').data.dropped[0], /^asked for already/);
-  assert.deepEqual(talk(), ['No more "well done" after plain sets: being fixed.\nBeing fixed now: no well done after a plain set.']);
+  assert.deepEqual(talk(), ['Being fixed now: no well done after a plain set.']);
   await n.tick();
   assert.equal(talk().length, 1, 'one morning message');
 });

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
 import { snapshot } from '../server/coach/shared.mjs';
-import { openNightly, validate, correctionsOf, inputFor, fixedOnMacFrom, DIARY, SUMMARY_WORDS, SINCE, SYSTEM } from '../server/coach/nightly.mjs';
+import { openNightly, validate, correctionsOf, inputFor, fixedOnMacFrom, withoutFixes, DIARY, SUMMARY_WORDS, SINCE, SYSTEM } from '../server/coach/nightly.mjs';
 import { openChanges, COL as CHANGES } from '../server/coach/changes.mjs';
 import { READ_TOOLS, contextLine } from '../server/coach/tools-read.mjs';
 
@@ -192,7 +192,7 @@ test('fixes filed at night build quietly; one morning message once he is up, the
   await n.tick();
   const t1 = talk();
   assert.equal(t1.length, 1);
-  assert.equal(t1[0].text, 'Noted: beef is your last meal, eggs the first; walks at 4 PM. The egg tip with the beef meal is being fixed.\nFixed overnight: Done: a food tip only goes with the meal that has the food.');
+  assert.equal(t1[0].text, 'Noted: beef is your last meal, eggs the first; walks at 4 PM.\nFixed overnight: a food tip only goes with the meal that has the food.', 'the fix named once, in its state now');
   assert.equal(store.getRecord(CHANGES, fix.id).data.announce, 'done');
   assert.ok(store.getRecord(DIARY, '2026-03-17').data.morningAt);
   await n.tick();
@@ -202,6 +202,57 @@ test('fixes filed at night build quietly; one morning message once he is up, the
   w(CHANGES, 'chg.late', { id: 'chg.late', at: clock, said: 'x', status: 'done', doneAt: clock, answer: 'Done: the late one.', by: 'nightly', announce: 'morning' });
   await n.tick();
   assert.deepEqual(talk().map((m) => m.text).slice(1), ['Done: the late one.']);
+});
+
+test('Tue 10/27: the recap names each fix once, in its state when he reads it, and the lock screen stays within 200', async () => {
+  const sent = [];
+  const morning = 'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today. Being fixed: the \'Back home yet?\' supplement and \'Push, no time set\' nags that repeated all evening.';
+  const { n } = nightly({ answer: { ...ANSWER, fixes: [ANSWER.fixes[0], { ...ANSWER.fixes[0], quote: 'Reminder set for 4:40 PM.', about: 'b' }, { ...ANSWER.fixes[0], quote: 'Walk at 4:00 PM, Wednesday 3/18.', about: 'c' }], morning },
+    push: { list: () => [{}], notify: async (x) => { sent.push(x); return { sent: 1 }; } } });
+  await n.tick();
+  const diary = store.getRecord(DIARY, '2026-03-17').data;
+  assert.equal(diary.morning, 'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today.', 'no fix talk kept from the night');
+  const [a, b, c] = diary.fixes.map((id) => store.getRecord(CHANGES, id).data);
+  // Built and reviewed while he slept: two done (answers start with "Done:"), one still building.
+  w(CHANGES, a.id, { ...a, status: 'done', doneAt: clock, announce: 'morning', answer: 'Done: after a meal out, "back home yet?" comes 3 times, an hour apart, new words each, then quiet.' });
+  w(CHANGES, b.id, { ...b, status: 'done', doneAt: clock, announce: 'morning', answer: 'Done: "Push, no time set" asks once, then once more at 7:00 PM, then quiet.' });
+  w(CHANGES, c.id, { ...c, status: 'working' });
+  clock = at('17:35', '2026-03-18');
+  msg('m9', 'user', 'Lunch', '17:32', '2026-03-18');
+  await n.tick();
+  const [m] = talk();
+  assert.equal(m.text, [
+    'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today.',
+    'Fixed overnight: after a meal out, "back home yet?" comes 3 times, an hour apart, new words each, then quiet.',
+    'Fixed overnight: "Push, no time set" asks once, then once more at 7:00 PM, then quiet.',
+    `Being fixed now: ${c.want}.`,
+  ].join('\n'));
+  assert.doesNotMatch(m.text, /Done:/, '"Fixed overnight" already says it');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].body, 'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today. 2 fixed overnight, 1 being fixed, in Talk.');
+  assert.ok(sent[0].body.length <= 200);
+});
+
+test('Tue 10/27: fix talk in the night\'s morning text is dropped, the rest kept as written', () => {
+  assert.equal(withoutFixes('Walks at 4 PM now. The egg tip is being fixed.'), 'Walks at 4 PM now.');
+  assert.equal(withoutFixes('Fixing the walk nags tonight. Pull today, 2.5 h after lunch.'), 'Pull today, 2.5 h after lunch.');
+  assert.equal(withoutFixes('Fixed overnight: the food nag. Fix for the walk is queued.'), '');
+  assert.equal(withoutFixes('Knees at 2 yesterday: holds first. Creatine low.'), 'Knees at 2 yesterday: holds first. Creatine low.');
+  assert.match(SYSTEM, /Never the fixes \(yours or any change request\): the app adds each one, once/);
+  assert.doesNotMatch(SYSTEM, /what is being fixed/);
+});
+
+test('Tue 10/27: no morning text, several fixes: the lock screen counts them; one fix alone is shown whole', async () => {
+  const sent = [];
+  const { n } = nightly({ answer: { ...ANSWER, fixes: [ANSWER.fixes[0]], morning: '' }, push: { list: () => [{}], notify: async (x) => { sent.push(x); return { sent: 1 }; } } });
+  await n.tick();
+  const [a] = store.getRecord(DIARY, '2026-03-17').data.fixes.map((id) => store.getRecord(CHANGES, id).data);
+  w(CHANGES, a.id, { ...a, status: 'done', doneAt: clock, announce: 'morning', answer: 'Done: tips only with their meal.' });
+  clock = at('09:05', '2026-03-18');
+  msg('m9', 'user', 'Morning', '09:05', '2026-03-18');
+  await n.tick();
+  assert.equal(talk()[0].text, 'Fixed overnight: tips only with their meal.');
+  assert.equal(sent[0].body, 'Fixed overnight: tips only with their meal.');
 });
 
 test('a hold-off on everything keeps the morning message back', async () => {

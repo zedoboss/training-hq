@@ -39,6 +39,12 @@ const KINDS = ['personality', 'behaviour', 'bug'];
 
 const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
 const words = (s, n) => { const w = String(s ?? '').trim().split(/\s+/).filter(Boolean); return w.length > n ? `${w.slice(0, n).join(' ')}…` : w.join(' '); };
+/** The morning text without its sentences about fixes (Tue 10/27: written at night as "being fixed", told hours later
+ *  next to the same fixes done): the app names each fix itself, once, in its state when he reads it. */
+const FIX_TALK = /\b(being fixed|fixed overnight|fix(es|ing)? (is|are|was|were|filed|queued|coming|in progress)|fixing|fix(es)? for)\b/i;
+export const withoutFixes = (s) => String(s ?? '').trim().split(/(?<=[.!?])\s+/).filter((x) => x && !FIX_TALK.test(x)).join(' ');
+/** A fix's answer as one line: "Done:" said once, by the line's own head. */
+const fixLine = (head, s) => `${head}: ${clip(String(s ?? '').replace(/^\s*(done|fixed|not fixed|question)\s*:\s*/i, ''), 120)}`;
 const dayName = (date) => formatDay(new Date(`${date}T12:00:00Z`), 'UTC');
 const rand = () => Math.random().toString(36).slice(2, 7);
 
@@ -51,7 +57,7 @@ RULES
 - diary.summary: at most ${SUMMARY_WORDS} words, plain: what he did (training, food, supplements, walks, sleep, holds), what he asked for, what went wrong, how the day ended. diary.line: the day in one or two short sentences, for the coach's memory. diary.words: up to 12 of his own sentences that matter (a decision, a preference, a complaint, a plan), copied exactly from his messages, with their time. diary.decisions: what he decided, one line each. diary.open: threads left open (a question not answered, something he said he'd do, a problem not fixed yet).
 - facts: lasting things about him the coach should know from now on (a habit, a preference, his schedule, how he wants things done, what he eats at which meal), one line each, with the date of the day they come from and the source (his words or what happened, with the time). Not one-day events (the timeline keeps those) and not what the coach's notes or his corrections below already say. When a learned fact below is no longer true, give the new one with replaces: its id. A learned fact that is simply no longer true, with nothing new: expire, with why. At most ${MAX_FACTS}; none is fine.
 - fixes: something he said should change about how the coach or the app talks or behaves, a wrong message or a bug, that no change request below already covers; or a clear mistake of the coach or the app in the day's messages (a wrong date, time or number, a message that contradicts what he had just said, a reminder at the wrong moment). At most ${MAX_FIXES}, the clearest first; none is fine and most days have none. quote: his words, or the wrong message, copied exactly from the day's messages. Never a new feature he didn't ask for, never a rule made from one day's timing, never anything that weakens a safety rule (the 30% cap, the readiness table, his tendon pain limit, the sauna ladder and hard stops, no supplement advice, no medical advice).
-- morning: one short message for him when he wakes (at most 200 characters, plain and blunt, no greeting formula): what you learned that changes something for him and what is being fixed. Only what the records show now; never tell him something was cancelled, missed or not done unless STATE NOW or the timeline says so. Empty when nothing is worth his time.
+- morning: one short message for him when he wakes (at most 200 characters, plain and blunt, no greeting formula): what you learned that changes something for him. Never the fixes (yours or any change request): the app adds each one, once, in the state it is in when he reads it. Only what the records show now; never tell him something was cancelled, missed or not done unless STATE NOW or the timeline says so. Empty when nothing is worth his time.
 
 ANSWER (JSON only):
 {"diary": {"summary": "...", "line": "...", "words": [{"at": "H:MM AM", "text": "..."}], "decisions": ["..."], "open": ["..."]},
@@ -203,7 +209,7 @@ export function validate(answer, { s, date }) {
     if (alreadyAsked(quote, recent) || fixes.some((x) => fold(x.quote) === fold(quote))) { dropped.push(`asked for already: "${clip(quote, 80)}"`); continue; }
     fixes.push({ quote, at: clip(f.at, 12), about: clip(f.about, 1200), want, kind: KINDS.includes(f.kind) ? f.kind : 'behaviour', fromHim });
   }
-  return { diary, facts, expire, fixes, morning: clip(a.morning, 220), dropped };
+  return { diary, facts, expire, fixes, morning: clip(withoutFixes(a.morning), 200), dropped };
 }
 
 /**
@@ -353,19 +359,23 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const building = filed.filter((c) => c.status === 'queued' || c.status === 'working');
     const other = [...filed, ...quiet].filter((c) => c.status === 'failed' || c.status === 'question');
     // A meal logged after the review (he logs the night meal once he's up): the morning's "X of Y kcal" is the Fuel total now.
-    const said = diaries.map((d) => (d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
+    const said = diaries.map((d) => withoutFixes(d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
       ? d.morning.replace(/\b\d[\d,]* of ([\d,]+ kcal)/, `${kcalOf(d.date).toLocaleString('en-US')} of $1`) : d.morning)).filter(Boolean);
     const learned = diaries.reduce((n, d) => n + (d.facts?.length || 0), 0);
     const lines = [
       said.length ? said.join(' ') : '',
-      ...done.map((c) => `Fixed overnight: ${clip(c.answer, 200)}`),
-      ...building.map((c) => `Being fixed now: ${clip(c.want || c.said, 160)}.`),
-      ...other.map((c) => `${c.status === 'question' ? 'Question' : 'Not fixed'}: ${clip(c.answer, 200)}`),
+      ...done.map((c) => fixLine('Fixed overnight', c.answer)),
+      ...building.map((c) => `Being fixed now: ${clip(c.want || c.said, 120).replace(/([^.!?…])$/, '$1.')}`),
+      ...other.map((c) => fixLine(c.status === 'question' ? 'Question' : 'Not fixed', c.answer)),
     ].filter(Boolean);
     for (const d of diaries) put(DIARY, d.date, { ...d, morningAt: t });
     for (const c of quiet) put(CHANGES, c.id, { ...c, announce: 'done', announcedAt: t });
     if (!lines.length) { log(`nightly: nothing to tell this morning (${learned} facts kept quietly)`); return null; }
-    const short = said[0] || lines[0];
+    // The lock screen: what he learned, then how many fixes, never their words (they're in Talk, once each).
+    const count = [done.length && `${done.length} fixed overnight`, building.length && `${building.length} being fixed`, other.length && `${other.length} need you`].filter(Boolean).join(', ');
+    const tally = count && `${count[0].toUpperCase()}${count.slice(1)}, in Talk.`;
+    const head = said.join(' ');
+    const short = head ? (tally && head.length + tally.length < 200 ? `${head} ${tally}` : head) : lines.length > 1 && tally ? tally : lines[0];
     await tell(lines.join('\n'), clip(short, 200), `nightly-${today}`);
     log(`nightly: morning message sent (${done.length} fixed, ${building.length} building, ${learned} facts)`);
     return lines.join('\n');
