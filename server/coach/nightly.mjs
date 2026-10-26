@@ -19,6 +19,7 @@ import { formatDay, formatTime, isoDate, zonedTime } from '../../app/js/lib/time
 import { addDays } from '../../app/js/lib/rotation.js';
 import { heldOff } from '../../app/js/lib/holdoffs.js';
 import { wakingDay } from '../../app/js/lib/waking-day.js';
+import { signsUpTo } from '../notify.mjs';
 import { dayTotals, mealTotals } from '../../app/js/lib/meals.js';
 
 export const DIARY = 'coach-diary';
@@ -231,13 +232,13 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
 
   /**
    * Days due: ended at least until runHm of the next day and his waking day over (Sat 10/24: a meal he ate at 2:40 AM
-   * before sleeping counts for the day before, so its review waits until he slept and got up, or 6:00 AM), the last 3
-   * at most, oldest first, not done yet.
+   * before sleeping counts for the day before, so its review waits until he slept and got up, or 6:00 AM; Tue 10/27:
+   * still up from the night past 6:00 AM, until he sleeps or noon), the last 3 at most, oldest first, not done yet.
    */
   function dueDays(t = now()) {
     const zone = tz();
     const today = isoDate(new Date(t), zone);
-    const awakeDay = wakingDay(t, { tz: zone, sleepLog: one('sleep-log', today), health: one('health', today), sessions: store.listRecords('sessions').map((r) => r.data).filter(Boolean) });
+    const awakeDay = wakingDay(t, { tz: zone, sleepLog: one('sleep-log', today), health: one('health', today), sessions: store.listRecords('sessions').map((r) => r.data).filter(Boolean), signs: () => signsUpTo(store, t) });
     const out = [];
     for (let i = CATCH_UP_DAYS; i >= 1; i--) {
       const date = addDays(today, -i);

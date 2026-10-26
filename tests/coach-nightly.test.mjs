@@ -337,7 +337,10 @@ test('Sat 10/24: a meal eaten after midnight before he slept is in that day\'s r
   meal('ml3', 'Second meal', '02:40', '2026-03-18', 1282, 115.1);
   clock = at('05:59', '2026-03-18');
   assert.deepEqual(n.dueDays(), [], 'the empty days are done; Tuesday 3/17 still his day');
+  // Tue 10/27: at 6:00 AM 2:40 AM is under 4 quiet hours ago (he may still be up); at 6:40 AM that's a night's sleep.
   clock = at('06:00', '2026-03-18');
+  assert.deepEqual(n.dueDays(), [], 'not yet 4 quiet hours since 2:40 AM');
+  clock = at('06:40', '2026-03-18');
   await n.tick();
   assert.equal(runs.length, 1);
   assert.match(runs[0].content, /FOOD THAT DAY \(his waking day, as the Fuel screen counts it; the day's only food numbers\): 2,627 kcal of 3,174, 214\.1 g protein of 242\.5 g \(Last meal 4:59 PM 1,199 kcal; Snack 5:31 PM 146 kcal; Second meal 2:40 AM Wednesday 3\/18 1,282 kcal\)\./);
@@ -370,4 +373,14 @@ test('Sat 10/24: a night meal logged after the review, before the morning messag
   msg('m9', 'user', 'Up', '13:30', '2026-03-18');
   await n.tick();
   assert.equal(talk()[0].text, 'Pull today. Yesterday: 2,140 of 3,174 kcal, knee holds 0/2.');
+});
+
+test('Tue 10/27: still up from the night past 6:00 AM, the review waits (a 6:31 AM meal still counts for the day), to noon', () => {
+  msg('n1', 'user', 'still up', '01:46', '2026-03-18');
+  msg('n2', 'user', 'took collagen', '05:19', '2026-03-18');
+  const { n } = nightly();
+  clock = at('06:07', '2026-03-18');
+  assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16'], 'up all night: Tuesday 3/17 is still his day');
+  clock = at('12:00', '2026-03-18');
+  assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16', '2026-03-17'], 'noon: reviewed');
 });
