@@ -129,3 +129,59 @@ test('the app on his night: the 2:43 AM meal is Friday\'s second meal (collagen 
   const n = nudgeInputs(store, NIGHT + 60000, TZ);
   assert.deepEqual([n.args.eaten.kcal, n.args.eaten.protein], [1600, 180], 'the food nudges count Friday');
 });
+
+// Tue 10/27: up all night (Talk at 1:46 and 5:19 AM, collagen ticked for the day before at 5:19 AM), a meal at 6:31 AM
+// went on the new day: the 6:00 AM cutoff flipped it though he hadn't slept. Now to noon, still up from the night
+// (his stretch awake began before 3:00 AM, no 4 hours without a sign of him since) is still the day before.
+const UP_ALL_NIGHT = [t(FRI, '22:45'), t(SAT, '01:41'), t(SAT, '01:46'), t(SAT, '05:19')];
+
+test('past 6:00 AM: still up from the night is the day before, to noon; a sleep gap, sleep logged or noon is the new day', () => {
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: UP_ALL_NIGHT }), FRI, 'his Tuesday: up all night');
+  assert.equal(wakingDay(t(SAT, '11:59'), { tz: TZ, signs: [...UP_ALL_NIGHT, t(SAT, '08:30'), t(SAT, '11:00')] }), FRI, 'still up at 11:59 AM');
+  assert.equal(wakingDay(t(SAT, '12:00'), { tz: TZ, signs: [...UP_ALL_NIGHT, t(SAT, '08:30'), t(SAT, '11:00')] }), SAT, 'noon: the new day whatever');
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: () => UP_ALL_NIGHT }), FRI, 'signs as a function');
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ }), SAT, 'no signs: the calendar date, as before');
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: [t(FRI, '22:45'), t(SAT, '01:46')] }), SAT, 'quiet 1:46 to 6:31 AM: he slept');
+  assert.equal(wakingDay(t(SAT, '09:00'), { tz: TZ, signs: [t(FRI, '22:45'), t(SAT, '01:46'), t(SAT, '06:00'), t(SAT, '08:00')] }), SAT, 'slept 1:46 to 6:00 AM, up since');
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: [t(FRI, '23:00'), t(SAT, '03:30'), t(SAT, '06:00')] }), SAT, 'a sleep gap ending 3:30 AM is a night');
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: [...UP_ALL_NIGHT, t(SAT, '07:00')] }), FRI, 'a sign after the meal time changes nothing');
+  const sleepLog = { id: SAT, date: SAT, bed: t(SAT, '05:30'), wake: t(SAT, '06:20') };
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: UP_ALL_NIGHT, sleepLog }), SAT, 'sleep he told: the new day');
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: UP_ALL_NIGHT, health: { date: SAT, sleep: { wake: t(SAT, '06:10') } } }), SAT);
+  assert.equal(wakingDay(t(SAT, '06:31'), { tz: TZ, signs: UP_ALL_NIGHT, sessions: [{ id: 's', kind: 'workout', startedAt: t(SAT, '06:05') }] }), SAT, 'a workout started');
+  assert.equal(wakingDay(t(SAT, '05:00'), { tz: TZ, signs: [t(SAT, '04:50')] }), FRI, 'before 6:00 AM: as before');
+});
+
+test('on the phone past 6:00 AM: from its local messages, meals and ticks', async () => {
+  const docs = { 'sleep-log': {}, health: {}, sessions: [], meals: [], 'meal-checks': [], 'supp-log': [{ at: t(SAT, '05:19') }],
+    'coach-messages': UP_ALL_NIGHT.map((at) => ({ role: 'user', at })).concat([{ role: 'assistant', at: t(SAT, '03:30') }]) };
+  const repo = { get: async (col, id) => docs[col][id] ?? null, list: async (col) => docs[col] };
+  assert.equal(await wakingDayAt(repo, t(SAT, '06:45'), TZ), FRI);
+  assert.equal(await wakingDayAt(repo, t(SAT, '12:01'), TZ), SAT);
+  docs['coach-messages'] = [{ role: 'user', at: t(SAT, '01:46') }, { role: 'assistant', at: t(SAT, '04:00') }];
+  docs['supp-log'] = [];
+  assert.equal(await wakingDayAt(repo, t(SAT, '06:45'), TZ), SAT, 'only the coach wrote in the night: he slept');
+});
+
+test('his Tuesday: up all night, the meal at 6:31 AM and a tick at 6:45 AM go on the day before by themselves', async () => {
+  UP_ALL_NIGHT.forEach((at, i) => store.writeLocal('coach-messages', `cm${i}`, { id: `cm${i}`, role: 'user', at, text: 'hi' }));
+  clock = t(SAT, '06:45');
+  const r = await call('log_meal', { items: [{ name: 'Pork ribs', grams: 200, kcal: 580, protein: 50 }], time: '06:31' });
+  assert.match(r.text, /^Logged [A-Za-z ]+, 6:31 AM \(counts for Friday 3\/20, his waking day\)/, r.text);
+  const m = meals().find((x) => x.id !== 'm1');
+  assert.deepEqual([m.date, m.at], [FRI, t(SAT, '06:31')]);
+  const s = await call('supplement', { names: ['collagen'], status: 'taken' });
+  assert.match(s.text, /^Friday 3\/20: collagen 10 g taken/);
+  assert.match(contextLine({ store, tz: TZ, now: clock }), /Meals today \(his waking day, Friday 3\/20/);
+  const { foodDayOf } = await import('../server/notify.mjs');
+  assert.equal(foodDayOf(store, clock, TZ), FRI, 'the app\'s nudges count Friday too');
+  clock = t(SAT, '12:05');
+  assert.equal(foodDayOf(store, clock, TZ), SAT, 'noon: Saturday');
+});
+
+test('slept in the night (no sign 1:46 to 6:31 AM): the 6:31 AM meal is the new day\'s', async () => {
+  store.writeLocal('coach-messages', 'cm1', { id: 'cm1', role: 'user', at: t(SAT, '01:46'), text: 'night' });
+  clock = t(SAT, '06:45');
+  const r = await call('log_meal', { items: [{ name: 'Pork ribs', grams: 200, kcal: 580, protein: 50 }], time: '06:31' });
+  assert.equal(meals().find((x) => x.id !== 'm1').date, SAT, r.text);
+});

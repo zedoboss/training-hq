@@ -12,7 +12,7 @@ import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, awaySuppsText, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
-import { wakingDay } from '../app/js/lib/waking-day.js';
+import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
 import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
@@ -66,7 +66,8 @@ const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'cook', 'evening', 'ne
 export function foodDayOf(store, now, tz) {
   const date = isoDate(new Date(now), tz);
   const one = (col) => { const r = store.getRecord(col, date); return r && !r.deleted ? r.data : null; };
-  return wakingDay(now, { tz, sleepLog: one('sleep-log'), health: one('health'), sessions: recordsOf(store, 'sessions') });
+  // Tue 10/27: past 6:00 AM still the day before while he's up from the night (signs of him, no sleep gap).
+  return wakingDay(now, { tz, sleepLog: one('sleep-log'), health: one('health'), sessions: recordsOf(store, 'sessions'), signs: () => signsUpTo(store, now) });
 }
 
 export function wakeHmToday(store, now, tz, wakeHm) {
@@ -107,7 +108,7 @@ const ASKS_BODY = /\b(back|body|sore\w*|knees?|pain|hurts?|hurting)\b[^.!?]*\?/i
 // a meal, a tick, the app opened...), the gap ending from wakeFromHm on (his bedtimes run to about 4:00 AM; a quiet
 // evening isn't a night's sleep). Up through the night with no such gap: he hasn't slept, no sleep question.
 // activeH: with no wake sign, a sign this recent means he's still up (not asleep): no "Are you up?" either.
-export const SLEEP = { gapH: 4, wakeFromHm: '03:00', activeH: 2 };
+export const SLEEP = { gapH: SLEEP_GAP_H, wakeFromHm: WAKE_FROM_HM, activeH: 2 };
 
 /** Every sign of him from `since` to now, sorted: his messages, meals, meal answers, ticks, workouts, the app. */
 function signsOf(store, since, now) {
@@ -124,21 +125,13 @@ function signsOf(store, since, now) {
   ].filter((t) => Number.isFinite(t) && t >= since && t <= now).sort((a, b) => a - b);
 }
 
-/** When his stretch awake that includes `t` began: back over every gap shorter than SLEEP.gapH. */
-function awakeSince(signs, t) {
-  let s = t;
-  for (let i = signs.length - 1; i >= 0; i--) {
-    if (signs[i] >= s) continue;
-    if (s - signs[i] >= SLEEP.gapH * 3600000) break;
-    s = signs[i];
-  }
-  return s;
-}
+/** Every sign of him in the day up to `t` (lib/waking-day.js: is he still up from the night?). */
+export const signsUpTo = (store, t) => signsOf(store, t - 86400000, t);
 
 /** A sign at `t` is him up after sleeping: his stretch awake began after a sleep gap ending from SLEEP.wakeFromHm. */
 const wokeBy = (store, t, tz) => {
   const date = isoDate(new Date(t), tz);
-  return awakeSince(signsOf(store, t - 86400000, t), t) >= zonedTime(date, SLEEP.wakeFromHm, tz);
+  return awakeSince(signsOf(store, t - 86400000, t), t, SLEEP.gapH) >= zonedTime(date, SLEEP.wakeFromHm, tz);
 };
 
 /**
@@ -155,7 +148,7 @@ export function upAtToday(store, now, tz) {
   const workout = recordsOf(store, 'sessions').filter((x) => x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt)
     && x.startedAt <= now && isoDate(new Date(x.startedAt), tz) === date).map((x) => x.startedAt);
   const all = signsOf(store, from - 86400000, now);
-  const woke = all.find((t) => t >= from && awakeSince(all, t) >= early);
+  const woke = all.find((t) => t >= from && awakeSince(all, t, SLEEP.gapH) >= early);
   const logged = store.getRecord('sleep-log', date)?.data?.wake;
   const signs = [logged, woke].filter((t) => Number.isFinite(t) && t >= from && t <= now).concat(workout);
   return signs.length ? Math.min(...signs) : null;
