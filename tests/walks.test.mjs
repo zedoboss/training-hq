@@ -29,7 +29,9 @@ test('walks: ask, then 3 check-ins (20, 60, 120 minutes), each in new words, the
   doc = withAsk(doc, D, 'check', at('16:30'));
   assert.equal(due('17:00'), null, 'then it stops');
   assert.equal(due('21:00'), null, 'all evening');
-  assert.equal(due('21:30', { lastUserAt: at('21:00') }).kind, 'ask', 'he talks again: a fresh ask 30 minutes on');
+  assert.equal(due('21:30', { lastUserAt: at('21:00') }), null, 'he writes about something else: still quiet (Tue 10/27)');
+  doc = withAnswer(doc, D, { action: 'none' }, at('21:00'));
+  assert.equal(due('21:30').kind, 'ask', 'he answers about the walk with no time: a fresh ask 30 minutes on');
   assert.equal(due('23:30'), null, 'not in the last hour before bed');
 });
 
@@ -64,8 +66,10 @@ test('walks: "I\'ll go in an hour": quiet until then, walk time, then the follow
 test('walks: an answer with no time asks again after 30 minutes; "not now" waits an hour; stale steps say so', () => {
   let doc = withAsk(null, D, 'ask', at('14:30'));
   const due = (hm, o = {}) => walkDue({ ...base, now: at(hm), doc, steps: steps(3000, '14:00'), ...o });
-  assert.equal(due('14:36', { lastUserAt: at('14:33') }), null, 'he replied: no follow-up');
-  assert.equal(due('15:04', { lastUserAt: at('14:33') }).kind, 'ask');
+  doc = withAnswer(doc, D, { action: 'none' }, at('14:33'));
+  assert.equal(due('14:36'), null, 'he replied: no follow-up');
+  assert.equal(due('15:02'), null);
+  assert.equal(due('15:03').kind, 'ask');
   doc = withAnswer(doc, D, { action: 'skip', reason: 'raining' }, at('14:40'));
   assert.equal(due('15:20'), null);
   assert.equal(due('15:41').kind, 'ask');
@@ -184,4 +188,50 @@ test('Sun 10/25: a walk the coach planned for the weather: 3 check-ins, new word
   // His own time keeps his words.
   const mine = withAnswer(null, D, { action: 'plan', at: at('18:00'), said: 'at 6' }, at('14:02'));
   assert.match(walkDue({ ...base, now: at('18:00'), doc: mine, steps: steps(1820, '17:00') }).text, /^Walk time: you said "at 6"\./);
+});
+
+test('Tue 10/27: his message about something else never restarts the walk check-ins; at most 3, new words, then quiet', () => {
+  // Monday 10/26: the app planned the walk for 5:00 PM (heat). Walk time 5:02, check-in 5:23; at 5:32 PM he logged lunch
+  // with the coach; that counted as an answer: a fresh "Out yet?" at 6:02, then 6:22, 7:02, 8:02 PM, three the same.
+  const start = withAnswer(withAsk(null, D, 'planned', at('15:07')), D, { action: 'plan', at: at('17:00'), by: 'coach' }, at('15:07'));
+  const replay = (talks, answers = []) => {
+    let doc = start;
+    const sent = [];
+    for (let m = 17 * 60; m < 23 * 60; m++) {
+      const hm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const ans = answers.find((x) => x === hm);
+      if (ans) doc = withAnswer(doc, D, { action: 'none' }, at(hm));
+      const lastUserAt = Math.max(0, ...talks.filter((t) => t <= hm).map((t) => at(t)));
+      const due = walkDue({ ...base, now: at(hm), doc, steps: steps(36, '13:52'), lastUserAt });
+      if (!due) continue;
+      sent.push({ hm, ...due });
+      doc = withAsk(doc, D, due.kind, at(hm));
+    }
+    return sent;
+  };
+  const mon = replay(['17:32']);
+  assert.deepEqual(mon.map((x) => `${x.hm} ${x.kind}`), ['17:00 plan', '17:20 check', '18:02 check', '19:00 check']);
+  assert.equal(new Set(mon.map((x) => x.text.slice(0, 30))).size, 4, 'each one in new words');
+  assert.match(mon[3].text, /^Last check on the walk/);
+  // He keeps writing all evening about other things: still never more than 3 check-ins, and none within 30 minutes of
+  // a message.
+  const chatty = replay(['17:10', '17:45', '18:30', '19:15', '20:00', '21:00']);
+  assert.equal(chatty.filter((x) => x.kind === 'check').length, 3);
+  assert.deepEqual(chatty.map((x) => x.kind), ['plan', 'check', 'check', 'check']);
+  // No time set at all (the no-plan stream): the same.
+  let doc = withAsk(null, D, 'ask', at('14:30'));
+  const sent = [];
+  for (let m = 14 * 60 + 31; m < 23 * 60; m++) {
+    const hm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const due = walkDue({ ...base, now: at(hm), doc, steps: steps(3000, '14:00'), lastUserAt: at('15:00') });
+    if (!due) continue;
+    sent.push(due.kind);
+    doc = withAsk(doc, D, due.kind, at(hm));
+  }
+  assert.deepEqual(sent, ['check', 'check', 'check'], 'a message at 3:00 PM about something else: no fresh ask');
+  // A real answer with no time ("not sure yet"): one new round, its opening unlike the check-ins before it.
+  const ans = replay([], ['18:10']);
+  assert.deepEqual(ans.map((x) => `${x.hm} ${x.kind}`), ['17:00 plan', '17:20 check', '18:00 check', '18:40 again', '19:00 check', '19:40 check', '20:40 check']);
+  assert.match(ans[3].text, /^Back to the walk: 5:00 PM was the hour I picked for the weather, and no new time yet\./);
+  for (const x of ans) assert.doesNotMatch(x.text, /you set|you said/i);
 });
