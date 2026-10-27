@@ -34,10 +34,12 @@ export function awakeSince(signs, t, gapH = SLEEP_GAP_H) {
  * The day food and supplements at `at` count toward. sleepLog: the sleep-log doc for the night to that calendar date
  * (id = date); health: the Apple Health doc for that date; sessions: his sessions (holds rounds don't count as up);
  * signs: the times of every sign of him up to `at`, sorted (or a function giving them, called only from 6:00 AM to noon).
- * moving: {wakeHm} with the moving schedule on (signs then always read).
+ * moving: {wakeHm, mealTimes, sleeps, driftMin} with the moving schedule on (signs then always read; mealTimes and
+ * sleeps arrays or functions giving them: a night is only seen near his bedtime, Wed 10/28).
  */
 export function wakingDay(at, { tz, sleepLog = null, health = null, sessions = [], signs = null, moving = null } = {}) {
-  if (moving) return movingDayOf(at, { signs: (typeof signs === 'function' ? signs() : signs) || [], wakeHm: moving.wakeHm, tz });
+  const val = (x) => (typeof x === 'function' ? x() : x) || [];
+  if (moving) return movingDayOf(at, { signs: val(signs), mealTimes: val(moving.mealTimes), sleeps: val(moving.sleeps), driftMin: moving.driftMin, wakeHm: moving.wakeHm, tz });
   const date = isoDate(new Date(at), tz);
   const hm = hmOf(new Date(at), tz);
   if (hm >= STILL_UP_UNTIL_HM) return date;
@@ -71,13 +73,18 @@ export async function wakingDayAt(repo, at = Date.now(), tz) {
   const date = isoDate(new Date(at), tz);
   const hm = hmOf(new Date(at), tz);
   const n = withDefaults(await repo.get('settings', 'main')).notify;
-  const moving = n.movingDay ? { wakeHm: n.wakeHm } : null;
+  const moving = n.movingDay ? { wakeHm: n.wakeHm, driftMin: n.driftMin } : null;
   if (hm >= STILL_UP_UNTIL_HM && !moving) return date;
   const [sleepLog, health, sessions] = await Promise.all([repo.get('sleep-log', date), repo.get('health', date), repo.list('sessions')]);
   let signs = null;
   if (hm >= WAKING_CUTOFF_HM || moving) {
     const [messages, meals, checks, supps] = await Promise.all(['coach-messages', 'meals', 'meal-checks', 'supp-log'].map(async (c) => (await repo.list(c)) || []));
     signs = phoneSigns({ messages, meals, checks, supps, sessions: sessions || [] });
+    if (moving) {
+      const [logs, days] = await Promise.all(['sleep-log', 'health'].map(async (c) => (await repo.list(c)) || []));
+      moving.mealTimes = meals.map((m) => m?.at);
+      moving.sleeps = [...logs.filter((x) => x && !x.deleted), ...days.map((d) => d?.sleep)].filter(Boolean);
+    }
   }
   return wakingDay(at, { tz, sleepLog, health, sessions, signs, moving });
 }

@@ -6,18 +6,23 @@
 // moving schedule can be turned off, like in a setting"). "Morning. Are you up?" went out at his 10:00 AM wake setting
 // while he slept 8:00 AM to 4:50 PM.
 // With the moving schedule on (Settings notify.movingDay, the default), his day isn't the clock's:
-// - He's asleep when he has gone quiet (no sign of him for quietMin) near his expected bedtime, at least afterMealMin
-//   after his last meal, or quiet gapH hours at any time. Asleep since: his last sign, or his last meal + afterMealMin
-//   if later. Asleep until his next sign: nothing is asked, nothing waits for a wake time.
-// - He woke at his first sign after gapH hours without one (or the wake time he told, if in that gap).
+// - He's asleep when he has gone quiet (no sign of him for quietMin) near his expected bedtime (from nearBedH before
+//   it, and never sooner than minAwakeH after he woke), at least afterMealMin after his last meal. Asleep since: his
+//   last sign, or his last meal + afterMealMin if later, not before that window. Asleep until his next sign: nothing is
+//   asked, nothing waits for a wake time.
+// - He woke at his first sign after gapH hours without one that reached minSleepMin into that window (or the wake
+//   time he told, if in that gap).
 // - His expected bedtime: the last bedtime + 24 hours + driftMin (1 to 2 hours later a day, his words).
+// Wed 10/28, his words: "how the fuck did you assume that I went to bed again after waking up?... I cannot sleep from
+// 8 a.m. till 4.50 and then go back to bed at 6.20 p.m.... Obviously, I haven't been on my phone": up at 4:50 PM, off
+// his phone 6:21 PM to 12:30 AM was taken as a night ("6 hours quiet at any time") and a new day began at 12:30 AM.
+// Hours off his phone in the middle of his day aren't sleep: only near his bedtime.
 // - His day plays out his usual day from Settings (wake time to bedtime) from the moment he woke: a "body clock" zone,
 //   the clock's zone moved so his wake reads as his wake time in Settings. Reminders that wait for his wake time
 //   (holds, meals, supplements, the evening round-up...) run on it; food and supplements count toward the day he woke.
-import { awakeSince } from './waking-day.js';
 import { isoDate, hmOf } from './time.js';
 
-export const MOVING = { driftMin: 90, gapH: 6, quietMin: 60, nearBedH: 4, afterMealMin: 60, sleepMin: 510 };
+export const MOVING = { driftMin: 90, gapH: 6, quietMin: 60, nearBedH: 4, minAwakeH: 8, minSleepMin: 180, afterMealMin: 60, sleepMin: 510 };
 
 const minOf = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 
@@ -41,40 +46,61 @@ export function bedAfter(last, mealTimes = [], cap = Infinity, afterMealMin = MO
  * @param {object} o
  * @param {number[]} o.signs     every sign of him up to now (messages, meals, ticks, workouts, the app...), sorted
  * @param {number[]} o.mealTimes when his meals were (ms)
- * @param {{bed: number, wake: number}[]} o.sleeps his logged nights (he told, Apple Health, or worked out here)
- * @returns {{wokeAt: number|null, firstSign?: number, nightBed: number|null, gap: boolean, bedAt: number|null, asleep: boolean,
- *   asleepSince: number|null, sleepMin: number, nextWakeAt: number|null}}
+ * @param {{bed: number, wake: number, source?: string}[]} o.sleeps his logged nights (he told, Apple Health, or worked
+ *   out here: source 'auto', which this works out again rather than trusting)
+ * @returns {{wokeAt: number|null, firstSign?: number, nightBed: number|null, gap: boolean, bedAt: number|null,
+ *   sleepFrom: number|null, asleep: boolean, asleepSince: number|null, sleepMin: number, nextWakeAt: number|null,
+ *   nights: {bed: number, wake: number}[]}}
  *   wokeAt: when his current (or last) stretch awake began; nightBed: when he went to sleep before it; gap: a real
- *   sleep gap seen before it (not just the start of the data); bedAt: when he's expected to sleep next.
+ *   sleep gap seen before it (not just the start of the data); bedAt: when he's expected to sleep next; sleepFrom: the
+ *   earliest a sleep is assumed; nights: the sleeps found in the signs, oldest first.
  */
 export function dayClock({ now, signs = [], mealTimes = [], sleeps = [], driftMin = MOVING.driftMin }) {
   const c = { ...MOVING, driftMin };
   const list = signs.filter((t) => Number.isFinite(t) && t <= now).sort((a, b) => a - b);
   const sleepMin = usualSleepMin(sleeps);
-  const out = { wokeAt: null, nightBed: null, gap: false, bedAt: null, asleep: true, asleepSince: null, sleepMin, nextWakeAt: null };
+  const out = { wokeAt: null, nightBed: null, gap: false, bedAt: null, sleepFrom: null, asleep: true, asleepSince: null, sleepMin, nextWakeAt: null, nights: [] };
   if (!list.length) return out;
+  const nights = sleeps.filter((x) => Number.isFinite(x?.bed) && Number.isFinite(x?.wake));
+  const told = nights.filter((x) => x.source !== 'auto');
+  // A stretch awake from `wake` (slept from `bed`, if known): bed again about 1 h 30 min after the last bedtime; a
+  // last bedtime more than 2 days back says nothing about tonight: then from his wake and his usual sleep.
+  const stretch = (wake, bed, firstSign, gap) => {
+    const lastBed = bed ?? nights.filter((x) => x.bed < wake).sort((a, b) => b.bed - a.bed)[0]?.bed ?? null;
+    let bedAt = lastBed != null && wake - lastBed < 48 * 3600000 ? lastBed + (24 * 60 + c.driftMin) * 60000 : wake + (24 * 60 + c.driftMin - sleepMin) * 60000;
+    bedAt = Math.max(bedAt, wake + 6 * 3600000);
+    // Wed 10/28: never asleep a few hours after he woke, only near his bedtime.
+    const sleepFrom = Math.max(bedAt - c.nearBedH * 3600000, wake + c.minAwakeH * 3600000);
+    return { wokeAt: wake, firstSign, nightBed: bed, gap, bedAt, sleepFrom };
+  };
+  const toldBefore = (lo, hi, from = told) => from.filter((x) => x.wake > lo && x.wake <= hi + 30 * 60000 && x.bed < hi).sort((a, b) => b.wake - a.wake)[0];
+  // The wake he told (or Apple Health's) wins when it falls in the gap before his first sign; so does one worked out
+  // here, that far back (it was found from signs since gone from the list).
+  const t0 = toldBefore(list[0] - 18 * 3600000, list[0], nights);
+  let cur = t0 ? stretch(Math.min(t0.wake, list[0]), t0.bed, list[0], true) : stretch(list[0], null, list[0], false);
+  // Forward through his signs: a gap is a night when he told one there, or when it's gapH hours or more and he still
+  // had minSleepMin asleep after the earliest he'd go to bed (his last sign, his meal + 1 hour, sleepFrom).
+  for (let i = 1; i < list.length; i++) {
+    const a = list[i - 1], b = list[i];
+    const t = toldBefore(a, b);
+    let night = t ? { bed: t.bed, wake: Math.min(t.wake, b) } : null;
+    if (!night && b - a >= c.gapH * 3600000) {
+      const bed = Math.max(bedAfter(a, mealTimes, b, c.afterMealMin), cur.sleepFrom);
+      if (b - bed >= c.minSleepMin * 60000) night = { bed, wake: b };
+    }
+    if (!night) continue;
+    out.nights.push(night);
+    cur = stretch(night.wake, night.bed, b, true);
+  }
+  Object.assign(out, cur);
   const last = list.at(-1);
-  const start = awakeSince(list, last, c.gapH);
-  const before = list.filter((t) => t < start).at(-1) ?? null;
-  // The wake he told (or Apple Health's) wins when it falls in the gap before his first sign.
-  const told = sleeps.filter((x) => Number.isFinite(x?.wake) && x.wake <= start + 30 * 60000 && x.wake > (before ?? start - 18 * 3600000))
-    .sort((a, b) => b.wake - a.wake)[0];
-  out.firstSign = start;
-  out.wokeAt = told ? Math.min(told.wake, start) : start;
-  out.gap = before != null || Boolean(told);
-  out.nightBed = told && Number.isFinite(told.bed) ? told.bed : before != null ? bedAfter(before, mealTimes, out.wokeAt, c.afterMealMin) : null;
-  const lastBed = out.nightBed ?? sleeps.filter((x) => Number.isFinite(x?.bed) && x.bed < out.wokeAt).sort((a, b) => b.bed - a.bed)[0]?.bed ?? null;
-  // A last bedtime more than 2 days back says nothing about tonight: then from his wake and his usual sleep.
-  out.bedAt = lastBed != null && out.wokeAt - lastBed < 48 * 3600000
-    ? lastBed + (24 * 60 + c.driftMin) * 60000
-    : out.wokeAt + (24 * 60 + c.driftMin - sleepMin) * 60000;
-  out.bedAt = Math.max(out.bedAt, out.wokeAt + 6 * 3600000);
   const quiet = now - last;
   const lastMeal = Math.max(-Infinity, ...mealTimes.filter((t) => Number.isFinite(t) && t <= now));
-  out.asleep = quiet >= c.gapH * 3600000
-    || (quiet >= c.quietMin * 60000 && now >= lastMeal + c.afterMealMin * 60000 && now >= out.bedAt - c.nearBedH * 3600000);
+  // Gone quiet an hour, an hour past his last meal, near his bedtime: asleep. Off his phone for hours in the middle of
+  // his day isn't sleep (Wed 10/28).
+  out.asleep = quiet >= c.quietMin * 60000 && now >= lastMeal + c.afterMealMin * 60000 && now >= cur.sleepFrom;
   if (out.asleep) {
-    out.asleepSince = bedAfter(last, mealTimes, now, c.afterMealMin);
+    out.asleepSince = Math.min(Math.max(bedAfter(last, mealTimes, now, c.afterMealMin), cur.sleepFrom), now);
     out.nextWakeAt = out.asleepSince + sleepMin * 60000;
   }
   return out;
@@ -103,9 +129,9 @@ export function bodyClock(wokeAt, wakeHm, tz) {
 }
 
 /** The day food and supplements at `at` count toward: the body-clock date of the stretch awake it falls in. */
-export function movingDayOf(at, { signs = [], wakeHm, tz, gapH = MOVING.gapH }) {
-  const list = signs.filter((t) => Number.isFinite(t) && t <= at).concat(at).sort((a, b) => a - b);
-  return bodyClock(awakeSince(list, at, gapH), wakeHm, tz).date;
+export function movingDayOf(at, { signs = [], mealTimes = [], sleeps = [], driftMin, wakeHm, tz }) {
+  const list = signs.filter((t) => Number.isFinite(t) && t <= at).concat(at);
+  return bodyClock(dayClock({ now: at, signs: list, mealTimes, sleeps, driftMin }).wokeAt, wakeHm, tz).date;
 }
 
 /** A clock time in a text written on the body clock ("10:30 AM"), on the real clock: moved by shiftMin. */

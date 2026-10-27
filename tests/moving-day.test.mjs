@@ -59,11 +59,47 @@ test('his day: bed 1 h 30 min later than the last; gone quiet near it, an hour p
   assert.equal(woke.bedAt, at(WED, '09:15'), 'Tuesday 7:45 AM + 25 h 30 min');
 });
 
-test('quiet in the middle of his day is not sleep; 6 hours quiet at any time is', () => {
-  const sleeps = [{ bed: at(TUE, '08:00'), wake: at(TUE, '16:50') }];
-  const signs = [at(TUE, '17:54'), at(TUE, '19:00')];
-  assert.equal(dayClock({ now: at(TUE, '21:30'), signs, sleeps }).asleep, false, '2 h 30 min quiet, 12 hours before his bedtime');
-  assert.equal(dayClock({ now: at(WED, '01:01'), signs, sleeps }).asleep, true, '6 hours quiet');
+// Wed 10/28, his words: "how the fuck did you assume that I went to bed again after waking up?... I cannot sleep from
+// 8 a.m. till 4.50 and then go back to bed at 6.20 p.m.... Obviously, I haven't been on my phone": off his phone 6:21 PM
+// to 12:30 AM was "Sleep logged from your activity: 6:21 PM to 12:30 AM" and "Morning." at 12:30 AM.
+test('hours off his phone in the middle of his day are not sleep: asleep only near his bedtime', () => {
+  const sleeps = [{ bed: at(TUE, '08:00'), wake: at(TUE, '16:50'), source: 'coach' }];
+  const signs = [at(TUE, '17:54'), at(TUE, '18:19'), at(TUE, '18:21')];
+  const quiet = dayClock({ now: at(WED, '00:29'), signs, sleeps });
+  assert.equal(quiet.asleep, false, '6 h 08 min quiet, 9 hours before his bedtime');
+  assert.equal(quiet.bedAt, at(WED, '09:30'));
+  assert.equal(quiet.sleepFrom, at(WED, '05:30'), 'the earliest he is taken as asleep: 4 hours before it');
+  const back = dayClock({ now: at(WED, '00:31'), signs: [...signs, at(WED, '00:30')], sleeps });
+  assert.equal(back.wokeAt, at(TUE, '16:50'), 'still his Tuesday, up since 4:50 PM');
+  assert.deepEqual(back.nights, []);
+  assert.equal(movingDayOf(at(WED, '00:31'), { signs: [...signs, at(WED, '00:30')], sleeps, wakeHm: '10:00', tz: TZ }), TUE);
+  // Quiet on into the morning: asleep from 5:30 AM, not from 6:21 PM; up at 2:00 PM: that night, 5:30 AM to 2:00 PM.
+  const late = dayClock({ now: at(WED, '05:31'), signs, sleeps });
+  assert.equal(late.asleep, true);
+  assert.equal(late.asleepSince, at(WED, '05:30'));
+  const woke = dayClock({ now: at(WED, '14:05'), signs: [...signs, at(WED, '14:00')], sleeps });
+  assert.deepEqual(woke.nights, [{ bed: at(WED, '05:30'), wake: at(WED, '14:00') }]);
+  assert.equal(woke.wokeAt, at(WED, '14:00'));
+  // A gap that only just reaches his bedtime window (back at 7:00 AM, 1 h 30 min into it): not a night.
+  assert.deepEqual(dayClock({ now: at(WED, '07:05'), signs: [...signs, at(WED, '07:00')], sleeps }).nights, []);
+});
+
+test('never asleep sooner than 8 hours after he woke, whatever his last bedtime says', () => {
+  // Slept 10:00 PM Monday to 4:50 PM Tuesday: bed again about 11:30 PM by the drift, but he only just got up.
+  const sleeps = [{ bed: at(MON, '22:00'), wake: at(TUE, '16:50'), source: 'coach' }];
+  const signs = [at(TUE, '17:00'), at(TUE, '18:00')];
+  const c = dayClock({ now: at(TUE, '23:00'), signs, sleeps });
+  assert.equal(c.sleepFrom, at(WED, '00:50'));
+  assert.equal(c.asleep, false);
+  assert.equal(dayClock({ now: at(WED, '01:00'), signs, sleeps }).asleep, true);
+});
+
+test('his last sign a meal: not asleep within the hour, even in his bedtime window', () => {
+  const sleeps = [{ bed: at(TUE, '08:00'), wake: at(TUE, '16:50'), source: 'coach' }];
+  const signs = [at(TUE, '17:54'), at(WED, '06:00')];
+  const meals = [at(WED, '06:00')];
+  assert.equal(dayClock({ now: at(WED, '06:59'), signs, mealTimes: meals, sleeps }).asleep, false);
+  assert.equal(dayClock({ now: at(WED, '07:01'), signs, mealTimes: meals, sleeps }).asleepSince, at(WED, '07:00'));
 });
 
 test('his body clock: his wake reads as his wake time in Settings; the day he woke on, across midnight', () => {
@@ -211,9 +247,50 @@ test('on the phone: a meal at 2:00 AM, up since 4:50 PM, counts for the day he w
   const { wakingDayAt } = await import('../app/js/lib/waking-day.js');
   const docs = { settings: { main: { notify: { wakeHm: '10:00', bedHm: '00:00' } } }, 'sleep-log': {}, health: {}, sessions: [], meals: [], 'meal-checks': [], 'supp-log': [],
     'coach-messages': [at(TUE, '16:50'), at(TUE, '20:00'), at(WED, '00:30'), at(WED, '05:00'), at(WED, '10:00')].map((t) => ({ role: 'user', at: t })) };
-  const repo = { get: async (col, id) => docs[col]?.[id] ?? null, list: async (col) => docs[col] || [] };
+  const repo = { get: async (col, id) => docs[col]?.[id] ?? null, list: async (col) => (Array.isArray(docs[col]) ? docs[col] : Object.values(docs[col] || {})) };
   assert.equal(await wakingDayAt(repo, at(WED, '02:00'), TZ), TUE);
   assert.equal(await wakingDayAt(repo, at(WED, '12:30'), TZ), TUE, 'still up past noon: still Tuesday');
   docs.settings.main.notify.movingDay = false;
   assert.equal(await wakingDayAt(repo, at(WED, '12:30'), TZ), WED, 'moving off: noon caps it');
+});
+
+test('his Tuesday evening replayed: up at 4:50 PM, off his phone 6:21 PM to 12:30 AM: no sleep logged, no "Morning."', async () => {
+  const f = day();
+  try {
+    f.store.writeLocal('sleep-log', TUE, { id: TUE, date: TUE, bed: at(TUE, '08:00'), wake: at(TUE, '16:50'), inBedMin: 530, asleepMin: 530, source: 'coach' });
+    f.opens(at(TUE, '17:54'));
+    for (const hm of ['17:55', '17:57', '18:18', '18:19', '18:21']) f.say(at(TUE, hm));
+    await f.run(at(TUE, '18:22'), at(WED, '00:29'));
+    assert.equal(hoursNow(f.store, at(TUE, '23:00'), TZ).asleep, false, 'off his phone, not asleep');
+    f.opens(at(WED, '00:30'));
+    await f.run(at(WED, '00:30'), at(WED, '00:32'));
+    assert.ok(!f.store.getRecord('sleep-log', WED), 'no night logged');
+    assert.equal(f.store.getRecord('sleep-log', TUE).data.source, 'coach');
+    assert.ok(!f.talk().some((m) => m.at >= at(WED, '00:00') && /^Morning|Sleep logged/.test(m.text)), 'no "Morning." at 12:30 AM');
+    assert.equal(clockOf(f.store, at(WED, '00:32'), TZ).wokeAt, at(TUE, '16:50'));
+    assert.equal(foodDayOf(f.store, at(WED, '00:32'), TZ), TUE, 'food still counts to Tuesday');
+  } finally { f.done(); }
+});
+
+test('a sleep the app worked out that the rule no longer sees is removed; what he told is kept', async () => {
+  const f = day();
+  try {
+    f.store.writeLocal('sleep-log', TUE, { id: TUE, date: TUE, bed: at(TUE, '08:00'), wake: at(TUE, '16:50'), inBedMin: 530, asleepMin: 530, source: 'coach' });
+    for (const hm of ['17:55', '18:21']) f.say(at(TUE, hm));
+    f.opens(at(WED, '00:30'));
+    f.store.writeLocal('sleep-log', WED, { id: WED, date: WED, bed: at(TUE, '18:21'), wake: at(WED, '00:30'), inBedMin: 369, asleepMin: 369, source: 'auto' });
+    await f.run(at(WED, '00:40'), at(WED, '00:40'));
+    assert.equal(f.store.getRecord('sleep-log', WED).deleted, true, 'the wrong 6:21 PM to 12:30 AM night is gone');
+    assert.equal(f.store.getRecord('sleep-log', TUE).deleted, false);
+    // His real night later is still logged by itself, on the same date.
+    f.say(at(WED, '03:00'));
+    await f.run(at(WED, '14:00'), at(WED, '14:00'));
+    f.opens(at(WED, '14:00'));
+    await f.run(at(WED, '14:01'), at(WED, '14:01'));
+    const night = f.store.getRecord('sleep-log', WED);
+    assert.equal(night.deleted, false);
+    assert.equal(night.data.source, 'auto');
+    assert.equal(night.data.bed, at(WED, '05:30'), 'from his bedtime window, not his 3:00 AM message');
+    assert.equal(night.data.wake, at(WED, '14:00'));
+  } finally { f.done(); }
 });

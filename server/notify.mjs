@@ -127,18 +127,21 @@ function signsOf(store, since, now) {
   ].filter((t) => Number.isFinite(t) && t >= since && t <= now).sort((a, b) => a - b);
 }
 
-/** Every sign of him in the day up to `t` (lib/waking-day.js: is he still up from the night?). */
-export const signsUpTo = (store, t) => signsOf(store, t - 86400000, t);
+/** Every sign of him in the day and a half up to `t` (lib/waking-day.js: is he still up from the night? which
+ * stretch awake is it, on the moving schedule: the same span as clockOf). */
+export const signsUpTo = (store, t) => signsOf(store, t - 36 * 3600000, t);
 
 // ---- His moving day (Tue 10/27, lib/moving-day.js): with the moving schedule on, his day runs from when he woke (his
 // first sign after hours without one), not from the wake time in Settings; asleep (gone quiet near his bedtime, an hour
 // or more after a meal) nothing goes out until his next sign; his sleep is worked out from that and logged. ----
 
-/** With the moving schedule on: {wakeHm} for lib/waking-day.js, else null. */
+/** With the moving schedule on: {wakeHm, driftMin, mealTimes, sleeps} for lib/waking-day.js, else null. */
 export function movingOf(store) {
   const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
-  return n.movingDay ? { wakeHm: n.wakeHm } : null;
+  return n.movingDay ? { wakeHm: n.wakeHm, driftMin: n.driftMin, mealTimes: () => mealsAtOf(store), sleeps: () => sleepsOf(store) } : null;
 }
+
+const mealsAtOf = (store) => recordsOf(store, 'meals').map((m) => m.at);
 
 /** His nights: the sleep he told the coach (or worked out here) and Apple Health's, {bed, wake}. */
 const sleepsOf = (store) => [...recordsOf(store, 'sleep-log'), ...recordsOf(store, 'health').map((d) => d.sleep)]
@@ -151,7 +154,7 @@ const sleepsOf = (store) => [...recordsOf(store, 'sleep-log'), ...recordsOf(stor
 export function clockOf(store, now, tz) {
   const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
   if (!n.movingDay) return null;
-  const c = dayClock({ now, signs: signsOf(store, now - 36 * 3600000, now), mealTimes: recordsOf(store, 'meals').map((m) => m.at), sleeps: sleepsOf(store), driftMin: n.driftMin });
+  const c = dayClock({ now, signs: signsUpTo(store, now), mealTimes: mealsAtOf(store), sleeps: sleepsOf(store), driftMin: n.driftMin });
   const body = c.wokeAt != null ? bodyClock(c.wokeAt, n.wakeHm, tz) : null;
   return { ...c, body, date: body?.date ?? null };
 }
@@ -208,14 +211,29 @@ export const AUTO_SLEEP_NOTE = 'Worked out from his activity: his last sign befo
 
 /** Logs the night he just woke from, when nothing has it yet. Returns the sleep-log doc written, or null. */
 export function autoSleep(store, now, tz, c = clockOf(store, now, tz)) {
+  if (c) dropWrongAutoSleeps(store, now, c);
   if (!c || c.asleep || !c.gap || c.wokeAt == null || c.nightBed == null || now - c.wokeAt > 12 * 3600000) return null;
   const id = isoDate(new Date(c.wokeAt), tz);
-  if (store.getRecord('sleep-log', id) || store.getRecord('health', id)?.data?.sleep) return null;
+  const had = store.getRecord('sleep-log', id);
+  if ((had && !had.deleted) || store.getRecord('health', id)?.data?.sleep) return null;
   const inBedMin = Math.round((c.wokeAt - c.nightBed) / 60000);
   if (inBedMin < 3 * 60 || inBedMin > 16 * 60) return null;
   const doc = { id, date: id, bed: c.nightBed, wake: c.wokeAt, inBedMin, asleepMin: inBedMin, quality: null, note: AUTO_SLEEP_NOTE, source: 'auto', at: now };
   store.writeLocal('sleep-log', id, doc);
   return doc;
+}
+
+/**
+ * Wed 10/28: a sleep the app worked out that its rule no longer sees (within the 12 hours after it, while it can be
+ * said: its wake matches no night in his signs) is removed: "Sleep logged from your activity: 6:21 PM to 12:30 AM" was hours off his phone after waking at
+ * 4:50 PM. What he or the coach logged is never touched.
+ */
+function dropWrongAutoSleeps(store, now, c) {
+  for (const r of store.listRecords('sleep-log')) {
+    const x = r.data;
+    if (x?.source !== 'auto' || !Number.isFinite(x.wake) || x.wake > now || now - x.wake > 12 * 3600000) continue;
+    if (!c.nights.some((n) => Math.abs(n.wake - x.wake) < 2 * 60000)) store.writeLocal('sleep-log', r.id, null, { deleted: true });
+  }
 }
 
 const hoursOf = (min) => `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
