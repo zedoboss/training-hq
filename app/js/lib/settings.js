@@ -44,7 +44,11 @@ export const DEFAULT_SETTINGS = {
     recoveryHm: '20:15',
     // The coach's nudges (Mon 10/19): every this many minutes (0 = off) inside his waking hours, the most important
     // thing still open (lib/nudges.js). His own hours are set on the phone (Settings > Coach).
-    nudgeEveryMin: 20, wakeHm: '07:00', bedHm: '22:00', nudgePausedUntil: 0 },
+    nudgeEveryMin: 20, wakeHm: '07:00', bedHm: '22:00', nudgePausedUntil: 0,
+    // Tue 10/27, his words: "the coach should resume the moving schedule... if I do have a consistent schedule, I'll
+    // tell it and the moving schedule can be turned off": his day runs from when he wakes, bed about driftMin later
+    // each day (lib/moving-day.js); off = the wake time and bedtime above.
+    movingDay: true, driftMin: 90 },
   // Step 6: which Claude reads meal photos on the Mac ('fast' Sonnet 5.5 low, 'deep' Opus 5.5 high); his usual meal
   // times [{name, time 'HH:MM'}] (none until he sets them: brief section 10).
   fuel: { visionModel: 'fast', mealTimes: [] },

@@ -126,7 +126,7 @@ test('the Mac sends a nudge from the coach, writes it into Talk, and keeps quiet
   const dir = mkdtempSync(join(tmpdir(), 'thq-nudge-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { nudgeEveryMin: 20, wakeHm: '04:40', bedHm: '18:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, nudgeEveryMin: 20, wakeHm: '04:40', bedHm: '18:00' } });
     store.writeLocal('fuel', 'plan', { kcal: 3174, proteinG: 242.5 });
     // He's up: the phone opened the app (Sat 10/24: no sign of him, the day waits for him).
     store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: at(D, '05:00') });
@@ -289,7 +289,7 @@ test('the Mac asks for his after-meal supplements the moment the first meal is l
   const dir = mkdtempSync(join(tmpdir(), 'thq-supps-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.d3', { id: 'supp.d3', kind: 'supplement', name: 'Vitamin D3 + K2', short: 'D3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
     store.writeLocal('supplements', 'supp.mg', { id: 'supp.mg', kind: 'supplement', name: 'Magnesium', short: 'Mg', days: { type: 'daily' }, status: 'active', order: 2, perTake: { train: 1, rest: 1 } });
     const sent = [];
@@ -325,7 +325,7 @@ test('Thu 10/22: a mark left by the morning snack and a holds round left open bl
   const dir = mkdtempSync(join(tmpdir(), 'thq-supps2-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.o3', { id: 'supp.o3', kind: 'supplement', name: 'Omega-3', short: 'O3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
     store.writeLocal('meals', 'm0', { id: 'm0', date: D, at: at(D, '10:20'), name: 'Snack', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
     // What the Mac held that day: the snack marked the day's prompt as done, before snacks stopped counting.
@@ -354,7 +354,7 @@ test('Thu 10/22: a reminder or the dishes due between two ticks go out on the se
   const dir = mkdtempSync(join(tmpdir(), 'thq-soon-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     // "Dishes in 2 minutes", said at 1:31:54 PM; the clock ticks at :52 each minute.
     const due = at(D, '13:33') + 54000;
     store.writeLocal('coach-reminders', 'rem-1', { id: 'rem-1', at: due, date: D, hm: '13:33', text: 'Get up and clean the dishes.', createdAt: due - 120000, by: 'coach' });
@@ -420,7 +420,7 @@ test('walk tick (Tue 10/20): asks, 20 minutes later asks for a time, stays quiet
   const dir = mkdtempSync(join(tmpdir(), 'thq-walk-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' }, body: { stepGoal: 8000 } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' }, body: { stepGoal: 8000 } });
     store.writeLocal('health', D, { date: D, steps: 3000, fileAt: at(D, '14:00') });
     store.setMeta('morning:state', { date: D, open: at(D, '05:00') }); // his morning questions are through
     const sent = [];
@@ -446,7 +446,7 @@ test('walk tick (Tue 10/20): asks, 20 minutes later asks for a time, stays quiet
     assert.equal((await tick('23:23')).key, 'walk:goal');
     assert.equal(sent.at(-1).body, "8,295 steps: today's 8,000 is done. Well done. Have a good night, catch you in the morning.");
     // Walks off in Settings: nothing.
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00', kinds: { walk: false } }, body: { stepGoal: 8000 } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00', kinds: { walk: false } }, body: { stepGoal: 8000 } });
     assert.equal(await tick('16:30'), null);
   } finally {
     store.close();
@@ -463,7 +463,7 @@ test('Thu 10/22: after the second meal, collagen first, again every 5 minutes un
   const dir = mkdtempSync(join(tmpdir(), 'thq-after2-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
     const sent = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
@@ -510,7 +510,7 @@ test('Thu 10/22: collagen already taken before the second meal: no prompt, the d
   const dir = mkdtempSync(join(tmpdir(), 'thq-after2b-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
     store.writeLocal('supp-log', `${D}:supp.co`, { id: `${D}:supp.co`, date: D, suppId: 'supp.co', status: 'taken', at: at(D, '12:00') });
     store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '13:15'), name: 'First meal', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
@@ -533,7 +533,7 @@ test('Thu 10/22: the dishes are not sent late, nor after the coach already said 
   const dir = mkdtempSync(join(tmpdir(), 'thq-dishes-late-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     const sent = [];
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     await dishesTick({ store, push, now: at(D, '11:00'), tz: TZ });
@@ -569,7 +569,7 @@ test('Thu 10/22: a reminder set earlier that lands while he cooks or eats waits 
   const store = openStore(join(dir, 'db.sqlite'));
   try {
     const mealTimes = [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
     store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
     const rem = (id, hm, createdHm, extra = {}) => store.writeLocal('coach-reminders', id, { id, at: at(D, hm), date: D, hm, text: id, createdAt: at(D, createdHm), by: 'coach', ...extra });
     rem('errand-1', '17:00', '12:06');
@@ -651,7 +651,7 @@ test('Thu 10/22: errands that land in a meal logged late wait for that meal, its
   const store = openStore(join(dir, 'db.sqlite'));
   try {
     const mealTimes = [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
     store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
     // His three errands that day, restored with meal 'wait' at 4:33 PM.
     const rem = (id, hm, createdHm) => store.writeLocal('coach-reminders', id, { id, at: at(D, hm), date: D, hm, text: id, createdAt: at(D, createdHm), by: 'coach', meal: 'wait' });
@@ -709,7 +709,7 @@ test('Thu 10/22: a meal ask and his own reminder about the meal in the same minu
   const store = openStore(join(dir, 'db.sqlite'));
   try {
     const mealTimes = [{ name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }];
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '09:00', bedHm: '00:00' }, fuel: { mealTimes } });
     store.setMeta('morning:state', { date: D, open: at(D, '05:00') }); // his morning questions are through
     const rem = (id, hm, createdHm, text, extra = {}) => store.writeLocal('coach-reminders', id, { id, at: at(D, hm), date: D, hm, text, createdAt: at(D, createdHm), by: 'coach', ...extra });
     rem('home', '16:30', '16:20', "It's 4:30 PM. Are you home? Started cooking?");
@@ -768,7 +768,7 @@ test('Fri 10/23: a meal eaten out says take the supplements once home, no dishes
   const dir = mkdtempSync(join(tmpdir(), 'thq-away-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.d3', { id: 'supp.d3', kind: 'supplement', name: 'Vitamin D3 + K2', short: 'D3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
     store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 2, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
     const sent = [];
@@ -827,7 +827,7 @@ test('Fri 10/23: his own time for being home / the supplements holds the "back h
   const dir = mkdtempSync(join(tmpdir(), 'thq-own-home-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('supplements', 'supp.d3', { id: 'supp.d3', kind: 'supplement', name: 'Vitamin D3 + K2 (MK-7)', short: 'D3', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
     store.writeLocal('supplements', 'supp.ash', { id: 'supp.ash', kind: 'supplement', name: 'Ashwagandha KSM-66', short: 'ashwagandha', days: { type: 'daily' }, status: 'active', order: 2, afterMeal: 'first', perTake: { train: 1, rest: 1 } });
     store.writeLocal('supplements', 'supp.co', { id: 'supp.co', kind: 'supplement', name: 'Collagen peptides', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 3, afterMeal: 'second', perTake: { train: 1, rest: 1 } });

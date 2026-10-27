@@ -19,7 +19,7 @@ import { formatDay, formatTime, isoDate, zonedTime } from '../../app/js/lib/time
 import { addDays } from '../../app/js/lib/rotation.js';
 import { heldOff } from '../../app/js/lib/holdoffs.js';
 import { wakingDay } from '../../app/js/lib/waking-day.js';
-import { signsUpTo } from '../notify.mjs';
+import { signsUpTo, movingOf } from '../notify.mjs';
 import { dayTotals, mealTotals } from '../../app/js/lib/meals.js';
 
 export const DIARY = 'coach-diary';
@@ -238,7 +238,7 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
   function dueDays(t = now()) {
     const zone = tz();
     const today = isoDate(new Date(t), zone);
-    const awakeDay = wakingDay(t, { tz: zone, sleepLog: one('sleep-log', today), health: one('health', today), sessions: store.listRecords('sessions').map((r) => r.data).filter(Boolean), signs: () => signsUpTo(store, t) });
+    const awakeDay = wakingDay(t, { tz: zone, sleepLog: one('sleep-log', today), health: one('health', today), sessions: store.listRecords('sessions').map((r) => r.data).filter(Boolean), signs: () => signsUpTo(store, t), moving: movingOf(store) });
     const out = [];
     for (let i = CATCH_UP_DAYS; i >= 1; i--) {
       const date = addDays(today, -i);

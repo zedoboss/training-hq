@@ -673,7 +673,7 @@ test('log_weight and log_sleep (Mon 10/19): the Evolt weigh-in and last night as
 });
 
 test('nudges by talking: how often, waking hours, a pause and resume', async () => {
-  assert.match((await call('nudges')).text, /^Nudges: every 20 minutes, 7:00 AM to 10:00 PM\.$/);
+  assert.match((await call('nudges')).text, /^Nudges: every 20 minutes, moving schedule on \(his day from when he wakes, bed about 90 min later each day; 7:00 AM to 10:00 PM is his usual day\)\.$/);
   const r = await call('nudges', { wakeHm: '04:40', bedHm: '18:00', everyMin: 15 });
   assert.equal(r.text, 'Nudges every 15 minutes, from 4:40 AM, until 6:00 PM.');
   assert.deepEqual([store.getRecord('settings', 'main').data.notify.wakeHm, store.getRecord('settings', 'main').data.notify.bedHm], ['04:40', '18:00']);
@@ -681,6 +681,10 @@ test('nudges by talking: how often, waking hours, a pause and resume', async () 
   assert.ok(store.getRecord('settings', 'main').data.notify.nudgePausedUntil > clock);
   assert.equal((await call('nudges', { resume: true })).text, 'Nudges back on now.');
   assert.equal(store.getRecord('settings', 'main').data.notify.nudgePausedUntil, 0);
+  // Tue 10/27: his schedule steady, the moving one off; back on when he says.
+  assert.equal((await call('nudges', { movingDay: false })).text, 'Nudges moving schedule off: back to 4:40 AM to 6:00 PM.');
+  assert.match((await call('nudges')).text, /^Nudges: every 15 minutes, 4:40 AM to 6:00 PM\.$/);
+  assert.equal((await call('nudges', { movingDay: true })).text, 'Nudges moving schedule on: his day runs from when he wakes.');
 });
 
 

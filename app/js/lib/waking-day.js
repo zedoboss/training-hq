@@ -5,8 +5,11 @@
 // From 6:00 AM it is the calendar date, unless he's still up from the night (Tue 10/27: up all night, a meal at 6:31 AM
 // went on the new day): to noon, while his stretch awake began before 3:00 AM (no 4 hours without a sign of him that
 // ended from 3:00 AM on), it is still the day before.
+// Tue 10/27, the moving schedule on (lib/moving-day.js): the day of the stretch awake `at` falls in, whatever the clock.
 import { isoDate, hmOf, zonedTime } from './time.js';
 import { addDays } from './rotation.js';
+import { movingDayOf } from './moving-day.js';
+import { withDefaults } from './settings.js';
 
 /** Before this clock time, a moment with no sign of sleep belongs to the day before. */
 export const WAKING_CUTOFF_HM = '06:00';
@@ -31,8 +34,10 @@ export function awakeSince(signs, t, gapH = SLEEP_GAP_H) {
  * The day food and supplements at `at` count toward. sleepLog: the sleep-log doc for the night to that calendar date
  * (id = date); health: the Apple Health doc for that date; sessions: his sessions (holds rounds don't count as up);
  * signs: the times of every sign of him up to `at`, sorted (or a function giving them, called only from 6:00 AM to noon).
+ * moving: {wakeHm} with the moving schedule on (signs then always read).
  */
-export function wakingDay(at, { tz, sleepLog = null, health = null, sessions = [], signs = null } = {}) {
+export function wakingDay(at, { tz, sleepLog = null, health = null, sessions = [], signs = null, moving = null } = {}) {
+  if (moving) return movingDayOf(at, { signs: (typeof signs === 'function' ? signs() : signs) || [], wakeHm: moving.wakeHm, tz });
   const date = isoDate(new Date(at), tz);
   const hm = hmOf(new Date(at), tz);
   if (hm >= STILL_UP_UNTIL_HM) return date;
@@ -65,12 +70,14 @@ export function phoneSigns({ messages = [], meals = [], checks = [], supps = [],
 export async function wakingDayAt(repo, at = Date.now(), tz) {
   const date = isoDate(new Date(at), tz);
   const hm = hmOf(new Date(at), tz);
-  if (hm >= STILL_UP_UNTIL_HM) return date;
+  const n = withDefaults(await repo.get('settings', 'main')).notify;
+  const moving = n.movingDay ? { wakeHm: n.wakeHm } : null;
+  if (hm >= STILL_UP_UNTIL_HM && !moving) return date;
   const [sleepLog, health, sessions] = await Promise.all([repo.get('sleep-log', date), repo.get('health', date), repo.list('sessions')]);
   let signs = null;
-  if (hm >= WAKING_CUTOFF_HM) {
+  if (hm >= WAKING_CUTOFF_HM || moving) {
     const [messages, meals, checks, supps] = await Promise.all(['coach-messages', 'meals', 'meal-checks', 'supp-log'].map(async (c) => (await repo.list(c)) || []));
     signs = phoneSigns({ messages, meals, checks, supps, sessions: sessions || [] });
   }
-  return wakingDay(at, { tz, sleepLog, health, sessions, signs });
+  return wakingDay(at, { tz, sleepLog, health, sessions, signs, moving });
 }

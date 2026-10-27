@@ -13,12 +13,13 @@ import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pic
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
+import { dayClock, bodyClock, realTimes } from '../app/js/lib/moving-day.js';
 import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
 import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, isDone, planFor, scanTakenOn } from '../app/js/lib/scans.js';
-import { zonedTime, hmOf, formatTime } from '../app/js/lib/time.js';
+import { zonedTime, hmOf, formatTime, formatHm } from '../app/js/lib/time.js';
 import { healthSendsText } from './health.mjs';
 
 export const SENT = 'notify:sent';
@@ -67,7 +68,7 @@ export function foodDayOf(store, now, tz) {
   const date = isoDate(new Date(now), tz);
   const one = (col) => { const r = store.getRecord(col, date); return r && !r.deleted ? r.data : null; };
   // Tue 10/27: past 6:00 AM still the day before while he's up from the night (signs of him, no sleep gap).
-  return wakingDay(now, { tz, sleepLog: one('sleep-log'), health: one('health'), sessions: recordsOf(store, 'sessions'), signs: () => signsUpTo(store, now) });
+  return wakingDay(now, { tz, sleepLog: one('sleep-log'), health: one('health'), sessions: recordsOf(store, 'sessions'), signs: () => signsUpTo(store, now), moving: movingOf(store) });
 }
 
 export function wakeHmToday(store, now, tz, wakeHm) {
@@ -89,6 +90,7 @@ export function wakeHmToday(store, now, tz, wakeHm) {
 
 // Thu 10/22: the scan reminders before his session follow the time he chose for it, like the check-in: never moved.
 const SESSION_TIMED = /^scan-(morning|arrive):/;
+const waitsForWake = (i) => WAIT_FOR_WAKE.has(i.kind) && !SESSION_TIMED.test(i.id || '');
 
 // ---- His morning (Fri 10/23, lib/nudges.js morningStep): "Are you up?" at his wake time, then sleep, then his body
 // (pain from his last workout first), one at a time; the day's reminders that wait for his wake time, the nudges, the
@@ -128,6 +130,98 @@ function signsOf(store, since, now) {
 /** Every sign of him in the day up to `t` (lib/waking-day.js: is he still up from the night?). */
 export const signsUpTo = (store, t) => signsOf(store, t - 86400000, t);
 
+// ---- His moving day (Tue 10/27, lib/moving-day.js): with the moving schedule on, his day runs from when he woke (his
+// first sign after hours without one), not from the wake time in Settings; asleep (gone quiet near his bedtime, an hour
+// or more after a meal) nothing goes out until his next sign; his sleep is worked out from that and logged. ----
+
+/** With the moving schedule on: {wakeHm} for lib/waking-day.js, else null. */
+export function movingOf(store) {
+  const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  return n.movingDay ? { wakeHm: n.wakeHm } : null;
+}
+
+/** His nights: the sleep he told the coach (or worked out here) and Apple Health's, {bed, wake}. */
+const sleepsOf = (store) => [...recordsOf(store, 'sleep-log'), ...recordsOf(store, 'health').map((d) => d.sleep)]
+  .filter((x) => x && Number.isFinite(x.bed) && Number.isFinite(x.wake));
+
+/**
+ * Where he is in his moving day now (lib/moving-day.js dayClock), with his body clock for the stretch awake
+ * ({zone, shiftMin, date}) and date = the day he's in; null with the moving schedule off.
+ */
+export function clockOf(store, now, tz) {
+  const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  if (!n.movingDay) return null;
+  const c = dayClock({ now, signs: signsOf(store, now - 36 * 3600000, now), mealTimes: recordsOf(store, 'meals').map((m) => m.at), sleeps: sleepsOf(store), driftMin: n.driftMin });
+  const body = c.wokeAt != null ? bodyClock(c.wokeAt, n.wakeHm, tz) : null;
+  return { ...c, body, date: body?.date ?? null };
+}
+
+/**
+ * His notification settings for now: on the moving schedule, his hours are from when he woke to his expected bedtime
+ * (or an hour from now while he's still up past it), asleep: none; else the wake time from wakeHmToday.
+ */
+export function hoursNow(store, now, tz) {
+  const n0 = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  const c = clockOf(store, now, tz);
+  if (!c) return { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
+  if (c.asleep || c.wokeAt == null) return { ...n0, clock: c, asleep: true };
+  return { ...n0, clock: c, asleep: false, wakeHm: hmOf(new Date(c.wokeAt), tz), bedHm: hmOf(new Date(Math.max(c.bedAt, now + 3600000)), tz) };
+}
+
+/** Inside his waking hours now (hoursNow): on the moving schedule, while he's not asleep. */
+export const awakeIn = (n, now, tz) => (n.clock ? !n.asleep : awakeAt(now, tz, n.wakeHm, n.bedHm));
+
+/** A text written on his body clock, its times on the real clock (the evening round-up's "Tomorrow: ..." is real). */
+const realText = (text, shift) => {
+  const s = String(text ?? '');
+  const k = s.indexOf('Tomorrow:');
+  return k < 0 ? realTimes(s, shift) : realTimes(s.slice(0, k), shift) + s.slice(k);
+};
+
+/**
+ * The reminders that wait for his wake time, for the day he's in on the moving schedule: planned on his body clock
+ * (his usual day from Settings, started when he woke), their times and texts on the real clock, none before he woke.
+ * None while he's asleep.
+ */
+function movedDayItems(store, c) {
+  if (!c || c.asleep || !c.body) return [];
+  const st = stateFrom(store, c.body.zone);
+  return remindersFor({ ...st, date: c.date }).filter(waitsForWake).map((i) => ({
+    ...i, at: Math.max(i.at, c.wokeAt), bodyAt: i.at,
+    ...(i.title != null ? { title: realText(i.title, c.body.shiftMin) } : {}),
+    ...(i.body != null ? { body: realText(i.body, c.body.shiftMin) } : {}),
+  }));
+}
+
+/** Today's planned reminders (the nudges read them): on the moving schedule, the day he's in. */
+function remindersToday(store, st, date, now, tz) {
+  const c = clockOf(store, now, tz);
+  if (!c) return remindersFor({ ...st, date });
+  return [...remindersFor({ ...st, date: isoDate(new Date(now), tz) }).filter((i) => !waitsForWake(i)), ...movedDayItems(store, c)];
+}
+
+// Sleep worked out from his activity (his words: "obviously he can calculate the sleep automatically"): once he's up
+// after a sleep gap and no sleep is logged or in Apple Health for that night, bed = his last sign before it (or his
+// last meal + 1 hour, if later), wake = his first sign after (or the wake he told). Kept as the night to the date he
+// woke, like the coach's log_sleep; he corrects it by telling the coach.
+export const AUTO_SLEEP_NOTE = 'Worked out from his activity: his last sign before (or his last meal + 1 hour), his first sign after. An estimate.';
+
+/** Logs the night he just woke from, when nothing has it yet. Returns the sleep-log doc written, or null. */
+export function autoSleep(store, now, tz, c = clockOf(store, now, tz)) {
+  if (!c || c.asleep || !c.gap || c.wokeAt == null || c.nightBed == null || now - c.wokeAt > 12 * 3600000) return null;
+  const id = isoDate(new Date(c.wokeAt), tz);
+  if (store.getRecord('sleep-log', id) || store.getRecord('health', id)?.data?.sleep) return null;
+  const inBedMin = Math.round((c.wokeAt - c.nightBed) / 60000);
+  if (inBedMin < 3 * 60 || inBedMin > 16 * 60) return null;
+  const doc = { id, date: id, bed: c.nightBed, wake: c.wokeAt, inBedMin, asleepMin: inBedMin, quality: null, note: AUTO_SLEEP_NOTE, source: 'auto', at: now };
+  store.writeLocal('sleep-log', id, doc);
+  return doc;
+}
+
+const hoursOf = (min) => `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+/** What he's told with his first morning message after his sleep was worked out. */
+export const autoSleepText = (doc, tz) => `Sleep logged from your activity: ${formatTime(new Date(doc.bed), tz)} to ${formatTime(new Date(doc.wake), tz)}, ${hoursOf(doc.inBedMin)}. Off? Tell me the real times.`;
+
 /** A sign at `t` is him up after sleeping: his stretch awake began after a sleep gap ending from SLEEP.wakeFromHm. */
 const wokeBy = (store, t, tz) => {
   const date = isoDate(new Date(t), tz);
@@ -142,6 +236,8 @@ const wokeBy = (store, t, tz) => {
  * day now waits for him, so an early session must not leave it waiting.
  */
 export function upAtToday(store, now, tz) {
+  const c = clockOf(store, now, tz);
+  if (c) return c.asleep ? null : c.wokeAt;
   const date = isoDate(new Date(now), tz);
   const from = zonedTime(date, '05:00', tz);
   const early = zonedTime(date, SLEEP.wakeFromHm, tz);
@@ -159,33 +255,48 @@ const stillUp = (store, now) => signsOf(store, now - SLEEP.activeH * 3600000, no
 
 /** Where his morning is now (read only): morningStep's {hold, open, ask}, with today's state and when it opened. */
 export function morningGate(store, now, tz) {
-  const date = isoDate(new Date(now), tz);
+  // The moving schedule (Tue 10/27): his morning is the start of the day he's in, from when he woke; asleep, it waits
+  // (no "Are you up?": asleep until his next sign).
+  const c = clockOf(store, now, tz);
+  if (c && (c.asleep || c.wokeAt == null)) return { hold: true, open: false, ask: null, state: { date: c.date }, date: c.date, openAt: null, upAt: null, asleep: true };
+  const date = c ? c.date : isoDate(new Date(now), tz);
   const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
   const m = store.getMeta(MORNING_STATE);
-  const state = m?.date === date ? m : { date };
-  const off = { hold: false, open: true, ask: null, state, date, openAt: null, off: true };
+  const upAt = c ? c.wokeAt : upAtToday(store, now, tz);
+  // Tue 10/27: questions asked before he slept (5:18 AM, still up from the night) aren't this morning's.
+  const state = m?.date === date ? sinceUp(m, upAt, Boolean(c)) : { date };
+  const off = { hold: false, open: true, ask: null, state, date, openAt: null, off: true, clock: c, upAt };
   // Nudges off or paused, or he asked the coach to hold off everything: no morning questions, nothing held.
   if (!n.nudgeEveryMin || now < (n.nudgePausedUntil || 0) || heldOff('morning', holdsOf(store), now)) return off;
   const list = (col) => recordsOf(store, col);
-  const health = store.getRecord('health', date)?.data;
-  const wakeAt = zonedTime(date, n.wakeHm, tz);
-  const upAt = upAtToday(store, now, tz);
+  // His night: the sleep logged for the date he woke.
+  const night = c ? isoDate(new Date(c.wokeAt), tz) : date;
+  const health = store.getRecord('health', night)?.data;
+  const wakeAt = c ? c.wokeAt : zonedTime(date, n.wakeHm, tz);
   const msgs = list(MSGS);
   const since = Math.min(state.up || Infinity, upAt ?? Infinity, wakeAt);
   const replies = msgs.filter((x) => COACH_REPLY(x) && x.at >= since && x.at <= now);
   const askedBy = (re) => Math.max(0, ...replies.filter((x) => re.test(x.text || '')).map((x) => x.at)) || null;
   const sessions = list('sessions');
-  const trainedToday = sessions.some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && isoDate(new Date(x.startedAt), tz) === date);
+  const trainedToday = sessions.some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && (c ? x.startedAt >= c.wokeAt && x.startedAt <= now : isoDate(new Date(x.startedAt), tz) === date));
   const step = morningStep({
-    now, wakeAt, upAt, state, upNoSleep: !upAt && stillUp(store, now),
-    sleepKnown: Boolean(health?.sleep || store.getRecord('sleep-log', date)?.data),
-    bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness) || trainedToday,
+    now, wakeAt, upAt, state, upNoSleep: !c && !upAt && stillUp(store, now),
+    sleepKnown: Boolean(health?.sleep || store.getRecord('sleep-log', night)?.data),
+    bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness || (c && store.getRecord('days', isoDate(new Date(now), tz))?.data?.readiness)) || trainedToday,
     coachAsked: { sleep: askedBy(ASKS_SLEEP), body: askedBy(ASKS_BODY) },
     lastUserAt: Math.max(0, ...msgs.filter((x) => x.role === 'user').map((x) => x.at || 0)),
     lastCoachAt: Math.max(store.getMeta(LAST) || 0, ...msgs.filter((x) => x.role === 'assistant').map((x) => x.at || 0)),
     bodyText: morningBodyText(lastWorkoutPain({ sessions, sets: list('sets'), today: date, tz }), date, tz),
   });
-  return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt };
+  return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt, clock: c, night };
+}
+
+/** The morning's state without what was asked or greeted before he got up (moving: or opened, a day before his). */
+function sinceUp(m, upAt, moving) {
+  if (upAt == null) return m;
+  const out = { ...m };
+  for (const k of ['sleep', 'body', 'greet', 'sleepTold', ...(moving ? ['open'] : [])]) if (out[k] != null && out[k] < upAt) delete out[k];
+  return out;
 }
 
 // Sat 10/24, his words: "Auto greet when i open the app Too by the coach speaking pls". He opened the app at 2:23 PM
@@ -213,12 +324,18 @@ const appOpens = (store, now, tz) => { const d = isoDate(new Date(now), tz); ret
  * it's time (pushed and written into Talk). His first open of the day gets the greeting. Returns what was sent, or null.
  */
 export async function morningTick({ store, push, log = () => {}, now, tz }) {
+  // The moving schedule: the night he just woke from, worked out and logged first; asleep, nothing.
+  const slept = autoSleep(store, now, tz);
+  if (slept) log(`sleep worked out: ${autoSleepText(slept, tz)}`);
   const g = morningGate(store, now, tz);
+  if (g.asleep) return null;
   const st = { ...g.state };
-  const start = zonedTime(g.date, withDefaults(store.getRecord('settings', 'main')?.data).notify.wakeHm, tz);
+  const c = g.clock;
+  const start = c ? c.wokeAt : zonedTime(g.date, withDefaults(store.getRecord('settings', 'main')?.data).notify.wakeHm, tz);
   // Held from his wake time (the Mac asleep then: up to 30 minutes later, what a late reminder may still be); first
-  // seen later (the server just updated mid-day): from now, so nothing older is let out.
-  if (g.hold && !st.from) st.from = now - start < 30 * 60000 ? Math.min(start, now) : now;
+  // seen later (the server just updated mid-day): from now, so nothing older is let out. Moving: from when he woke
+  // (the wake he told may be before his first sign), first seen within 30 minutes of that sign.
+  if (g.hold && !st.from) st.from = now - (c ? c.firstSign : start) < 30 * 60000 ? Math.min(start, now) : now;
   if (g.open && st.from && !st.open) st.open = g.openAt;
   let out = null;
   const busy = busyNow((col) => recordsOf(store, col), now);
@@ -230,7 +347,11 @@ export async function morningTick({ store, push, log = () => {}, now, tz }) {
   const ask = g.ask && g.ask.key !== 'up' ? g.ask : null; // he opened the app: he's up, no need to ask
   if (greet || (g.ask && !busy)) {
     const key = greet ? (ask ? `greet:${ask.key}` : 'greet') : g.ask.key;
-    const v = coachVoice(greet ? [GREET.text, ask?.text].filter(Boolean).join(' ') : g.ask.text, { calm: true });
+    // His sleep worked out from his activity: said with the first message of his morning, once.
+    const auto = c && !st.sleepTold ? store.getRecord('sleep-log', g.night)?.data : null;
+    const sleepLine = auto?.source === 'auto' && !store.getRecord('sleep-log', g.night)?.deleted ? autoSleepText(auto, tz) : null;
+    if (sleepLine) st.sleepTold = now;
+    const v = coachVoice(greet ? [GREET.text, sleepLine, ask?.text].filter(Boolean).join(' ') : [sleepLine, g.ask.text].filter(Boolean).join(' '), { calm: true });
     const r = !greet && push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: `morning-${key}` }) : { sent: 0 };
     sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `morning:${key}` });
     if (greet) st.greet = now;
@@ -249,10 +370,29 @@ export async function morningTick({ store, push, log = () => {}, now, tz }) {
 /** For the coach, with every message: where his morning is while it is still going. */
 export function morningContext(store, now, tz) {
   const g = morningGate(store, now, tz);
-  if (!g.hold) return '';
+  const moving = movingContext(store, now, tz, g);
+  if (!g.hold || g.asleep) return moving;
+  return [moving, morningLine(store, g, tz)].filter(Boolean).join('\n');
+}
+
+/** For the coach, with every message on the moving schedule: his day as the app reads it. */
+function movingContext(store, now, tz, g) {
+  const c = g.clock ?? clockOf(store, now, tz);
+  if (!c) return '';
+  const t = (ms) => formatTime(new Date(ms), tz);
+  const night = c.wokeAt != null ? store.getRecord('sleep-log', isoDate(new Date(c.wokeAt), tz)) : null;
+  const slept = night && !night.deleted ? night.data : null;
+  const n = withDefaults(store.getRecord('settings', 'main')?.data).notify;
+  return `His day moves (moving schedule on; his words Tue 10/27: he falls asleep about 1 to 2 hours later each day): never assume a fixed wake time or bedtime (Settings' ${formatHm(n.wakeHm)} to ${formatHm(n.bedHm)} is only his usual day's length). `
+    + (c.wokeAt == null ? 'No sign of him in 36 hours: taken as asleep. '
+      : `${c.asleep ? 'Gone quiet: taken as asleep since' : 'Up since'} ${c.asleep ? t(c.asleepSince) : t(c.wokeAt)}${slept ? `; his sleep before: ${t(slept.bed)} to ${t(slept.wake)} (${slept.source === 'auto' ? 'worked out by the app from his activity, an estimate' : 'as he told it'})` : ''}; expected bedtime about ${t(c.bedAt)} (his last bedtime + ${hoursOf(n.driftMin)}). `)
+    + 'After a meal he stays up at least an hour; gone quiet after that near his bedtime = asleep until his next message, and the app logs that sleep itself (bed = his last sign, wake = his next): don\'t ask how he slept or when; if he gives other times, save them with log_sleep. If he says his schedule is steady now, switch it off with nudges (movingDay false); back on with movingDay true.';
+}
+
+function morningLine(store, g, tz) {
   const t = (ms) => formatTime(new Date(ms), tz);
   const asked = [['up', '"Are you up?"'], ['sleep', 'how he slept'], ['body', 'how his body feels']].filter(([k]) => g.state[k]).map(([k, w]) => `${w} at ${t(g.state[k])}`);
-  return `His morning (his rule, Fri 10/23): one question at a time, in this order: is he up, how he slept, how his body feels (${morningBodyText(lastWorkoutPain({ sessions: recordsOf(store, 'sessions'), sets: recordsOf(store, 'sets'), today: g.date, tz }), g.date, tz)}), then the day's plan. The app ${asked.length ? `asked ${asked.join(', ')}` : 'has asked nothing yet'}, and holds the day's reminders until that's through. When he answers one, ask the next yourself, one question, never the plan first.`;
+  return `His morning (his rule, Fri 10/23): one question at a time, in this order: ${g.clock ? '' : 'is he up, how he slept, '}how his body feels (${morningBodyText(lastWorkoutPain({ sessions: recordsOf(store, 'sessions'), sets: recordsOf(store, 'sets'), today: g.date, tz }), g.date, tz)}), then the day's plan. The app ${asked.length ? `asked ${asked.join(', ')}` : 'has asked nothing yet'}, and holds the day's reminders until that's through. When he answers one, ask the next yourself, one question, never the plan first.`;
 }
 
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */
@@ -268,13 +408,17 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
     const w = zonedTime(d, wakeOn(d), tz);
     return w > at ? w : zonedTime(addDays(d, 1), n.wakeHm, tz);
   };
-  const waits = (i) => WAIT_FOR_WAKE.has(i.kind) && !SESSION_TIMED.test(i.id || '');
+  const waits = waitsForWake;
   // His morning (morningGate): while it holds, what comes due waits; once through, it goes out then, together.
   const g = morningGate(store, now, tz);
   const from = g.state.from ?? now;
-  const held = (i) => waits(i) && i.at >= from && isoDate(new Date(i.at), tz) === today;
-  const items = [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date }))
-    .map((i) => (waits(i) && !awake(i.at) ? { ...i, at: toWake(i.at) } : i))
+  // The moving schedule (Tue 10/27): what waits for his wake time is the day he's in (movedDayItems), all of it his.
+  const c = g.clock ?? (g.asleep ? clockOf(store, now, tz) : null);
+  const held = (i) => waits(i) && i.at >= from && (c || isoDate(new Date(i.at), tz) === today);
+  const planned = c
+    ? [...[today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date })).filter((i) => !waits(i)), ...movedDayItems(store, c)]
+    : [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date })).map((i) => (waits(i) && !awake(i.at) ? { ...i, at: toWake(i.at) } : i));
+  const items = planned
     .map((i) => (g.hold && held(i) && i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, morning: 'waiting' }
       : !g.hold && g.state.from && g.openAt && held(i) && i.at < g.openAt ? { ...i, at: g.openAt, morning: 'after', heldAt: i.at } : i));
   return afterMeals(afterWorkouts(items, workoutSpans(st, recordsOf(store, 'sessions'), now, tz), now, waits), mealSpansFor(store, now, tz), st.coachReminders);
@@ -377,7 +521,11 @@ export function mealSpans({ date, tz, now, mealTimes = [], meals = [], checks = 
 export function mealSpansFor(store, now, tz) {
   const list = (col) => recordsOf(store, col);
   const st = withDefaults(store.getRecord('settings', 'main')?.data);
-  const date = isoDate(new Date(now), tz);
+  // The moving schedule: his meal times on his body clock of the day he's in (movedDayItems).
+  const c = clockOf(store, now, tz);
+  if (c && !c.body) return [];
+  if (c) tz = c.body.zone;
+  const date = c ? c.date : isoDate(new Date(now), tz);
   return mealSpans({ date, tz, now, mealTimes: st.fuel.mealTimes, meals: list('meals'), checks: list('meal-checks'), dishes: store.getMeta(DISHES) || {}, dishesOn: st.notify.kinds?.dishes !== false });
 }
 
@@ -471,16 +619,17 @@ export function nudgeInputs(store, now, tz) {
   const list = (col) => recordsOf(store, col);
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
   const st = stateFrom(store, tz);
-  const date = isoDate(new Date(now), tz);
-  const n0 = withDefaults(one('settings', 'main')).notify;
-  // His day starts when he's up (wakeHmToday), for every nudge below.
-  const n = { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
-  const health = one('health', date);
+  // His day starts when he's up (wakeHmToday), for every nudge below; on the moving schedule, the day he's in.
+  const n = hoursNow(store, now, tz);
+  const c = n.clock || null;
+  const date = c?.date ?? isoDate(new Date(now), tz);
+  const health = one('health', isoDate(new Date(now), tz));
   const plan = one('fuel', 'plan');
   // Food and supplements: his waking day (after midnight, before he has slept, still the day before).
   const food = foodDayOf(store, now, tz);
   const eaten = dayTotals(list('meals'), list('meal-estimates'), food);
-  const trained = st.trainedDates?.has?.(date) || false;
+  const since = (t) => (c ? t >= c.wokeAt && t <= now : isoDate(new Date(t), tz) === date);
+  const trained = c ? list('sessions').some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && since(x.startedAt)) : st.trainedDates?.has?.(date) || false;
   const rot = rotationDay({ last: st.last, today: date, days: st.days || {} });
   const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date: food, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
   const untimed = groups.filter((g) => !g.time && !g.afterMeal && !g.afterMeal2).flatMap((g) => g.items);
@@ -494,7 +643,7 @@ export function nudgeInputs(store, now, tz) {
     lastUserAt: Math.max(0, ...list(MSGS).filter((m) => m.role === 'user').map((m) => m.at || 0)),
     args: {
       now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm, fasting,
-      reminders: remindersFor({ ...st, date }),
+      reminders: remindersToday(store, st, date, now, tz),
       rot,
       // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
       // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
@@ -504,10 +653,11 @@ export function nudgeInputs(store, now, tz) {
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
         || scanTakenOn(list('body-scans'), date, list('scan-photos').map((p) => p.scanId)),
-      // Tue 10/27: "How did you sleep?" only once he has slept and is up (upAtToday), never while he's still up.
-      sleepLogged: Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null,
-      wokeAt: one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
-      workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && isoDate(new Date(x.endedAt), tz) === date).map((x) => x.endedAt)) || null,
+      // Tue 10/27: "How did you sleep?" only once he has slept and is up (upAtToday), never while he's still up. The
+      // moving schedule works his sleep out itself (autoSleep): never asked.
+      sleepLogged: Boolean(c) || Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null,
+      wokeAt: c ? c.wokeAt : one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
+      workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && since(x.endedAt)).map((x) => x.endedAt)) || null,
       mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan })?.mealAt ?? null,
       lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === food && m.at).map((m) => m.at)) || null,
       // His last answer to a meal question (eaten, about to cook, cooking, skipping): the after-workout meal nudge stops on it.
@@ -537,8 +687,7 @@ const DISHES = 'dishes:state';
  */
 export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   const list = (col) => recordsOf(store, col);
-  const n0 = withDefaults(store.getRecord('settings', 'main')?.data).notify;
-  const n = { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
+  const n = hoursNow(store, now, tz);
   // His waking day (Sat 10/24): a meal after midnight, before he has slept, is that day's second meal, not tomorrow's first.
   const date = foodDayOf(store, now, tz);
   const meals = list('meals').filter((m) => m.date === date);
@@ -607,7 +756,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     } else if (w?.asked && !w.done) {
       if (!open2.length) w.done = now;
       // Not before the time he set himself for being home or taking it (Fri 10/23, ownSuppsTime).
-      else if (now - w.last >= after2GapMin(w) * 60000 && !busy && awakeAt(now, tz, n.wakeHm, n.bedHm) && !heldOff('supps-after-meal', holds, now)
+      else if (now - w.last >= after2GapMin(w) * 60000 && !busy && awakeIn(n, now, tz) && !heldOff('supps-after-meal', holds, now)
         && now >= ownSuppsTime(list('coach-reminders').filter((r) => isoDate(new Date(r.at || 0), tz) >= date), open2, second.at)) {
         w.last = now;
         const k = w.n || 0;
@@ -618,7 +767,7 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     const w2 = state.after2?.[date];
     if (w2?.id === second.id && w2.asked) readyAt[second.id] = w2.done || Infinity;
   }
-  const ready = n.kinds?.dishes === false || busy || !awakeAt(now, tz, n.wakeHm, n.bedHm) || heldOff('dishes', holds, now) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now, readyAt });
+  const ready = n.kinds?.dishes === false || busy || !awakeIn(n, now, tz) || heldOff('dishes', holds, now) ? [] : dishesDue({ meals, seen: state.seen, sent: state.sent, now, readyAt });
   // Late, or already said by the coach (Thu 10/22, his words: "Why did the notification get sent right now for me to do
   // the dishes?" His 1:15 PM meal's came at 1:59 PM, after the coach's own reminder at 1:34 PM): counted, not sent.
   const said = list('coach-messages').filter((x) => x.role === 'assistant' && x.kind !== 'nudge' && /\bdish/i.test(x.text || ''));
@@ -712,7 +861,8 @@ export async function initiativeTick({ store, push, coach, log = () => {}, now, 
   if (!coach?.initiate) return null;
   const inp = nudgeInputs(store, now, tz);
   if (inp.busy || now < (inp.n.nudgePausedUntil || 0) || inp.n.kinds?.coach === false || morningGate(store, now, tz).hold) return null;
-  const awake = awakeAt(now, tz, addMinHm(inp.n.wakeHm, 60), addMinHm(inp.n.bedHm, -60));
+  // Moving schedule: an hour after he woke, while he's up.
+  const awake = inp.n.clock ? !inp.n.asleep && now - inp.n.clock.wokeAt >= 3600000 : awakeAt(now, tz, addMinHm(inp.n.wakeHm, 60), addMinHm(inp.n.bedHm, -60));
   if (!awake || now - (store.getMeta(LAST) || 0) < 10 * 60000 || now - (inp.lastUserAt || 0) < 10 * 60000) return null;
   const state = store.getMeta(INIT) || { last: 0, byKey: {} };
   if (now - state.last < INITIATIVE_GAP_MIN * 60000) return null;
@@ -742,7 +892,7 @@ const addMinHm = (hm, m) => { const [h, mm] = String(hm || '00:00').split(':').m
 export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
   const state = store.getMeta(NUDGES) || { last: 0, byKey: {} };
-  const awake = awakeAt(now, tz, inp.n.wakeHm, inp.n.bedHm) && !morningGate(store, now, tz).hold;
+  const awake = awakeIn(inp.n, now, tz) && !morningGate(store, now, tz).hold;
   if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy, pausedUntil: inp.n.nudgePausedUntil })) return null;
   const holds = holdsOf(store);
   const pick = pickNudge(nudgeCandidates({ ...inp.args, sent: state.byKey }).filter((c) => !heldOff(c.key, holds, now)), state.byKey, now);

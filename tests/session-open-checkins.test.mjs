@@ -98,7 +98,7 @@ test('through the Mac\'s nudge clock: a push day, woke 12:40 PM, no time set, no
   const dir = mkdtempSync(join(tmpdir(), 'thq-session-open-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { nudgeEveryMin: 20, wakeHm: '10:00', bedHm: '00:00', morning: { text: 'Banana', gymAfterMin: [60, 90] } } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, nudgeEveryMin: 20, wakeHm: '10:00', bedHm: '00:00', morning: { text: 'Banana', gymAfterMin: [60, 90] } } });
     store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: at('12:00') });
     store.writeLocal('sleep-log', D, { date: D, bed: at('04:00'), wake: at('12:40') });
     const sent = [];

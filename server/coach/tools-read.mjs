@@ -554,9 +554,10 @@ function noticeLines(s) {
   const weighed = s.list('measurements').some((m) => m.date === s.today && m.weightKg != null) || Boolean(health?.weights?.length)
     || s.list('body-scans').some((x) => x.date === s.today && isDone(x));
   const slept = Boolean(health?.sleep || s.one('sleep-log', s.today));
+  const moving = Boolean(s.settings().notify?.movingDay);
   return [
     recent.length ? `Your notifications to him in the last 3 hours, newest first (he may be answering one; their numbers were true when sent, possibly wrong, and the "Now:" lines are what's true now): ${recent.map((m) => `${formatTime(new Date(m.at), s.tz)} "${m.text}"`).join('; ')}.` : '',
-    `Today: weigh-in ${weighed ? 'logged' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
+    `Today: weigh-in ${weighed ? 'logged' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : moving ? 'not logged yet (the moving schedule works it out when he wakes: don\'t ask)' : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
   ].filter(Boolean);
 }
 

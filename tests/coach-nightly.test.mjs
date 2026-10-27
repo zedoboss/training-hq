@@ -22,6 +22,8 @@ const talk = () => recs('coach-messages').filter((m) => m.kind === 'nightly' || 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'thq-nightly-'));
   store = openStore(join(dir, 'db.sqlite'));
+  // The fixed schedule (the moving one has its own tests, moving-day.test.mjs).
+  store.writeLocal('settings', 'main', { notify: { movingDay: false } });
   clock = at('06:00', '2026-03-18');
   msg('m1', 'user', 'I eat beef at my last meal, always. Eggs are the first meal.', '16:37');
   msg('m2', 'assistant', 'Reminder set for 4:40 PM. It will remind you of the butter step for the eggs.', '16:37');

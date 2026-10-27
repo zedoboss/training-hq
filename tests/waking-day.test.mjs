@@ -38,7 +38,7 @@ test('slept and up since midnight: the new day, whichever says so (sleep he told
 });
 
 test('on the phone: from its local copy; a new meal takes the day it is given', async () => {
-  const docs = { 'sleep-log': {}, health: {}, sessions: [] };
+  const docs = { 'sleep-log': {}, health: {}, sessions: [], settings: { main: { notify: { movingDay: false } } } };
   const repo = { get: async (col, id) => docs[col][id] ?? null, list: async (col) => docs[col] };
   assert.equal(await wakingDayAt(repo, NIGHT, TZ), FRI);
   docs['sleep-log'][SAT] = { id: SAT, date: SAT, wake: t(SAT, '02:00') };
@@ -60,7 +60,7 @@ beforeEach(() => {
   clock = NIGHT;
   const w = (col, id, data) => store.writeLocal(col, id, data);
   w('fuel', 'plan', { kind: 'plan', kcal: 3000, proteinG: 200 });
-  w('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30' }, { name: 'Second meal', time: '18:00' }] } });
+  w('settings', 'main', { notify: { movingDay: false }, fuel: { mealTimes: [{ name: 'First meal', time: '12:30' }, { name: 'Second meal', time: '18:00' }] } });
   w('supplements', 'supp.col', { id: 'supp.col', kind: 'supplement', name: 'Collagen', short: 'collagen', dose: '10 g', days: { type: 'daily' }, status: 'active', order: 1 });
   w('sleep-log', FRI, { id: FRI, date: FRI, bed: t(FRI, '03:30'), wake: t(FRI, '10:30'), inBedMin: 420, asleepMin: 420, source: 'coach' });
   w('meals', 'm1', { id: 'm1', date: FRI, at: t(FRI, '16:59'), name: 'First meal', before: { items: [{ name: 'Udon', grams: 375, kcal: 1000, protein: 80 }], confirmedAt: t(FRI, '17:00') } });
@@ -112,7 +112,7 @@ test('the next morning, once his sleep is in, Saturday starts empty; the night m
 
 test('the app on his night: the 2:43 AM meal is Friday\'s second meal (collagen ask), not Saturday\'s first; food counts Friday', async () => {
   const { dishesTick, nudgeInputs } = await import('../server/notify.mjs');
-  store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' }, fuel: { mealTimes: [{ name: 'First meal', time: '12:30' }, { name: 'Second meal', time: '18:00' }] } });
+  store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' }, fuel: { mealTimes: [{ name: 'First meal', time: '12:30' }, { name: 'Second meal', time: '18:00' }] } });
   store.writeLocal('supplements', 'supp.col', { id: 'supp.col', kind: 'supplement', name: 'Collagen', short: 'collagen', days: { type: 'daily' }, status: 'active', order: 1, afterMeal: 'second', perTake: { train: 1, rest: 1 } });
   store.writeLocal('supplements', 'supp.d3', { id: 'supp.d3', kind: 'supplement', name: 'D3', short: 'D3', days: { type: 'daily' }, status: 'active', order: 2, afterMeal: true, perTake: { train: 1, rest: 1 } });
   const sent = [];
@@ -153,7 +153,7 @@ test('past 6:00 AM: still up from the night is the day before, to noon; a sleep 
 });
 
 test('on the phone past 6:00 AM: from its local messages, meals and ticks', async () => {
-  const docs = { 'sleep-log': {}, health: {}, sessions: [], meals: [], 'meal-checks': [], 'supp-log': [{ at: t(SAT, '05:19') }],
+  const docs = { 'sleep-log': {}, health: {}, sessions: [], settings: { main: { notify: { movingDay: false } } }, meals: [], 'meal-checks': [], 'supp-log': [{ at: t(SAT, '05:19') }],
     'coach-messages': UP_ALL_NIGHT.map((at) => ({ role: 'user', at })).concat([{ role: 'assistant', at: t(SAT, '03:30') }]) };
   const repo = { get: async (col, id) => docs[col][id] ?? null, list: async (col) => docs[col] };
   assert.equal(await wakingDayAt(repo, t(SAT, '06:45'), TZ), FRI);

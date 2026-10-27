@@ -89,7 +89,7 @@ function friday() {
   const dir = mkdtempSync(join(tmpdir(), 'thq-morning-'));
   const store = openStore(join(dir, 'db.sqlite'));
   store.writeLocal('settings', 'main', {
-    notify: { wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 30, holdsMorning: '09:30', holdsEvening: '21:30', kinds: { walk: false } },
+    notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 30, holdsMorning: '09:30', holdsEvening: '21:30', kinds: { walk: false } },
     fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }] },
   });
   store.writeLocal('tendons', 'area.knees', { kind: 'area', id: 'knees', label: 'Knees', phase: 'heal', holds: [{ exercise: 'Toes Wall Squat Hold', where: 'home' }], loadsArea: { exercises: [] } });
@@ -280,7 +280,7 @@ test('no greeting: he wrote first, a workout runs, nudges are off, the Mac saw t
   // Nudges off: no morning, no greeting.
   f = friday();
   try {
-    f.store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 0 } });
+    f.store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 0 } });
     opens(f, '11:00'); await f.run('11:00', '11:05');
     assert.equal(greeted(f), false, 'nudges off');
   } finally { f.done(); }

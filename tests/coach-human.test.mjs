@@ -62,7 +62,7 @@ test('initiative tick: the coach writes it, pushed and in Talk; one per 3 hours;
   const dir = mkdtempSync(join(tmpdir(), 'thq-init-'));
   const store = openStore(join(dir, 'db.sqlite'));
   try {
-    store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00' } });
+    store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00' } });
     store.writeLocal('schedule', 'neck', { planned: true, place: 'after-push', on: '2026-03-15' });
     // He's up: the phone opened the app (Sat 10/24: no sign of him, the day waits for him).
     store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: at('10:05') });

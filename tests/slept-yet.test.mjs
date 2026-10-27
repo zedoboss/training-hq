@@ -21,7 +21,7 @@ const SLEEPQ = /How did you sleep|Are you up/;
 function night() {
   const dir = mkdtempSync(join(tmpdir(), 'thq-slept-'));
   const store = openStore(join(dir, 'db.sqlite'));
-  store.writeLocal('settings', 'main', { notify: { wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 30, kinds: { walk: false } } });
+  store.writeLocal('settings', 'main', { notify: { movingDay: false, wakeHm: '10:00', bedHm: '00:00', nudgeEveryMin: 30, kinds: { walk: false } } });
   const sent = [];
   const push = { list: () => [{}], notify: async (m) => { sent.push({ ...m, at: now }); return { sent: 1, failed: 0 }; } };
   let now = T('00:00');
