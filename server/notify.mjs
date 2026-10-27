@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, awaySuppsText, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
@@ -732,9 +732,12 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       const opts = voiceOpts(store);
       // Eaten out (Fri 10/23, his words): they're at home, so "when you're back home", no push line, and the nudges ask
       // "back home yet?" later (nudgeCandidates).
+      // Logged hours after he ate it (Wed 10/28): he's home by now, so one question, no "back home" (lib/nudges.js loggedLate).
       const away = ateOut(first, holds);
+      const late = away && loggedLate(first.at, now);
       const line = away ? null : pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
-      const body = away ? `${first.name || 'First meal'} logged. You ate out, so take your supplements when you're back home: ${open.join(', ')}. I'll remind you later.`
+      const body = late ? lateSuppsText(first.name || 'First meal', open)
+        : away ? `${first.name || 'First meal'} logged. You ate out, so take your supplements when you're back home: ${open.join(', ')}. I'll remind you later.`
         : `${first.name || 'First meal'} logged. Take your supplements now: ${open.join(', ')}.${line?.text ? ` ${line.text}` : ''}`;
       const r = push.list().length ? await push.notify({ title: 'Coach', body, url: '#/supps', tag: 'supps-after-meal' }) : { sent: 0 };
       sayInTalk(store, { text: body, at: now, tz, kind: 'nudge', ref: `supps-after-meal:${first.id}` });
@@ -765,10 +768,12 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       log(`after second meal: ${text.slice(0, 60)} (${r.sent} sent)`);
       out = { key: 'supps-after-meal-2', body };
     };
+    // Logged hours after he ate it (Wed 10/28): one question, then no check-ins (n past the last of AWAY_CHECK_MIN).
+    const late = away && loggedLate(second.at, state.seen[second.id]);
     if (!w && mealEatenAt(second, state.seen[second.id]) <= now && !heldOff('supps-after-meal', holds, now)) {
-      state.after2 = { [date]: { id: second.id, asked: open2.length ? now : null, last: now, done: open2.length ? null : now, ...(away ? { everyMin: AWAY_REMIND_MIN } : {}) } };
+      state.after2 = { [date]: { id: second.id, asked: open2.length ? now : null, last: now, done: open2.length ? null : now, ...(away ? { everyMin: AWAY_REMIND_MIN } : {}), ...(late ? { n: AWAY_CHECK_MIN.length } : {}) } };
       if (open2.length) {
-        await say(away ? `${second.name || 'Second meal'} done. You ate out, so take your ${open2.join(', ')} when you're back home. I'll remind you in ${AWAY_REMIND_MIN} minutes.`
+        await say(late ? lateSuppsText(second.name || 'Second meal', open2) : away ? `${second.name || 'Second meal'} done. You ate out, so take your ${open2.join(', ')} when you're back home. I'll remind you in ${AWAY_REMIND_MIN} minutes.`
           : `${second.name || 'Second meal'} done. Get up and take your ${open2.join(', ')} now. I'll ask again every ${AFTER_MEAL2_BUMP_MIN} minutes until you tick it.`, 'supps-after-meal-2');
       }
     } else if (w?.asked && !w.done) {

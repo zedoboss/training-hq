@@ -157,6 +157,9 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Mon 10/26 (Sunday's pizza out: "Back home yet?" 11 times, 5:42 to 11:55 PM, every 30 to 45 minutes, the same
   // words): a meal out gets AWAY_CHECK_MIN's few check-ins, each in new words, the first AWAY_REMIND_MIN after he told
   // me about the meal, then quiet.
+  // Wed 10/28 (a 7:00 PM meal out logged at 12:32 AM got "take them when you're back home... I'll remind you later"): a
+  // meal out logged AWAY_LATE_MIN or more after he ate it gets one question when logged (dishesTick), no check-ins.
+  if (suppsAfterMeal?.away && loggedLate(suppsAfterMeal.mealAt, suppsAfterMeal.toldAt)) suppsAfterMeal = null;
   if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && suppsAfterMeal.away) {
     const own = ownSuppsTime(reminders, suppsAfterMeal.open, suppsAfterMeal.mealAt);
     const start = Math.max(Math.max(suppsAfterMeal.mealAt, suppsAfterMeal.toldAt || 0) + AWAY_REMIND_MIN * 60000, own);
@@ -383,6 +386,24 @@ export const AWAY_REMIND_MIN = 30;
  * the check-ins this many minutes after the first one, then nothing more about it that day.
  */
 export const AWAY_CHECK_MIN = [0, 60, 120];
+/**
+ * A meal out logged this long after he ate it (Wed 10/28, his words: "You obviously ate earlier, and I assume you did not
+ * take the supplements. Let me know if I'm wrong"): he's home by now, so no "when you're back home" and no "back home
+ * yet?" check-ins; one question when it's logged (lateSuppsText).
+ */
+export const AWAY_LATE_MIN = 120;
+
+/** Was the meal (eaten at mealAt) logged AWAY_LATE_MIN or more after it? toldAt: when the Mac first saw it logged. */
+export function loggedLate(mealAt, toldAt) {
+  return Number.isFinite(mealAt) && Number.isFinite(toldAt) && toldAt - mealAt >= AWAY_LATE_MIN * 60000;
+}
+
+/** The one question after a meal out logged late (loggedLate). */
+export function lateSuppsText(meal, names = []) {
+  const one = names.length === 1;
+  return `${meal} logged. You ate a while ago, so I'm guessing ${one ? `your ${names[0]} isn't` : `your supplements aren't`} taken yet${one ? '' : `: ${names.join(', ')}`}. Am I wrong?`;
+}
+
 /** At least this long between two of them (one held back by a session or a quiet spell doesn't bunch with the next). */
 const AWAY_SPACE_MIN = 45;
 

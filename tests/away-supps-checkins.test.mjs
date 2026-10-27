@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { nudgeCandidates, pickNudge, awaySuppsText, after2GapMin, AWAY_CHECK_MIN } from '../app/js/lib/nudges.js';
+import { nudgeCandidates, pickNudge, awaySuppsText, after2GapMin, AWAY_CHECK_MIN, AWAY_LATE_MIN, loggedLate, lateSuppsText } from '../app/js/lib/nudges.js';
 import { openStore } from '../server/store.mjs';
 import { dishesTick, nudgeTick } from '../server/notify.mjs';
 
@@ -104,4 +104,66 @@ test('a check-in held back (a session, a quiet spell) does not bunch with the ne
   const hm = nudgeCandidates({ ...base, now: at('17:00'), suppsAfterMeal: { ...sa, away: false } }).find((x) => x.key === 'supps-after-meal');
   assert.match(hm.text, /^First meal logged: take your supplements now/);
   assert.equal(hm.gapMin, 30);
+});
+
+// Wed 10/28: udon out at 7:00 PM, logged by the coach at 12:32 AM on his word, after hours off the phone. "You ate out, so
+// take your supplements when you're back home... I'll remind you later" made no sense. His words: "You obviously ate
+// earlier, and I assume you did not take the supplements. Let me know if I'm wrong."
+test('a meal out logged hours after he ate it: one question, no "back home", no check-ins', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-away-late-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    setUp(store);
+    store.writeLocal('settings', 'main', { notify: { nudgeEveryMin: 20, wakeHm: '10:00', bedHm: '02:00' } });
+    const sent = [];
+    let now;
+    const push = { list: () => [{}], notify: async (m) => { sent.push({ ...m, at: now }); return { sent: 1, failed: 0 }; } };
+    const run = async (from, to) => { for (now = from; now <= to; now += 60000) { await dishesTick({ store, push, now, tz: TZ }); await nudgeTick({ store, push, now, tz: TZ }); } };
+    await run(at('18:00'), at('18:00'));
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at('19:00'), name: 'First meal', source: 'manual', by: 'coach', away: true, before: { items: [{ name: 'Udon', grams: 375, kcal: 500, protein: 20 }] } });
+    const logged = at('19:00') + (5 * 60 + 32) * 60000; // 12:32 AM
+    await run(logged, logged + 3 * 3600000);
+    const ask = sent.filter((m) => m.tag === 'supps-after-meal');
+    assert.equal(ask.length, 1);
+    assert.equal(ask[0].body, `First meal logged. You ate a while ago, so I'm guessing your supplements aren't taken yet: ${NAMES.join(', ')}. Am I wrong?`);
+    assert.doesNotMatch(ask[0].body, /back home|remind you/);
+    assert.deepEqual(sent.filter((m) => /supps-after-meal/.test(m.tag) && m !== ask[0]), [], 'no "back home yet?" afterwards');
+    assert.equal(sent.some((m) => /back home|home by now|meal out/i.test(m.body)), false);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a meal out logged soon after: unchanged, "when you\'re back home" and the check-ins', () => {
+  assert.equal(AWAY_LATE_MIN, 120);
+  assert.equal(loggedLate(at('16:30'), at('18:29')), false);
+  assert.equal(loggedLate(at('16:30'), at('18:30')), true);
+  assert.equal(loggedLate(at('16:30'), null), false, 'not known when it was logged: the usual way');
+  const base = { tz: TZ, wakeHm: '00:00', bedHm: '23:59', sleepLogged: true };
+  const c = (told, hm) => nudgeCandidates({ ...base, now: at(hm), suppsAfterMeal: { open: NAMES, mealAt: at('16:30'), toldAt: at(told), away: true } }).filter((x) => x.key.startsWith('supps-after-meal'));
+  assert.equal(c('17:30', '18:00').length, 1, 'logged an hour after: "back home yet?" as before');
+  assert.deepEqual(c('19:00', '19:30'), [], 'logged 2.5 hours after: no check-in');
+  assert.deepEqual(c('19:00', '22:00'), []);
+  // At home, logged late: unchanged (take them now).
+  const home = nudgeCandidates({ ...base, now: at('19:30'), suppsAfterMeal: { open: NAMES, mealAt: at('16:30'), toldAt: at('19:00'), away: false } });
+  assert.match(home.find((x) => x.key === 'supps-after-meal').text, /^First meal logged: take your supplements now/);
+  assert.equal(lateSuppsText('Dinner', ['collagen']), 'Dinner logged. You ate a while ago, so I\'m guessing your collagen isn\'t taken yet. Am I wrong?');
+});
+
+test('the second meal out logged hours later: one question, no check-ins', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'thq-away-late2-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  try {
+    setUp(store);
+    for (const id of ['supp.d3', 'supp.om', 'supp.ash']) store.writeLocal('supp-log', `${D}:${id}`, { id: `${D}:${id}`, date: D, suppId: id, status: 'taken', at: at('13:00') });
+    const sent = [];
+    let now = at('12:00');
+    const push = { list: () => [{}], notify: async (m) => { sent.push({ ...m, at: now }); return { sent: 1, failed: 0 }; } };
+    const run = async (from, to) => { for (now = at(from); now <= at(to); now += 60000) await dishesTick({ store, push, now, tz: TZ }); };
+    await run('12:00', '12:00');
+    store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at('12:30'), name: 'Lunch', source: 'manual', before: { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }] } });
+    await run('12:31', '19:59');
+    store.writeLocal('meals', 'm2', { id: 'm2', date: D, at: at('17:30'), name: 'Dinner', source: 'manual', away: true, before: { items: [{ name: 'Pho', grams: 500, kcal: 600, protein: 30 }] } });
+    await run('20:00', '23:59');
+    const two = sent.filter((m) => m.tag === 'supps-after-meal-2');
+    assert.deepEqual(two.map((m) => [hmOf(m.at), m.body]), [['20:00', 'Dinner logged. You ate a while ago, so I\'m guessing your collagen isn\'t taken yet. Am I wrong?']]);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
