@@ -111,9 +111,12 @@ export function heldPlanText(items, { now, tz, max = 150 } = {}) {
   return join(asks.slice(0, n)) + more(n);
 }
 
-// Which planned reminders are nudged again while still open: [key prefix, priority, minutes between nudges].
+// Which planned reminders are nudged again while still open: [key prefix, priority, minutes between nudges, once].
 // Not holds (Sat 10/24): they have their own few check-ins (lib/reminders.js HOLDS_CHECK), not every hour.
-const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps: ['supps', 60, 45], recovery: ['recovery', 40, 120] };
+// The first nudge waits those minutes after the reminder itself too; once: a single follow-up (Thu 10/29, his words on
+// Wednesday's surgery check-in at 5:05 AM and again at 5:15 AM, word for word: it goes out once, any follow-up later and
+// in new words; the reminder's own againText when it has one).
+const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps: ['supps', 60, 45], recovery: ['recovery', 40, 120, true] };
 
 /**
  * Everything worth a nudge right now, most important first.
@@ -258,12 +261,14 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     const a = AGAIN[r.kind];
     // A one-off message (again: false) is not nudged again (Thu 10/22 audit: "Head home", the step-up question and the
     // after photo came back every half hour or hour); repeats the planner sends itself (group) aren't doubled.
-    if (!a || !r.due || r.again === false || r.group || r.at > now || r.at < now - 16 * 3600000) continue;
+    // From when it really went out (sentAt, from the Mac; null: not yet, so nothing to follow up).
+    const from = r.sentAt === undefined ? r.at : r.sentAt;
+    if (!a || !r.due || r.again === false || r.group || from == null || from > now - a[2] * 60000 || r.at < now - 16 * 3600000) continue;
     // A meal ask isn't nudged here: its own check-ins follow it (lib/fuel-reminders.js; Fri 10/23, "First meal is late"
     // came on top of them, and after the last meal's time).
     const title = String(r.title || '').replace(/[.:]?\s*$/, '');
-    out.push({ key: `${a[0]}:${r.tag || r.id}`, priority: a[1], gapMin: a[2], url: r.url || '#/', calm: CALM_KINDS.has(r.kind),
-      text: [/[?!]$/.test(title) ? title : `${title}.`, r.body].filter(Boolean).join(' ') });
+    out.push({ key: `${a[0]}:${r.tag || r.id}`, priority: a[1], gapMin: a[3] ? ONCE_MIN : a[2], url: r.url || '#/', calm: CALM_KINDS.has(r.kind),
+      text: r.againText || [/[?!]$/.test(title) ? title : `${title}.`, r.body].filter(Boolean).join(' ') });
   }
 
   // Food behind the day's pace (wake up to 2 hours before bed).

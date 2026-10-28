@@ -107,16 +107,19 @@ export function recoveryReminders({ date, tz, plan, state = null, notes = [], ph
   const taskLine = tasks.length ? `Still to do: ${tasks.map((t) => t.text.charAt(0).toLowerCase() + t.text.slice(1)).join('; ')}.` : '';
   const every = plan.checkIn?.askAgainDays || 2;
   if (st.active && st.due && daysBetween(st.dueOn, date) % every === 0) {
-    const asks = (plan.checkIn.questions || []).map((q) => q.ask || q.label).join(' ');
-    out.push({ ...base, id: `recovery-checkin:${date}`, at: zonedTime(date, hm, tz), tag: 'recovery-checkin', title: `${title}: weekly check-in`, body: [asks, taskLine].filter(Boolean).join(' '), due: true });
+    const qs = plan.checkIn.questions || [];
+    const asks = qs.map((q) => q.ask || q.label).join(' ');
+    out.push({ ...base, id: `recovery-checkin:${date}`, at: zonedTime(date, hm, tz), tag: 'recovery-checkin', title: `${title}: weekly check-in`, body: [asks, taskLine].filter(Boolean).join(' '), againText: checkInAgainText(title, qs), due: true });
   } else if (tasks.length && daysBetween(plan.checkIn?.from || plan.since, date) % 7 === 0) {
-    out.push({ ...base, id: `recovery-tasks:${date}`, at: zonedTime(date, hm, tz), tag: 'recovery-tasks', title: `${title}: still to do`, body: taskLine, due: true });
+    out.push({ ...base, id: `recovery-tasks:${date}`, at: zonedTime(date, hm, tz), tag: 'recovery-tasks', title: `${title}: still to do`, body: taskLine,
+      againText: `${title}, your list is still open: ${tasks.map((t) => t.text.charAt(0).toLowerCase() + t.text.slice(1)).join('; ')}. Done any of it? Tell me, or tick it in Body > Recovery.`, due: true });
   }
   const ph = photoStatus(plan, photos, date);
   if (ph?.due && daysBetween(ph.dueOn, date) % 7 === 0) {
     out.push({
       ...base, id: `recovery-photos:${date}`, at: zonedTime(date, addMinutesHm(hm, 5), tz), tag: 'recovery-photos', url: '#/body/recovery', title: `${title}: photos`,
       body: `${ph.last ? `Last ones ${dayText(ph.last)}.` : 'None yet.'} ${plan.photos.how || ''}`.trim(), due: !ph.takenToday,
+      againText: `${title} photos still not taken today. ${plan.photos.poses?.length || 'A few'} quick shots in Body > Recovery.`,
     });
   }
   const cu = state?.checkup?.date;
@@ -125,6 +128,22 @@ export function recoveryReminders({ date, tz, plan, state = null, notes = [], ph
     out.push({ ...base, id: `recovery-checkup:${cu}`, at: zonedTime(date, hm, tz), tag: 'recovery-checkup', title: 'Checkup tomorrow', body: `${dayText(cu)}.${qs.length ? ` Your list for it: ${qs.join('; ')}.` : ''}`, again: false, due: true });
   }
   return out;
+}
+
+/**
+ * The follow-up to an unanswered weekly check-in, in other words than the check-in itself (Thu 10/29: the same check-in
+ * went out twice, word for word, ten minutes apart): "Surgery recovery: no answer yet. Tenderness and puffiness: gone,
+ * less, same or more? Anything new? One line does it."
+ */
+export function checkInAgainText(title, questions = []) {
+  const and = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs[0] || '');
+  const or = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}` : xs[0] || '');
+  const low = (t) => String(t || '').charAt(0).toLowerCase() + String(t || '').slice(1);
+  const rated = questions.filter((q) => q.choices?.length);
+  const open = questions.filter((q) => !q.choices?.length).map((q) => `${q.label || q.ask}`.replace(/[?.]*$/, '?'));
+  const head = rated.length ? and(rated.map((q) => low(q.label || q.key))) : '';
+  const scale = rated.length ? `${head.charAt(0).toUpperCase()}${head.slice(1)}: ${or(rated[0].choices.map(low))}?` : '';
+  return [`${title}: no answer yet.`, scale, ...open, 'One line does it.'].filter(Boolean).join(' ');
 }
 
 /** The coach's lines for today: where he is, and what is due (so the coach asks, never works out dates itself). */

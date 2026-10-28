@@ -193,6 +193,7 @@ function movedDayItems(store, c) {
     ...i, at: Math.max(i.at, c.wokeAt), bodyAt: i.at,
     ...(i.title != null ? { title: realText(i.title, c.body.shiftMin) } : {}),
     ...(i.body != null ? { body: realText(i.body, c.body.shiftMin) } : {}),
+    ...(i.againText != null ? { againText: realText(i.againText, c.body.shiftMin) } : {}),
   }));
 }
 
@@ -655,13 +656,15 @@ export function nudgeInputs(store, now, tz) {
   const firstMeal = list('meals').filter((m) => m.date === food && m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[0];
   const firstMealAt = firstMeal ? firstMeal.at : NaN;
   const fasting = fastingOn(st.days || {}, date, list('meals'));
+  const wentOut = store.getMeta(SENT) || {};
   return {
     date, n, fasting,
     busy: busyNow(list, now),
     lastUserAt: Math.max(0, ...list(MSGS).filter((m) => m.role === 'user').map((m) => m.at || 0)),
     args: {
       now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm, fasting,
-      reminders: remindersToday(store, st, date, now, tz),
+      // When each one really went out (held for his morning or a workout, later than planned); null = not yet.
+      reminders: remindersToday(store, st, date, now, tz).map((i) => ({ ...i, sentAt: wentOut[i.id] ?? null })),
       rot,
       // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
       // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
