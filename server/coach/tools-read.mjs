@@ -19,7 +19,7 @@ import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/m
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
-import { walkLines, usualWalkHm, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
+import { walkLines, usualWalkHm, walkSteps, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
 import { activeHolds } from '../../app/js/lib/holdoffs.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
@@ -353,9 +353,10 @@ function rainNowLines(w, s) {
 export function walkTextLines(s, { week = false } = {}) {
   if (s.settings().notify?.kinds?.walk === false) return [];
   const docs = s.list('walks');
-  const health = s.one('health', s.today);
-  const steps = health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null;
-  const lines = walkLines(docs, { today: s.today, now: s.now, tz: s.tz, steps, goal: s.settings().body?.stepGoal || 8000, usualHm: usualWalkHm(docs, { today: s.today, tz: s.tz }) });
+  // His waking day, as the walk questions count it (Thu 10/29).
+  const day = s.foodDay();
+  const steps = walkSteps(day, s.today, (d) => s.one('health', d));
+  const lines = walkLines(docs, { today: day, now: s.now, tz: s.tz, steps, goal: s.settings().body?.stepGoal || 8000, usualHm: usualWalkHm(docs, { today: day, tz: s.tz }) });
   // Wed 10/21: UV (Open-Meteo, his area), so walks are planned at UV under 3; UV only since Tue 10/27.
   const w = s.store.getMeta?.('weather');
   const nowH = (w?.hours || []).find((h) => h.at <= s.now && s.now < h.at + 3600000);

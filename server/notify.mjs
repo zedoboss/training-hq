@@ -10,7 +10,7 @@ import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
-import { walkDue, withAsk, withAnswer, usualWalkHm } from '../app/js/lib/walks.js';
+import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
 import { dayClock, bodyClock, realTimes } from '../app/js/lib/moving-day.js';
@@ -854,11 +854,16 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const a = inp.args;
   if (a.workoutEndedAt && now >= a.workoutEndedAt && now - a.workoutEndedAt < AFTER_WORKOUT_QUIET_MIN * 60000) return null;
   if (now - (store.getMeta(LAST) || 0) < 2 * 60000 || now - (inp.lastUserAt || 0) < 60000) return null;
-  const date = isoDate(new Date(now), tz);
+  // His waking day, like his meals (Thu 10/29: at 12:00 AM, still up, a new day's walk ask went out and its check-ins
+  // till 2:00 AM); on the moving schedule only what happened since he woke counts.
+  const date = foodDayOf(store, now, tz);
   const docs = store.listRecords('walks').map((r) => r.data).filter(Boolean);
   const doc = docs.find((d) => d.date === date) || null;
+  const view = dayPart(doc, inp.n.clock?.wokeAt ?? null);
+  const health = (d) => { const r = store.getRecord('health', d); return r && !r.deleted ? r.data : null; };
+  const steps = walkSteps(date, isoDate(new Date(now), tz), health);
   const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
-  const due = walkDue({ now, tz, doc, steps: a.steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather'), homeAt: doc?.going ? homeSince(store, doc.going.at) : 0 });
+  const due = walkDue({ now, tz, doc: view, steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather'), homeAt: view?.going ? homeSince(store, view.going.at) : 0 });
   if (!due) return null;
   const v = coachVoice(due.text, { ...voiceOpts(store), calm: due.calm });
   const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };

@@ -980,7 +980,8 @@ async function holdOff(a, ctx) {
 /** His answer to a walk question (Tue 10/20): a time, going now, done, or not now. */
 async function walkAnswer(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
-  const date = s.today;
+  // His waking day, the same record the walk questions use (Thu 10/29).
+  const date = s.foodDay();
   const doc = s.one('walks', date);
   const t = (ms) => timeText(ms, s.tz);
   if (a.action === 'plan') {

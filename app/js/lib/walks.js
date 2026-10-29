@@ -160,9 +160,38 @@ const lastOf = (a) => a[a.length - 1] || null;
 export function stepsText({ steps, goal, now, tz }) {
   if (!goal) return '';
   const fresh = steps?.steps != null && steps.asOf && now - steps.asOf <= WALK.freshMs;
-  if (!fresh) return `No step count from your phone since ${steps?.asOf ? formatHm(hmOf(new Date(steps.asOf), tz)) : 'this morning'} (opening the app sends it). Goal ${nf(goal)}.`;
+  // Thu 10/29: "since this morning" went out at 12:00 AM. No reading at all is "yet today", whatever the hour.
+  if (!fresh) return `No step count from your phone ${steps?.asOf ? `since ${formatHm(hmOf(new Date(steps.asOf), tz))}` : 'yet today'} (opening the app sends it). Goal ${nf(goal)}.`;
   const left = Math.max(0, goal - steps.steps);
   return `${nf(steps.steps)} of ${nf(goal)} steps as of ${formatHm(hmOf(new Date(steps.asOf), tz))}: ${nf(left)} to go, about ${Math.max(5, Math.ceil(left / WALK.stepsPerMin / 5) * 5)} minutes of walking.`;
+}
+
+/**
+ * The steps of his waking day `day` (Apple Health counts by calendar day): past midnight, before he has slept, that
+ * day's count plus the new calendar day's (Thu 10/29: at 12:00 AM the new day had none, "no step count" while
+ * Wednesday's 7,337 were there). `one(date)` gives the health record of a date. Null when neither has a count.
+ */
+export function walkSteps(day, today, one) {
+  const a = one(day), b = day !== today ? one(today) : null;
+  if (a?.steps == null && b?.steps == null) return null;
+  return { steps: (a?.steps || 0) + (b?.steps || 0), asOf: Math.max(a?.fileAt || 0, b?.fileAt || 0) || null };
+}
+
+/**
+ * The record as it stands since `from` (when he woke, on the moving schedule): asks, answers, plans, walks and skips
+ * from an earlier stretch awake don't count for this one (Thu 10/29: Wednesday's record held Tuesday night's
+ * 12:00-2:00 AM asks, so his Wednesday evening got none).
+ */
+export function dayPart(doc, from) {
+  if (!doc || !from) return doc;
+  const after = (x) => (x?.at ?? 0) >= from;
+  return {
+    ...doc, asks: doc.asks.filter(after), walks: doc.walks.filter(after), skips: doc.skips.filter(after),
+    answeredAt: (doc.answeredAt || 0) >= from ? doc.answeredAt : null,
+    plan: doc.plan && (doc.plan.setAt ?? doc.plan.at) >= from ? doc.plan : null,
+    going: after(doc.going) ? doc.going : null,
+    goalAt: (doc.goalAt || 0) >= from ? doc.goalAt : null,
+  };
 }
 
 /** The hour he usually walks, from the last two weeks of plans and walks (memory), as "HH:00", or null. */
@@ -274,7 +303,14 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     return null;
   }
   if (!last || (skip && skip.at > last.at)) {
-    return { kind: 'ask', text: withRain(`${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${st} Go out for a walk now${risk === 'caution' ? ` (${weatherWords(nowH)}: shade and a hat)` : ''}.${usualHm ? ` You usually go around ${formatHm(usualHm)}.` : ''} When are you going?`) };
+    // His usual hour (Thu 10/29: "Go out for a walk now. You usually go around 8:00 PM." at 12:00 AM): still ahead in
+    // his day, more than half an hour away: ask if he's going then, no "go now". Past it: go now. After his last ask
+    // time: not said.
+    const fast = fasting ? 'Fasting today, so moving is the job. ' : '';
+    const u = usualHm ? minOf(usualHm) + (minOf(usualHm) < wake && bed > 1440 ? 1440 : 0) : null;
+    const usual = u != null && u <= bed - cfg.stopBeforeBedMin ? formatHm(usualHm) : null;
+    if (usual && u - at > 30) return { kind: 'ask', text: `${fast}Walk: ${st} You usually go around ${usual}. Going then, or another time?` };
+    return { kind: 'ask', text: withRain(`${fast}Walk: ${st} Go out for a walk now${risk === 'caution' ? ` (${weatherWords(nowH)}: shade and a hat)` : ''}.${usual ? ` You usually go around ${usual}${at - u > 30 ? `; it's past that` : ''}.` : ''} When are you going?`) };
   }
   if (answered(last.at)) {
     return now - Math.max(d.answeredAt, since) >= cfg.againMin * 60000 ? { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` } : null;
