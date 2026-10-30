@@ -753,6 +753,9 @@ test('walk (Tue 10/20): "in an hour" sets the time and says it back; going, done
 test('human coach (Wed 10/21): fast, hold_off, neck_plan, sauna later and the doctor answer', async () => {
   const f = await call('fast', { action: 'start', said: 'Today I fast' });
   assert.match(f.text, /^Tuesday 1\/20 is a fasting day: no cooking, meal-time, food or supplement prompts; skipped \(fasting\): powder, caps\./);
+  assert.match(f.text, /Walks stay on: ask when he's going, never order it/);
+  assert.doesNotMatch(f.text, /Walks are the push/);
+  assert.match(contextLine({ store, tz: TZ, now: NOW }), /FASTING today.*walks stay on: ask when he's going, never order it/);
   assert.equal(list('days').find((d) => d.date === '2026-01-20').fast.said, 'Today I fast');
   assert.deepEqual(list('supp-log').map((e) => [e.status, e.reason]), [['skipped', 'fasting'], ['skipped', 'fasting']]);
   assert.match((await call('fast', { action: 'end' })).text, /^Fast ended at 3:00 AM/);

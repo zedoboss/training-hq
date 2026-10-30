@@ -873,7 +873,7 @@ async function fastDay(a, ctx) {
       skipped.push(i.supp.short || i.supp.name);
     }
   }
-  return wrote(`${dayText(date, s.today)} is a fasting day: no cooking, meal-time, food or supplement prompts${skipped.length ? `; skipped (fasting): ${skipped.join(', ')}` : ''}. Walks are the push; no sauna that day (his checklist wants food in the last few hours). Acknowledge in one line; no lecture.`, `fasting ${date === s.today ? 'today' : date}`);
+  return wrote(`${dayText(date, s.today)} is a fasting day: no cooking, meal-time, food or supplement prompts${skipped.length ? `; skipped (fasting): ${skipped.join(', ')}` : ''}. Walks stay on: ask when he's going, never order it; no sauna that day (his checklist wants food in the last few hours). Acknowledge in one line; no lecture.`, `fasting ${date === s.today ? 'today' : date}`);
 }
 
 /** His hold path (Thu 10/22): start it, step up (after he confirms), not yet, or back one stage. */

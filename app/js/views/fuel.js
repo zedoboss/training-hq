@@ -182,7 +182,7 @@ export function render(view, params) {
       </div>
       <h1 class="view-title">Fuel</h1>
       ${fasting ? `<section class="card pad-card fuel-fast" id="f-fast"><div class="hud c-cyan">FASTING ${date === today ? 'TODAY' : ''} · SINCE ${esc(formatTime(new Date(fast.at)).toUpperCase())}</div>
-        <p class="hint c-text">No food target, no cooking, meal-time or supplement reminders ${date === today ? 'today' : 'that day'}. Walks are the push. ${date === today ? 'Tomorrow is back to normal by itself; logging a meal ends the fast now.' : ''}</p>
+        <p class="hint c-text">No food target, no cooking, meal-time or supplement reminders ${date === today ? 'today' : 'that day'}. Walks stay on. ${date === today ? 'Tomorrow is back to normal by itself; logging a meal ends the fast now.' : ''}</p>
         ${date === today ? '<button class="btn-ghost" id="f-fast-end" type="button">End the fast</button>' : ''}</section>` : ''}
       <section class="card pad-card fuel-totals" id="f-totals"${fasting ? ' hidden' : ''}>
         <div class="fuel-total"><span class="hud c-muted">KCAL</span><b>${n0(t.kcal)}</b>${tg ? `<small>${tg.kcal > t.kcal ? `${n0(tg.kcal - t.kcal)} to go` : 'target reached'}</small>` : ''}</div>

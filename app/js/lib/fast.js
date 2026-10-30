@@ -1,7 +1,7 @@
 // A fasting day (Wed 10/21, his words: "I told him that I'm gonna fast. Why is he asking me to cook? And that I should
 // [take] supplements. Obviously, I'm fasting, so I'm not gonna get any... He can say, still, go for a walk"). Kept on
 // the day record: days/<date>.fast = {at, by, said, endedAt?}. While it runs: no cooking, meal-time, food or
-// supplement prompts; walks are the push; no sauna (his own checklist wants food and water in the last few hours).
+// supplement prompts; walks stay on, asked, never ordered (Sat 10/31); no sauna (his own checklist wants food and water in the last few hours).
 // A meal logged after the fast began ends it (he broke it).
 
 /** Is he fasting on this date? meals: that day's meals (a meal after the fast began ends it). */

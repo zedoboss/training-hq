@@ -452,7 +452,7 @@ export function contextLine({ store, tz, now, screen = null }) {
 function situationLines(s) {
   const out = [...walkTextLines(s)];
   const f = s.days()[s.today]?.fast;
-  if (fastingOn(s.days(), s.today, s.list('meals'))) out.push(`He is FASTING today (his decision, ${timeText(f.at, s.tz)}${f.said ? `: "${f.said}"` : ''}): the app sends no food, cooking or supplement prompts. Never argue it or count his kcal against him; walks are the push; no sauna today (his checklist wants food in the last few hours). If he eats, the fast ends.`);
+  if (fastingOn(s.days(), s.today, s.list('meals'))) out.push(`He is FASTING today (his decision, ${timeText(f.at, s.tz)}${f.said ? `: "${f.said}"` : ''}): the app sends no food, cooking or supplement prompts. Never argue it or count his kcal against him; walks stay on: ask when he's going, never order it; no sauna today (his checklist wants food in the last few hours). If he eats, the fast ends.`);
   const holds = activeHolds(s.list('coach-holds'), s.now);
   if (holds.length) out.push(`He asked the app to hold off (it does): ${holds.map((h) => `${h.areas.join(', ')} until ${dayText(s.date(h.until), s.today)} ${timeText(h.until, s.tz)}${h.reason ? ` (${h.reason})` : ''} [id ${h.id}]`).join('; ')}.`);
   out.push(...changeLines(s));
