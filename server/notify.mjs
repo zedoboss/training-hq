@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
@@ -125,6 +125,50 @@ function signsOf(store, since, now) {
     ...(store.getMeta(APP_OPENS)?.at || []),
     // Not Apple Health: its Shortcut also runs on timers (10:30 AM, 7:30 PM, 11:59 PM) while he sleeps.
   ].filter((t) => Number.isFinite(t) && t >= since && t <= now).sort((a, b) => a - b);
+}
+
+// Sat 10/31 (the nightly review, his words on Fri 10/30: "Morning. How did you sleep? When did you go to bed and when
+// did you wake up?"): the phone had been cut off from the Mac since Wednesday, so his Thursday looked like one long
+// night and the start of Push at 2:05 AM like him waking. Opening the app at 5:49 AM got the question, 2 h 42 min after
+// Push ended at 3:07 AM, with his steps still rising; he hadn't slept. Now no sleep or morning ask until 4 quiet hours
+// have passed with no workout, steps or app use: not within gapH of a workout, and not once he has been active more
+// than the morning lasts (MORNING.giveUpH) with no gapH quiet in it. Only the asks read this, not his day clock: a
+// Shortcut send on a timer can show steps from before bed, and that must never make him awake.
+
+/** When his step count went up, from the Shortcut's sends: moved at some point before each. */
+function stepRises(store, since, now) {
+  const out = [];
+  for (const r of store.listRecords('health')) {
+    if (!(r.data?.fileAt >= since)) continue;
+    let was = 0;
+    for (const v of store.historyFor('health', r.id)) {
+      const d = v.data == null ? null : JSON.parse(v.data);
+      if (!(d?.steps >= 0)) continue;
+      if (d.steps > was && d.fileAt >= since && d.fileAt <= now) out.push(d.fileAt);
+      was = Math.max(was, d.steps);
+    }
+  }
+  return out;
+}
+
+/** Every time in his workouts from `since` to now: start, sets, end. holds: with holds rounds. */
+function workoutTimes(store, since, now, holds = false) {
+  const mine = recordsOf(store, 'sessions').filter((x) => x.status !== 'discarded' && (holds || x.kind !== 'holds') && x.startedAt >= since - WORKOUT_BUSY_MIN * 60000);
+  const ids = new Set(mine.map((x) => x.id));
+  const sets = ids.size ? recordsOf(store, 'sets').filter((s) => ids.has(s.sessionId)).map((s) => s.doneAt) : [];
+  return [...mine.flatMap((x) => [x.startedAt, x.endedAt]), ...sets].filter((t) => Number.isFinite(t) && t >= since && t <= now);
+}
+
+/** Everything that says he's up: his signs, his workouts' sets and ends, his steps rising. Sorted. */
+function activityOf(store, since, now) {
+  return [...signsOf(store, since, now), ...workoutTimes(store, since, now, true), ...stepRises(store, since, now)].sort((a, b) => a - b);
+}
+
+/** No 4 quiet hours behind him yet (above): no sleep or morning ask now. */
+export function noQuietYet(store, now) {
+  const since = now - 36 * 3600000;
+  if (now - Math.max(0, ...workoutTimes(store, since, now)) < SLEEP.gapH * 3600000) return true;
+  return now - awakeSince(activityOf(store, since, now), now, SLEEP.gapH) >= MORNING.giveUpH * 3600000;
 }
 
 /** Every sign of him in the day and a half up to `t` (lib/waking-day.js: is he still up from the night? which
@@ -281,7 +325,7 @@ export function upAtToday(store, now, tz) {
 }
 
 /** A sign of him within SLEEP.activeH: with no sign he woke today, he's still up from the night, not asleep. */
-const stillUp = (store, now) => signsOf(store, now - SLEEP.activeH * 3600000, now).length > 0;
+const stillUp = (store, now) => activityOf(store, now - SLEEP.activeH * 3600000, now).length > 0;
 
 /** Where his morning is now (read only): morningStep's {hold, open, ask}, with today's state and when it opened. */
 export function morningGate(store, now, tz) {
@@ -309,8 +353,10 @@ export function morningGate(store, now, tz) {
   const askedBy = (re) => Math.max(0, ...replies.filter((x) => re.test(x.text || '')).map((x) => x.at)) || null;
   const sessions = list('sessions');
   const trainedToday = sessions.some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && (c ? x.startedAt >= c.wokeAt && x.startedAt <= now : isoDate(new Date(x.startedAt), tz) === date));
+  // Not up yet: any of it in the last 4 hours and "Are you up?" waits too.
+  const noQuiet = !state.open && (noQuietYet(store, now) || (upAt == null && activityOf(store, now - SLEEP.gapH * 3600000, now).length > 0));
   const step = morningStep({
-    now, wakeAt, upAt, state, upNoSleep: !c && !upAt && stillUp(store, now),
+    now, wakeAt, upAt, state, upNoSleep: !c && !upAt && stillUp(store, now), noQuiet,
     sleepKnown: Boolean(health?.sleep || store.getRecord('sleep-log', night)?.data),
     bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness || (c && store.getRecord('days', isoDate(new Date(now), tz))?.data?.readiness)) || trainedToday,
     coachAsked: { sleep: askedBy(ASKS_SLEEP), body: askedBy(ASKS_BODY) },
@@ -373,7 +419,7 @@ export async function morningTick({ store, push, log = () => {}, now, tz }) {
   const opened = Math.max(0, ...appOpens(store, now, tz).filter(today)) || null;
   // Wrote first: since he woke (Tue 10/27: a message while still up from the night is not his day yet).
   const wrote = recordsOf(store, MSGS).some((m) => m.role === 'user' && m.at >= (g.upAt ?? zonedTime(g.date, '05:00', tz)) && m.at <= now && today(m.at));
-  const greet = !g.off && g.upAt != null && !st.greet && !busy && !wrote && opened != null && now - opened < GREET.freshMin * 60000;
+  const greet = !g.off && g.upAt != null && !st.greet && !busy && !wrote && opened != null && now - opened < GREET.freshMin * 60000 && !noQuietYet(store, now);
   const ask = g.ask && g.ask.key !== 'up' ? g.ask : null; // he opened the app: he's up, no need to ask
   if (greet || (g.ask && !busy)) {
     const key = greet ? (ask ? `greet:${ask.key}` : 'greet') : g.ask.key;
@@ -688,15 +734,15 @@ export function nudgeInputs(store, now, tz) {
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
         || scanTakenOn(scans, date, scanPhotoIds),
       // Tue 10/27: "How did you sleep?" only once he has slept and is up (upAtToday), never while he's still up. The
-      // moving schedule works his sleep out itself (autoSleep): never asked.
-      sleepLogged: Boolean(c) || Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null,
+      // moving schedule works his sleep out itself (autoSleep): never asked. Sat 10/31: nor before 4 quiet hours (noQuietYet).
+      sleepLogged: Boolean(c) || Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null || noQuietYet(store, now),
       wokeAt: c ? c.wokeAt : one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && since(x.endedAt)).map((x) => x.endedAt)) || null,
       mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan })?.mealAt ?? null,
       lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === food && m.at).map((m) => m.at)) || null,
       // His last answer to a meal question (eaten, about to cook, cooking, skipping): the after-workout meal nudge stops on it.
       mealAnsweredAt: Math.max(0, ...list('meal-checks').filter((c) => c.date === date && c.at).map((c) => c.at)) || null,
-      morning: n.morning || null,
+      morning: n.morning && noQuietYet(store, now) ? { ...n.morning, text: null } : n.morning || null,
       eaten: { kcal: eaten.kcal, protein: eaten.protein, unread: eaten.unread || 0 },
       targets: plan?.kcal ? { kcal: plan.kcal, protein: plan.proteinG } : null,
       steps: health?.steps != null ? { steps: health.steps, asOf: health.fileAt ?? null } : null,

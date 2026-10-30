@@ -228,7 +228,7 @@ test('the coach is told his day moves, when he woke, his bedtime; and how to swi
   } finally { f.done(); }
 });
 
-test('he tells the coach his schedule is steady: moving off, back to the wake time ("Are you up?" at 10:00 AM)', async () => {
+test('he tells the coach his schedule is steady: moving off, back to the wake time ("Are you up?" once 4 hours are quiet: 10:55 AM, his last sign 6:54 AM)', async () => {
   const f = day();
   try {
     const nudges = (args) => TOOLS.find((t) => t.name === 'nudges').run(args, { store: f.store, tz: TZ, now: () => at(TUE, '07:00') });
@@ -236,7 +236,7 @@ test('he tells the coach his schedule is steady: moving off, back to the wake ti
     const off = await nudges({ movingDay: false });
     assert.match(off.text, /moving schedule off/i);
     assert.equal(f.store.getRecord('settings', 'main').data.notify.movingDay, false);
-    await f.run(at(TUE, '09:59'), at(TUE, '10:00'));
+    await f.run(at(TUE, '09:59'), at(TUE, '10:55'));
     assert.deepEqual(f.sent.map((m) => m.body), ['Morning. Are you up?']);
     const on = await nudges({ movingDay: true });
     assert.match(on.text, /moving schedule on/i);
