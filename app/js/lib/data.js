@@ -359,6 +359,8 @@ async function reportOpen() {
   await ready;
   if (!(await repo.getMeta('token')) || !(await repo.getMeta('macUrl'))) return;
   const phone = /iPhone|iPad|iPod|Android/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+  // Sat 10/31: what he did offline reaches the Mac first: a workout it hasn't seen can't hold back the greeting.
+  await syncNow().catch(() => {});
   const r = await post('/api/app/opened', { phone });
   if (r.status === 200) scheduleSync(0);
 }

@@ -135,20 +135,26 @@ function signsOf(store, since, now) {
 // than the morning lasts (MORNING.giveUpH) with no gapH quiet in it. Only the asks read this, not his day clock: a
 // Shortcut send on a timer can show steps from before bed, and that must never make him awake.
 
-/** When his step count went up, from the Shortcut's sends: moved at some point before each. */
-function stepRises(store, since, now) {
-  const out = [];
+/**
+ * When his step count went up, from the Shortcut's sends: moved at some point before each. known: only rises with a
+ * send under gapH before them. After a longer silence the steps could be from before bed (Mon 10/26: 36 steps first
+ * shown at 1:52 PM, in his sleep), so they can't say the quiet hours weren't quiet.
+ */
+function stepRises(store, since, now, known = false) {
+  const sends = [];
   for (const r of store.listRecords('health')) {
-    if (!(r.data?.fileAt >= since)) continue;
+    if (!(r.data?.fileAt >= since - SLEEP.gapH * 3600000)) continue;
     let was = 0;
     for (const v of store.historyFor('health', r.id)) {
       const d = v.data == null ? null : JSON.parse(v.data);
-      if (!(d?.steps >= 0)) continue;
-      if (d.steps > was && d.fileAt >= since && d.fileAt <= now) out.push(d.fileAt);
+      if (!(d?.steps >= 0) || !Number.isFinite(d.fileAt)) continue;
+      sends.push({ at: d.fileAt, rose: d.steps > was });
       was = Math.max(was, d.steps);
     }
   }
-  return out;
+  sends.sort((a, b) => a.at - b.at);
+  const near = (i) => i > 0 && sends[i].at - sends[i - 1].at < SLEEP.gapH * 3600000;
+  return sends.filter((x, i) => x.rose && x.at >= since && x.at <= now && (!known || near(i))).map((x) => x.at);
 }
 
 /** Every time in his workouts from `since` to now: start, sets, end. holds: with holds rounds. */
@@ -160,15 +166,15 @@ function workoutTimes(store, since, now, holds = false) {
 }
 
 /** Everything that says he's up: his signs, his workouts' sets and ends, his steps rising. Sorted. */
-function activityOf(store, since, now) {
-  return [...signsOf(store, since, now), ...workoutTimes(store, since, now, true), ...stepRises(store, since, now)].sort((a, b) => a - b);
+function activityOf(store, since, now, known = false) {
+  return [...signsOf(store, since, now), ...workoutTimes(store, since, now, true), ...stepRises(store, since, now, known)].sort((a, b) => a - b);
 }
 
 /** No 4 quiet hours behind him yet (above): no sleep or morning ask now. */
 export function noQuietYet(store, now) {
   const since = now - 36 * 3600000;
   if (now - Math.max(0, ...workoutTimes(store, since, now)) < SLEEP.gapH * 3600000) return true;
-  return now - awakeSince(activityOf(store, since, now), now, SLEEP.gapH) >= MORNING.giveUpH * 3600000;
+  return now - awakeSince(activityOf(store, since, now, true), now, SLEEP.gapH) >= MORNING.giveUpH * 3600000;
 }
 
 /** Every sign of him in the day and a half up to `t` (lib/waking-day.js: is he still up from the night? which

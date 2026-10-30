@@ -4,7 +4,7 @@
 // ask until 4 quiet hours have passed with no workout, steps or app use.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
@@ -120,6 +120,24 @@ test('he wakes, then walks: steps right after waking do not take the question aw
     assert.equal(noQuietYet(f.store, at(THU, '11:40')), false);
     assert.equal(noQuietYet(f.store, at(THU, '14:30')), false, 'under the 4 hours the morning lasts');
   } finally { f.done(); }
+});
+
+test('his Monday 10/26: steps first shown in his sleep, after a long silence: his morning still runs its 4 hours', () => {
+  const f = fixture();
+  try {
+    f.say(at(WED, '06:45'));
+    f.steps(WED, 36, at(WED, '13:52'));
+    f.say(at(WED, '17:31'));
+    assert.equal(noQuietYet(f.store, at(WED, '18:31')), false, '4 hours after the 1:52 PM send');
+    f.say(at(WED, '21:00'));
+    assert.equal(noQuietYet(f.store, at(WED, '21:40')), true, 'up over 4 hours from 5:31 PM');
+  } finally { f.done(); }
+});
+
+test('the app reports the open after syncing: a workout done offline reaches the Mac before the greeting', () => {
+  const src = readFileSync(new URL('../app/js/lib/data.js', import.meta.url), 'utf8');
+  const open = src.slice(src.indexOf('async function reportOpen'));
+  assert.ok(open.indexOf('await syncNow()') > 0 && open.indexOf('await syncNow()') < open.indexOf("post('/api/app/opened'"));
 });
 
 test('a holds round after waking is not a workout: the questions still come', async () => {
