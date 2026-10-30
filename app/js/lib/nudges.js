@@ -309,7 +309,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Steps behind, only from fresh Apple Health numbers (read in the last 3 hours).
   if (stepGoal && steps?.steps != null && steps.asOf && now - steps.asOf <= 3 * 3600000 && frac >= 0.3 && steps.steps < stepGoal * frac * 0.7) {
     out.push({ key: 'steps', priority: 30, gapMin: 90, url: '#/body',
-      text: `Steps: ${nf(steps.steps)} by ${formatHm(hmOf(new Date(steps.asOf), tz))}, goal ${nf(stepGoal)}. Walk 15 minutes.` });
+      text: `Steps: ${nf(steps.steps)} by ${formatHm(hmOf(new Date(steps.asOf), tz))}, goal ${nf(stepGoal)}. When are you walking?` });
   }
   return out.sort((a, b) => b.priority - a.priority);
 }

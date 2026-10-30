@@ -65,7 +65,7 @@ test('nudges: the morning sleep question, the session and the Evolt, food behind
   const steps = { steps: 1200, asOf: at(D, '12:00') };
   const s1 = nudgeCandidates({ ...base, rot: null, now: at(D, '13:00'), stepGoal: 8000, steps, eaten: { kcal: 2500, protein: 200 } });
   assert.deepEqual(keys(s1), ['steps']);
-  assert.equal(s1[0].text, 'Steps: 1,200 by 12:00 PM, goal 8,000. Walk 15 minutes.');
+  assert.equal(s1[0].text, 'Steps: 1,200 by 12:00 PM, goal 8,000. When are you walking?');
   assert.equal(nudgeCandidates({ ...base, rot: null, now: at(D, '16:00'), stepGoal: 8000, steps, eaten: { kcal: 3000, protein: 230 } }).length, 0);
 });
 
@@ -427,7 +427,7 @@ test('walk tick (Tue 10/20): asks, 20 minutes later asks for a time, stays quiet
     const push = { list: () => [{}], notify: async (m) => { sent.push(m); return { sent: 1, failed: 0 }; } };
     const tick = (hm) => walkTick({ store, push, now: at(D, hm), tz: TZ });
     assert.equal((await tick('14:30')).key, 'walk:ask');
-    assert.match(sent[0].body, /^Walk: 3,000 of 8,000 steps as of 2:00 PM: 5,000 to go, about 50 minutes of walking\. Go out for a walk now\. When are you going\?/);
+    assert.match(sent[0].body, /^Walk: 3,000 of 8,000 steps as of 2:00 PM: 5,000 to go, about 50 minutes of walking\. When are you going\?$/);
     assert.equal(sent[0].url, '#/coach', 'tapping it opens Talk to answer');
     assert.equal(await tick('14:33'), null);
     assert.equal(await tick('14:35'), null);

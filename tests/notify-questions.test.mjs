@@ -20,7 +20,7 @@ const bank = { moods: { hype: { nudge: [[3, 'You got this. Move!']] } } };
 const fixed = () => 0;
 
 test('a push line follows a call to act, never a question to him', () => {
-  assert.equal(coachVoice('Walk time: you said 6:00 PM. Go now.', { bank, rng: fixed }).body, 'Walk time: you said 6:00 PM. Go now. You got this. Move!');
+  assert.equal(coachVoice('Legs was due at 6:00 AM. Go now.', { bank, rng: fixed }).body, 'Legs was due at 6:00 AM. Go now. You got this. Move!');
   assert.equal(coachVoice('Last meal: cooking yet? Cooking, eaten, or skipping?', { bank, rng: fixed }).body, 'Last meal: cooking yet? Cooking, eaten, or skipping?');
   assert.equal(coachVoice('Back from the walk? How many minutes did you go? ', { bank, rng: fixed }).body, 'Back from the walk? How many minutes did you go?');
 });

@@ -878,7 +878,9 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
   const due = walkDue({ now, tz, doc: view, steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather'), homeAt: view?.going ? homeSince(store, view.going.at) : 0 });
   if (!due) return null;
-  const v = coachVoice(due.text, { ...voiceOpts(store), calm: due.calm });
+  // Sat 10/31 (Fri 10/30, 7:05 AM, "One time, and I stop asking. Are you going to let your future self be weaker? Move."):
+  // the walk coach asks when he's going; no push line, whatever the text ends on.
+  const v = coachVoice(due.text, { ...voiceOpts(store), calm: true });
   const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };
   sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `walk:${due.kind}` });
   // Too hot or bright: the coach planned (or moved) the walk itself; quiet until then.

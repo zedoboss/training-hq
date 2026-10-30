@@ -19,19 +19,19 @@ test('no step count at all is "yet today", never "since this morning", at any ho
   assert.match(stepsText({ steps: { steps: 2000, asOf: at('11:00') }, goal: 8000, now: at('19:00'), tz: TZ }), /^No step count from your phone since 11:00 AM/);
 });
 
-test('his usual hour still ahead: no "go now", asks if he goes then; near or past it: go now', () => {
+test('his usual hour still ahead: asks if he goes then; near or past it: when he\'s going', () => {
   const ask = (hm, usualHm, o = {}) => walkDue({ ...base, now: at(hm), doc: null, usualHm, ...o }).text;
   const ahead = ask('14:00', '20:00');
   assert.equal(ahead, 'Walk: No step count from your phone yet today (opening the app sends it). Goal 8,000. You usually go around 8:00 PM. Going then, or another time?');
   assert.doesNotMatch(ahead, /now/);
-  assert.match(ask('19:45', '20:00'), /Go out for a walk now\. You usually go around 8:00 PM\. When are you going\?$/, 'within half an hour: go now');
-  assert.match(ask('22:00', '20:00'), /Go out for a walk now\. You usually go around 8:00 PM; it's past that\. When are you going\?$/);
-  assert.match(ask('14:00', null), /Go out for a walk now\. When are you going\?$/, 'no usual hour: as before');
+  assert.match(ask('19:45', '20:00'), /Goal 8,000\. You usually go around 8:00 PM\. When are you going\?$/, 'within half an hour');
+  assert.match(ask('22:00', '20:00'), /Goal 8,000\. You usually go around 8:00 PM; it's past that\. When are you going\?$/);
+  assert.match(ask('14:00', null), /Goal 8,000\. When are you going\?$/, 'no usual hour');
   // Bed at 2:00 AM: 1:00 AM is still in his day, so an 8:00 PM habit is behind him, not ahead.
   assert.match(ask('00:30', '20:00', { bedHm: '02:00' }), /it's past that/);
   // Usual hour after his last ask time (woke 9:00 PM, usual 8:00 PM, bed 7:00 AM): not mentioned.
   const late = ask('22:30', '20:00', { wakeHm: '21:00', bedHm: '07:00' });
-  assert.match(late, /Go out for a walk now\. When are you going\?$/);
+  assert.match(late, /Goal 8,000\. When are you going\?$/);
   assert.doesNotMatch(late, /usually/);
   assert.match(ask('14:00', '20:00', { fasting: true }), /^Fasting today, so moving is the job\. Walk: .* Going then, or another time\?$/);
 });

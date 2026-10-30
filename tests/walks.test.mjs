@@ -14,7 +14,7 @@ test('walks: ask, then 3 check-ins (20, 60, 120 minutes), each in new words, the
   assert.equal(due('10:30'), null, 'not in the first hour after he wakes');
   const a = due('14:30');
   assert.equal(a.kind, 'ask');
-  assert.equal(a.text, 'Walk: 3,000 of 8,000 steps as of 2:00 PM: 5,000 to go, about 50 minutes of walking. Go out for a walk now. When are you going?');
+  assert.equal(a.text, 'Walk: 3,000 of 8,000 steps as of 2:00 PM: 5,000 to go, about 50 minutes of walking. When are you going?');
   doc = withAsk(doc, D, 'ask', at('14:30'));
   assert.equal(due('14:35'), null, 'not after 5 minutes any more (Sun 10/25)');
   assert.equal(due('14:49'), null);
@@ -57,7 +57,7 @@ test('walks: "I\'ll go in an hour": quiet until then, walk time, then the follow
   assert.equal(due('17:51'), null, 'no step count since the walk yet');
   assert.equal(due('17:51', { steps: steps(6500, '17:45') }).kind, 'ask');
   assert.equal(due('19:21').kind, 'ask');
-  assert.deepEqual(due('17:51', { steps: steps(8100, '17:45') }), { kind: 'goal', calm: true, text: "8,100 steps: today's 8,000 is done. Well done." });
+  assert.deepEqual(due('17:51', { steps: steps(8100, '17:45') }), { kind: 'goal', text: "8,100 steps: today's 8,000 is done. Well done." });
   assert.equal(due('23:23', { steps: steps(8295, '23:20') }).text, "8,295 steps: today's 8,000 is done. Well done. Have a good night, catch you in the morning.", 'late: a good night, no cutoff');
   doc = withAsk(doc, D, 'goal', at('17:51'));
   assert.equal(due('19:00', { steps: steps(8400, '18:55') }), null, 'goal met: no more asks today');
@@ -107,7 +107,7 @@ test('walks and the weather (Wed 10/21, UV only since Tue 10/27): UV 3+ -> the c
   doc = withAnswer(withAsk(null, D, 'planned', at('12:30')), D, { action: 'plan', at: p.planAt, said: 'planned by the coach', by: 'coach' }, at('12:30'));
   assert.equal(due('13:00'), null, 'quiet until then');
   assert.equal(due('16:00').kind, 'plan');
-  assert.match(due('16:00').text, /Go now\./);
+  assert.match(due('16:00').text, /^Walk time: 4:00 PM, the hour I picked for the weather\. Going, or another time\?/);
   // The app's own time lands at UV 3+: moved once to the next hour under 3.
   const coachPlan = withAnswer(withAsk(null, D, 'planned', at('11:00')), D, { action: 'plan', at: at('13:00'), by: 'coach' }, at('11:00'));
   const cm = walkDue({ ...base, now: at('13:00'), doc: coachPlan, steps: steps(3000, '12:00'), weather });
@@ -119,11 +119,11 @@ test('walks and the weather (Wed 10/21, UV only since Tue 10/27): UV 3+ -> the c
   assert.equal(m.kind, 'plan');
   assert.match(m.text, /^Walk time: you said "at 1"\. Did you start walking\? UV 8 now, strong sun: shade and a hat; under 3 from 4:00 PM\./);
   assert.equal(m.planAt, undefined);
-  // UV 3 to 6 with no hour under 3 left before bed: go now, with shade (not held).
+  // UV 3 to 6 with no hour under 3 left before bed: asked, with shade (not held).
   const late = { hours: [hour('20:00', 4, 30), hour('21:00', 4, 30), hour('22:00', 4, 30), hour('23:00', 4, 30)] };
   const c = walkDue({ ...base, now: at('20:10'), doc: null, steps: steps(3000, '20:00'), weather: late });
   assert.equal(c.kind, 'ask');
-  assert.match(c.text, /Go out for a walk now \(UV 4: shade and a hat\)\./);
+  assert.match(c.text, / UV 4 now: shade and a hat\. When are you going\?$/);
   // No weather known: as before.
   assert.equal(walkDue({ ...base, now: at('12:30'), doc: null, steps: steps(3000, '12:00') }).kind, 'ask');
 });
@@ -135,7 +135,7 @@ test('Tue 10/27: UV under 3 = walk on, whatever the heat; rain is told as his ri
   const a = walkDue({ ...base, now: at('17:57'), doc: null, steps: steps(379, '17:43'), weather });
   assert.equal(a.kind, 'ask');
   assert.equal(a.planAt, undefined);
-  assert.match(a.text, /Go out for a walk now\. When are you going\? Rain chance is high, 55%: it could rain\. If you walk, you take the risk\. Your call\.$/);
+  assert.match(a.text, /walking\. When are you going\? Rain chance is high, 55%: it could rain\. If you walk, you take the risk\. Your call\.$/);
   assert.doesNotMatch(a.text, /UV|feels|°C|hot|bright/);
   // His 6:11 PM: his own time ("in 10-15 minutes") at UV 0.1, feels 34°C, rain 42%: not moved; asked if he started.
   const mine = withAnswer(withAsk(null, D, 'ask', at('17:57')), D, { action: 'plan', at: at('18:11'), said: 'in 10-15 minutes' }, at('17:59'));
@@ -143,7 +143,7 @@ test('Tue 10/27: UV under 3 = walk on, whatever the heat; rain is told as his ri
   assert.equal(p.kind, 'plan');
   assert.match(p.text, /^Walk time: you said "in 10-15 minutes"\. Did you start walking\? 379 of 8,000 steps/);
   assert.doesNotMatch(p.text, /UV|feels|°C|moved|not a walk|rain/i);
-  // Raining now (model only, or confirmed) with UV under 3: still "go", the rain said as his risk.
+  // Raining now (model only, or confirmed) with UV under 3: still asked, the rain said as his risk.
   const shower = { ...weather, current: { at: at('18:00'), precip: 0.6, code: 80 } };
   const r = walkDue({ ...base, now: at('18:11'), doc: null, steps: steps(379, '17:43'), weather: shower });
   assert.equal(r.kind, 'ask');
@@ -212,7 +212,7 @@ test('Sun 10/25: a walk the coach planned for the weather: 3 check-ins, new word
       doc = withAsk(doc, D, due.kind, at(hm));
     }
     assert.deepEqual(sent.map((x) => `${x.hm} ${x.kind}`), ['18:00 plan', '18:20 check', '19:00 check', '20:00 check']);
-    assert.match(sent[0].text, /^Walk time: 6:00 PM, the hour I picked for the weather\. Go now\./);
+    assert.match(sent[0].text, /^Walk time: 6:00 PM, the hour I picked for the weather\. Going, or another time\?/);
     assert.equal(new Set(sent.map((x) => x.text.slice(0, 40))).size, 4, 'each one in new words');
     for (const x of sent) assert.doesNotMatch(x.text, /you set|you said|planned by the coach/i, x.text);
     assert.match(walkLines([doc], { today: D, now: at('19:00'), tz: TZ })[0], /the app planned it for 6:00 PM \(for the weather;/);

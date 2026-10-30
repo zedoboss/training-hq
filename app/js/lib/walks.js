@@ -219,7 +219,7 @@ export function usualWalkHm(docs = [], { today, tz } = {}) {
  * @param {number} o.lastUserAt      when he last wrote or spoke to the coach
  * @param {string|null} [o.usualHm]  his usual walk hour (usualWalkHm)
  * @param {number} [o.homeAt]        the last thing he did at home (a meal answer, a meal, a workout start), or 0
- * @returns {{kind: 'ask'|'check'|'again'|'plan'|'planned'|'moved'|'no-window'|'back'|'goal', text: string, calm?: boolean}|null}
+ * @returns {{kind: 'ask'|'check'|'again'|'plan'|'planned'|'moved'|'no-window'|'back'|'goal', text: string}|null}
  */
 export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, weather = null, homeAt = 0, cfg = WALK }) {
   const d = doc || emptyWalk(isoDate(new Date(now), tz));
@@ -227,18 +227,18 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   const wake = minOf(wakeHm); let bed = minOf(bedHm); if (bed <= wake) bed += 1440;
   const at = nowMin < wake && bed > 1440 ? nowMin + 1440 : nowMin;
   // Goal done (Thu 10/22, his words: "Why would I want a notification after 12 am? ... he should say: Have a good night,
-  // catch you up in the morning"): a short well done, a good night when it's late, no cutoff and no push line (calm).
+  // catch you up in the morning"): a short well done, a good night when it's late, no cutoff.
   if (goal && steps?.steps != null && steps.steps >= goal) {
     const late = at < wake || at > bed - cfg.stopBeforeBedMin;
-    return d.goalAt ? null : { kind: 'goal', calm: true, text: `${nf(steps.steps)} steps: today's ${nf(goal)} is done. Well done.${late ? ' Have a good night, catch you in the morning.' : ''}` };
+    return d.goalAt ? null : { kind: 'goal', text: `${nf(steps.steps)} steps: today's ${nf(goal)} is done. Well done.${late ? ' Have a good night, catch you in the morning.' : ''}` };
   }
   if (d.goalAt) return null;
   if (at < wake + cfg.startAfterWakeMin || at > bed - cfg.stopBeforeBedMin) return null;
   if (busy) return null;
   const st = stepsText({ steps, goal, now, tz });
   const last = lastOf(d.asks);
-  // Weather: when the UV is 3+ now, plan (or move the app's own time) to the next good time instead of "go now". UV
-  // only (Tue 10/27): never the heat, never rain; rain is told as his risk (rainNote).
+  // Weather: when the UV is 3+ now, plan (or move the app's own time) to the next good time. UV only (Tue 10/27): never
+  // the heat, never rain; rain is told as his risk (rainNote).
   const endMs = now + (bed - cfg.stopBeforeBedMin - at) * 60000;
   const nowH = hourAt(weather, now);
   const risk = hourRisk(nowH);
@@ -285,7 +285,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     const planTime = formatHm(hmOf(new Date(d.plan.at), tz));
     const whose = mine ? `you said ${planTime}` : `${planTime} was the hour I picked for the weather`;
     // His time: ask, don't order (his profile, Thu 10/22: "Did you start walking?"); the UV and rain as facts, his call.
-    if (!asked.length) return { kind: 'plan', text: withRain(mine ? `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Did you start walking?${uvNote ? ` ${uvNote}` : ''} ${st}` : `Walk time: ${planTime}, the hour I picked for the weather. Go now. ${st}`) };
+    if (!asked.length) return { kind: 'plan', text: withRain(mine ? `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Did you start walking?${uvNote ? ` ${uvNote}` : ''} ${st}` : `Walk time: ${planTime}, the hour I picked for the weather. Going, or another time? ${st}`) };
     const l = lastOf(asked);
     if (answered(l.at)) return now - d.answeredAt >= cfg.againMin * 60000 ? { kind: 'again', text: `Back to the walk: ${whose}, and no new time yet. Going now, or pick one? ${st}` } : null;
     if (talking(l.at)) return null;
@@ -304,13 +304,14 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   }
   if (!last || (skip && skip.at > last.at)) {
     // His usual hour (Thu 10/29: "Go out for a walk now. You usually go around 8:00 PM." at 12:00 AM): still ahead in
-    // his day, more than half an hour away: ask if he's going then, no "go now". Past it: go now. After his last ask
-    // time: not said.
+    // his day, more than half an hour away: ask if he's going then. After his last ask time: not said. Sat 10/31 (Fri
+    // 10/30, 6:05 AM, "Go out for a walk now." with no usual hour to go by): every ask is a question, at any hour; the
+    // time is his to say.
     const fast = fasting ? 'Fasting today, so moving is the job. ' : '';
     const u = usualHm ? minOf(usualHm) + (minOf(usualHm) < wake && bed > 1440 ? 1440 : 0) : null;
     const usual = u != null && u <= bed - cfg.stopBeforeBedMin ? formatHm(usualHm) : null;
     if (usual && u - at > 30) return { kind: 'ask', text: `${fast}Walk: ${st} You usually go around ${usual}. Going then, or another time?` };
-    return { kind: 'ask', text: withRain(`${fast}Walk: ${st} Go out for a walk now${risk === 'caution' ? ` (${weatherWords(nowH)}: shade and a hat)` : ''}.${usual ? ` You usually go around ${usual}${at - u > 30 ? `; it's past that` : ''}.` : ''} When are you going?`) };
+    return { kind: 'ask', text: withRain(`${fast}Walk: ${st}${risk === 'caution' ? ` ${weatherWords(nowH)} now: shade and a hat.` : ''}${usual ? ` You usually go around ${usual}${at - u > 30 ? `; it's past that` : ''}.` : ''} When are you going?`) };
   }
   if (answered(last.at)) {
     return now - Math.max(d.answeredAt, since) >= cfg.againMin * 60000 ? { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` } : null;
