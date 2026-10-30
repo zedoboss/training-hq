@@ -18,7 +18,7 @@ import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
 import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
-import { protocolOf, isDone, planFor, scanTakenOn } from '../app/js/lib/scans.js';
+import { protocolOf, planFor, scanTakenOn } from '../app/js/lib/scans.js';
 import { zonedTime, hmOf, formatTime, formatHm } from '../app/js/lib/time.js';
 import { healthSendsText } from './health.mjs';
 
@@ -182,14 +182,25 @@ const realText = (text, shift) => {
 };
 
 /**
+ * The scans as the day he's in sees them: a scan keeps its calendar date, and the day he's in can run behind the
+ * calendar (Fri 10/30: scan 2:03 AM and Push on 10/30 while the day he was in was still 10/29, so the checklist went
+ * out at 6:15 AM, "Body scan today, before you train"). One dated inside this stretch awake also counts for that day.
+ */
+function scansOfStretch(scans, c, now, tz) {
+  if (!c?.date || c.wokeAt == null) return scans;
+  const from = isoDate(new Date(c.wokeAt), tz); const to = isoDate(new Date(now), tz);
+  return [...scans, ...scans.filter((s) => s.date !== c.date && s.date >= from && s.date <= to).map((s) => ({ ...s, date: c.date }))];
+}
+
+/**
  * The reminders that wait for his wake time, for the day he's in on the moving schedule: planned on his body clock
  * (his usual day from Settings, started when he woke), their times and texts on the real clock, none before he woke.
  * None while he's asleep.
  */
-function movedDayItems(store, c) {
+function movedDayItems(store, c, now, tz) {
   if (!c || c.asleep || !c.body) return [];
   const st = stateFrom(store, c.body.zone);
-  return remindersFor({ ...st, date: c.date }).filter(waitsForWake).map((i) => ({
+  return remindersFor({ ...st, date: c.date, scans: scansOfStretch(st.scans, c, now, tz) }).filter(waitsForWake).map((i) => ({
     ...i, at: Math.max(i.at, c.wokeAt), bodyAt: i.at,
     ...(i.title != null ? { title: realText(i.title, c.body.shiftMin) } : {}),
     ...(i.body != null ? { body: realText(i.body, c.body.shiftMin) } : {}),
@@ -201,7 +212,7 @@ function movedDayItems(store, c) {
 function remindersToday(store, st, date, now, tz) {
   const c = clockOf(store, now, tz);
   if (!c) return remindersFor({ ...st, date });
-  return [...remindersFor({ ...st, date: isoDate(new Date(now), tz) }).filter((i) => !waitsForWake(i)), ...movedDayItems(store, c)];
+  return [...remindersFor({ ...st, date: isoDate(new Date(now), tz) }).filter((i) => !waitsForWake(i)), ...movedDayItems(store, c, now, tz)];
 }
 
 // Sleep worked out from his activity (his words: "obviously he can calculate the sleep automatically"): once he's up
@@ -435,7 +446,7 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
   const c = g.clock ?? (g.asleep ? clockOf(store, now, tz) : null);
   const held = (i) => waits(i) && i.at >= from && (c || isoDate(new Date(i.at), tz) === today);
   const planned = c
-    ? [...[today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date })).filter((i) => !waits(i)), ...movedDayItems(store, c)]
+    ? [...[today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date })).filter((i) => !waits(i)), ...movedDayItems(store, c, now, tz)]
     : [today, addDays(today, 1)].flatMap((date) => remindersFor({ ...st, date })).map((i) => (waits(i) && !awake(i.at) ? { ...i, at: toWake(i.at) } : i));
   const items = planned
     .map((i) => (g.hold && held(i) && i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, morning: 'waiting' }
@@ -657,6 +668,8 @@ export function nudgeInputs(store, now, tz) {
   const firstMealAt = firstMeal ? firstMeal.at : NaN;
   const fasting = fastingOn(st.days || {}, date, list('meals'));
   const wentOut = store.getMeta(SENT) || {};
+  const scans = scansOfStretch(list('body-scans'), c, now, tz);
+  const scanPhotoIds = list('scan-photos').map((p) => p.scanId);
   return {
     date, n, fasting,
     busy: busyNow(list, now),
@@ -673,7 +686,7 @@ export function nudgeInputs(store, now, tz) {
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
-        || scanTakenOn(list('body-scans'), date, list('scan-photos').map((p) => p.scanId)),
+        || scanTakenOn(scans, date, scanPhotoIds),
       // Tue 10/27: "How did you sleep?" only once he has slept and is up (upAtToday), never while he's still up. The
       // moving schedule works his sleep out itself (autoSleep): never asked.
       sleepLogged: Boolean(c) || Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null,
@@ -691,8 +704,8 @@ export function nudgeInputs(store, now, tz) {
       // The walk coach asks about steps now (walkTick); the nudges' own steps line only when walks are off.
       stepGoal: n.kinds?.walk === false ? withDefaults(one('settings', 'main')).body.stepGoal : null,
       scanToday: (() => {
-        const sp = planFor(one('scan-plan', 'main') || {}, { scans: list('body-scans'), today: date, last: st.last, days: st.days || {} });
-        if (sp?.next?.date !== date || list('body-scans').some((x) => x.date === date && isDone(x))) return null;
+        const sp = planFor(one('scan-plan', 'main') || {}, { scans, today: date, last: st.last, days: st.days || {} });
+        if (sp?.next?.date !== date || scanTakenOn(scans, date, scanPhotoIds)) return null;
         return { items: protocolOf(sp).filter((i) => i.when === 'day').map((i) => i.text.replace(/\.$/, '')) };
       })(),
     },

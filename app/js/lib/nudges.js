@@ -133,7 +133,7 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  * @param {{kcal: number, protein: number}|null} o.targets
  * @param {{steps: number, asOf: number}|null} o.steps   today's steps from Apple Health and when they were read
  * @param {number|null} o.stepGoal
- * @param {{items: string[]}|null} o.scanToday  a body scan planned for today and not done: the on-the-day checklist
+ * @param {{items: string[]}|null} o.scanToday  a body scan planned for today and not taken: the on-the-day checklist
  * @param {{open: string[], total: number, taken?: number}|null} o.suppsUntimed  today's supplements with no time set: names
  *   still open; total and taken over all of today's (out of stock ones aren't on the list)
  * @param {string} o.wakeHm
@@ -224,8 +224,9 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
 
   // A body scan planned today (Tue 10/20): the checklist, once that day (Fri 10/23: it went out 4 times by 12:10 PM, "the
   // body scan, which you said twice... body scan again. You're not making any sense"); the scan reminders at his session
-  // time (lib/scans.js) still come. After his sleep question, not ahead of it.
-  if (scanToday) {
+  // time (lib/scans.js) still come. After his sleep question, not ahead of it. Never once he has started or finished
+  // the workout (Fri 10/30: it came at 6:15 AM, Push done at 3:07 AM): "before you train" is over, and it says nothing.
+  if (scanToday && !session.started && !session.done) {
     out.push({ key: 'scan', priority: 87, gapMin: ONCE_MIN, url: '#/body/scan',
       text: `Body scan today, before you train: ${scanToday.items.join('; ')}. Then tell me the numbers.` });
   }
