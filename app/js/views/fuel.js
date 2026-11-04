@@ -21,6 +21,8 @@ import { toast } from '../ui/toast.js';
 import { fastingOn, withFast } from '../lib/fast.js';
 import { daysByDate } from '../lib/rotation.js';
 import { loadFoods, planItems, SOURCE_NOTE, myFoods, itemAmount } from '../lib/foods.js';
+import { QUICK_ML, waterEntry, waterTotal, waterTarget, waterOn, mlText } from '../lib/water.js';
+import { promptText } from '../ui/sheet.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const CAMERA = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
@@ -153,8 +155,11 @@ export function render(view, params) {
   const draw = async () => {
     today = await wakingDayAt(repo);
     if (!asked) date = today;
-    const [meals, estimates, photos, plan, checks, dayList, presetDoc] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days'), repo.get('fuel', 'presets')]);
+    const [meals, estimates, photos, plan, checks, dayList, presetDoc, waterLog] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days'), repo.get('fuel', 'presets'), repo.list('water')]);
     if (!alive) return;
+    // Thu 11/5 (his list: "No water tracking"): the day's water; a daily amount only when he set one himself.
+    const water = waterTotal(waterLog, date);
+    const waterGoal = waterTarget(withDefaults(getState().settings));
     // A fasting day (Wed 10/21): no target, no "to go"; a meal logged after it began ends it.
     const days = daysByDate(dayList);
     const fasting = fastingOn(days, date, meals);
@@ -204,6 +209,12 @@ export function render(view, params) {
         ${times.length ? `<p class="hint c-text">${times.map((x) => `${esc(x.name)} ${formatHm(x.time)}`).join(' · ')}</p>` : '<p class="hint">Not set yet, so no meal-time reminders. Set your usual times and the app asks when one passes with nothing logged.</p>'}
         ${dayChecks.length ? `<p class="hint">${dayChecks.map((c) => `${esc(c.name)}: ${ANSWER[c.answer].toLowerCase()}`).join(' · ')}</p>` : ''}</section>` : ''}
       ${date === today ? `<a class="card supp-card" href="#/supps" id="f-supps"><span class="hud c-amber">SUPPLEMENTS</span><span class="supp-card-line" id="f-supps-line">Your checklist</span><span class="pill is-on">Open</span></a>` : ''}
+      <section class="card pad-card" id="f-water"><div class="ex-head"><span class="hud c-cyan">WATER</span>
+          <b class="mono">${esc(mlText(water.ml))}${waterGoal ? ` <span class="c-faint">/ ${esc(mlText(waterGoal))}</span>` : ''}</b></div>
+        ${date === today ? `<div class="btn-row tight">${QUICK_ML.map((ml) => `<button class="btn-ghost small" type="button" data-water="${ml}">+${ml} ml</button>`).join('')}
+          ${water.count ? '<button class="link-btn" type="button" id="f-water-undo">Undo last</button>' : ''}
+          <button class="link-btn" type="button" id="f-water-goal">${waterGoal ? 'Daily amount' : 'Set a daily amount'}</button></div>` : ''}</section>
+      ${date === today ? '<a class="card supp-card" href="#/pantry" id="f-pantry"><span class="hud c-amber">FOOD STOCK</span><span class="supp-card-line">What you have at home and the shopping list</span><span class="pill is-on">Open</span></a>' : ''}
       <a class="card supp-card" href="#/micro/${esc(date)}" id="f-micro"><span class="hud c-cyan">VITAMINS & MINERALS</span><span class="supp-card-line">From what you logged, against your Diet.html references</span><span class="pill is-on">Open</span></a>
       ${date === today ? '<a class="card supp-card" href="#/sauna" id="f-sauna"><span class="hud c-cyan">SAUNA</span><span class="supp-card-line">The ladder, the checklist and the hard stops</span><span class="pill is-on">Open</span></a>' : ''}
       <div class="section-label">${list.length ? `Meals · ${list.length}` : 'No meals logged'}</div>
@@ -226,6 +237,26 @@ export function render(view, params) {
       const next = groups.find((g) => g.open.length);
       if (alive) line.textContent = due.length ? `${due.filter((i) => i.entry?.status === 'taken').length} of ${due.length} taken${next ? ` · next: ${next.label}${next.time ? ` ${formatHm(next.time)}` : ''}` : ' · all answered'}` : 'Nothing scheduled today';
     }
+    body.querySelectorAll('[data-water]').forEach((b) => { b.onclick = async () => {
+      const e = waterEntry({ id: newId('water'), ml: Number(b.dataset.water), at: Date.now(), date: today, by: 'tap' });
+      await repo.put('water', e.id, e);
+      toast(`+${e.ml} ml water: ${mlText(water.ml + e.ml)} today.`);
+    }; });
+    const wUndo = body.querySelector('#f-water-undo');
+    if (wUndo) wUndo.onclick = async () => {
+      const last = waterOn(waterLog, today).at(-1);
+      if (last) { await repo.remove('water', last.id); toast(`Took back ${last.ml} ml.`); }
+    };
+    const wGoal = body.querySelector('#f-water-goal');
+    if (wGoal) wGoal.onclick = async () => {
+      const v = await promptText('Your daily water amount (ml), empty for none', waterGoal ? String(waterGoal) : '', { placeholder: 'ml' });
+      if (v === null) return;
+      const ml = v.trim() === '' ? null : Math.round(Number(v.replace(',', '.')));
+      if (ml != null && !(ml >= 250 && ml <= 10000)) { toast('250 to 10,000 ml, or empty for none.'); return; }
+      await saveSettings({ fuel: { waterMl: ml } });
+      toast(ml ? `Daily amount: ${mlText(ml)}.` : 'No daily amount.');
+      draw();
+    };
     body.querySelector('#f-targets')?.addEventListener('click', () => editTargets(repo));
     body.querySelector('#f-plan')?.addEventListener('click', () => showPlan(repo));
     body.querySelector('#f-times')?.addEventListener('click', () => editMealTimes());
@@ -269,7 +300,7 @@ export function render(view, params) {
   const unsub = subscribe((s) => { const k = `${s.paired}|${s.mac.reachable}|${s.sync.pending > 0}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log', 'days', 'sleep-log'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log', 'days', 'sleep-log', 'water'].includes(c))) draw(); });
     draw().then(() => { if (checking && alive) answerCheck(repo, date, params[2]); });
   });
   return () => { alive = false; off(); unsub(); };

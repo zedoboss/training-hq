@@ -11,7 +11,7 @@ import { FOOD_TEXT, daysText, statusOn, stockStatus, lastsText, adherence, check
 import { addDays } from '../lib/rotation.js';
 import { wakingDayAt } from '../lib/waking-day.js';
 import { actionSheet, promptText, promptLong, confirmSheet } from '../ui/sheet.js';
-import { lowAnswered, weeklyAnsweredSince } from '../lib/fuel-reminders.js';
+import { lowAnswered, weeklyAnsweredSince, restockList } from '../lib/fuel-reminders.js';
 import { newId } from '../lib/routines.js';
 import { formatDate } from '../lib/time.js';
 import { toast } from '../ui/toast.js';
@@ -94,7 +94,10 @@ function renderDay(view, repo, alive, dateParam) {
     if (!alive()) return;
     const groups = checklist({ supps: all, log, date, dayKind });
     // Out of stock (Thu 10/22): off the day until he restocks; one tap puts it back (or tell the coach).
-    const outs = date === today ? outOfStock(all, log, today) : [];
+    // Thu 11/5 (his list: "no restock list or reminder to order"): out of stock and running low together, each with
+    // Ordered (no more order reminders) and Restocked.
+    const restock = date === today ? restockList({ supps: all, log, answers, date: today }) : [];
+    const dayName = (d) => formatDay(new Date(`${d}T12:00:00`));
     // Running low (about a week or less) and not answered for this count yet.
     const low = all.filter((x) => statusOn(x, today) === 'active').map((x) => ({ x, st: stockStatus(x, log) })).filter((y) => y.st?.low && !lowAnswered(y.x, answers));
     const due = groups.flatMap((g) => g.items);
@@ -138,10 +141,11 @@ function renderDay(view, repo, alive, dateParam) {
         <section class="card supp-group" data-group="${esc(g.key)}">${g.items.map(row).join('')}
           ${g.open.length > 1 ? `<button class="btn-ghost supp-all" type="button" data-all="${esc(g.key)}">All ${g.open.length} taken</button>` : ''}</section>`).join('')
         || '<p class="hint">Nothing scheduled on this day.</p>'}
-      ${outs.length ? `<div class="section-label">Out of stock · ${outs.length}</div>
-        <section class="card supp-group">${outs.map(({ supp, since }) => `<div class="supp-item" data-out="${esc(supp.id)}"><div class="supp-main"><b>${esc(supp.name)}</b>
-          <span class="hint c-amber">Ran out ${esc(formatDay(new Date(`${since}T12:00:00`)))} · off your day until it's back</span></div>
-          <span class="supp-btns"><button class="btn-primary small" type="button" data-restocked>Restocked</button></span></div>`).join('')}</section>` : ''}`;
+      ${restock.length ? `<div class="section-label" id="s-restock">Restock list · ${restock.length}</div>
+        <section class="card supp-group">${restock.map((r) => `<div class="supp-item" data-out="${esc(r.supp.id)}" data-state="${r.state}"><div class="supp-main"><b>${esc(r.supp.name)}</b>
+          <span class="hint c-amber">${r.state === 'out' ? `Ran out ${esc(dayName(r.since))} · off your day until it's back` : `${r.left} serving${r.left === 1 ? '' : 's'} left, ${esc(lastsText(r.days))}`}</span>
+          ${r.ordered ? `<span class="hint c-green">Ordered ${esc(dayName(r.ordered.date))}${r.ordered.arrives ? `, arriving ${esc(dayName(r.ordered.arrives))}` : ''}</span>` : ''}</div>
+          <span class="supp-btns">${r.ordered ? '' : '<button class="btn-ghost small" type="button" data-ordered>Ordered</button>'}${r.state === 'out' ? '<button class="btn-primary small" type="button" data-restocked>Restocked</button>' : `<a class="btn-primary small center" href="#/supp/${esc(r.supp.id)}">New count</a>`}</span></div>`).join('')}</section>` : ''}`;
     const find = (el) => due.find((i) => i.supp.id === el.closest('[data-id]').dataset.id);
     view.querySelectorAll('[data-take]').forEach((b) => b.addEventListener('click', async () => { await answerSupp(repo, find(b).supp, date, 'taken'); }));
     view.querySelectorAll('[data-skip]').forEach((b) => b.addEventListener('click', () => {
@@ -155,6 +159,14 @@ function renderDay(view, repo, alive, dateParam) {
       await repo.put('supplements', supp.id, { ...supp, restockedAt: Date.now() });
       toast(`${supp.name}: back on your day.`);
     }));
+    view.querySelectorAll('[data-ordered]').forEach((b) => b.addEventListener('click', async () => {
+      const row = b.closest('[data-out]');
+      const supp = all.find((x) => x.id === row.dataset.out);
+      const low = row.dataset.state === 'low';
+      const id = newId('ans');
+      await repo.put('supp-answers', id, { id, kind: low ? 'low' : 'out', suppId: supp.id, ...(low ? { countedAt: supp.stock?.countedAt ?? null } : {}), answer: 'ordered', arrives: null, text: '', at: Date.now(), date: today });
+      toast(`${supp.name}: ordered. No more order reminders until it's back.`);
+    }));
     view.querySelectorAll('[data-undo]').forEach((b) => b.addEventListener('click', async () => { await repo.remove('supp-log', logId(date, find(b).supp.id)); }));
     view.querySelectorAll('[data-all]').forEach((b) => b.addEventListener('click', async () => {
       const g = groups.find((x) => x.key === b.dataset.all);
@@ -164,7 +176,7 @@ function renderDay(view, repo, alive, dateParam) {
   };
   draw();
   let t = null;
-  return repo.onChange((cols) => { if (cols.some((c) => ['supplements', 'supp-log', 'sessions', 'days', 'sleep-log'].includes(c))) { clearTimeout(t); t = setTimeout(draw, 60); } });
+  return repo.onChange((cols) => { if (cols.some((c) => ['supplements', 'supp-log', 'supp-answers', 'sessions', 'days', 'sleep-log'].includes(c))) { clearTimeout(t); t = setTimeout(draw, 60); } });
 }
 
 

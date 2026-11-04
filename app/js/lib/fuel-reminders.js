@@ -201,6 +201,9 @@ export function restockAsk({ date, supps = [], log = [], answers = [] }) {
     const ranAt = outOf(supp, log)?.at || 0;
     const a = answers.filter((x) => x.kind === 'out' && x.suppId === supp.id && x.at > ranAt).sort((p, q) => p.at - q.at).at(-1);
     if (a?.answer === 'stop') continue;
+    // Thu 11/5 (his list: "no restock list or reminder to order"): marked ordered with no arrival day = no more asks
+    // until it's back (Restocked, a new count or a tick); with a day, only "arrived?" from that day.
+    if (a?.answer === 'ordered' && !a.arrives) continue;
     let on;
     if (a?.arrives) { on = date >= a.arrives; if (on) arriving = true; } else on = daysApart(a?.date || since, date) >= 2 && daysApart(a?.date || since, date) % 2 === 0;
     if (!on) continue;
@@ -210,6 +213,37 @@ export function restockAsk({ date, supps = [], log = [], answers = [] }) {
   if (!asked.length) return null;
   const names = asked.map((n) => n.charAt(0).toUpperCase() + n.slice(1)).join(', ');
   return { names, arriving, due: !answeredToday };
+}
+
+/**
+ * The restock list (Thu 11/5, his list of missing features: "4 supplements have been out of stock since Tuesday 10/20
+ * and there's no restock list or reminder to order"): every active supplement that is out of stock or running low
+ * (a week or less by his count), with whether he has ordered it. One he said he is stopping isn't on it.
+ * [{supp, state: 'out'|'low', since?, left?, days?, ordered: {date, arrives}|null}], out first.
+ */
+export function restockList({ supps = [], log = [], answers = [], date }) {
+  const list = [];
+  for (const { supp, since } of outOfStock(supps, log, date)) {
+    const ranAt = outOf(supp, log)?.at || 0;
+    const a = answers.filter((x) => x.kind === 'out' && x.suppId === supp.id && x.at > ranAt).sort((p, q) => p.at - q.at).at(-1);
+    if (a?.answer === 'stop') continue;
+    list.push({ supp, state: 'out', since, ordered: a?.answer === 'ordered' ? { date: a.date, arrives: a.arrives || null } : null });
+  }
+  for (const supp of supps.filter((x) => statusOn(x, date) === 'active' && !outOf(x, log))) {
+    const st = stockStatus(supp, log);
+    if (!st?.low) continue;
+    const a = answers.filter((x) => x.kind === 'low' && x.suppId === supp.id && x.countedAt === supp.stock?.countedAt).sort((p, q) => p.at - q.at).at(-1);
+    if (a?.answer === 'stop') continue;
+    list.push({ supp, state: 'low', left: st.left, days: st.days, ordered: a?.answer === 'ordered' ? { date: a.date, arrives: a.arrives || null } : null });
+  }
+  return list;
+}
+
+/** "Creatine monohydrate (out since Tuesday 10/20)", "Omega-3 (6 servings left, 6 days, ordered Thursday 11/5)". */
+export function restockLine(r, dayText = (d) => d) {
+  const what = r.state === 'out' ? `out since ${dayText(r.since)}` : `${r.left} serving${r.left === 1 ? '' : 's'} left, ${lastsText(r.days)}`;
+  const ord = r.ordered ? `, ordered ${dayText(r.ordered.date)}${r.ordered.arrives ? `, arriving ${dayText(r.ordered.arrives)}` : ''}` : ', not ordered';
+  return `${r.supp.name} (${what}${ord})`;
 }
 
 /** Halfway through his waking day ("10:00" to "00:00" = "17:00"; works across midnight). */
@@ -243,7 +277,7 @@ export function planReminders({ date, tz, supps = [], log = [], answers = [], ev
     out.push({
       id: `supps-out:${date}`, kind: 'supps', at: zonedTime(date, midDayHm(wakeHm, bedHm), tz), url: '#/supps', tag: 'supps-out', fixed: false,
       title: ask.arriving ? `Restock arrived? ${ask.names}` : `Still out: ${ask.names}`,
-      body: ask.arriving ? 'Tap Restocked on each, or tell me.' : 'Ordered them? When do they arrive? Tell me.', again: false, due: ask.due,
+      body: ask.arriving ? 'Tap Restocked on each, or tell me.' : 'Ordered them? Tap Ordered on your restock list, or tell me when they arrive.', again: false, due: ask.due,
     });
   }
   if (new Date(`${date}T12:00:00Z`).getUTCDay() === weekday && supps.some((x) => statusOn(x, date) === 'active')) {

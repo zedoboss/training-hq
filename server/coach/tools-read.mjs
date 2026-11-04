@@ -280,7 +280,7 @@ function suppLine(s) {
   const skipped = items.filter((i) => i.entry?.status === 'skipped').length;
   const open = items.filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
   const outs = outOfStock(supps, log, s.today);
-  return `Supplements today${wakingNote(s)}: ${items.length ? `${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}` : 'none scheduled'}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out): ${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
+  return `Supplements today${wakingNote(s)}: ${items.length ? `${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}` : 'none scheduled'}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out, "I ordered them" with kind ordered; kind list = his restock list):${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
 }
 
 function foodLine(s) {

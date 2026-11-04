@@ -27,6 +27,7 @@ import * as supps from './views/supps.js';
 import * as supp from './views/supp.js';
 import * as sauna from './views/sauna.js';
 import * as micro from './views/micro.js';
+import * as pantry from './views/pantry.js';
 import * as coach from './views/coach.js';
 import * as voiceView from './views/voice.js';
 import { getState, subscribe } from './lib/store.js';
@@ -65,6 +66,7 @@ const VIEWS = {
   supp: { mod: supp, label: 'Supplement', hidden: true, tab: 'fuel' },
   sauna: { mod: sauna, label: 'Sauna', hidden: true, tab: 'fuel' },
   micro: { mod: micro, label: 'Vitamins and minerals', hidden: true, tab: 'fuel' },
+  pantry: { mod: pantry, label: 'Food stock', hidden: true, tab: 'fuel' },
   coach: { mod: coach, label: 'Talk', hidden: true, tab: 'today' },
   voice: { mod: voiceView, label: 'Voice', hidden: true, tab: 'settings' },
   import: { mod: importView, label: 'Import', hidden: true, tab: 'settings' },

@@ -33,6 +33,7 @@ export const SCREENS = [
   ['supplements_plan', '#/supps/plan', 'Supplement plans and restock'],
   ['supplement', '#/supp/', 'One supplement', 'supplement'],
   ['vitamins', '#/micro', 'Vitamins and minerals'],
+  ['food_stock', '#/pantry', 'Food stock and shopping list'],
   ['sauna', '#/sauna', 'Sauna'],
   ['sauna_checklist', '#/sauna/check', 'Sauna checklist'],
   ['body', '#/body', 'Body'],

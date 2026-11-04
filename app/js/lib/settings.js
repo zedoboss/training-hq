@@ -53,7 +53,8 @@ export const DEFAULT_SETTINGS = {
     weekly: { weekday: 0, hm: '19:00' } },
   // Step 6: which Claude reads meal photos on the Mac ('fast' Sonnet 5.5 low, 'deep' Opus 5.5 high); his usual meal
   // times [{name, time 'HH:MM'}] (none until he sets them: brief section 10).
-  fuel: { visionModel: 'fast', mealTimes: [] },
+  // waterMl: his own daily water amount (null = none, Thu 11/5); shopDays: the shopping list's "runs out within" days.
+  fuel: { visionModel: 'fast', mealTimes: [], waterMl: null, shopDays: 3 },
   // Step 7: a daily step goal of his own for the Body chart and the core's steps ring (none until he sets one).
   // Step 7: which Claude reads body scan result photos on the Mac (Opus 5.5 high by default: every number counts).
   body: { stepGoal: null, scanModel: 'deep' },
