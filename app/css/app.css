@@ -761,3 +761,29 @@ body.has-wbar:has(.coach-compose) .app { padding-bottom: 0; }
    workout running the hint goes, so the box ends the page and the layout is the same scrolled or not. */
 body.has-wbar .coach-foot { display: none; }
 body.has-wbar .toast { bottom: calc(86px + var(--safe-bottom)); }
+/* Thu 11/5: the Mac unreachable for 2 minutes while the phone is online (ui/mac-banner.js). */
+.mac-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 12px 0; padding: 10px 12px;
+  border: 1px solid var(--amber); border-radius: 10px; background: var(--surface-2); color: var(--text); font-size: 14px; line-height: 1.4; }
+.mac-banner[hidden] { display: none; }
+.mac-banner .mb-text { flex: 1 1 220px; }
+.mac-banner .mb-x { border: 0; background: none; color: var(--muted); font-size: 16px; width: 32px; height: 32px; cursor: pointer; }
+/* Thu 11/5: his morning routine as a checklist on Today (lib/morning.js). */
+.morning-card[hidden] { display: none; }
+.morning-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.morning-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 6px 2px; border: 0; background: none;
+  color: var(--text); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.morning-item .mi-box { flex: 0 0 22px; height: 22px; border: 1px solid var(--cyan); border-radius: 6px; display: grid; place-items: center; color: var(--green); font-size: 14px; }
+.morning-item.is-done { color: var(--muted); text-decoration: line-through; }
+.morning-item.is-done .mi-box { border-color: var(--green); }
+/* Thu 11/5: the clinic summary (views/body-clinic.js), on screen and printed. */
+.clinic-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.clinic-table th, .clinic-table td { text-align: left; vertical-align: top; padding: 5px 6px; border-top: 1px solid var(--line, #1d3442); }
+.clinic-table thead th { border-top: 0; color: var(--muted); font-weight: 500; }
+.clinic-table tbody th { white-space: nowrap; font-weight: 500; }
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  body::after, header.top, .no-print, .wbar, .coach-caption, .mac-banner, .toast { display: none !important; }
+  .view-body .clinic, .view-body .clinic * { color: #000 !important; background: none !important; box-shadow: none !important; }
+  .view-body .clinic .card { border: 1px solid #999 !important; break-inside: avoid; margin: 0 0 8px; }
+  .view-body .clinic .clinic-table th, .view-body .clinic .clinic-table td { border-top: 1px solid #ccc !important; }
+}

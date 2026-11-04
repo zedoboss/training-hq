@@ -18,10 +18,11 @@ import * as photos from './body-photos.js';
 import * as scan from './body-scan.js';
 import * as recovery from './body-recovery.js';
 import * as pain from './body-pain.js';
+import * as clinic from './body-clinic.js';
 import { isDone, cadenceOf, planFor } from '../lib/scans.js';
 import { checkInStatus, photoStatus, openTasks, sinceText } from '../lib/recovery.js';
 
-const SUB = { health, measure, photos, scan, recovery, pain };
+const SUB = { health, measure, photos, scan, recovery, pain, clinic };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const n0 = (x) => Math.round(x || 0).toLocaleString('en-US');
 const dayName = (iso) => formatDay(new Date(`${iso}T12:00:00`));
@@ -167,6 +168,7 @@ export function render(view, params = []) {
       <a class="card supp-card" href="#/body/scan" id="b-scan"><span class="hud c-cyan">BODY SCAN</span><span class="supp-card-line ${nextScan || scanPlan?.safety?.readAt ? '' : 'c-amber'}">${esc(scanLine)}${scanPlan?.safety?.readAt ? '' : ' · safety notice first'}</span><span class="pill is-on">Open</span></a>
       ${recCard}
       <a class="card supp-card" href="#/body/pain" id="b-pain"><span class="hud c-cyan">PAIN</span><span class="supp-card-line">Per area over days, and the lifts it was on</span><span class="pill is-on">Open</span></a>
+      <a class="card supp-card" href="#/body/clinic" id="b-clinic"><span class="hud c-cyan">CLINIC SUMMARY</span><span class="supp-card-line">One printable page from your records</span><span class="pill">Open</span></a>
       <a class="card supp-card" href="#/body/measure"><span class="hud c-cyan">MEASUREMENTS</span><span class="supp-card-line">${mDates.length ? `${mLatest.slice(0, 2).map((f) => `${esc(f.label)} ${shown(f.kind, f.value, st.units)} ${esc(unitText(f.kind, st.units))}`).join(' · ') || `${mDates.length} entries`} · last ${esc(md(mDates.at(-1)))}` : 'Weight, body fat and 14 circumferences'}</span><span class="pill is-on">Open</span></a>
       <a class="card supp-card" href="#/body/photos"><span class="hud c-cyan">PROGRESS PHOTOS</span><span class="supp-card-line">${pDays.length ? `${pDays.length} day${pDays.length === 1 ? '' : 's'} · last ${esc(dayName(pDays[0].date))}` : 'Front, side and back, private'}</span><span class="pill is-on">Open</span></a>
       <a class="card supp-card" href="#/body/health"><span class="hud c-cyan">APPLE HEALTH</span><span class="supp-card-line">${last ? `Last file ${esc(at(last.readAt))} · ${docs.length} days` : 'Set up the iPhone Shortcut'}</span><span class="pill is-on">Open</span></a>`;

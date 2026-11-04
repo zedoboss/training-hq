@@ -12,7 +12,8 @@ import { kg as fmtKg } from '../lib/loads.js';
 import { unlockAudio, play } from '../lib/sounds.js';
 import { notifyPanel } from '../ui/notify-panel.js';
 import { toast } from '../ui/toast.js';
-import { confirmSheet, promptTime } from '../ui/sheet.js';
+import { confirmSheet, promptTime, promptLong } from '../ui/sheet.js';
+import { morningItems, itemsFromLines } from '../lib/morning.js';
 import { EVERY_LABEL, MOOD_LABEL, MOOD_TEXT } from '../lib/coach-talk.js';
 import { NUDGE_EVERY } from '../lib/nudges.js';
 
@@ -156,6 +157,7 @@ function prefsHtml(st, eq) {
       ${opt('Nudges from the coach', 'Notifications in its voice through your waking hours: the most important thing still open (session and Evolt, sleep, food, supplements, holds). Quiet while you train, while you talk to it, and at night.', '')}
       ${seg('notify.nudgeEveryMin', NUDGE_EVERY, st.notify.nudgeEveryMin)}
       ${opt('Moving schedule', `Your day runs from when you wake, bedtime about ${st.notify.driftMin} minutes later each day. Asleep once you go quiet near your bedtime (at least an hour after a meal) until your next message, never just off your phone mid-day; your sleep is logged from that. Off: the hours below.`, sw('notify.movingDay', st.notify.movingDay !== false))}
+      ${opt('Morning checklist', morningItems(st.notify.morning).length ? `On Today, ticked each day: ${morningItems(st.notify.morning).map(esc).join(' · ')}` : 'None set', '<button class="btn-ghost small" id="morning-items" type="button">Change</button>')}
       ${opt(st.notify.movingDay !== false ? 'Your usual day' : 'Awake', st.notify.movingDay !== false ? `${formatHm(st.notify.wakeHm)} to ${formatHm(st.notify.bedHm)}: its length and order, from when you wake.` : `${formatHm(st.notify.wakeHm)} to ${formatHm(st.notify.bedHm)}. No nudges outside these hours.`, '<button class="btn-ghost small" id="awake-hours" type="button">Change</button>')}
       ${opt('Rep calls on squat-camera sets', '"Two more", "Last one", only while you stand at the top. Off until it is checked on your iPhone that the depth ding is not slowed or covered; while off, the coach stays silent during squat-camera sets.', sw('coach.squatCalls', st.coach.squatCalls === true))}
       ${opt('Get ready before a hold', 'Seconds to set up after Start, then 3, 2, 1 and the hold.', '')}
@@ -229,6 +231,15 @@ function wirePrefs(box) {
 
   box.addEventListener('click', async (e) => {
     if (e.target.closest('#meal-times')) { editMealTimes(); return; }
+    // Thu 11/5: his morning routine, one item per line, ticked on Today (lib/morning.js). Empty = from his routine text.
+    if (e.target.closest('#morning-items')) {
+      const v = await promptLong('Morning checklist, one per line', morningItems(st().notify.morning).join('\n'), { placeholder: 'Banana\nStretch' });
+      if (v == null) return;
+      const items = itemsFromLines(v);
+      await saveSettings({ notify: { morning: { items } } });
+      toast(items.length ? `Morning checklist: ${items.length} item${items.length > 1 ? 's' : ''}.` : 'Morning checklist cleared.');
+      return;
+    }
     if (e.target.closest('#awake-hours')) {
       const wake = await promptTime('You wake up at', st().notify.wakeHm);
       if (!wake) return;

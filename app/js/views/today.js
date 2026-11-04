@@ -21,10 +21,13 @@ import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
 import * as voice from '../lib/voice.js';
 import { elapsedMs, nextSetText } from '../lib/session.js';
 import { planFor, isDone, cadenceOf } from '../lib/scans.js';
+import { morningItems, morningState, withMorningTick } from '../lib/morning.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
 const CHECK = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>`;
 const MIC = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`;
+
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const LATER = {
   talk: 'Voice arrives in step 9, after you calibrate it to your voice.',
@@ -166,6 +169,8 @@ export function render(view) {
         <div class="spoke-actions" data-k="spoke-actions"></div>
       </section>
 
+      <section class="card morning-card" data-k="morning" hidden></section>
+
       <div class="dock">
         <label class="dock-btn file-btn" for="t-cam">${CAMERA}LOG MEAL</label>${cameraInput('t-cam')}
         <a class="dock-btn dock-mid" href="#/coach" id="t-talk" aria-label="Talk to the coach"><span class="mic-btn">${MIC}</span><span data-k="dock-voice">TALK</span></a>
@@ -222,6 +227,27 @@ export function render(view) {
   let fuel = null;
   let steps = null; let healthAt = null;
   let talk = null;
+  let morning = null;
+  // Thu 11/5 (missing feature 9): his morning routine as a checklist for the day, ticked here or by telling the coach.
+  const drawMorning = () => {
+    const el = view.querySelector('[data-k="morning"]');
+    if (!el) return;
+    el.hidden = !morning?.items.length;
+    if (el.hidden) return;
+    const n = morning.items.filter((x) => x.at).length;
+    const all = n === morning.items.length;
+    el.innerHTML = `<div class="hud c-muted spoke-head"><span>MORNING</span><span class="${all ? 'c-green' : 'c-cyan-dim'}">${all ? 'DONE' : `${n}/${morning.items.length}`}</span></div>
+      ${all ? '' : `<ul class="morning-list">${morning.items.map((x, i) => `<li><button class="morning-item${x.at ? ' is-done' : ''}" type="button" data-mi="${i}" aria-pressed="${x.at ? 'true' : 'false'}"><span class="mi-box" aria-hidden="true">${x.at ? '✓' : ''}</span><span>${esc(x.item)}</span></button></li>`).join('')}</ul>`}`;
+  };
+  view.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-mi]');
+    if (!b || !morning) return;
+    const x = morning.items[Number(b.dataset.mi)];
+    if (!x) return;
+    const repo = await ready;
+    const day = await repo.get('days', morning.date);
+    await repo.put('days', morning.date, withMorningTick(day, morning.date, x.item, !x.at, Date.now()));
+  });
   const draw = (s) => {
     set('model', MODEL_LABEL[withDefaults(s.settings).coach.model] || MODEL_LABEL.fast);
     set('turns', `TURN ${String(talk?.turns ?? 0).padStart(4, '0')} · MIC OFF`);
@@ -243,6 +269,7 @@ export function render(view) {
     set('spoke', s.paired && s.programme && train ? train.line : spokeText(s));
     set('spoke-actions', !s.paired ? '<a class="btn-ghost spoke-btn" href="#/settings">PAIR WITH MAC</a>'
       : [train?.live ? `<a class="btn-primary spoke-btn" href="#/session/${encodeURIComponent(train.live)}">BACK TO THE WORKOUT</a>` : '', train?.scan ? '<a class="btn-ghost spoke-btn" href="#/body/scan">LOG THE SCAN</a>' : ''].join(''));
+    drawMorning();
     set('core', coreSvg({ train: train?.progress ?? null, fuel: fuel?.progress ?? null, steps: steps?.goal ? Math.min(1, steps.steps / steps.goal) : null, tendons: train?.holds.progress ?? null },
       `AI core. ${train ? train.line : 'Nothing logged yet today.'}`));
   };
@@ -257,6 +284,9 @@ export function render(view) {
   ready.then((repo) => {
     const refresh = async () => {
       train = await trainToday(repo); fuel = await fuelToday(repo); steps = await stepsToday(repo); healthAt = await healthAsOf(repo);
+      const mdate = await wakingDayAt(repo);
+      const mItems = morningItems(withDefaults(getState().settings).notify.morning);
+      morning = { date: mdate, items: morningState(mItems, await repo.get('days', mdate)) };
       talk = todayCounts(await repo.list('coach-messages'), isoDate(new Date()), (ms) => isoDate(new Date(ms)));
       if (!gone) draw(getState());
     };

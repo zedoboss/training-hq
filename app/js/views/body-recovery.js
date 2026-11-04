@@ -37,7 +37,7 @@ export function render(view) {
     const qs = plan.checkIn?.questions || [];
     const firstPose = ph ? (ph.poses.find((p) => !photos.some((x) => x.date === today && x.pose === p && x.dataUrl)) || ph.poses[0]) : null;
     view.innerHTML = `
-      <div class="lib-head"><a class="pill" href="#/body">Body</a></div>
+      <div class="lib-head"><a class="pill" href="#/body">Body</a><a class="pill" href="#/body/clinic">Clinic summary</a></div>
       <h1 class="view-title">${esc(plan.title || 'Recovery')}</h1>
       <p class="view-sub">${esc(sinceText(plan, today) || '')} since ${esc(plan.sinceText || dayName(plan.since))}.${st.endsOn ? ` Check-ins until ${esc(state?.checkup?.date ? `your checkup, ${dayName(st.endsOn)}` : plan.untilText || dayName(st.endsOn))}.` : ''}</p>
 

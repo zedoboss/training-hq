@@ -45,6 +45,8 @@ export const SCREENS = [
   ['body_scan_checklist', '#/body/scan/protocol', 'Body scan checklist'],
   ['recovery', '#/body/recovery', 'Surgery recovery'],
   ['pain', '#/body/pain', 'Pain log (per body area over days, the lifts it was on)'],
+  // Thu 11/5: one printable page of his own records for the clinic checkup.
+  ['clinic_summary', '#/body/clinic', 'Clinic summary (one printable page: check-ins, tendon holds, pain written down, main lifts, body scans)'],
   ['settings', '#/settings', 'Settings'],
   ['voice', '#/voice', 'Voice settings'],
   ['import', '#/import', 'Import history (a Hevy or Strong CSV export; the file can also be AirDropped to the Mac\'s imports/inbox folder, which imports it by itself)'],

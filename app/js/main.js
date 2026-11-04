@@ -36,6 +36,7 @@ import { autoKeepOffline } from './lib/squat-offline.js';
 import { mountVoiceHud } from './ui/voice-hud.js';
 import { mountCoachCaption } from './ui/coach-caption.js';
 import { mountWorkoutBar } from './ui/workout-bar.js';
+import { mountMacBanner } from './ui/mac-banner.js';
 import { resume as resumeVoice, watchNudges } from './lib/voice.js';
 
 const VIEWS = {
@@ -139,6 +140,7 @@ route();
 mountVoiceHud(document.getElementById('voice-chip'), document.getElementById('voice-x'));
 mountCoachCaption();
 mountWorkoutBar();
+mountMacBanner(document.querySelector('header.top'));
 resumeVoice();
 ready.then((repo) => watchNudges(repo)).catch(() => {});
 // Notifications stay connected: the Mac gets this phone's subscription at every start; if it was lost, one tap.
