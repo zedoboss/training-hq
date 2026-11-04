@@ -572,6 +572,34 @@ test('check-in by talking: refused on a draft table; missing ratings asked for; 
   assert.match((await call('today')).text, /^Today: rest \(session moved to tomorrow at the check-in\)\. Next: Legs, Wednesday 1\/21/);
 });
 
+test('check-in again mid-session (pain, Thu 11/5): only the rating that changed; the rest stand from today\'s check-in', async () => {
+  const t = store.getRecord('tendons', 'readiness').data;
+  store.writeLocal('tendons', 'readiness', { ...t, status: 'confirmed' });
+  store.writeLocal('days', '2026-01-20', { date: '2026-01-20' });
+  const first = await call('check_in', { areas: [{ area: 'knees', sore: 0, worse: false }], legs: 0, energy: 2, again: true });
+  assert.match(first.text, /rule 6/);
+  // Not again: refused at once (not a list of every rating), and it says how to give only what changed.
+  const no = await call('check_in', { legs: 2 });
+  assert.match(no.text, /already checked in today.*again: true and only what changed/);
+  assert.doesNotMatch(no.text, /Still needed/);
+  // His one new rating decides with the rest from this morning: legs 2 = lighter on the whole session.
+  const one = await call('check_in', { legs: 2, again: true });
+  assert.match(one.text, /rule 5/);
+  const rec = store.getRecord('days', '2026-01-20').data.readiness;
+  assert.deepEqual([rec.ratings.L, rec.ratings.E, rec.ratings.T.knees, rec.ratings.W.knees], [2, 2, 0, false]);
+  // The one rating can make it stricter too: legs 3 = move, never applied without his word.
+  const three = await call('check_in', { legs: 3, again: true });
+  assert.match(three.text, /rule 3.*\n.*Not applied yet/s);
+  // Not checked in today yet: the table still needs the missing ratings, and only those are asked (never the ones given).
+  store.writeLocal('days', '2026-01-20', { date: '2026-01-20' });
+  const fresh = await call('check_in', { legs: 2 });
+  assert.match(fresh.text, /Still needed .*Knees soreness 0-3; Knees: worse than yesterday, yes or no; energy 0-3\. Ask only for what's missing, in one short line, never the ratings he already gave/);
+  assert.doesNotMatch(fresh.text, /legs soreness/);
+  // The coach's rule for that moment: what to do now first, one rating, no list, no recap.
+  const { RULES } = await import('../server/coach/prompt.mjs');
+  assert.match(RULES, /Pain mid-session .*the first line says what to do now, in one or two lines.*Ask only that area's rating, never the full check-in list, and no recap of past pain or sessions/);
+});
+
 test('today projects the coming days from the rotation (dates never worked out by hand)', async () => {
   const r = await call('today');
   assert.match(r.text, /Coming up, if each planned session happens on its day: Wednesday 1\/21 rest; Thursday 1\/22 Pull \(week 4\); Friday 1\/23 Push \(week 4\)/);

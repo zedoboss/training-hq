@@ -405,6 +405,7 @@ async function checkIn(a, ctx) {
     return wrote(saved.action === 'move' ? `${LABEL[saved.dayType]} moved to tomorrow, ${dayText(addDays(s.today, 1), s.today)}. ${LABEL[saved.dayType]} stays next.` : `Rest and tendon holds today, with less weight or less effort. ${LABEL[saved.dayType]} stays next.`, saved.action);
   }
 
+  if (saved && !a.again) return refuse(`He already checked in today (rule ${saved.rule}: ${ACTION_TEXT[saved.action] || saved.action}). To check in again (new pain, a changed rating), call check_in with again: true and only what changed: the rest stand from this check-in.`);
   const ratings = { T: {}, W: {} };
   const unknown = [];
   for (const r of a.areas || []) {
@@ -416,6 +417,14 @@ async function checkIn(a, ctx) {
   if (Number.isInteger(a.legs)) ratings.L = a.legs;
   if (Number.isInteger(a.back)) ratings.B = a.back;
   if (Number.isInteger(a.energy)) ratings.E = a.energy;
+  // Checking in again (pain mid-session, his words Thu 11/5: "should i do what now??"): only the rating that changed
+  // is asked; the rest stand from today's saved check-in.
+  if (a.again && saved?.ratings) {
+    const was = saved.ratings;
+    for (const [id, v] of Object.entries(was.T || {})) if (!Number.isInteger(ratings.T[id])) ratings.T[id] = v;
+    for (const [id, v] of Object.entries(was.W || {})) if (typeof ratings.W[id] !== 'boolean') ratings.W[id] = v;
+    for (const k2 of ['L', 'B', 'E']) if (!Number.isInteger(ratings[k2]) && Number.isInteger(was[k2])) ratings[k2] = was[k2];
+  }
   const ids = areas.map((x) => x.id);
   const ok = dayType ? complete(ratings, ids, keys) : ids.every((id) => Number.isInteger(ratings.T[id]) && typeof ratings.W[id] === 'boolean');
   if (!ok) {
@@ -425,9 +434,8 @@ async function checkIn(a, ctx) {
       ...keys.filter((k2) => !Number.isInteger(ratings[k2])).map((k2) => `${KEY_NAME[k2]} soreness 0-3`),
       ...(dayType && !Number.isInteger(ratings.E) ? ['energy 0-3'] : []),
     ];
-    return { text: `${unknown.length ? `Not an area in his check-in: ${unknown.join(', ')}. ` : ''}Still needed before the table can decide: ${missing.join('; ')}. Ask only for what's missing, in his words: "${areas.map((x) => x.label).join(', ')}${keys.length ? `, ${keys.map((k2) => KEY_NAME[k2]).join(', ')}` : ''}${dayType ? ', then energy' : ''}. Zero to three." Levels (his table): ${levelsText(table, ['T', ...keys, ...(dayType ? ['E'] : [])])}. Nothing saved yet.`, summary: 'ratings missing' };
+    return { text: `${unknown.length ? `Not an area in his check-in: ${unknown.join(', ')}. ` : ''}Still needed before the table can decide: ${missing.join('; ')}. Ask only for what's missing, in one short line, never the ratings he already gave. Levels (his table): ${levelsText(table, ['T', ...keys, ...(dayType ? ['E'] : [])])}. Nothing saved yet.`, summary: 'ratings missing' };
   }
-  if (saved && !a.again) return refuse(`He already checked in today (rule ${saved.rule}: ${ACTION_TEXT[saved.action] || saved.action}). To check in again, call check_in with again: true.`);
   const movedYesterday = days[addDays(s.today, -1)]?.rest?.reason === 'moved';
   const d = decide({ table, ratings, dayType, loaded, movedYesterday });
   const names = d.action === 'lighter-area' ? exercisesLoading(areas, d.lighterAreas, exNames) : [];
@@ -1466,7 +1474,7 @@ export const WRITE_TOOLS = [
   write('weather_seen', 'What he sees outside', "He says what the weather is where he is ('no rain, just clouds', 'it's pouring'): raining = rain or drizzle falling on him now; said = his words. For the next hour it beats the forecast models and the station, for you and for the app's walk messages.", obj({ raining: { type: 'boolean' }, said: { type: 'string' } }, ['raining']), weatherSeen),
   write('write_note', 'Write a note', 'Keep a note for him (something he wants remembered, an answer to an open question). replace: a note\'s id (from the notes line) with the corrected text, when he corrects what a note says or it changed: keeps the id and the old wording, dated. remove: delete one by id (only when he asks).', obj({ text: { type: 'string' }, topic: { type: 'string' }, replace: { type: 'string' }, remove: { type: 'string' } }), writeNote),
   write('sauna_session', 'Sauna session', "Sauna sessions. start: opens the checklist on his phone (he ticks it; the app decides). symptoms: ANY symptom he reports during or after a session: ends it at once and records what he felt. end: ends the running session here with no symptoms. after_answer: the question 15 minutes after (none: true for no symptoms). Can't add rounds or time.", obj({ action: { type: 'string', enum: ['start', 'symptoms', 'end', 'after_answer'] }, symptoms: { type: 'array', items: { type: 'string' } }, none: { type: 'boolean' } }, ['action']), sauna),
-  write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
+  write('check_in', 'Readiness check-in', "His readiness check-in by talking ('Sore, or good to go?'), decided by HIS table exactly as the check-in screen does. Give every rating he said: per tendon area soreness 0-3 and worse-than-yesterday yes/no; legs and back 0-3 when today's day type asks them; energy 0-3. Missing ratings come back as a list to ask for. Pain mid-session after today's check-in: again: true with only the rating he gave for that area; the rest stand from today's check-in. move / rest-holds results are applied only with apply: true once he agrees.", obj({ areas: { type: 'array', items: obj({ area: { type: 'string' }, sore: { type: 'integer', minimum: 0, maximum: 3 }, worse: { type: 'boolean' } }, ['area']) }, legs: { type: 'integer', minimum: 0, maximum: 3 }, back: { type: 'integer', minimum: 0, maximum: 3 }, energy: { type: 'integer', minimum: 0, maximum: 3 }, again: { type: 'boolean' }, apply: { type: 'boolean' } }), checkIn),
   write('sauna_plan', 'Sauna days', "Plan sauna days WITH him: propose (from his rotation: rest days first, never before lifting, about two a week on separate days while building up, once a week at his level; at his usual sauna time), then plan the dates he agrees to, remove one, set his usual sauna time, later = he doesn't want to plan now (no planning questions for days, or until date), doctor = his answer to the one-time doctor question (yes, not-yet, no). The ladder decides each session's step. About food and drink say only his checklist line (eaten and drunk in the last few hours); never tell him to fast.", obj({ action: { type: 'string', enum: ['propose', 'plan', 'remove', 'set_time', 'later', 'doctor'] }, dates: { type: 'array', items: obj({ date: ISO, time: HM }, ['date']) }, date: ISO, time: HM, days: { type: 'integer', minimum: 1, maximum: 30 }, answer: { type: 'string', enum: ['yes', 'not-yet', 'no'] } }, ['action']), saunaPlan),
   write('supplement_review', 'Diet.html line', "His answer about a line of his Diet.html that differs from his supplement list (the supplements tool lists the open ones): use = change the supplement to the Diet.html line, keep = leave his list. Only his answer; never decide for him.", obj({ supplement: { type: 'string' }, answer: { type: 'string', enum: ['use', 'keep'] } }, ['supplement', 'answer']), supplementReview),
   write('rest_day_hold', 'Rest-day hold', "His answer to the rest-day hold question (rest days only): gym = he goes to the gym just for the rest-day hold (the cable lateral raise hold for the shoulder); other = a hold HE names (pass his words in hold); skip = no hold today. Never suggest a hold or a replacement. Default area: the shoulder.", obj({ choice: { type: 'string', enum: ['gym', 'other', 'skip'] }, hold: { type: 'string' }, area: { type: 'string' } }, ['choice']), restDayHold),
