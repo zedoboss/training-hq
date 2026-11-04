@@ -382,7 +382,7 @@ test('held reminders as one ask: the latest of each thing, passed times dropped,
   const meal = { meal: 'First meal', latestAt: T('14:00') };
   const cook = H(`meal-cook:${D}:1230`, 'cook', `meal-${D}-1230`, 'Start cooking: first meal at 12:30 PM', '30 minutes to get it on the plate; 2:00 PM at the latest.', '12:00', meal);
   const ask = H(`meal:${D}:1230`, 'meals', `meal-${D}-1230`, 'First meal', '12:30 PM, nothing logged yet today. 2:00 PM at the latest. Eaten, cooking, or skipping?', '12:30', meal);
-  const again = H(`meal-again:${D}:1230:2`, 'meals', `meal-${D}-1230`, 'Still nothing on your first meal', '2:00 PM is the latest you set.', '13:30', meal);
+  const again = H(`meal-again:${D}:1230:2`, 'meals', `meal-${D}-1230`, 'Still nothing on your first meal', '2:00 PM is the latest.', '13:30', meal);
   const supps = H(`supps:${D}:1000`, 'supps', `supps-${D}-1000`, 'Morning supplements', 'Creatine 5 g, Vitamin C 500 mg, Omega-3 3 softgels. Tap to tick them off.', '10:00');
   const said = (items, hm) => heldPlanText(items, { now: T(hm), tz: TZ });
   // (A check-in the latest of the holds: plain "Holds", what they are from the holds reminder.)

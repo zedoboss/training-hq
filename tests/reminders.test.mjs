@@ -593,23 +593,29 @@ test('Fri 10/23: he goes quiet all day: a few check-ins, never the same line, an
     n.stop();
     for (; now <= at(date, '19:00'); now += 5 * 60000) await n.tick();
     const hms = sent.map((m) => hmOf(m.at));
-    assert.deepEqual(hms, ['12:00 PM', '12:30 PM', '12:50 PM', '1:30 PM', '2:30 PM', '4:00 PM', '4:30 PM', '4:50 PM', '5:30 PM', '6:30 PM'], 'never every 5 minutes');
-    // Each line differs from the one before (the mood line aside), and the later meal never talks about a "last meal".
+    // Thu 11/5: after the 2:30 PM "Last check" on the first meal, the later meal time starts no new chase for it.
+    assert.deepEqual(hms, ['12:00 PM', '12:30 PM', '12:50 PM', '1:30 PM', '2:30 PM'], 'never every 5 minutes');
+    // Each line differs from the one before (the mood line aside).
     const facts = sent.map((m) => m.body.split(/(?<=[.?!])\s/).slice(0, 2).join(' '));
     for (let k = 1; k < facts.length; k++) assert.notEqual(facts[k], facts[k - 1]);
-    const later = sent.filter((m) => m.at >= at(date, '16:00')).map((m) => m.body);
-    assert.ok(later.every((b) => !/last meal|is late|first meal is/i.test(b)), later.join(' | '));
-    assert.match(later[0], /^Nothing eaten yet today\. Start cooking now: 30 minutes and it's on the plate by 4:30 PM; 5:00 PM at the latest\./);
-    assert.match(later[1], /^First meal of the day\. 4:30 PM, nothing logged yet today\. 5:00 PM at the latest\. Eaten, cooking, or skipping\?$/);
-    assert.equal(later[2], "First meal of the day: haven't heard from you. Eaten, cooking, or skipping it?");
-    assert.match(later[3], /^Still nothing on your first meal of the day\. 5:00 PM was the latest you set\. Eat now, or skip it\?$/);
-    assert.ok(sent.filter((m) => m.at < at(date, '16:00')).every((b) => !/last meal|of the day/i.test(b.body)));
+    assert.match(sent.at(-1).body, /^Last check on your first meal\./);
+    assert.ok(sent.every((b) => !/last meal|of the day|you set/i.test(b.body)));
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });
   }
   const items = (meals = [], checks = []) => mealReminders({ date, tz: TZ, meals, checks, mealTimes });
   const one = (list, id) => list.find((i) => i.id === id);
+  // He skipped the first meal: the later one is his first meal of the day, asked as such, never about a "last meal".
+  {
+    const skipped = items([], [{ id: `${date}.1230`, answer: 'skipped', at: at(date, '13:00') }]);
+    const later = skipped.filter((i) => i.id.includes(':1630') && i.due).map((i) => i.body);
+    assert.ok(later.every((b) => !/last meal|is late|first meal is|you set/i.test(b)), later.join(' | '));
+    assert.match(later[0], /^Start cooking now: 30 minutes and it's on the plate by 4:30 PM; 5:00 PM at the latest\./);
+    assert.match(later[1], /^4:30 PM, nothing logged yet today\. 5:00 PM at the latest\. Eaten, cooking, or skipping\?$/);
+    assert.equal(later[2], 'Eaten, cooking, or skipping it?');
+    assert.equal(later[3], '5:00 PM was the latest. Eat now, or skip it?');
+  }
   // He ate the first meal: the later one is his last meal, as before.
   const ate = items([{ id: 'm', date, at: at(date, '13:00'), name: 'First meal' }]);
   assert.equal(one(ate, `meal-cook:${date}:1630`).title, 'Start cooking: last meal at 4:30 PM');

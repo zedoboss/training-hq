@@ -43,6 +43,8 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
   // When a meal's questions start: its "start cooking", else its ask.
   const askHmOf = (slot) => (slot.latest ? slot.time : addMinutesHm(slot.time, MEAL_NUDGE.afterMin));
   const startOf = (slot) => Math.min(zonedTime(date, askHmOf(slot), tz), zonedTime(date, slot.time, tz) - (slot.cookMin || 0) * 60000);
+  // Per meal time: its unanswered check-ins ran through to the "Last check" (nothing logged, no answer).
+  const ranOut = [];
   slots.forEach((slot, n) => {
     const slotAt = zonedTime(date, slot.time, tz);
     const id = `${date}.${hmId(slot.time)}`;
@@ -57,9 +59,16 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
     // He's on an earlier meal (about to cook or cooking, in the last 2 hours, not logged yet): its own check-backs ask;
     // this one doesn't start on top of them.
     const onEarlier = earlier.some((c) => (c.answer === 'soon' || c.answer === 'cooking') && c.at > startOf(slot) - 2 * 3600000 && !today.some((m) => m.at >= c.at));
-    const open = !logged && !check && !onEarlier;
+    // Thu 11/5, his words: "Still nothing on your first meal of the day... Eat now, or skip it?" came after Wednesday's
+    // 10:10 AM "Last check on your first meal": nothing eaten, an earlier meal time already chased to its last check
+    // unanswered, so a later one doesn't start a new chase for the same first meal. Answered (skipped) or a meal
+    // logged: the later meal asks as usual.
+    const afterLast = firstOfDay && ranOut.some(Boolean);
+    const open = !logged && !check && !onEarlier && !afterLast;
     // The next meal time takes over: no more check-ins on this one from its start.
     const nextAt = slots[n + 1] ? startOf(slots[n + 1]) : Infinity;
+    const lastCheckAt = zonedTime(date, askHmOf(slot), tz) + MEAL_NUDGE.checkInMin.at(-1) * 60000;
+    ranOut[n] = open && lastCheckAt < nextAt;
     // With a latest time the meal is a target: asked at its time; without, 45 minutes after it.
     const askHm = askHmOf(slot);
     if (slot.cookMin) {
@@ -93,9 +102,11 @@ export function mealReminders({ date, tz, meals = [], checks = [], mealTimes = [
       const at = askAt + min * 60000;
       if (at >= nextAt) return;
       const late = slot.latest && at >= zonedTime(date, slot.latest, tz);
+      // Never "the latest you set" (Thu 11/5): with the moving schedule the app moves his times to his body clock.
+      // (12:40 PM was the app's, from his 5:00 PM.)
       const [title, body] = [
         [`${label}: haven't heard from you`, 'Eaten, cooking, or skipping it?'],
-        [`Still nothing on your ${lower}`, late ? `${latestHm} was the latest you set. Eat now, or skip it?` : `${latestHm ? `${latestHm} is the latest you set. ` : ''}When are you eating, or are you skipping it?`],
+        [`Still nothing on your ${lower}`, late ? `${latestHm} was the latest. Eat now, or skip it?` : `${latestHm ? `${latestHm} is the latest. ` : ''}When are you eating, or are you skipping it?`],
         [`Last check on your ${lower}`, 'Eating now, or skipping it today?'],
       ][k];
       out.push({
