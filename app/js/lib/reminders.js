@@ -34,6 +34,7 @@ export const KINDS = [
   ['flex', 'Flexibility: your stretch routine after a workout (or at your evening time) and the weekly kick test'],
   ['combat', 'Boxing / kickboxing: before each class, and how it went after'],
   ['rest', 'Timers: rest over, and a hold\'s go and stop (sent by the Mac, so they come with the screen locked too)'],
+  ['weekly', 'Weekly report: your week in numbers (workouts, top sets, food, sleep, scans, pain you wrote down), once a week'],
 ];
 
 const KEY_WORD = { L: 'legs', B: 'back' };

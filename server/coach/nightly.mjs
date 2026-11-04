@@ -334,8 +334,7 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
       || list('here').some((h) => h.phone && h.at >= dawn && h.at <= t);
   }
 
-  async function tell(text, short, ref) {
-    const t = now();
+  async function tell(text, short, ref, t = now()) {
     const id = `cm.${String(t).padStart(13, '0')}.${rand()}`;
     store.writeLocal(MSGS, id, { id, role: 'assistant', text, at: t, tz: tz(), kind: 'nightly', ref });
     try { if (push?.list?.().length) await push.notify({ title: 'Coach', body: short || text, url: '#/coach', tag: ref }); } catch (e) { log(`nightly: notification: ${e.message}`); }
@@ -368,22 +367,24 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const said = diaries.map((d) => withoutFixes(d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
       ? d.morning.replace(/\b\d[\d,]* of ([\d,]+ kcal)/, `${kcalOf(d.date).toLocaleString('en-US')} of $1`) : d.morning)).filter(Boolean);
     const learned = diaries.reduce((n, d) => n + (d.facts?.length || 0), 0);
-    const lines = [
-      said.length ? said.join(' ') : '',
+    const head = said.join(' ');
+    // Thu 11/5 (his list of missing features: "Your 4:33 AM morning message came with three 'Being fixed now' lines
+    // tacked on. Build updates shouldn't ride along in daily messages"): the morning message is only what was learned;
+    // the fixes come as their own message; one still building isn't named at all: it is told on its own once it's done
+    // (quietDone above, a quiet change told after the morning).
+    const fixes = [
       ...done.map((c) => fixLine('Fixed overnight', c.answer)),
-      ...building.map((c) => `Being fixed now: ${clip(c.want || c.said, 120).replace(/([^.!?…])$/, '$1.')}`),
       ...other.map((c) => fixLine(c.status === 'question' ? 'Question' : 'Not fixed', c.answer)),
-    ].filter(Boolean);
+    ];
+    const lines = [head, ...fixes].filter(Boolean);
     for (const d of diaries) put(DIARY, d.date, { ...d, morningAt: t });
     for (const c of quiet) put(CHANGES, c.id, { ...c, announce: 'done', announcedAt: t });
     if (!lines.length) { log(`nightly: nothing to tell this morning (${learned} facts kept quietly)`); return null; }
-    // The lock screen: what he learned, then how many fixes, never their words (they're in Talk, once each).
-    const count = [done.length && `${done.length} fixed overnight`, building.length && `${building.length} being fixed`, other.length && `${other.length} need you`].filter(Boolean).join(', ');
-    const tally = count && `${count[0].toUpperCase()}${count.slice(1)}, in Talk.`;
-    const head = said.join(' ');
-    const short = head ? (tally && head.length + tally.length < 200 ? `${head} ${tally}` : head) : lines.length > 1 && tally ? tally : lines[0];
-    await tell(lines.join('\n'), clip(short, 200), `nightly-${today}`);
-    log(`nightly: morning message sent (${done.length} fixed, ${building.length} building, ${learned} facts)`);
+    if (head) await tell(head, clip(head, 200), `nightly-${today}`);
+    // The fixes' lock screen: one fix is shown whole; several are counted (their words are in Talk, once each).
+    const count = [done.length && `${done.length} fixed overnight`, other.length && `${other.length} need you`].filter(Boolean).join(', ');
+    if (fixes.length) await tell(fixes.join('\n'), clip(fixes.length > 1 ? `${count[0].toUpperCase()}${count.slice(1)}, in Talk.` : fixes[0], 200), `nightly-fixes-${today}`, now() + (head ? 1 : 0));
+    log(`nightly: morning message sent (${done.length} fixed, ${building.length} still building, not named, ${learned} facts)`);
     return lines.join('\n');
   }
 

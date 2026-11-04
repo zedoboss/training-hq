@@ -54,8 +54,11 @@ function prefsHtml(n) {
     <label class="opt"><span>Morning holds</span><input class="input mini" type="time" data-n="holdsMorning" value="${esc(n.holdsMorning)}"></label>
     <label class="opt"><span>Evening holds</span><input class="input mini" type="time" data-n="holdsEvening" value="${esc(n.holdsEvening)}"></label>
     <label class="opt"><span>Evening round-up</span><input class="input mini" type="time" data-n="eveningCheck" value="${esc(n.eveningCheck)}"></label>
+    <label class="opt"><span>Weekly report</span><span class="btn-row tight"><select class="input mini" data-weekly="weekday">${WEEKDAYS.map((d, i) => `<option value="${i}" ${i === Number(n.weekly?.weekday ?? 0) ? 'selected' : ''}>${d}</option>`).join('')}</select><input class="input mini" type="time" data-weekly="hm" value="${esc(n.weekly?.hm || '19:00')}"></span></label>
   </div>`;
 }
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export function notifyPanel(el) {
   const draw = async () => {
@@ -86,6 +89,12 @@ export function notifyPanel(el) {
       <div id="backup-box"></div>`;
     drawBackup();
     el.querySelectorAll('[data-kind]').forEach((c) => c.addEventListener('change', () => saveSettings({ notify: { kinds: { [c.dataset.kind]: c.checked } } }).then(listToday)));
+    // Thu 11/5: the weekly report's day and time (lib/weekly.js).
+    el.querySelectorAll('[data-weekly]').forEach((c) => c.addEventListener('change', () => {
+      const v = c.dataset.weekly === 'weekday' ? Number(c.value) : c.value;
+      if (c.dataset.weekly === 'hm' && !/^\d\d:\d\d$/.test(v)) return;
+      saveSettings({ notify: { weekly: { [c.dataset.weekly]: v } } });
+    }));
     el.querySelectorAll('[data-n]').forEach((c) => c.addEventListener('change', () => {
       const v = c.dataset.n === 'readinessMin' ? Number(c.value) : c.value;
       if (c.type === 'time' && !/^\d\d:\d\d$/.test(v)) return;

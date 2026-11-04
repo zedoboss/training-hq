@@ -21,6 +21,8 @@ import { pickLine } from '../app/js/lib/coach-talk.js';
 import { protocolOf, planFor, scanTakenOn } from '../app/js/lib/scans.js';
 import { zonedTime, hmOf, formatTime, formatHm } from '../app/js/lib/time.js';
 import { healthSendsText } from './health.mjs';
+import { weeklyTick } from './weekly.mjs';
+import { lastAnswerAt, silentNow, openLabels, catchUpText, SILENT, SILENT_PASS } from '../app/js/lib/silent.js';
 
 export const SENT = 'notify:sent';
 
@@ -722,6 +724,42 @@ function sayInTalk(store, { text, at, tz, kind, ref }) {
   store.writeLocal(MSGS, id, { id, role: 'assistant', text, at, tz, kind, ref });
 }
 
+/** Gone quiet (lib/silent.js): {since, hours} once SILENT.afterH hours have passed with no answer from him, else null. */
+export function silentOf(store, now) {
+  const list = (col) => recordsOf(store, col);
+  // Sets left out (a workout's start counts; reading every set each minute isn't worth it).
+  return silentNow(lastAnswerAt({ messages: list(MSGS), meals: list('meals'), checks: list('meal-checks'), supps: list('supp-log'), sessions: list('sessions'), walks: list('walks'), days: list('days') }, now), now);
+}
+export const SILENT_STATE = 'silent:state';
+
+/**
+ * While he's quiet: one catch-up a day, inside his waking hours, SILENT.catchUpAfterWakeMin after his wake time, naming
+ * what is still open today (the day's own asks, held back). Returns what was sent, or null.
+ */
+export async function silentTick({ store, push, log = () => {}, now, tz, quiet }) {
+  if (!quiet) return null;
+  const inp = nudgeInputs(store, now, tz);
+  if (!awakeIn(inp.n, now, tz) || now < (inp.n.nudgePausedUntil || 0) || heldOff('all', holdsOf(store), now) || morningGate(store, now, tz).hold) return null;
+  const date = inp.date;
+  if (now < zonedTime(date, inp.n.wakeHm, tz) + SILENT.catchUpAfterWakeMin * 60000) return null;
+  const st = store.getMeta(SILENT_STATE) || {};
+  if (st.lastDate === date) return null;
+  const items = remindersToday(store, stateFrom(store, tz), date, now, tz).filter((i) => !SILENT_PASS.has(i.kind) && i.due !== false);
+  const a = inp.args;
+  const extra = [
+    a.rot?.today?.kind === 'train' && !a.session.started ? (a.rot.today.dayType ? a.rot.today.dayType[0].toUpperCase() + a.rot.today.dayType.slice(1) : 'workout') : null,
+    inp.n.kinds?.walk !== false && a.steps && a.steps.steps < (withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000) ? 'walk' : null,
+  ].filter(Boolean);
+  const text = catchUpText({ since: quiet.since, open: openLabels(items.map((i) => i.kind), extra), tz });
+  const v = coachVoice(text, { calm: true });
+  const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'silent-catch-up' }) : { sent: 0 };
+  sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `silent:${date}` });
+  store.setMeta(SILENT_STATE, { lastDate: date, at: now });
+  store.setMeta(LAST, now);
+  log(`silent catch-up ${date}: ${v.body.slice(0, 80)} (${r.sent} sent)`);
+  return { key: `silent:${date}`, body: v.body };
+}
+
 /**
  * A workout or the sauna running. A holds session counts only for its first 30 minutes: a round takes a few (Thu 10/22:
  * a wrist round left open at 11:32 AM kept the dishes after his first meal from ever coming).
@@ -1082,6 +1120,8 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       applyPhasePlans(store, t, zone, log);
       for (const r of rearmRepeats(store, t, zone)) log(`notify: repeating reminder ${r.series} next at ${formatTime(new Date(r.at), zone)} ${r.date}`);
       if (!push.list().length) return [];
+      // Gone quiet (lib/silent.js): the app's own asks wait for him; what he set himself keeps its time.
+      const quiet = silentOf(store, t);
       // His morning first: its question, and whether the rest of the day is still held.
       const morning = await morningTick({ store, push, log, now: t, tz: zone });
       const sent = store.getMeta(SENT) || {};
@@ -1109,8 +1149,11 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       for (const i of due.filter((x) => x.workout === 'after' && (!x.group || latest.get(x.group) === x)).sort((a, b) => a.heldAt - b.heldAt)) if (!firstOfTag.has(i.tag)) firstOfTag.set(i.tag, i);
       const repeats = new Set(due.filter((i) => i.workout === 'after' && firstOfTag.has(i.tag) && firstOfTag.get(i.tag) !== i));
       for (const i of repeats) sent[i.id] = t;
-      if (covered.size || spaced.size || repeats.size) store.setMeta(SENT, sent);
-      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !spaced.has(i) && !repeats.has(i));
+      // Quiet: counted, not sent (the day's catch-up names what's open).
+      const hushed = new Set(quiet ? due.filter((i) => !SILENT_PASS.has(i.kind)) : []);
+      for (const i of hushed) { sent[i.id] = t; log(`notify ${i.id}: not sent (no answer from him since ${new Date(quiet.since).toISOString()})`); }
+      if (covered.size || spaced.size || repeats.size || hushed.size) store.setMeta(SENT, sent);
+      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !spaced.has(i) && !repeats.has(i) && !hushed.has(i));
       if (items.length) {
         const opts = voiceOpts(store);
         // What waited for his morning or a workout: one short ask of what to do now (heldPlanText: one line a thing, no
@@ -1141,16 +1184,19 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
         store.setMeta(LAST, t);
       }
       const dishes = await dishesTick({ store, push, log, now: t, tz: zone });
-      const walk = await walkTick({ store, push, log, now: t, tz: zone });
+      const caught = quiet ? await silentTick({ store, push, log, now: t, tz: zone, quiet }) : null;
+      // Once a week, his report (server/weekly.mjs).
+      const weekly = caught ? null : await weeklyTick({ store, push, log, now: t, tz: zone });
+      const walk = quiet ? null : await walkTick({ store, push, log, now: t, tz: zone });
       // One coach notification a minute: a walk question that just went out holds the other nudges.
-      const nudge = walk ? null : await nudgeTick({ store, push, log, now: t, tz: zone });
-      const init = walk || nudge ? null : await initiativeTick({ store, push, coach: typeof coach === 'function' ? coach() : coach, log, now: t, tz: zone });
+      const nudge = walk || quiet ? null : await nudgeTick({ store, push, log, now: t, tz: zone });
+      const init = walk || nudge || quiet ? null : await initiativeTick({ store, push, coach: typeof coach === 'function' ? coach() : coach, log, now: t, tz: zone });
       // Something due before the next tick: an extra tick on the second it's due.
       clearTimeout(soon);
       const next = nextDueAt(store, t, zone, everyMs);
       soon = next ? setTimeout(tick, next - t + 250) : null;
       soon?.unref?.();
-      return [...(morning ? [morning] : []), ...items, ...(dishes ? [dishes] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : []), ...(init ? [init] : [])];
+      return [...(morning ? [morning] : []), ...items, ...(dishes ? [dishes] : []), ...(caught ? [caught] : []), ...(weekly ? [weekly] : []), ...(walk ? [walk] : []), ...(nudge ? [nudge] : []), ...(init ? [init] : [])];
     } catch (e) {
       log(`notify error: ${e.stack || e}`);
       return [];

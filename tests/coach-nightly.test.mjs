@@ -215,17 +215,17 @@ test('fixes filed at night build quietly; one morning message once he is up, the
   assert.deepEqual(talk(), [], 'not while the coach answers or a workout runs');
   await n.tick();
   const t1 = talk();
-  assert.equal(t1.length, 1);
-  assert.equal(t1[0].text, 'Noted: beef is your last meal, eggs the first; walks at 4 PM.\nFixed overnight: a food tip only goes with the meal that has the food.', 'the fix named once, in its state now');
+  // Thu 11/5: the fixes are their own message, not riding along in the morning one.
+  assert.deepEqual(t1.map((m) => m.text), ['Noted: beef is your last meal, eggs the first; walks at 4 PM.', 'Fixed overnight: a food tip only goes with the meal that has the food.'], 'the fix named once, in its state now, on its own');
   assert.equal(store.getRecord(CHANGES, fix.id).data.announce, 'done');
   assert.ok(store.getRecord(DIARY, '2026-03-17').data.morningAt);
   await n.tick();
-  assert.equal(talk().length, 1, 'once');
+  assert.equal(talk().length, 2, 'once');
   // A quiet one that finishes after the morning message is told on its own.
   clock = at('09:20', '2026-03-18');
   w(CHANGES, 'chg.late', { id: 'chg.late', at: clock, said: 'x', status: 'done', doneAt: clock, answer: 'Done: the late one.', by: 'nightly', announce: 'morning' });
   await n.tick();
-  assert.deepEqual(talk().map((m) => m.text).slice(1), ['Done: the late one.']);
+  assert.deepEqual(talk().map((m) => m.text).slice(2), ['Done: the late one.']);
 });
 
 test('Tue 10/27: the recap names each fix once, in its state when he reads it, and the lock screen stays within 200', async () => {
@@ -244,17 +244,26 @@ test('Tue 10/27: the recap names each fix once, in its state when he reads it, a
   clock = at('17:35', '2026-03-18');
   msg('m9', 'user', 'Lunch', '17:32', '2026-03-18');
   await n.tick();
-  const [m] = talk();
-  assert.equal(m.text, [
-    'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today.',
+  // Thu 11/5 (his words: "Your 4:33 AM morning message came with three 'Being fixed now' lines tacked on. Build
+  // updates shouldn't ride along in daily messages"): the morning message alone, the fixes as their own message, and
+  // the one still building not named at all (it is told on its own once done).
+  const [m, f] = talk();
+  assert.equal(m.text, 'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today.');
+  assert.equal(f.text, [
     'Fixed overnight: after a meal out, "back home yet?" comes 3 times, an hour apart, new words each, then quiet.',
     'Fixed overnight: "Push, no time set" asks once, then once more at 7:00 PM, then quiet.',
-    `Being fixed now: ${c.want}.`,
   ].join('\n'));
-  assert.doesNotMatch(m.text, /Done:/, '"Fixed overnight" already says it');
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].body, 'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today. 2 fixed overnight, 1 being fixed, in Talk.');
-  assert.ok(sent[0].body.length <= 200);
+  assert.equal(talk().length, 2);
+  assert.doesNotMatch(talk().map((x) => x.text).join('\n'), /Being fixed|Done:/);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].body, 'Sunday: 2,791 kcal, 145 of 242.5 g protein. Push is today.');
+  assert.equal(sent[1].body, '2 fixed overnight, in Talk.');
+  assert.ok(sent.every((x) => x.body.length <= 200));
+  // The one that was building finishes: told on its own.
+  w(CHANGES, c.id, { ...store.getRecord(CHANGES, c.id).data, status: 'done', doneAt: clock, announce: 'morning', answer: 'Done: the walk ask says its time once.' });
+  clock = at('17:50', '2026-03-18');
+  await n.tick();
+  assert.equal(talk().at(-1).text, 'Done: the walk ask says its time once.');
 });
 
 test('Tue 10/27: fix talk in the night\'s morning text is dropped, the rest kept as written', () => {

@@ -48,7 +48,9 @@ export const DEFAULT_SETTINGS = {
     // Tue 10/27, his words: "the coach should resume the moving schedule... if I do have a consistent schedule, I'll
     // tell it and the moving schedule can be turned off": his day runs from when he wakes, bed about driftMin later
     // each day (lib/moving-day.js); off = the wake time and bedtime above.
-    movingDay: true, driftMin: 90 },
+    movingDay: true, driftMin: 90,
+    // Thu 11/5: the weekly report (lib/weekly.js): weekday (0 = Sunday) and time; off with kinds.weekly false.
+    weekly: { weekday: 0, hm: '19:00' } },
   // Step 6: which Claude reads meal photos on the Mac ('fast' Sonnet 5.5 low, 'deep' Opus 5.5 high); his usual meal
   // times [{name, time 'HH:MM'}] (none until he sets them: brief section 10).
   fuel: { visionModel: 'fast', mealTimes: [] },

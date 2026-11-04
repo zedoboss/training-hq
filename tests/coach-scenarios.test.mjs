@@ -142,9 +142,10 @@ test('the Mac asleep at night = the missed days are reviewed when it wakes; thei
   assert.equal(runs.length, 2, 'both missed days, once each');
   assert.equal(changes().filter((c) => c.by === 'nightly').length, 1, 'the same complaint on both days: one fix');
   assert.match(store.getRecord('coach-diary', '2026-03-18').data.dropped[0], /^asked for already/);
-  assert.deepEqual(talk(), ['Being fixed now: no well done after a plain set.']);
+  // Thu 11/5: a fix still building isn't named in the morning (build updates don't ride along); told once it's done.
+  assert.deepEqual(talk(), []);
   await n.tick();
-  assert.equal(talk().length, 1, 'one morning message');
+  assert.deepEqual(talk(), [], 'no morning message with only a fix still building');
 });
 
 test('a fact that changes = the old one expired with a date, kept, and out of the coach\'s context', async () => {

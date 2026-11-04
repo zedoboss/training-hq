@@ -210,7 +210,8 @@ test('the Mac notifier: sends what is due once, skips what is stale, nothing wit
     for (const a of areas) store.writeLocal('tendons', `area.${a.id}`, a);
     store.writeLocal('tendons', 'readiness', { kind: 'readiness', ...table });
     store.writeLocal('sessions', 'hevy.x', { id: 'hevy.x', kind: 'workout', status: 'done', dayType: 'push', startedAt: at('2026-01-18', '05:00') });
-    store.writeLocal('days', '2026-01-20', { date: '2026-01-20', sessionTime: '04:30' });
+    // He set the session time the evening before (an answer: he isn't gone quiet, lib/silent.js).
+    store.writeLocal('days', '2026-01-20', { date: '2026-01-20', sessionTime: '04:30', timeSetAt: at('2026-01-19', '20:00') });
     // He's up through the day: the phone opened the app (Sat 10/24: no sign of him, the day waits for him).
     store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: at('2026-01-20', '05:05') });
     let now = at('2026-01-20', '04:01');
@@ -225,7 +226,7 @@ test('the Mac notifier: sends what is due once, skips what is stale, nothing wit
     assert.equal(sent[0].url, '#/checkin');
     assert.deepEqual(await n.tick(), []); // not twice
     // He checks in on the phone (it syncs): the session reminder still comes, without "check-in still open".
-    store.writeLocal('days', '2026-01-20', { date: '2026-01-20', sessionTime: '04:30', readiness: { action: 'train' } });
+    store.writeLocal('days', '2026-01-20', { date: '2026-01-20', sessionTime: '04:30', timeSetAt: at('2026-01-19', '20:00'), readiness: { action: 'train' } });
     now = at('2026-01-20', '04:30');
     const s = await n.tick();
     assert.deepEqual(s.map((i) => i.id), ['session:2026-01-20']);
