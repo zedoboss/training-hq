@@ -285,7 +285,14 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // question he hasn't answered yet: that one asks, not this too (Fri 10/23: "Food: 0 of 3,174 kcal... Eat." between
   // the meal asks).
   const mealAsked = reminders.some((r) => r.kind === 'meals' && String(r.id).startsWith('meal:') && r.due && r.at <= now);
-  if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked) {
+  // Thu 11/5, his words: "Food: 0 of 3,174 kcal... at 7:52 AM. You should be near 500 kcal by now. Eat." came 18
+  // minutes before his 8:10 AM first meal time, right after "Start cooking". No pace nudge before his first meal time
+  // of this waking day (its question, the meal: ask) has come.
+  const firstMealAt = Math.min(Infinity, ...reminders.filter((r) => String(r.id).startsWith('meal:') && r.at > now).map((r) => r.at));
+  const sinceWakeMin = (minOf(hmOf(new Date(now), tz)) - minOf(wakeHm) + 1440) % 1440;
+  const beforeFirstMeal = Number.isFinite(firstMealAt) && !reminders.some((r) => String(r.id).startsWith('meal:') && r.at <= now)
+    && sinceWakeMin + (firstMealAt - now) / 60000 < ((minOf(bedHm) - minOf(wakeHm) + 1440) % 1440 || 1440);
+  if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked && !beforeFirstMeal) {
     const expect = targets.kcal * frac;
     // Tue 10/27 (Monday's "Food: 1,028 of 3,174 kcal... You should be near 2,300 kcal by now. Eat." every hour, 5:42 to
     // 9:50 PM, the same words, while he was quiet): FOOD_CHECKS check-ins, further apart, new words each, then quiet.
