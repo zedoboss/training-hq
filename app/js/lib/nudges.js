@@ -207,7 +207,9 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   const wokeHm = wokeAt ? hmOf(new Date(wokeAt), tz) : wakeHm;
   const sinceWoke = wokeAt ? Math.round((now - wokeAt) / 60000) : sinceWake;
   const after = Array.isArray(morning?.gymAfterMin) && morning.gymAfterMin.length === 2 ? morning.gymAfterMin : null;
-  const gymText = after ? `${formatHm(addMin(wokeHm, after[0]))} to ${formatHm(addMin(wokeHm, after[1]))}` : null;
+  // Only while it is still ahead (Thu 11/5: "Gym 6:39 AM to 7:09 AM" said at 6:50 AM): a window that has begun isn't quoted.
+  const dayStart = wokeAt || zonedTime(isoDate(new Date(now), tz), wakeHm, tz);
+  const gymText = after && now < dayStart + after[0] * 60000 ? `${formatHm(addMin(wokeHm, after[0]))} to ${formatHm(addMin(wokeHm, after[1]))}` : null;
 
   // Sleep: the morning question, until noon. Asked once (Fri 10/23, his words: "you shouldn't keep on messaging me").
   if (!sleepLogged && sinceWake < Math.max(60, minOf('12:00') - minOf(wakeHm))) {
@@ -247,8 +249,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       // is still ahead, then quiet; none late in the evening (the day rolls to tomorrow).
       const day = `session:${isoDate(new Date(now), tz)}:`;
       const k = Object.keys(sent || {}).filter((x) => x.startsWith(day)).length;
-      const planEnd = after ? (wokeAt || zonedTime(isoDate(new Date(now), tz), wakeHm, tz)) + after[1] * 60000 : 0;
-      const text = sessionOpenText(k, label, now < planEnd ? gymText : null);
+      const text = sessionOpenText(k, label, gymText);
       if (text) out.push({ key: `${day}${k}`, priority: 65, gapMin: ONCE_MIN, spaceMin: SESSION_CHECKS.spaceMin, url: '#/train', text });
     }
   }
@@ -512,10 +513,11 @@ export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
 // the walk, the scan, the coach's holds talk). Now no answer to "Are you up?" means quiet until he messages or opens
 // the app, however long; then sleep, his body, the plan.
 /**
- * giveUpH: once he's up, the morning questions left this long after his wake time (or after he got up, if later),
- * the day goes on as usual. Never while he hasn't shown he's up.
- * waitMin: a question he leaves this long counts as passed over, the next one comes. quietMin: after his message or
- * the coach's reply, this long before the next question.
+ * giveUpH: once he's up, this long after his wake time (or after he got up, if later) no more questions are asked and,
+ * when none is left unanswered, the day goes on as usual. Never while he hasn't shown he's up, and never past a
+ * question he hasn't answered (Thu 11/5).
+ * waitMin: a question he leaves this long counts as passed over, the next one comes; the day still waits for his reply.
+ * quietMin: after his message or the coach's reply, this long before the next question.
  */
 export const MORNING = { giveUpH: 4, waitMin: 30, quietMin: 3 };
 export const MORNING_UP_TEXT = 'Morning. Are you up?';
@@ -574,26 +576,38 @@ const formatDayIso = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('e
  * @param {{sleep?: number, body?: number}} o.coachAsked  the coach asked it itself in Talk (its reply), when
  * @param {number} o.lastUserAt  his last message, ms
  * @param {number} o.lastCoachAt the coach's last message or notification, ms
+ * @param {number} [o.workoutAt] his latest workout started today, ms: like a reply, it lets the day go
  * @param {string} o.bodyText    the body question
  * @returns {{hold: boolean, open: boolean, ask: {key: string, text: string}|null}}
  */
-export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQuiet = false, sleepKnown = false, bodyKnown = false, state = {}, coachAsked = {}, lastUserAt = 0, lastCoachAt = 0, bodyText = morningBodyText(null) }) {
+export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQuiet = false, sleepKnown = false, bodyKnown = false, state = {}, coachAsked = {}, lastUserAt = 0, lastCoachAt = 0, workoutAt = 0, bodyText = morningBodyText(null) }) {
   if (state.open) return { hold: false, open: true, ask: null };
   // Before his day starts: the wake-time rules hold things already.
   if (now < Math.min(wakeAt, upAt ?? Infinity)) return { hold: false, open: false, ask: null };
   // Up all night, not slept yet: no "Are you up?", no "How did you sleep?"; they wait till he has slept.
   if (!upAt && upNoSleep) return { hold: false, open: false, ask: null };
   if (!upAt) return { hold: true, open: false, ask: state.up || noQuiet ? null : { key: 'up', text: MORNING_UP_TEXT } };
-  if (now - Math.max(wakeAt, upAt) >= MORNING.giveUpH * 3600000 || noQuiet) return { hold: false, open: true, ask: null };
+  const late = now - Math.max(wakeAt, upAt) >= MORNING.giveUpH * 3600000 || noQuiet;
   const quiet = now - Math.max(lastUserAt || 0, lastCoachAt || 0) >= MORNING.quietMin * 60000;
+  // Thu 11/5 (Wednesday 11/4: "How did you sleep?" 5:39 AM, his body 6:10 AM, no answer to either, and at 6:50 AM the
+  // morning plan went out, then the scan checklist at 7:10 AM): a question he leaves still brings the next one after
+  // waitMin, but the day stays held until he replies (or logs it, or starts a workout), however long; giveUpH and
+  // noQuiet only let the day go when nothing is left unanswered.
+  const replied = Math.max(lastUserAt || 0, workoutAt || 0);
+  let unanswered = false;
   const steps = [['sleep', sleepKnown, 'How did you sleep? When did you go to bed and when did you wake up?'], ['body', bodyKnown, bodyText]];
   for (const [key, known, text] of steps) {
     if (known) continue;
     const askedAt = Math.max(state[key] || 0, coachAsked[key] || 0);
-    if (!askedAt) return { hold: true, open: false, ask: quiet ? { key, text } : null };
-    // Answered (he wrote after it) or passed over: the next one.
-    if (!(lastUserAt > askedAt) && now - askedAt < MORNING.waitMin * 60000) return { hold: true, open: false, ask: null };
+    if (!askedAt) {
+      if (late) continue;
+      return { hold: true, open: false, ask: quiet ? { key, text } : null };
+    }
+    if (replied > askedAt) continue;
+    if (now - askedAt < MORNING.waitMin * 60000) return { hold: true, open: false, ask: null };
+    unanswered = true; // passed over: the next question, but no plan until he answers
   }
+  if (unanswered) return { hold: true, open: false, ask: null };
   // Then the plan: not on top of his answer or the coach's reply either.
-  return quiet ? { hold: false, open: true, ask: null } : { hold: true, open: false, ask: null };
+  return late || quiet ? { hold: false, open: true, ask: null } : { hold: true, open: false, ask: null };
 }

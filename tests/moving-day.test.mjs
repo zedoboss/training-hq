@@ -184,7 +184,10 @@ test('his moving day: the first meal comes 2 h 30 min after he woke, on the real
     f.night();
     f.opens(at(TUE, '17:54'));
     f.say(at(TUE, '17:55'), 'Why would i be up at 10am?');
-    await f.run(at(TUE, '17:54'), at(TUE, '20:40'));
+    // He answers the body question (5:58 PM) at 6:10 PM: the day waits for that (Thu 11/5).
+    await f.run(at(TUE, '17:54'), at(TUE, '18:09'));
+    f.say(at(TUE, '18:10'), 'all good, 0');
+    await f.run(at(TUE, '18:10'), at(TUE, '20:40'));
     const first = f.sent.find((m) => /meal/i.test(`${m.title} ${m.body}`));
     assert.ok(first, 'a meal reminder went out');
     // 12:00 PM (cook for 12:30 PM) on his body clock, woke 5:54 PM = 10:00 AM: 7:55 PM, 8:25 PM on the plate.

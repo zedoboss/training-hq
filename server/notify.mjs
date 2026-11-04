@@ -358,7 +358,8 @@ export function morningGate(store, now, tz) {
   const replies = msgs.filter((x) => COACH_REPLY(x) && x.at >= since && x.at <= now);
   const askedBy = (re) => Math.max(0, ...replies.filter((x) => re.test(x.text || '')).map((x) => x.at)) || null;
   const sessions = list('sessions');
-  const trainedToday = sessions.some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && (c ? x.startedAt >= c.wokeAt && x.startedAt <= now : isoDate(new Date(x.startedAt), tz) === date));
+  const trainedAt = Math.max(0, ...sessions.filter((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && x.startedAt <= now && (c ? x.startedAt >= c.wokeAt : isoDate(new Date(x.startedAt), tz) === date)).map((x) => x.startedAt));
+  const trainedToday = trainedAt > 0;
   // Not up yet: any of it in the last 4 hours and "Are you up?" waits too.
   const noQuiet = !state.open && (noQuietYet(store, now) || (upAt == null && activityOf(store, now - SLEEP.gapH * 3600000, now).length > 0));
   const step = morningStep({
@@ -368,6 +369,7 @@ export function morningGate(store, now, tz) {
     coachAsked: { sleep: askedBy(ASKS_SLEEP), body: askedBy(ASKS_BODY) },
     lastUserAt: Math.max(0, ...msgs.filter((x) => x.role === 'user').map((x) => x.at || 0)),
     lastCoachAt: Math.max(store.getMeta(LAST) || 0, ...msgs.filter((x) => x.role === 'assistant').map((x) => x.at || 0)),
+    workoutAt: trainedAt,
     bodyText: morningBodyText(lastWorkoutPain({ sessions, sets: list('sets'), today: date, tz }), date, tz),
   });
   return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt, clock: c, night };

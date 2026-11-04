@@ -53,8 +53,9 @@ test('Sunday replayed: woke 12:40 PM, never answered: 3 check-ins, no past plan,
 test('his plan is said only while it is still ahead', () => {
   const o = { ...base, wokeAt: at('09:40') };
   assert.match(ask({ ...o, now: at('09:50') }).text, /Your plan: 10:40 AM to 11:10 AM\./);
-  assert.match(ask({ ...o, now: at('11:00') }).text, /Your plan: 10:40 AM to 11:10 AM\./, 'inside the window: still current');
-  assert.doesNotMatch(ask({ ...o, now: at('11:10') }).text, /Your plan/);
+  assert.match(ask({ ...o, now: at('10:39') }).text, /Your plan: 10:40 AM to 11:10 AM\./);
+  // Thu 11/5 (his words: never quote a session time that has already begun): from its start, not quoted.
+  for (const hm of ['10:40', '11:00', '11:10']) assert.doesNotMatch(ask({ ...o, now: at(hm) }).text, /Your plan|10:40|11:10/, hm);
   assert.doesNotMatch(ask({ ...o, now: at('15:00') }).text, /Your plan|10:40|11:10/);
   // No sleep log: from his usual wake time (10:00): 11:00 to 11:30 AM.
   assert.match(ask({ ...base, now: at('10:30') }).text, /Your plan: 11:00 AM to 11:30 AM\./);
@@ -78,7 +79,7 @@ test('late in the evening (3 hours before bed) it rolls to tomorrow: nothing, ev
 test('a new day starts its own check-ins; yesterday\'s count does not carry over', () => {
   const D2 = '2026-03-23';
   const sent = Object.fromEntries([0, 1, 2].map((k) => [`session:${D}:${k}`, at(['14:40', '16:10', '17:40'][k])]));
-  const c = ask({ ...base, wokeAt: at('10:00', D2), now: at('11:00', D2), sent });
+  const c = ask({ ...base, wokeAt: at('10:00', D2), now: at('10:50', D2), sent });
   assert.equal(c.key, `session:${D2}:0`);
   assert.match(c.text, /^Push today and no time set\. When are you going\? Your plan: 11:00 AM to 11:30 AM\./);
 });
