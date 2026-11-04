@@ -92,6 +92,17 @@ export function runAction(a, deps) {
     case 'rest': if (a.seconds > 0) { deps.rest.start(a.seconds, a.label || 'Rest', a.next || ''); return true; } return false;
     case 'rest-add': deps.rest.adjust(Number(a.seconds) || 0); return true;
     case 'rest-skip': deps.rest.clear(); return true;
+    // Thu 11/5: the coach pauses and resumes the rest, and pauses, resumes or restarts the hold counting down on the
+    // workout screen (views/session.js listens for 'thq:coach-hold').
+    case 'rest-pause': if (!deps.rest.pause) return false; deps.rest.pause(); return true;
+    case 'rest-resume': if (!deps.rest.resume) return false; deps.rest.resume(); return true;
+    case 'hold-pause': case 'hold-resume': case 'hold-restart': {
+      const op = a.kind.slice(5);
+      if (deps.hold) { deps.hold(op); return true; }
+      if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return false;
+      window.dispatchEvent(new CustomEvent('thq:coach-hold', { detail: { op } }));
+      return true;
+    }
     case 'sync': deps.sync(); return true;
     case 'focus': deps.focus(a); return true;
     default: return false;

@@ -140,6 +140,9 @@ export function render(view, params = []) {
   let typicalMs = null;
   let setTimer = loadSetTimer();
   let setTimerTick = null;
+  // Thu 11/5: the coach can pause a hold's countdown (it stands still at pausedAt) and resume or restart it.
+  const stNow = () => setTimer?.pausedAt || Date.now();
+  let holdTalk = null;
   // A15: the talk for the set or hold in progress, the next set's talk (fetched during the rest), and which timed set
   // has a script (its end is then marked by the script, not the plain beep).
   let talkRun = null; let upcoming = null; let scriptFor = null; let restWas = null; let quietRestEnd = false; let offTalk = () => {};
@@ -230,7 +233,7 @@ export function render(view, params = []) {
 
   const timerLine = (s, prev) => {
     if (setTimer?.setId === s.id) {
-      const v = setTimerView(setTimer);
+      const v = setTimerView(setTimer, stNow());
       return `<div class="set-timer"><button class="btn-primary small" data-a="timer-stop" type="button">${v.ready ? 'Not yet' : 'Stop'}</button><span class="hud ${v.reached ? 'c-green' : v.ready ? 'c-amber' : 'c-cyan'}" data-timer>${v.text}</span></div>`;
     }
     const target = s.durationS ?? prev?.durationS ?? 30;
@@ -255,14 +258,14 @@ export function render(view, params = []) {
       document.body.append(fullEl);
       document.body.classList.add('timer-open');
     }
-    const v = setTimerView(setTimer);
+    const v = setTimerView(setTimer, stNow());
     const no = s ? exSets(s.exKey).indexOf(s) + 1 : 0;
     const big = v.ready ? v.readyS : v.leftS ?? v.elapsedS;
     const of = v.ready ? (setTimer.readyUntil - setTimer.startedAt) / 1000 : setTimer.targetS;
     const frac = of > 0 ? Math.min(1, Math.max(0, 1 - big / of)) : 0;
     fullEl.className = `timer-full ${v.ready ? 'is-ready' : v.reached ? 'is-done' : 'is-holding'}`;
     fullEl.querySelector('.tf-name').textContent = `${ex?.name || ''}${no ? ` · set ${no}` : ''}`;
-    fullEl.querySelector('.tf-phase').textContent = v.ready ? 'GET READY' : v.reached ? 'DONE' : s && holdLike(s, ex) ? 'HOLD' : 'GO';
+    fullEl.querySelector('.tf-phase').textContent = setTimer.pausedAt ? 'PAUSED' : v.ready ? 'GET READY' : v.reached ? 'DONE' : s && holdLike(s, ex) ? 'HOLD' : 'GO';
     fullEl.querySelector('.tf-digits').textContent = mmssBig(big);
     fullEl.querySelector('.tf-bar i').style.width = `${(frac * 100).toFixed(1)}%`;
     const stop = fullEl.querySelector('.tf-stop');
@@ -273,12 +276,12 @@ export function render(view, params = []) {
   /** Live update of the running set timer; at the target it beeps and the set is saved (it ends at 0). */
   const runSetTimer = () => {
     clearInterval(setTimerTick);
-    setQuiet('set-timer', !!setTimer && !setTimer.cued);
+    setQuiet('set-timer', !!setTimer && !setTimer.cued && !setTimer.pausedAt);
     fullScreen();
     if (!setTimer) return;
     setTimerTick = setInterval(() => {
       if (!setTimer) { clearInterval(setTimerTick); setQuiet('set-timer', false); fullScreen(); return; }
-      const v = setTimerView(setTimer);
+      const v = setTimerView(setTimer, stNow());
       if (v.reached && !setTimer.cued) {
         setTimer = { ...setTimer, cued: true }; storeSetTimer(setTimer); rest.beep(3); setQuiet('set-timer', false);
         const id = setTimer.setId;
@@ -441,6 +444,44 @@ export function render(view, params = []) {
     if (marked) await saveSession({ exercises: session.exercises.map((e) => ({ ...e })) });
   };
 
+  // Thu 10/22, his words: "send a notification when I'm supposed to start... and when I need to stop, when zero
+  // appears... I want both": the Mac sends both, heard even when this page's ding isn't.
+  // Sat 10/24: on a one-arm exercise they say the round and the arm.
+  const holdAlarms = (s, ex, t) => {
+    const arm = isOneArm(ex) ? armOf(exSets(ex.key), s) : null;
+    const who = arm ? `${ex.name}, round ${arm.round}, ${arm.arm} arm` : ex.name;
+    const go = t.readyUntil || t.startedAt;
+    return [
+      ...(t.readyUntil && t.readyUntil > Date.now() ? [{ at: t.readyUntil, title: 'Hold: go', body: `${who}: hold ${t.targetS} s now.` }] : []),
+      { at: go + t.targetS * 1000, title: 'Hold: stop', body: `${who}: ${t.targetS} s done. Stop.${arm?.arm === 'right' && exSets(ex.key).some((x) => !x.done && x.id !== s.id) ? ' Left arm next, no rest.' : ''}` },
+    ];
+  };
+
+  /** Thu 11/5: the coach pauses, resumes or restarts the hold counting down (lib/coach.js runAction 'hold-*'). */
+  const onCoachHold = (e) => {
+    const op = e.detail?.op;
+    if (!setTimer || setTimer.cued) return;
+    const s = sets.find((x) => x.id === setTimer.setId);
+    const ex = s && session.exercises.find((x) => x.key === s.exKey);
+    if (!s || !ex) return;
+    if (op === 'pause' && !setTimer.pausedAt) {
+      setTimer = { ...setTimer, pausedAt: Date.now() }; storeSetTimer(setTimer);
+      sendTimerAlarms([]); talkRun?.stop(); setQuiet('set-timer', false);
+    } else if (op === 'resume' && setTimer.pausedAt) {
+      const d = Date.now() - setTimer.pausedAt;
+      setTimer = { ...setTimer, startedAt: setTimer.startedAt + d, readyUntil: setTimer.readyUntil ? setTimer.readyUntil + d : 0, pausedAt: null }; storeSetTimer(setTimer);
+      sendTimerAlarms(holdAlarms(s, ex, setTimer));
+      if (holdTalk?.setId === s.id) talkRun = talk.run(holdTalk.script, { t0: setTimer.startedAt, force: holdTalk.force });
+    } else if (op === 'restart') {
+      sendTimerAlarms([]); talkRun?.stop();
+      setTimer = null; storeSetTimer(null); clearInterval(setTimerTick);
+      onSetAction(s.id, 'timer-start');
+      return;
+    } else return;
+    redrawCard(ex.key);
+    runSetTimer();
+  };
+
   const onSetAction = async (setId, action) => {
     const s = sets.find((x) => x.id === setId);
     const ex = session.exercises.find((e) => e.key === s.exKey);
@@ -459,15 +500,8 @@ export function render(view, params = []) {
       const force = holdLike(s, ex);
       talk.prepare(script, { force });
       talkRun = talk.run(script, { t0: now, force }); scriptFor = s.id; upcoming = null;
-      // Thu 10/22, his words: "send a notification when I'm supposed to start... and when I need to stop, when zero
-      // appears... I want both": the Mac sends both, heard even when this page's ding isn't.
-      // Sat 10/24: on a one-arm exercise they say the round and the arm.
-      const arm = isOneArm(ex) ? armOf(exSets(ex.key), s) : null;
-      const who = arm ? `${ex.name}, round ${arm.round}, ${arm.arm} arm` : ex.name;
-      if (getReadyS || targetS) sendTimerAlarms([
-        ...(getReadyS ? [{ at: now + getReadyS * 1000, title: 'Hold: go', body: `${who}: hold ${targetS} s now.` }] : []),
-        { at: now + (getReadyS + targetS) * 1000, title: 'Hold: stop', body: `${who}: ${targetS} s done. Stop.${arm?.arm === 'right' && exSets(ex.key).some((x) => !x.done && x.id !== s.id) ? ' Left arm next, no rest.' : ''}` },
-      ]);
+      holdTalk = { setId: s.id, script, force };
+      if (getReadyS || targetS) sendTimerAlarms(holdAlarms(s, ex, setTimer));
       redrawCard(ex.key);
       runSetTimer();
       return;
@@ -475,8 +509,8 @@ export function render(view, params = []) {
     if (action === 'timer-stop' || (action === 'tick' && setTimer?.setId === s.id)) {
       // Stopped before its end: the Mac's go / stop notifications still waiting are cancelled.
       if (setTimer && !setTimer.cued) sendTimerAlarms([]);
-      const secs = setTimerResult(setTimer);
-      setTimer = null; storeSetTimer(null); clearInterval(setTimerTick); setQuiet('set-timer', false); fullScreen();
+      const secs = setTimerResult(setTimer, stNow());
+      setTimer = null; storeSetTimer(null); holdTalk = null; clearInterval(setTimerTick); setQuiet('set-timer', false); fullScreen();
       talkRun?.stop(); scriptFor = null;
       // Stopped during GET READY: nothing was held, nothing is filled.
       if (secs == null) { redrawCard(ex.key); return; }
@@ -750,7 +784,9 @@ export function render(view, params = []) {
     if (!st) return;
     bar.querySelector('[data-k="rleft"]').textContent = mmss(st.leftMs);
     // The whole name on its own line (Tue 10/20: "REST · BENCH PRESS (SMITH MACHI" was cut at 24 letters).
-    bar.querySelector('[data-k="rlabel"]').textContent = st.label === 'Countdown' ? 'COUNTDOWN' : st.next ? `REST · NEXT: ${st.next.toUpperCase()}` : `REST · ${st.label.toUpperCase()}`;
+    const what = st.label === 'Countdown' ? 'COUNTDOWN' : st.next ? `REST · NEXT: ${st.next.toUpperCase()}` : `REST · ${st.label.toUpperCase()}`;
+    // Thu 11/5: the coach can pause the rest; it stands still and says so.
+    bar.querySelector('[data-k="rlabel"]').textContent = st.paused ? `PAUSED · ${what}` : what;
     bar.querySelector('[data-k="fill"]').style.width = `${Math.min(100, st.fraction * 100)}%`;
   };
 
@@ -824,6 +860,7 @@ export function render(view, params = []) {
     document.addEventListener('visibilitychange', onVis);
     // The coach said "next exercise" (step 8): bring that exercise's card into view.
     window.addEventListener('thq:coach-focus', onFocus);
+    window.addEventListener('thq:coach-hold', onCoachHold);
     offRepo = repo.onChange(async (cols, origin) => {
       if (origin !== 'remote' || (!cols.includes('sets') && !cols.includes('sessions'))) return;
       if (view.contains(document.activeElement) && document.activeElement.matches('input')) return;
@@ -836,6 +873,7 @@ export function render(view, params = []) {
 
   return () => {
     window.removeEventListener('thq:coach-focus', onFocus);
+    window.removeEventListener('thq:coach-hold', onCoachHold);
     window.removeEventListener('thq:reopen', onReopen);
     clearInterval(timer); clearInterval(setTimerTick); offRest(); offRepo(); offTalk();
     fullEl?.remove(); fullEl = null; document.body.classList.remove('timer-open');

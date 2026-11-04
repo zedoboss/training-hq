@@ -68,6 +68,39 @@ function firstTrainingDate(days, from) {
  *   kind 'rest' reasons: 'rotation' (the day after Legs), or the day record's reason.
  */
 export function rotationDay({ last, today, days = {} }) {
+  const r = rotationDayOf({ last, today, days });
+  const c = chosenNext(days, last, r.next.date);
+  if (!c || c.dayType === r.next.dayType) return r;
+  return { ...r, today: r.today.kind === 'train' ? { ...r.today, dayType: c.dayType } : r.today, next: { ...r.next, dayType: c.dayType, chosen: c.date } };
+}
+
+/**
+ * Thu 11/5: the day type he chose for his next session ("Legs next, not Pull"), kept on a day record as
+ * days[date].nextType = {dayType, at, by}. It holds from that date (the next training day when he said it) until a
+ * rotation session is done on or after it, rest days in between included; then the rotation carries on from that
+ * session as always. The newest such choice up to `upTo` wins. {date, dayType} or null.
+ */
+export function chosenNext(days, last, upTo) {
+  let best = null;
+  for (const [date, doc] of Object.entries(days || {})) {
+    const t = doc?.nextType?.dayType;
+    if (!inRotation(t) || date > upTo || (last && date <= last.date)) continue;
+    if (!best || date > best.date) best = { date, dayType: t };
+  }
+  return best;
+}
+
+/** Day record with his chosen next day type (or with it taken away again: dayType null). */
+export function withNextType(doc, date, dayType, { at = Date.now(), by = 'app', said = '' } = {}) {
+  const base = doc || { date };
+  if (!dayType) {
+    const { nextType, ...rest } = base;
+    return { ...rest, date };
+  }
+  return { ...base, date, nextType: { dayType, at, by, ...(said ? { said: String(said).slice(0, 200) } : {}) } };
+}
+
+function rotationDayOf({ last, today, days = {} }) {
   const after = nextDayType(last?.dayType);
   if (last && last.date === today) {
     // Trained today. After three days in a row the next day is the rotation's Rest.

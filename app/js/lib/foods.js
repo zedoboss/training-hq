@@ -161,8 +161,15 @@ export function labelItem(food, grams, { unsure = false } = {}) {
   return { name: food.name, grams: Math.round(Number(grams) || 0), kcal: Math.round((food.label.kcal || 0) * k), protein: r1((food.label.protein || 0) * k), unsure, source: 'label' };
 }
 
+/**
+ * Every food of his in the fuel plan: his planned day's (foods), then the usual foods he saved with his own numbers
+ * when USDA had no match (ownFoods, Thu 11/5: {name, label: {perGrams, kcal, protein, carbs?, fat?}, pack?, unit?,
+ * addedOn, by}). ownFoods stay out of his planned day and its totals.
+ */
+export const foodsOf = (plan) => [...(plan?.foods || []), ...(Array.isArray(plan?.ownFoods) ? plan.ownFoods : [])];
+
 /** His own foods from the fuel plan, for matching first: [{fdcId?, name, label?, pack?, unit?, usual?}]. */
-export const myFoods = (plan) => (plan?.foods || []).filter((f) => f?.fdcId || f?.label).map((f) => ({
+export const myFoods = (plan) => foodsOf(plan).filter((f) => f?.fdcId || f?.label).map((f) => ({
   ...(f.fdcId ? { fdcId: Number(f.fdcId) } : {}), name: f.name, ...(f.label ? { label: f.label } : {}),
   ...(f.pack ? { pack: f.pack } : {}), ...(f.unit ? { unit: f.unit } : {}), ...(f.usual ? { usual: f.usual } : {}),
 }));
@@ -237,7 +244,7 @@ export function amountChoices(food) {
 
 /** His usual amounts in words, for the Mac reading a photo and for the coach. */
 export function amountsLine(plan) {
-  return (plan?.foods || []).filter((f) => f.pack || f.unit || f.usual).map((f) => [
+  return foodsOf(plan).filter((f) => f.pack || f.unit || f.usual).map((f) => [
     f.name, f.pack ? `pack ${f.pack.grams} g${/raw/i.test(f.pack.label || '') ? ' raw' : ''}` : '', f.unit ? `1 ${f.unit.label} = ${f.unit.grams} g${shellEach(f) ? ` (${shellEach(f)} g with shell)` : ''}` : '',
     f.usual ? `usually ${f.usual.text || amountText(f, f.usual)}` : '',
   ].filter(Boolean).join(', ')).join('; ');

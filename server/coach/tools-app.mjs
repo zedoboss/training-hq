@@ -84,6 +84,34 @@ async function openScreen(a, ctx) {
   } else if (sc.needs === 'date') {
     const d = /^\d{4}-\d{2}-\d{2}$/.test(a.date || '') ? a.date : s.today;
     url = `${sc.hash}${d}`; what = `${sc.label} (${d})`;
+  } else if (sc.needs === 'workout') {
+    // Thu 11/5: a past workout by its id, its day (and title when the day had more than one), or its title (the newest).
+    const { dayText } = await import('./shared.mjs');
+    const all = s.list('sessions').filter((x) => x?.id && x.startedAt && x.kind !== 'holds' && x.status === 'done').sort((p, q) => q.startedAt - p.startedAt);
+    let pick = a.name ? all.find((x) => x.id === a.name) : null;
+    if (!pick) {
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(a.date || '') ? all.filter((x) => s.date(x.startedAt) === a.date) : all;
+      if (a.date && !day.length) return refuse(`No finished workout on ${dayText(a.date, s.today)}.`);
+      if (a.name) {
+        const hit = day.find((x) => findByName([x], a.name, (y) => y.title, (y) => [y.dayType, LABEL[y.dayType]]).item);
+        if (!hit) return refuse(`No workout called "${a.name}"${a.date ? ` on ${dayText(a.date, s.today)}` : ''}.`);
+        pick = hit;
+      } else if (a.date && day.length > 1) return refuse(`Which one on ${dayText(a.date, s.today)}: ${day.map((x) => x.title).join('; ')}? Give its title as name.`);
+      else if (!a.date) return refuse('Which workout? Give its date, or its title (the newest is opened).');
+      else pick = day[0];
+    }
+    url = `${sc.hash}${pick.id}/h`; what = `${pick.title}, ${dayText(s.date(pick.startedAt), s.today)}`;
+  } else if (sc.id === 'calendar' && /^\d{4}-\d{2}-\d{2}$/.test(a.date || '')) {
+    const { dayText } = await import('./shared.mjs');
+    url = `${sc.hash}/${a.date}`; what = `Calendar, ${dayText(a.date, s.today)}`;
+  } else if (sc.id === 'stats_month' && /^\d{4}-\d{2}-\d{2}$/.test(a.date || '')) {
+    url = `${sc.hash}/${a.date.slice(0, 7)}`; what = `Monthly report, ${new Date(`${a.date.slice(0, 7)}-15T12:00:00Z`).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}`;
+  } else if (sc.id === 'demos' && a.name) {
+    // An exercise's demo video plays on its page.
+    const { item, ambiguous } = findByName([...s.lib().values()], a.name);
+    if (!item) return refuse(ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : `No exercise called "${a.name}".`);
+    const has = s.list('demos').some((d) => d.id === item.id);
+    url = `#/exercise/${item.id}`; what = `${item.name}, its page with the demo at the top${has ? '' : ' (no demo for it yet: a clip can be added there)'}`;
   }
   ctx.action({ kind: 'go', url, label: what });
   return { text: `Opened on his phone: ${what}.`, summary: `open ${a.screen}` };

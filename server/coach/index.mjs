@@ -14,6 +14,7 @@ import { COACH_MODELS as MODELS } from '../claude.mjs';
 import { deviceTimeZone, formatTime } from '../../app/js/lib/time.js';
 import { imageBlock } from '../claude.mjs';
 import { planLines } from '../meal-vision.mjs';
+import { recordingStore, saveUndo } from './tools-undo.mjs';
 
 export const COL = 'coach-messages';
 export const MAX_TEXT = 4000;
@@ -84,8 +85,10 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
 
   async function callTool(tool, args) {
     const t = active;
+    // Thu 11/5: what each tool call changes is kept, so the coach can undo its last change in one step.
+    const rec = recordingStore(store);
     const ctx = {
-      store, now, tz: t?.tz || tz, deviceId: t?.deviceId || null, turnId: t?.turnId || null,
+      store: rec.store, now, tz: t?.tz || tz, deviceId: t?.deviceId || null, turnId: t?.turnId || null,
       /** Something only the phone can do: sent to it now and kept with the reply. */
       action(a) { if (!t) return; t.actions.push(a); t.emit({ type: 'action', action: a }); },
     };
@@ -99,6 +102,9 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
       out = { text: `Error: ${e.message}`, isError: true };
     }
     const entry = { name: tool.name, title: tool.title, summary: String(out.summary || (out.isError ? out.text : '') || '').slice(0, 160), ok: !out.isError, ms: now() - started, wrote: !!out.wrote };
+    if (!out.isError) {
+      try { saveUndo(store, { tool: tool.name, title: tool.title, summary: entry.summary, turnId: t?.turnId || null, at: now(), writes: rec.writes() }); } catch (e) { log(`coach undo log: ${e.message}`); }
+    }
     if (t) {
       t.tools.push(entry);
       t.emit({ type: 'tool', tool: entry });

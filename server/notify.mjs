@@ -44,6 +44,44 @@ function markFired(store, id, t) {
   if (r && !r.deleted) store.writeLocal('coach-reminders', id, { ...r.data, firedAt: t });
 }
 
+// Thu 11/5: repeating reminders he asks for ("every day at 9", "weekdays at 7:30"). Each time is its own record, so
+// everything that reads one (the planner, Talk, the calendar, the coach's lists) works as it is: once one has gone out
+// (or its time passed by more than the 30-minute grace with the Mac asleep), the next one is written with the same
+// words at the next matching day and time. Cancelling the waiting one ends the series.
+// repeat: 'daily' | 'weekdays' (Monday to Friday) | 'days' (days: weekday numbers, 0 = Sunday); hm: "HH:MM".
+const REPEAT_DAYS = { daily: [0, 1, 2, 3, 4, 5, 6], weekdays: [1, 2, 3, 4, 5] };
+export const repeatDays = (r) => (r?.repeat === 'days' ? (r.days || []).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : REPEAT_DAYS[r?.repeat] || []);
+
+/** The first time of a repeating reminder after `after` (ms), on one of its days, at its hm; null when it has none. */
+export function nextRepeatAt(r, after, tz) {
+  const days = new Set(repeatDays(r));
+  if (!days.size || !/^\d{2}:\d{2}$/.test(r?.hm || '')) return null;
+  let d = isoDate(new Date(after), tz);
+  for (let i = 0; i < 9; i++, d = addDays(d, 1)) {
+    if (!days.has(new Date(`${d}T12:00:00Z`).getUTCDay())) continue;
+    const at = zonedTime(d, r.hm, tz);
+    if (at > after) return { at, date: d };
+  }
+  return null;
+}
+
+/** Writes the next of each repeating reminder whose time has gone. Returns the records written. */
+export function rearmRepeats(store, now, tz, graceMs = 30 * 60000) {
+  const out = [];
+  for (const r of recordsOf(store, 'coach-reminders')) {
+    if (!r.repeat || r.cancelledAt || r.nextId || r.trigger || !(r.firedAt || r.at < now - graceMs)) continue;
+    const next = nextRepeatAt(r, Math.max(r.at, now), tz);
+    if (!next) continue;
+    const series = r.series || r.id;
+    const id = `${series}.${next.date}`;
+    const { firedAt, cancelledAt, restoredAt, nextId, ...base } = r;
+    const doc = { ...base, id, series, at: next.at, date: next.date, createdAt: now, prevId: r.id };
+    store.writeLocalMany([{ col: 'coach-reminders', id, data: doc }, { col: 'coach-reminders', id: r.id, data: { ...r, nextId: id } }]);
+    out.push(doc);
+  }
+  return out;
+}
+
 /** A13: his recovery record and what it needs (photos only when there is a record: they are big). */
 function recoveryFrom(one, list) {
   const recoveryPlan = one('recovery', 'main');
@@ -278,6 +316,9 @@ export function autoSleep(store, now, tz, c = clockOf(store, now, tz)) {
   const id = isoDate(new Date(c.wokeAt), tz);
   const had = store.getRecord('sleep-log', id);
   if ((had && !had.deleted) || store.getRecord('health', id)?.data?.sleep) return null;
+  // Thu 11/5: he had this night's worked-out sleep deleted as wrong: it isn't worked out again (log_sleep sets it).
+  const dismissed = store.getRecord('sleep-dismissed', id);
+  if (dismissed && !dismissed.deleted) return null;
   const inBedMin = Math.round((c.wokeAt - c.nightBed) / 60000);
   if (inBedMin < 3 * 60 || inBedMin > 16 * 60) return null;
   const doc = { id, date: id, bed: c.nightBed, wake: c.wokeAt, inBedMin, asleepMin: inBedMin, quality: null, note: AUTO_SLEEP_NOTE, source: 'auto', at: now };
@@ -1039,6 +1080,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const zone = typeof tz === 'function' ? tz() : tz;
       if (zone !== lastZone) { if (lastZone) log(`notify: reminders now follow ${zone}`); lastZone = zone; }
       applyPhasePlans(store, t, zone, log);
+      for (const r of rearmRepeats(store, t, zone)) log(`notify: repeating reminder ${r.series} next at ${formatTime(new Date(r.at), zone)} ${r.date}`);
       if (!push.list().length) return [];
       // His morning first: its question, and whether the rest of the day is still held.
       const morning = await morningTick({ store, push, log, now: t, tz: zone });

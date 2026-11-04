@@ -26,11 +26,12 @@ export const ring = () => play(sounds().restEnd, sounds().timerVolume, { alarm: 
 
 const emit = () => { for (const fn of listeners) fn(status()); };
 /** When the rest ends, or null: on start, ±15 s and skip (the Mac sends "Rest over" then; Thu 10/22). */
-const plan = () => { for (const fn of planners) { try { fn(state ? { endsAt: state.endsAt, label: state.label, next: state.next || '' } : null); } catch { /* a listener */ } } };
+// Thu 11/5: a paused rest has no end, so the Mac's "Rest over" is cancelled until it runs again.
+const plan = () => { for (const fn of planners) { try { fn(state && state.pausedLeftMs == null ? { endsAt: state.endsAt, label: state.label, next: state.next || '' } : null); } catch { /* a listener */ } } };
 
 function loop() {
   clearInterval(tick);
-  if (!state) return;
+  if (!state || state.pausedLeftMs != null) return;
   tick = setInterval(() => {
     if (!state) { clearInterval(tick); return; }
     if (Date.now() >= state.endsAt) {
@@ -45,8 +46,9 @@ function loop() {
 
 export function status() {
   if (!state) return null;
-  const left = Math.max(0, state.endsAt - Date.now());
-  return { ...state, leftMs: left, fraction: state.totalMs ? 1 - left / state.totalMs : 1 };
+  const paused = state.pausedLeftMs != null;
+  const left = paused ? state.pausedLeftMs : Math.max(0, state.endsAt - Date.now());
+  return { ...state, paused, leftMs: left, fraction: state.totalMs ? 1 - left / state.totalMs : 1 };
 }
 
 /** A rest of `seconds` after `label` (the exercise just ticked); `next` is the set it leads to, in words (lib/session.js nextAfterText). */
@@ -58,9 +60,30 @@ export function start(seconds, label = '', next = '') {
 
 export function adjust(deltaSeconds) {
   if (!state) return;
+  if (state.pausedLeftMs != null) {
+    state.pausedLeftMs = Math.max(1000, state.pausedLeftMs + deltaSeconds * 1000);
+    state.totalMs = Math.max(1000, state.totalMs + deltaSeconds * 1000);
+    store(state); emit(); return;
+  }
   state.endsAt = Math.max(Date.now() + 1000, state.endsAt + deltaSeconds * 1000);
   state.totalMs = Math.max(1000, state.totalMs + deltaSeconds * 1000);
   store(state); emit(); plan();
+}
+
+/** Thu 11/5: the coach pauses the rest (it stands still) and resumes it. False when there is none, or nothing to do. */
+export function pause() {
+  if (!state || state.pausedLeftMs != null) return false;
+  state.pausedLeftMs = Math.max(1000, state.endsAt - Date.now());
+  store(state); clearInterval(tick); emit(); plan();
+  return true;
+}
+
+export function resume() {
+  if (!state || state.pausedLeftMs == null) return false;
+  state.endsAt = Date.now() + state.pausedLeftMs;
+  delete state.pausedLeftMs;
+  store(state); loop(); emit(); plan();
+  return true;
 }
 
 export function clear() { const had = Boolean(state); state = null; store(null); clearInterval(tick); emit(); if (had) plan(); }

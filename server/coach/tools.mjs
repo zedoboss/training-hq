@@ -4,7 +4,14 @@
 import { READ_TOOLS, contextLine } from './tools-read.mjs';
 import { WRITE_TOOLS } from './tools-write.mjs';
 import { APP_TOOLS } from './tools-app.mjs';
+import { WORKOUT_TOOLS } from './tools-workout.mjs';
+import { PLAN_TOOLS } from './tools-plan.mjs';
+import { FUEL_TOOLS } from './tools-fuel.mjs';
+import { BODY_TOOLS } from './tools-body.mjs';
+import { UNDO_TOOLS } from './tools-undo.mjs';
 
 // APP_TOOLS (Tue 10/20): the coach works the app itself: screens, the workout in progress, settings, the phone.
-export const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...APP_TOOLS];
+// Thu 11/5 (his words: "What else cant u do? Figure it out and let the mac give U the tools"): the workout, plan, fuel
+// and body tools cover what his screens could do that the coach could not.
+export const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...APP_TOOLS, ...WORKOUT_TOOLS, ...PLAN_TOOLS, ...FUEL_TOOLS, ...BODY_TOOLS, ...UNDO_TOOLS];
 export { contextLine };

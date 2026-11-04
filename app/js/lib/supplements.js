@@ -36,6 +36,15 @@ export function statusOn(supp, date) {
   return last ? last.status : 'none';
 }
 
+/**
+ * A dated status change (active, paused, removed), as the supplement screen saves it; a second change on the same day
+ * replaces the first. Its history stays.
+ */
+export function withStatus(supp, status, on) {
+  const history = (supp.history || []).filter((h) => h.on !== on);
+  return { ...supp, status, history: [...history, { on, status }].sort((a, b) => a.on.localeCompare(b.on)) };
+}
+
 /** Does the days rule put it on this weekday? 6 days a week with no day off chosen yet: every day until he picks. */
 export function onWeekday(days, wd) {
   if (!days || days.type === 'daily') return true;

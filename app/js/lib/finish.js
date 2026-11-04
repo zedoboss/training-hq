@@ -186,6 +186,10 @@ export function routineFromSession(session, sets, routine = null) {
  * template's sets. Id, title and settings stay the template's, so the rotation and "update routine?" still work.
  */
 export function routineFromLast(routine, last, lastSets) {
+  // Thu 11/5: he had the coach change the routine itself (exercises, order, sets, reps, seconds) after his last workout
+  // of its kind: the next Start is the routine as he changed it (weights still follow his last session unless he turned
+  // that off). The workout after that copies his last one again.
+  if (routine?.editedAt && routine.editedAt > (last.startedAt || 0)) return { ...routine, editedSince: last.id };
   const used = new Set();
   const exercises = (last.exercises || []).map((e) => {
     const mine = lastSets.filter((s) => s.exKey === e.key && s.done).sort((a, b) => a.order - b.order);

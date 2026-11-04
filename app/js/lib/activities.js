@@ -87,3 +87,14 @@ function addDaysIso(date, n) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+
+// The kick test as data (Thu 11/5): a dated coach note (topic 'flex-test', so the weekly reminder and the coach's lines
+// see it as before) with the two heights in cm. One a day: a second one that day replaces it.
+export const KICK_TOPIC = 'flex-test';
+export const kickTestId = (date) => `kicktest.${date}`;
+export function kickTestNote({ date, frontCm = null, sideCm = null, note = '', at, by = 'coach' }) {
+  const parts = [frontCm != null ? `front ${frontCm} cm` : '', sideCm != null ? `side ${sideCm} cm` : ''].filter(Boolean);
+  return { id: kickTestId(date), at, date, topic: KICK_TOPIC, text: `Kick test: ${parts.join(', ') || 'no heights'}.${note ? ` ${note}` : ''}`, kick: { frontCm, sideCm }, by };
+}
+/** His kick tests with heights, oldest first: [{date, frontCm, sideCm}]. */
+export const kickTests = (notes = []) => notes.filter((n) => n?.kick && n.date).map((n) => ({ date: n.date, frontCm: n.kick.frontCm ?? null, sideCm: n.kick.sideCm ?? null })).sort((a, b) => a.date.localeCompare(b.date));
