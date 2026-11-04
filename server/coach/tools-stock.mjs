@@ -29,7 +29,9 @@ async function water(a, ctx) {
   if (a.action === 'today') return wrote(dayWater(s, a.date || date), 'water');
   if (a.action === 'log') {
     const ml = num(a.ml) ?? (num(a.liters) != null ? num(a.liters) * 1000 : undefined);
-    const e = waterEntry({ id: newId('water'), ml, at: s.now, date, by: 'coach' });
+    // Two in the same moment keep their order (undo takes the one logged last).
+    const prev = waterOn(s.list('water'), date).at(-1);
+    const e = waterEntry({ id: newId('water'), ml, at: Math.max(s.now, (prev?.at ?? 0) + 1), date, by: 'coach' });
     if (!e) return refuse('How much, in ml (1 to 3,000 for one drink)? Ask him if he didn\'t say. Nothing logged.');
     put(s, 'water', e.id, e);
     return wrote(`Logged ${mlText(e.ml)} water. ${dayWater(snap(ctx), date)}`, `${e.ml} ml water`);

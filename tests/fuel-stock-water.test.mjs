@@ -18,7 +18,7 @@ const NOW = Date.UTC(2026, 0, 22, 13, 0); // Thursday 1/22, 1:00 PM
 const TODAY = '2026-01-22';
 const day = (d, h = 12) => Date.UTC(2026, 0, d, h);
 const PLAN = { foods: [
-  { name: 'Lean beef (shank)', gramsPerDay: 500, fdcId: 1001, pack: { grams: 250, label: '250 g pack' } },
+  { name: 'Lean beef', gramsPerDay: 500, fdcId: 1001, pack: { grams: 250, label: '250 g pack' } },
   { name: 'Eggs', gramsPerDay: 600, fdcId: 1002, unit: { grams: 60, label: 'egg', plural: 'eggs' } },
 ] };
 const meal = (id, d, items, h = 12) => ({ id, date: `2026-01-${String(d).padStart(2, '0')}`, at: day(d, h), name: 'Lunch', before: { at: day(d, h), items } });
@@ -41,7 +41,7 @@ test('water: entries, the day total, and a daily amount only when he set one', (
 test('food stock: daily use from his number, else his logged meals, else his planned day', () => {
   const beef = { id: 'pantry.beef', name: 'beef', amount: 1000, unit: 'g', countedAt: day(21, 20), countedOn: '2026-01-21' };
   assert.deepEqual(dailyUse(beef, { plan: PLAN, meals: [], today: TODAY }), { perDay: 500, from: 'plan' });
-  const meals = [15, 16, 17].map((d) => meal(`m${d}`, d, [{ name: 'Beef, shank', fdcId: 1001, grams: 400 }]));
+  const meals = [15, 16, 17].map((d) => meal(`m${d}`, d, [{ name: 'Beef, lean', fdcId: 1001, grams: 400 }]));
   assert.deepEqual(dailyUse(beef, { plan: PLAN, meals, today: TODAY }), { perDay: 400, from: 'meals' });
   assert.deepEqual(dailyUse({ ...beef, perDay: 300 }, { plan: PLAN, meals, today: TODAY }), { perDay: 300, from: 'his' });
   const almonds = { id: 'pantry.almonds', name: 'almonds', amount: 500, unit: 'g', countedAt: day(21) };
