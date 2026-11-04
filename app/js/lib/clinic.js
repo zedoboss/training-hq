@@ -1,5 +1,5 @@
 // A one-page summary for his clinic checkup (Thu 11/5, missing feature 12: "No one-page recovery summary to show the
-// clinic at your 5-month checkup"). Built only from what he logged: his recovery record and check-in answers, his
+// clinic at your checkup"). Built only from what he logged: his recovery record and check-in answers, his
 // tendon areas and the holds he did, the pain he wrote down in workouts (notes and skip reasons), his main lifts since
 // the comeback and his body scans. No advice, no reading of it: the clinic reads it. Pure; views/body-clinic.js draws it.
 import { isoDate, daysBetween } from './time.js';

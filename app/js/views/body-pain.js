@@ -28,14 +28,14 @@ export function render(view) {
       <div class="lib-head"><a class="pill" href="#/body">Body</a></div>
       <h1 class="view-title">Pain</h1>
       <p class="view-sub">Per area, newest first. From your workout notes and skips, and what you log here or tell the coach.</p>
-      ${flags.length ? `<section class="card"><div class="hud c-amber">SAME LIFT, SAME AREA AGAIN</div>${flags.map((f) => `<p class="sheet-text">${esc(f.label)} on ${esc(f.lift)}: ${f.dates.map((d) => esc(dayName(d))).join(', ')}.</p>`).join('')}</section>` : ''}
-      ${areas.length ? areas.map((a) => `<section class="card">
+      ${flags.length ? `<section class="card pad-card"><div class="hud c-amber">SAME LIFT, SAME AREA AGAIN</div>${flags.map((f) => `<p class="sheet-text">${esc(f.label)} on ${esc(f.lift)}: ${f.dates.map((d) => esc(dayName(d))).join(', ')}.</p>`).join('')}</section>` : ''}
+      ${areas.length ? areas.map((a) => `<section class="card pad-card">
         <div class="ex-head"><span class="hud c-cyan">${esc(a.label.toUpperCase())}</span>${a.trend ? `<span class="hud ${TREND[a.trend]}">${a.trend.toUpperCase()}</span>` : ''}</div>
         <ul class="ex-list">${a.days.slice(0, 14).map((d) => `<li class="ex"><div class="ex-head"><span class="ex-name">${esc(dayName(d.date))}</span><span class="hud">${d.rating != null ? `${d.rating}/10` : 'no rating'}</span></div>
           ${d.lifts.length ? `<div class="hint">${esc(d.lifts.join(', '))}</div>` : ''}
           ${d.texts.length ? `<div class="hint c-muted">${esc(d.texts.join(' · ').slice(0, 240))}</div>` : ''}</li>`).join('')}</ul>
       </section>`).join('') : '<p class="hint">Nothing logged. Pain you write in a workout note or a skip reason shows here by itself.</p>'}
-      <section class="card">
+      <section class="card pad-card">
         <div class="hud c-cyan">LOG PAIN</div>
         <div class="field"><label for="p-area">Area</label><select class="input" id="p-area">${AREAS.map(([id, label]) => `<option value="${id}" ${form.area === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
         <div class="field"><label for="p-rating">Pain 0-10 (optional)</label><input class="input" id="p-rating" type="number" inputmode="numeric" min="0" max="10" value="${esc(form.rating)}"></div>
@@ -43,7 +43,7 @@ export function render(view) {
         <div class="field"><label for="p-note">Note</label><input class="input" id="p-note" type="text" maxlength="300" value="${esc(form.note)}" placeholder="In your words"></div>
         <button class="btn-primary" id="p-save" type="button">Save for today</button>
       </section>
-      ${own.size ? `<section class="card"><div class="hud c-muted">LOGGED HERE OR BY THE COACH</div><ul class="ex-list">${[...own.values()].sort((a, b) => b.at - a.at).slice(0, 20).map((d) => `<li class="ex"><div class="ex-head"><span class="ex-name">${esc(dayName(d.date))} · ${esc(AREAS.find(([id]) => id === d.area)?.[1] || d.area)}${d.rating != null ? ` · ${d.rating}/10` : ''}</span><button class="btn-ghost small" data-del="${esc(d.id)}" type="button">Delete</button></div>${d.lift || d.note ? `<div class="hint">${esc([d.lift, d.note].filter(Boolean).join(' · '))}</div>` : ''}</li>`).join('')}</ul></section>` : ''}`;
+      ${own.size ? `<section class="card pad-card"><div class="hud c-muted">LOGGED HERE OR BY THE COACH</div><ul class="ex-list">${[...own.values()].sort((a, b) => b.at - a.at).slice(0, 20).map((d) => `<li class="ex"><div class="ex-head"><span class="ex-name">${esc(dayName(d.date))} · ${esc(AREAS.find(([id]) => id === d.area)?.[1] || d.area)}${d.rating != null ? ` · ${d.rating}/10` : ''}</span><button class="btn-ghost small" data-del="${esc(d.id)}" type="button">Delete</button></div>${d.lift || d.note ? `<div class="hint">${esc([d.lift, d.note].filter(Boolean).join(' · '))}</div>` : ''}</li>`).join('')}</ul></section>` : ''}`;
     const read = () => { form = { area: view.querySelector('#p-area').value, rating: view.querySelector('#p-rating').value, lift: view.querySelector('#p-lift').value, note: view.querySelector('#p-note').value }; };
     view.querySelectorAll('#p-area, #p-rating, #p-lift, #p-note').forEach((el) => el.addEventListener('change', read));
     view.querySelector('#p-save').onclick = async () => {
