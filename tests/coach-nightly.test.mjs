@@ -144,6 +144,28 @@ test('a day with nothing in it is not sent to Claude; a failed run is tried agai
   assert.match(store.getRecord(DIARY, '2026-03-16').data.error, /didn't pass the checks: the answer has no diary summary/);
 });
 
+test('signed out (Sun 11/1 to Thu 11/5): those failed days are never given up, up to 7 days back, once signed in', async () => {
+  for (const d of ['2026-03-12', '2026-03-13', '2026-03-14', '2026-03-15', '2026-03-16']) msg(`x${d}`, 'user', `Hello on ${d}`, '10:00', d);
+  const OUT = 'Claude Code on the Mac is not logged in (its sign-in ran out). On the Mac, run once: node x';
+  // 3/12 and 3/14 failed while signed out, 3 tries each; 3/13 failed for another reason, 3 tries: that one stays given up.
+  w(DIARY, '2026-03-12', { id: '2026-03-12', date: '2026-03-12', status: 'failed', at: at('02:00', '2026-03-13'), tries: 3, error: 'Claude Code on the Mac is not logged in' });
+  w(DIARY, '2026-03-13', { id: '2026-03-13', date: '2026-03-13', status: 'failed', at: at('02:00', '2026-03-14'), tries: 3, error: 'Claude did not answer within 120 s' });
+  w(DIARY, '2026-03-14', { id: '2026-03-14', date: '2026-03-14', status: 'failed', at: at('02:00', '2026-03-15'), tries: 3, error: OUT });
+  clock = at('09:00', '2026-03-18');
+  const { n, runs } = nightly();
+  assert.deepEqual(n.dueDays(), ['2026-03-12', '2026-03-14', '2026-03-15', '2026-03-16', '2026-03-17']);
+  for (let i = 0; i < 5; i++) await n.tick();
+  assert.deepEqual(runs.map((r) => /^DAY: .* \((\S+)\)/.exec(r.content)[1]), ['2026-03-12', '2026-03-14', '2026-03-15', '2026-03-16', '2026-03-17']);
+  assert.equal(store.getRecord(DIARY, '2026-03-12').data.status, 'done');
+  assert.equal(store.getRecord(DIARY, '2026-03-13').data.status, 'failed', 'another failure is still given up after 3 tries');
+  // Still signed out: a day keeps being tried every 20 minutes past 3 tries.
+  const still = nightly({ run: async () => { throw new Error(OUT); } });
+  store.writeLocal(DIARY, '2026-03-17', null, { deleted: true });
+  for (let i = 0; i < 5; i++) { await still.n.tick(); clock += 21 * 60000; }
+  assert.equal(store.getRecord(DIARY, '2026-03-17').data.tries, 5);
+  assert.deepEqual(still.n.dueDays(), ['2026-03-17']);
+});
+
 test('the checks: the summary at most 250 words, at most 3 fixes, his words only, a big feature he never asked for is never filed', () => {
   const s = snapshot(store, { tz: TZ, now: clock });
   const long = Array.from({ length: 400 }, (_, i) => `w${i}`).join(' ');

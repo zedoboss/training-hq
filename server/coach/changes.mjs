@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, r
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { findClaude } from '../claude.mjs';
+import { findClaude, claudeEnv } from '../claude.mjs';
 import { seenCount, addedAsks } from './change-more.mjs';
 import { formatTime, formatDay, isoDate } from '../../app/js/lib/time.js';
 
@@ -236,7 +236,7 @@ export function launchBuilder({ claude = findClaude(), prompt, cwd, logFile, set
   try {
     const args = ['-p', prompt, '--model', model.model, '--effort', model.effort, '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose'];
     if (settings) args.push('--settings', settings);
-    const child = spawn(claude, args, { cwd, detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, TRAINING_HQ_COACH_CHANGE: '1' } });
+    const child = spawn(claude, args, { cwd, detached: true, stdio: ['ignore', fd, fd], env: claudeEnv({ TRAINING_HQ_COACH_CHANGE: '1' }) });
     child.unref();
     return child.pid;
   } finally { closeSync(fd); }

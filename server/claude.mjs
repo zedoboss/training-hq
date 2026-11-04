@@ -2,9 +2,10 @@
 // runOnce() is one question, one answer, no tools, nothing saved: used for reading meal photos (6.2) and scale or
 // scan screens later. The long-lived coach process (step 8) is launched the same way.
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { paths } from './config.mjs';
 
 export const MODELS = {
   fast: { model: 'claude-sonnet-5-5', effort: 'low', label: 'Sonnet 5.5 · low' },
@@ -35,6 +36,39 @@ export function findClaude(env = process.env) {
   return null;
 }
 
+// Claude Code's own sign-in (Thu 11/5): the Claude Code the server starts never gets the Claude app's login, and its
+// keychain login runs out after about 30 days (it did on Sun 11/1). scripts/claude-login.mjs makes a 1-year token with
+// `claude setup-token` and saves it here: the private config, never in git, never sent to the phone.
+export const tokenFile = (p = paths()) => join(p.configDir, 'claude-token.json');
+export const SIGN_IN_CMD = 'node ~/Documents/training-hq/scripts/claude-login.mjs';
+export const SIGNED_OUT = `Claude Code on the Mac is not logged in (its sign-in ran out). On the Mac, run once: ${SIGN_IN_CMD}`;
+export const isSignedOut = (why) => /log(?:ged)? ?in|auth|credential/i.test(String(why || ''));
+export const SIGN_IN_WARN_DAYS = 14;
+
+/** The saved sign-in {token, createdAt, expiresAt}, or null. Read at every start, so a new one works without a restart. */
+export function claudeToken(file = tokenFile()) {
+  try {
+    const j = JSON.parse(readFileSync(file, 'utf8'));
+    return typeof j.token === 'string' && j.token ? j : null;
+  } catch { return null; }
+}
+
+/** The environment for a Claude Code the server starts: the server's own plus `extra`, signed in with the saved token. */
+export function claudeEnv(extra = {}, { base = process.env, token = claudeToken() } = {}) {
+  const env = { ...base, ...extra };
+  if (token && !env.CLAUDE_CODE_OAUTH_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = token.token;
+  return env;
+}
+
+/** A warning when the saved sign-in runs out within SIGN_IN_WARN_DAYS (or has), else null. */
+export function signInWarning(token = claudeToken(), now = Date.now()) {
+  if (!token?.expiresAt) return null;
+  const days = Math.floor((token.expiresAt - now) / 86400000);
+  if (days > SIGN_IN_WARN_DAYS) return null;
+  const when = new Date(token.expiresAt).toLocaleDateString('en-US', { weekday: 'long', month: 'numeric', day: 'numeric' });
+  return `${days < 0 ? 'Claude\'s sign-in on the Mac ran out' : `Claude's sign-in on the Mac runs out ${days <= 1 ? 'tomorrow' : `in ${days} days`}`} (${when}). The coach stops then. On the Mac, run once: ${SIGN_IN_CMD}`;
+}
+
 /** The text of the first JSON object in an answer (code fences and words around it are ignored). */
 export function parseJsonAnswer(text) {
   const s = String(text || '');
@@ -63,7 +97,7 @@ export function runOnce({ system, content, model = MODELS.fast.model, effort = M
       '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence', '--system-prompt', system];
     let child;
     try {
-      child = spawn(claude, args, { cwd: tmpdir(), env: { ...process.env, ENABLE_TOOL_SEARCH: 'false' }, stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(claude, args, { cwd: tmpdir(), env: claudeEnv({ ENABLE_TOOL_SEARCH: 'false' }), stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) { reject(new Error(`Claude Code could not start: ${e.message}`)); return; }
     let out = ''; let err = ''; let done = false;
     const finish = (fn, v) => { if (done) return; done = true; clearTimeout(timer); try { child.kill(); } catch { /* gone */ } fn(v); };
@@ -77,7 +111,7 @@ export function runOnce({ system, content, model = MODELS.fast.model, effort = M
         if (msg.type !== 'result') continue;
         if (msg.is_error || msg.subtype !== 'success') {
           const why = String(msg.result || msg.subtype || 'error');
-          finish(reject, new Error(/log ?in|auth/i.test(why) ? 'Claude Code on the Mac is not logged in' : `Claude answered with an error: ${why.slice(0, 200)}`));
+          finish(reject, new Error(isSignedOut(why) ? SIGNED_OUT : `Claude answered with an error: ${why.slice(0, 200)}`));
         } else finish(resolve, { text: String(msg.result ?? ''), model, ms: Date.now() - started });
       }
     });

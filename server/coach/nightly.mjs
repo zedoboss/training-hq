@@ -11,7 +11,7 @@
 // - one morning message once he is up: what was learned and fixed overnight.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runOnce, parseJsonAnswer } from '../claude.mjs';
+import { runOnce, parseJsonAnswer, isSignedOut } from '../claude.mjs';
 import { snapshot } from './shared.mjs';
 import { timelineText, fold } from './memory.mjs';
 import { newChange, asksOf, COL as CHANGES, MSGS } from './changes.mjs';
@@ -31,6 +31,9 @@ export const MODEL = { model: 'claude-opus-5-5', effort: 'high' };
 export const RUN_HM = '01:30';
 export const CATCH_UP_DAYS = 3;
 export const MAX_TRIES = 3;
+// A day that failed only because Claude was signed out (Sun 11/1 to Thu 11/5) is not given up on: it is tried again
+// every 20 minutes, with no cap, up to this many days back, so it is reviewed once Claude is signed in again.
+export const SIGNED_OUT_BACK_DAYS = 7;
 export const MAX_FIXES = 3;
 export const MAX_FACTS = 8;
 export const SUMMARY_WORDS = 250;
@@ -240,11 +243,13 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const today = isoDate(new Date(t), zone);
     const awakeDay = wakingDay(t, { tz: zone, sleepLog: one('sleep-log', today), health: one('health', today), sessions: store.listRecords('sessions').map((r) => r.data).filter(Boolean), signs: () => signsUpTo(store, t), moving: movingOf(store) });
     const out = [];
-    for (let i = CATCH_UP_DAYS; i >= 1; i--) {
+    for (let i = Math.max(CATCH_UP_DAYS, SIGNED_OUT_BACK_DAYS); i >= 1; i--) {
       const date = addDays(today, -i);
       if (date < first || t < zonedTime(addDays(date, 1), runHm, zone) || date >= awakeDay) continue;
       const d = one(DIARY, date);
-      if (d && (d.status === 'done' || d.status === 'empty' || (d.tries || 0) >= MAX_TRIES)) continue;
+      const signedOut = d?.status === 'failed' && isSignedOut(d.error);
+      if (i > CATCH_UP_DAYS && !signedOut) continue;
+      if (d && (d.status === 'done' || d.status === 'empty' || (!signedOut && (d.tries || 0) >= MAX_TRIES))) continue;
       // A failed run is tried again after 20 minutes, 3 times at most.
       if (d?.status === 'failed' && t - (d.at || 0) < RETRY_MS) continue;
       out.push(date);

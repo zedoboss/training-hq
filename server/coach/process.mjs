@@ -7,7 +7,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { findClaude, COACH_MODELS as MODELS } from '../claude.mjs';
+import { findClaude, claudeEnv, isSignedOut, SIGNED_OUT, COACH_MODELS as MODELS } from '../claude.mjs';
 
 export const TURN_TIMEOUT_MS = { fast: 180000, deep: 420000 };
 export const IDLE_MS = 60 * 60000;
@@ -22,7 +22,7 @@ export function coachArgs({ system, mcpUrl, model, effort }) {
     '--model', model, '--effort', effort, '--no-session-persistence'];
 }
 
-const plainError = (why) => (/log ?in|auth|credential/i.test(why) ? 'Claude Code on the Mac is not logged in. Open the Claude app on the Mac once.' : `Claude answered with an error: ${String(why).slice(0, 200)}`);
+const plainError = (why) => (isSignedOut(why) ? SIGNED_OUT : `Claude answered with an error: ${String(why).slice(0, 200)}`);
 
 /**
  * @param {object} o
@@ -76,7 +76,7 @@ export function openCoachProcess({ system, mcpUrl, claude = findClaude, spawn = 
     c.turns++;
     if (msg.is_error || msg.subtype !== 'success') {
       const why = String(msg.result || (msg.errors || []).join('; ') || msg.subtype || 'error');
-      if (/log ?in|auth|credential/i.test(why)) kill('not logged in');
+      if (isSignedOut(why)) kill('not logged in');
       t.reject(new Error(plainError(why)));
       return;
     }
@@ -91,7 +91,7 @@ export function openCoachProcess({ system, mcpUrl, claude = findClaude, spawn = 
     const m = MODELS[key] || MODELS.fast;
     const sys = system();
     const proc = spawn(path, coachArgs({ system: sys, mcpUrl: mcpUrl(), model: m.model, effort: m.effort }), {
-      cwd: tmpdir(), env: { ...process.env, ENABLE_TOOL_SEARCH: 'false' }, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: tmpdir(), env: claudeEnv({ ENABLE_TOOL_SEARCH: 'false' }), stdio: ['pipe', 'pipe', 'pipe'],
     });
     const c = { proc, key, model: m.model, sysHash: sha(sys), startedAt: now(), turns: 0, buf: '', err: '' };
     child = c;

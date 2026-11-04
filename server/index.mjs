@@ -19,7 +19,7 @@ import { openICloudCalendar, isRealFolder, eventKit } from './icloud-calendar.mj
 import { openEvoltImport } from './evolt-import.mjs';
 import { openMealVision } from './meal-vision.mjs';
 import { openScanVision } from './scan-vision.mjs';
-import { findClaude } from './claude.mjs';
+import { findClaude, claudeToken, signInWarning } from './claude.mjs';
 import { openChanges } from './coach/changes.mjs';
 import { openNightly, fixedOnMacFrom } from './coach/nightly.mjs';
 import { openRestPush } from './rest-push.mjs';
@@ -91,6 +91,22 @@ const evolt = openEvoltImport({ dir: join(p.importsDir, 'evolt'), log });
 // Meal photos (6.2): read by Claude on the Mac after each sync that brings one, at start, and every 2 minutes (retries).
 const vision = openMealVision({ store, log });
 log(`claude: ${findClaude() || 'not found (meal photos wait until the Claude app is installed)'}`);
+{
+  const t = claudeToken();
+  log(`claude sign-in: ${t ? `saved token${t.expiresAt ? `, until ${new Date(t.expiresAt).toISOString().slice(0, 10)}` : ''}` : 'none saved (the keychain login is used, if any)'}`);
+}
+// The saved sign-in runs out after a year: from 14 days before, one push a day says so (claude.mjs signInWarning).
+const signInTick = () => {
+  const warn = signInWarning();
+  const day = new Date().toISOString().slice(0, 10);
+  if (!warn || store.getMeta('claudeSignInWarned') === day || !push.list().length) return;
+  store.setMeta('claudeSignInWarned', day);
+  push.notify({ title: 'Training HQ', body: warn, url: '#/settings', tag: 'claude-sign-in' })
+    .then(() => log(`claude sign-in: warned (${warn.slice(0, 60)})`))
+    .catch((e) => log(`claude sign-in: warning not sent (${e.message})`));
+};
+setTimeout(signInTick, 60000).unref();
+setInterval(signInTick, 6 * 3600000).unref();
 const kickVision = () => vision.kick().catch((e) => log(`meal vision: ${e.stack || e}`));
 // Body scan result photos (7.5): the same way, into 'scan-reads'.
 const scanVision = openScanVision({ store, log });
