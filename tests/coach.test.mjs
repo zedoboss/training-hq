@@ -120,6 +120,17 @@ test('an error becomes a saved reply marked as an error', async () => {
   await coach.close();
 });
 
+test('a limit never means a flat refusal (Thu 11/5: "How should I rebuild My lower back now?"): his question answered first, one question to make it his plan', () => {
+  const i = RULES.indexOf('A limit changes what you build from, never whether he gets an answer');
+  assert.ok(i > RULES.indexOf('HARD LIMITS') && i < RULES.indexOf('Supplements: track only'), 'sits with the medical limit');
+  const rule = RULES.slice(i, RULES.indexOf('\n', i));
+  for (const s of ['first line answers his exact question', 'tendon note', 'flexibility plan', 'readiness table', 'skip or swap today', 'one short question', 'tendon_hold add_area', 'Never a flat refusal', '"I won\'t"', 'that\'s a fixed rule', 'no diagnosis, no treatment']) {
+    assert.ok(rule.includes(s), s);
+  }
+  // The medical limit itself is unchanged.
+  for (const s of ['This is not a medical app.', 'Never invent rehab advice, never diagnose, never suggest a treatment.', 'Never recommend a supplement or a dose', 'Never suggest one more round']) assert.ok(RULES.includes(s), s);
+});
+
 test('the rules come from the brief and his profile is added from the private folder', () => {
   for (const s of ['Lead with the answer', 'H:MM AM or PM', 'total kg including the bar', 'rating out of 10', 'Never recommend a supplement or a dose', 'never suggest one more round', 'not a medical app']) {
     assert.ok(RULES.includes(s) || RULES.toLowerCase().includes(s.toLowerCase()), s);
