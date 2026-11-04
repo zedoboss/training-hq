@@ -64,7 +64,7 @@ test('add: no load from before the comeback; last load since it; already on the 
   assert.equal(session().exercises[0].target.kg, null);
   assert.match((await call('workout_exercise', { action: 'add', exercise: 'horizontal leg press' })).text, /already in this workout \(first\)\. To change its place: action move/);
   const curl = await call('workout_exercise', { action: 'add', exercise: 'Seated Leg Curl (Machine)', again: true });
-  assert.match(curl.text, /, last, after Calf Raise \(Horizontal Leg Press\): 2 sets × 8-12 at 45 kg\./, 'last load since the comeback, the default place is last');
+  assert.match(curl.text, /, last, after Calf Raise \(Horizontal Leg Press\): 2 sets × 8-12 at 50 kg\. On his phone now, ready to tick\. Its target \(say it, with the number\): Last time 45 kg × 10 \(Tuesday 1\/13\), \+5 kg\./, 'last load since the comeback + one step (Thu 11/5), the default place is last');
   const ext = await call('workout_exercise', { action: 'add', exercise: 'Leg Extension (Machine)', before: 'squat' });
   assert.match(ext.text, /, number 2, after Leg Press Horizontal \(Machine\)/);
   assert.match((await call('workout_exercise', { action: 'add', exercise: 'Leg Extension (Machine)', after: 'bench' })).text, /^Leg Extension \(Machine\) is already/);

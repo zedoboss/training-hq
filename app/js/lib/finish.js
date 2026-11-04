@@ -191,8 +191,11 @@ export function routineFromLast(routine, last, lastSets) {
   // that off). The workout after that copies his last one again.
   if (routine?.editedAt && routine.editedAt > (last.startedAt || 0)) return { ...routine, editedSince: last.id };
   const used = new Set();
-  const exercises = (last.exercises || []).map((e) => {
-    const mine = lastSets.filter((s) => s.exKey === e.key && s.done).sort((a, b) => a.order - b.order);
+  const exercises = (last.exercises || []).map((e0) => {
+    // Thu 11/5: swapped for that day only: the original comes back, on its own weights; the card says so.
+    const swap = e0.swappedFrom?.name && e0.swappedFrom.name !== e0.name ? e0 : null;
+    const e = swap ? { ...e0, exerciseId: e0.swappedFrom.exerciseId ?? null, name: e0.swappedFrom.name, notes: '', skipped: null } : e0;
+    const mine = swap ? [] : lastSets.filter((s) => s.exKey === e.key && s.done).sort((a, b) => a.order - b.order);
     const holdsOnly = mine.length > 0 && mine.every((s) => s.type === 'hold');
     const re = holdsOnly ? null : (routine?.exercises || []).find((x) => !used.has(x.key) && (x.exerciseId === e.exerciseId || x.name === e.name));
     if (re) used.add(re.key);
@@ -200,7 +203,8 @@ export function routineFromLast(routine, last, lastSets) {
       .map((s) => ({ type: s.type, kg: s.kg ?? null, reps: s.reps != null ? [s.reps, s.reps] : null, durationS: s.durationS ?? null }));
     // Skipped last time with a reason (Thu 10/22, his words: "skipped this workout, do it next time, because of X"):
     // it comes back, with the reason on the card.
-    const why = e.skipped && !mine.length ? `Skipped last time${last.startedAt ? ` (${formatDay(new Date(last.startedAt))})` : ''}${e.skipped.reason ? `: ${e.skipped.reason}` : ''}.` : '';
+    const back = swap ? `Swapped for ${swap.name} last time${last.startedAt ? ` (${formatDay(new Date(last.startedAt))})` : ''}: back to ${e.name}.` : '';
+    const why = back || (e.skipped && !mine.length ? `Skipped last time${last.startedAt ? ` (${formatDay(new Date(last.startedAt))})` : ''}${e.skipped.reason ? `: ${e.skipped.reason}` : ''}.` : '');
     return {
       key: newKey(), exerciseId: e.exerciseId, name: re?.name ?? e.name, restSeconds: re?.restSeconds ?? e.restSeconds ?? null,
       notes: [re?.notes ?? e.notes ?? '', why].filter(Boolean).join('\n'), plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,

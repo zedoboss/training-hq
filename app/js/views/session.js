@@ -6,7 +6,7 @@ import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { clockText } from '../lib/records.js';
-import { buildSession, setsForAdded, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad, nextAfter, nextAfterText, oneArmIn, oneArmHoldRounds, pairUpRows, armOf, armLabel } from '../lib/session.js';
+import { buildSession, setsForAdded, addedTarget, swapEntry, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad, nextAfter, nextAfterText, oneArmIn, oneArmHoldRounds, pairUpRows, armOf, armLabel } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay, timeAt, zoneOf } from '../lib/time.js';
@@ -15,6 +15,7 @@ import * as rest from '../lib/rest-timer.js';
 import { pickExercises } from '../ui/picker.js';
 import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
+import { painEntries, repeatFlags } from '../lib/pain.js';
 import { warmupSets } from '../lib/plates.js';
 import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../lib/finish.js';
 import { demoPanel } from '../ui/demo-panel.js';
@@ -77,7 +78,7 @@ const minPlate = () => smallestPlate(getState().equipment);
 const mmss = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 async function context(repo, excludeSessionId) {
-  const [sessions, sets, bridge, exercises, meta, bank, todayDoc, programme] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('exercises'), repo.get('programme', 'meta'), repo.get('coach-lines', 'bank'), repo.get('days', isoDate(new Date())), repo.list('programme')]);
+  const [sessions, sets, bridge, exercises, meta, bank, todayDoc, programme, painLog] = await Promise.all([repo.list('sessions'), repo.list('sets'), repo.get('bridge', 'last-loads'), repo.list('exercises'), repo.get('programme', 'meta'), repo.get('coach-lines', 'bank'), repo.get('days', isoDate(new Date())), repo.list('programme'), repo.list('pain-log')]);
   const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
   // A15: his lines, his pre-layoff numbers (the Rival), and Calm on a day the check-in said lighter or rest.
   const rd = todayDoc?.readiness;
@@ -87,7 +88,9 @@ async function context(repo, excludeSessionId) {
   const ceilings = (meta?.preLayoffCeilings || []).map((c) => ({ ...c, also: alias.has(c.name) ? [alias.get(c.name)] : [] }));
   // All-time records only once the whole Hevy history is in (as the workout detail).
   const fullHistory = !activeBridge(bridge, sessions) && sessions.some((s) => s.source === 'hevy' && s.status === 'done');
-  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, comebackStart: comebackStartOf(meta), fullHistory, bank, ceilings, calm };
+  // Thu 11/5: the same lift hurting the same area on more than one day (lib/pain.js): flagged on its card.
+  const painFlags = repeatFlags(painEntries({ sessions, sets: sets.filter((x) => x.note), log: painLog }));
+  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, meta, painFlags, comebackStart: comebackStartOf(meta), fullHistory, bank, ceilings, calm };
 }
 
 /** The template as his last workout of its kind (routineFromLast), or the template when there is none since the comeback. */
@@ -107,7 +110,7 @@ async function startSession(view, routineId, logFor = null, from = null) {
     return;
   }
   let routine = routineId === 'empty' ? null : await repo.get('routines', routineId);
-  const [meta, progDocs, ctx, progress, todayDoc, healthDocs, measurements, tendons] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null), repo.list('progression'), repo.get('days', isoDate(new Date())), repo.list('health'), repo.list('measurements'), repo.list('tendons')]);
+  const [meta, progDocs, ctx, progress, todayDoc, healthDocs, measurements, tendons, formChecks] = await Promise.all([repo.get('programme', 'meta'), repo.list('programme'), context(repo, null), repo.list('progression'), repo.get('days', isoDate(new Date())), repo.list('health'), repo.list('measurements'), repo.list('tendons'), repo.list('form-checks')]);
   // Thu 10/22: a copy of his last workout of this kind since the comeback, unless he asked for the template.
   if (routine && from !== 'template') routine = await copyOfLast(repo, routine, ctx.sessions, comebackStartOf(meta));
   // Today's check-in said "go lighter" for this day type: the session's targets follow it (readiness table rules 4 and 5).
@@ -119,7 +122,7 @@ async function startSession(view, routineId, logFor = null, from = null) {
     smallestPlate: minPlate(), gym: prefs().gym.name, warmupSteps: prefs().warmup.steps, sameRoutine: prefs().previousFrom === 'same-routine',
     // Decision 12: bodyweight from Apple Health (the latest weigh-in), unless he typed a newer one himself.
     bodyweightKg: currentBodyweight({ healthDocs, measurements, manual: prefs().bodyweight })?.kg ?? null, progress, lighter,
-    holdRounds: oneArmHoldRounds(tendons),
+    holdRounds: oneArmHoldRounds(tendons), formChecks,
   });
   // Logged after the fact from the calendar (P12): the finish screen starts on that date.
   if (/^\d{4}-\d{2}-\d{2}$/.test(logFor || '') && logFor < isoDate(new Date())) session.logFor = logFor;
@@ -397,9 +400,11 @@ export function render(view, params = []) {
     return `<section class="card s-ex ${g ? 'in-superset' : ''}" data-ex="${esc(ex.key)}" ${g ? `style="--ss:${SS_COLORS[gi % SS_COLORS.length]}"` : ''}>
       ${g ? `<div class="hud ss-label">SUPERSET ${g.letter} · ${g.keys.indexOf(ex.key) + 1} OF ${g.keys.length}</div>` : ''}
       <div class="ex-head"><span class="ex-title"><button class="ex-demo" data-a="demo" type="button" aria-label="Demo: ${esc(ex.name)}">${DEMO_ICON}</button><a class="ex-name plain" href="#/exercise/${esc(ex.exerciseId)}">${esc(ex.name)}</a></span>
-        <span class="btn-row tight">${ex.capClass === 'main' ? '<span class="tag tag-main">30% CAP</span>' : ex.role === 'tendon-hold' ? '<span class="tag tag-hold">HOLD</span>' : ''}
+        <span class="btn-row tight">${t?.capped ? '<span class="tag tag-main">30% CAP</span>' : ex.role === 'tendon-hold' ? '<span class="tag tag-hold">HOLD</span>' : ''}${ex.swappedFrom?.name ? '<span class="tag tag-skip">SWAP</span>' : ''}
         <button class="icon-mini" data-a="ex-more" type="button" aria-label="Exercise options">···</button></span></div>
       ${pinned ? `<div class="pinned small">${esc(pinned)}</div>` : ''}
+      ${(ctx.painFlags || []).filter((f) => f.lift === ex.name).map((f) => `<div class="hint c-amber">${esc(f.label)} hurt on this lift ${f.dates.length} times: ${f.dates.slice(0, 3).map((d) => esc(formatDay(new Date(`${d}T12:00:00`)))).join(', ')}.</div>`).join('')}
+      ${ex.swappedFrom?.name ? `<div class="hint">Instead of ${esc(ex.swappedFrom.name)}, today only. Your next ${esc(DAY[session.dayType] ? DAY[session.dayType][0] + DAY[session.dayType].slice(1).toLowerCase() : 'workout')} brings it back.</div>` : ''}
       ${ex.notes ? `<div class="hint">${esc(ex.notes)}</div>` : ''}
       ${isOneArm(ex) ? `<div class="hint">${oneArmHint(all)}</div>` : ''}
       ${t && (t.kg != null || t.reps) ? `<div class="target">TARGET ${t.bodyweight ? 'BW' : t.added ? `+${showKg(ex, t.kg)} ${unit}` : t.kg != null ? `${t.approx ? '~' : ''}${showKg(ex, t.kg)} ${unit}` : ''}${t.reps ? ` · ${rangeText(t.reps)}` : ''}${t.sets ? ` · ${t.sets} ${isOneArm(ex) ? `ROUND${t.sets > 1 ? 'S' : ''} · RIGHT THEN LEFT` : `SET${t.sets > 1 ? 'S' : ''}`}` : ''}${t.gated ? ' <span class="c-amber">· ONLY IF FORM IS CONSISTENT ON VIDEO</span>' : ''}</div>${t.why ? `<div class="target-why">${esc(t.why)}${unit !== 'KG' && /\d/.test(t.why) ? ' (in kg)' : ''}.</div>` : ''}` : ''}
@@ -408,6 +413,7 @@ export function render(view, params = []) {
       <div class="s-ex-foot"><span class="hud c-muted">${per != null ? `${fmtKg(ex.barKg)} BAR + ${fmtKg(per)} KG / SIDE` : ''}</span>
         <span class="btn-row tight">${!editing && isSquatExercise(ex) ? `<a class="btn-ghost small center" href="#/squat/set/${esc(session.id)}/${esc(ex.key)}" data-k="depth">Depth</a>` : ''}
         ${fields.includes('kg') && plateCalc && ex.barKg ? '<button class="btn-ghost small" data-a="plates" type="button">Plates</button>' : ''}
+        ${t?.formHold || t?.gated ? '<button class="btn-ghost small" data-a="form-ok" type="button">Form OK on video</button>' : ''}
         <button class="btn-ghost small" data-a="add-set" type="button">+ Set</button></span></div>
     </section>`;
   };
@@ -579,6 +585,15 @@ export function render(view, params = []) {
     // Thu 10/22, his words: "just like Hevy at the name... a very small icon of the animation; when I tap on that, it
     // opens the demo".
     if (action === 'demo') { openDemo(ex); return; }
+    // Thu 11/5: his own verdict on a lift gated on filmed form (RDL, hip thrust): its next target may step up again.
+    if (action === 'form-ok') {
+      if (!ex || !(await confirmSheet(`Was your ${ex.name} form consistent on video? Its next target steps up again.`, { ok: 'Yes, consistent' }))) return;
+      const date = isoDate(new Date());
+      const id = `form.${ex.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.${date}`;
+      await repo.put('form-checks', id, { id, name: ex.name, date, at: Date.now(), ok: true, note: '', by: 'his tap' });
+      toast('Saved. The next target steps up.');
+      return;
+    }
     if (action === 'unskip') { await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, skipped: null } : e)) }); drawCards(); return; }
     if (action === 'skip-note') { await skipExercise(ex); return; }
     if (action === 'add-set') {
@@ -664,10 +679,22 @@ export function render(view, params = []) {
         } },
         { label: 'Move up', run: () => move(-1) },
         { label: 'Move down', run: () => move(1) },
-        { label: 'Replace', run: async () => {
-          const [n] = await pickExercises({ multi: false, title: 'Replace with' });
+        // Thu 11/5, his words: swap an exercise for today (squat to leg press) keeping both histories linked: the card
+        // says what it replaces, its target comes from its own history, the next workout brings the original back.
+        { label: editing ? 'Replace' : 'Swap for today', run: async () => {
+          const [n] = await pickExercises({ multi: false, title: editing ? 'Replace with' : `Instead of ${ex.name} today` });
           if (!n) return;
-          await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? { ...e, exerciseId: n.id, name: n.name, type: n.type, capClass: n.capClass ?? null, barKg: n.barKg ?? null, target: null } : e)) });
+          const reps = ex.target?.reps || exSets(key).find((x) => x.type !== 'warmup' && x.type !== 'hold')?.target?.reps || [8, 12];
+          const ft = addedTarget({ name: n.name, history: ctx.history, meta: ctx.meta, today: isoDate(new Date()), dayType: session.dayType, reps, barKg: n.barKg ?? null, equipment: n.equipment ?? null, smallestPlate: minPlate() });
+          const target = ft ? { kg: ft.kg, reps, sets: ex.target?.sets ?? null, why: ft.why, ...(ft.approx ? { approx: true } : {}) } : null;
+          await saveSession({ exercises: session.exercises.map((e) => (e.key === key ? (editing ? { ...e, exerciseId: n.id, name: n.name, type: n.type, capClass: n.capClass ?? null, barKg: n.barKg ?? null, target: null } : swapEntry(e, n, target)) : e)) });
+          // Open rows take the new exercise's numbers; warm-ups of the old one go (they were for its weight).
+          if (!editing) {
+            for (const x of exSets(key).filter((y) => !y.done)) {
+              if (x.type === 'warmup') { await repo.remove('sets', x.id); sets = sets.filter((y) => y.id !== x.id); continue; }
+              if (x.type !== 'hold') await patchSet(x.id, { kg: ft?.kg ?? null, target: { kg: ft?.kg ?? null, reps } });
+            }
+          }
           drawCards();
         } },
         { label: 'Remove', danger: true, run: async () => {
@@ -752,8 +779,10 @@ export function render(view, params = []) {
       for (const n of picked) {
         const entry = { key: newKey(), exerciseId: n.id, name: n.name, type: n.type || 'weight_reps', capClass: n.capClass ?? null, barKg: n.barKg ?? null, restSeconds: n.restSeconds ?? null, notes: '', role: null, target: null };
         list.push(entry);
-        const last = ctx.history.lastLifted(n.name);
-        for (const s of setsForAdded(session.id, entry, last?.heaviest, order)) { await saveSet(s); order++; }
+        // Thu 11/5: a target from his history (since the comeback, or an estimate from before it), never the old load.
+        const ft = addedTarget({ name: n.name, history: ctx.history, meta: ctx.meta, today: isoDate(new Date()), dayType: session.dayType, barKg: n.barKg ?? null, equipment: n.equipment ?? null, smallestPlate: minPlate() });
+        if (ft) entry.target = { kg: ft.kg, reps: ft.reps, why: ft.why, ...(ft.approx ? { approx: true } : {}) };
+        for (const s of setsForAdded(session.id, entry, ft?.kg != null ? { kg: ft.kg } : null, order)) { await saveSet(s); order++; }
       }
       await saveSession({ exercises: list });
       drawCards();

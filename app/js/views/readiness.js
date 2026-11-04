@@ -2,11 +2,11 @@
 // The table is a draft until he confirms it here; the check-in won't run on a draft. It stays editable afterwards,
 // and every edit is dated in the table's change list (brief section 5).
 import { ready } from '../lib/data.js';
-import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT, DEFAULT_PARAMS } from '../lib/readiness.js';
+import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT, DEFAULT_PARAMS, ratingFromWords } from '../lib/readiness.js';
 import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, addDays, LABEL } from '../lib/rotation.js';
 import { modeOf } from '../lib/progression.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
-import { confirmSheet } from '../ui/sheet.js';
+import { confirmSheet, promptText } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -122,7 +122,7 @@ function segment(name, n, value, labels) {
 
 function renderCheckin(view) {
   view.innerHTML = '<p class="view-sub">Loading…</p>';
-  let repo; let ctx; const ratings = { T: {}, W: {} }; let again = false;
+  let repo; let ctx; const ratings = { T: {}, W: {} }; let again = false; const fromWords = {};
 
   const load = async () => {
     const { table, areas } = await loadAll(repo);
@@ -157,16 +157,19 @@ function renderCheckin(view) {
         <div class="ex-head"><b>${esc(a.label)}</b>${ctx.loaded.includes(a.id) ? '<span class="hud c-amber">TODAY LOADS IT</span>' : ''}</div>
         <div class="hint">Sore tendon area (T)</div>
         ${segment(`${a.label} soreness`, 4, ratings.T[a.id], ratingLevels('T'))}
-        <div class="hint rd-meaning">${Number.isInteger(ratings.T[a.id]) ? esc(ratingLevels('T')[ratings.T[a.id]]) : '&nbsp;'}</div>
+        <div class="hint rd-meaning">${fromWords[`T.${a.id}`] ? `${esc(fromWords[`T.${a.id}`])}<br>` : ''}${Number.isInteger(ratings.T[a.id]) ? esc(ratingLevels('T')[ratings.T[a.id]]) : '&nbsp;'}</div>
+        <button class="btn-ghost small" type="button" data-words="T" data-words-area="${esc(a.id)}">Can't rate it? Say it in words</button>
         <div class="hint">${esc(table.worseQuestion?.text || 'Is the tendon worse than yesterday?')}</div>
         <div class="seg" data-w><button type="button" class="pill seg-btn ${ratings.W[a.id] === false ? 'is-on' : ''}" data-yes="0">No</button><button type="button" class="pill seg-btn ${ratings.W[a.id] === true ? 'is-on' : ''}" data-yes="1">Yes</button></div>
       </section>`).join('')}
       ${ctx.keys.map((k) => `<section class="card pad-card rd-q" data-key-q="${k}"><b>${KEY_NAME[k]} (${k})</b>
         ${segment(KEY_NAME[k], 4, ratings[k], ratingLevels(k))}
-        <div class="hint rd-meaning">${Number.isInteger(ratings[k]) ? esc(ratingLevels(k)[ratings[k]]) : '&nbsp;'}</div></section>`).join('')}
+        <div class="hint rd-meaning">${fromWords[k] ? `${esc(fromWords[k])}<br>` : ''}${Number.isInteger(ratings[k]) ? esc(ratingLevels(k)[ratings[k]]) : '&nbsp;'}</div>
+        <button class="btn-ghost small" type="button" data-words="${k}">Can't rate it? Say it in words</button></section>`).join('')}
       ${dayType ? `<section class="card pad-card rd-q" data-key-q="E"><b>Energy (E)</b>
         ${segment('Energy', 4, ratings.E, ratingLevels('E'))}
-        <div class="hint rd-meaning">${Number.isInteger(ratings.E) ? esc(ratingLevels('E')[ratings.E]) : '&nbsp;'}</div></section>` : ''}
+        <div class="hint rd-meaning">${fromWords.E ? `${esc(fromWords.E)}<br>` : ''}${Number.isInteger(ratings.E) ? esc(ratingLevels('E')[ratings.E]) : '&nbsp;'}</div>
+        <button class="btn-ghost small" type="button" data-words="E">Can't rate it? Say it in words</button></section>` : ''}
       <div class="btn-row"><button class="btn-primary" id="rd-go" type="button" ${done ? '' : 'disabled'}>See what that means</button></div>`;
 
     view.querySelectorAll('[data-area-q]').forEach((sec) => {
@@ -177,6 +180,19 @@ function renderCheckin(view) {
     view.querySelectorAll('[data-key-q]').forEach((sec) => {
       sec.querySelectorAll('[data-v]').forEach((b) => b.addEventListener('click', () => { ratings[sec.dataset.keyQ] = Number(b.dataset.v); draw(); }));
     });
+    // Thu 11/5 (his words: "I cant rate it... somewhat sore and a tiny tiny pain"): his words pick the number; he
+    // sees it selected with what it means, and confirms by going on (or taps another number).
+    view.querySelectorAll('[data-words]').forEach((b) => b.addEventListener('click', async () => {
+      const key = b.dataset.words; const area = b.dataset.wordsArea;
+      const said = await promptText('In your words', '', { placeholder: 'e.g. somewhat sore, a tiny bit of pain', ok: 'Rate it' });
+      if (!said) return;
+      const r = ratingFromWords(said, key, ratingLevels(key));
+      const slot = area ? `T.${area}` : key;
+      if (!r) { fromWords[slot] = `"${said.slice(0, 60)}": no number in that. Tap the one that fits.`; draw(); return; }
+      if (area) ratings.T[area] = r.rating; else ratings[key] = r.rating;
+      fromWords[slot] = `"${said.slice(0, 60)}" reads as ${r.rating}. Right? Tap another number if not.`;
+      draw();
+    }));
     view.querySelector('#rd-go').onclick = async () => {
       const movedYesterday = days[addDays(today, -1)]?.rest?.reason === 'moved';
       const d = decide({ table, ratings, dayType, loaded: ctx.loaded, movedYesterday });

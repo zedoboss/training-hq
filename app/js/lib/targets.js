@@ -72,6 +72,20 @@ export function repNotes(history, name, opts = {}) {
   return lastNotes([...held, ...lifted], opts);
 }
 
+/** Days without it that count as a gap (Thu 11/5: Legs after 2 weeks off still went up). The usual rotation brings each
+ *  day type back within 4 to 8 days. */
+export const GAP_DAYS = 10;
+const DAY_NAMES = { legs: 'Legs', pull: 'Pull', push: 'Push' };
+/** {days, text} when the last time he lifted it was GAP_DAYS or more before today, else null. */
+export function gapOf(last, today, dayType = null) {
+  if (!last?.date || !today) return null;
+  const days = Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${last.date}T12:00:00Z`)) / 864e5);
+  if (!(days >= GAP_DAYS)) return null;
+  const span = days >= 14 ? `${Math.floor(days / 7)} weeks` : `${days} days`;
+  const what = dayType && DAY_NAMES[dayType] && (!last.dayType || last.dayType === dayType) ? `last ${DAY_NAMES[dayType]}` : 'you last did it';
+  return { days, since: last.date, text: `${span} since ${what} (${dayOf(last.date)})` };
+}
+
 /** The highest load allowed by the cap, before rounding to a loadable weight. */
 export const capOf = (lastKg) => Math.round(lastKg * (1 + CAP) * 100) / 100;
 
@@ -150,7 +164,7 @@ export function setCount(sets, doneBefore) {
  * @returns {{kg:number|null, approx:boolean, added:boolean, bodyweight:boolean, reps:[number,number]|null,
  *   sets:number, why:string, table:number|null, capKg:number|null, gated:string|null, week:number}}
  */
-export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25, progressKg = null, equipment = null, name = '', notes = null }) {
+export function targetFor({ plan, week, last = null, barKg = null, smallestPlate = 1.25, progressKg = null, equipment = null, name = '', notes = null, today = null, dayType = null, formOk = null }) {
   const doneBefore = !!last;
   const gatedNotStarted = plan.weeks && plan.weeks.some((w) => w.gate) && !doneBefore;
   const cell = weekCell(plan, gatedNotStarted ? 1 : week, progressKg);
@@ -163,6 +177,16 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
   const step = stepFor({ barKg, equipment, name: name || plan.name || '', smallestPlate });
   const r2 = (x) => Math.round(x * 100) / 100;
   const stepText = barKg != null ? `+${step} kg (${step / 2} a side)` : `+${step} kg`;
+  // Thu 11/5, his words: "I haven't worked out in two weeks... Why is it recommending me to do more?": the plus said
+  // is the plus done (36 -> 40 is +4 kg, not +5).
+  const plusText = (to, from) => { const d = r2(to - from); return barKg != null ? `+${d} kg (${r2(d / 2)} a side)` : `+${d} kg`; };
+  // Thu 11/5: a gap (10+ days since he last lifted it) means no step: repeat the last load, and say why.
+  const gap = gapOf(last, today, dayType);
+  if (gap) out.gap = gap;
+  // Thu 11/5: a lift gated on filmed form (RDL, hip thrust) only steps up while his latest form check says his form
+  // was consistent on video (formOk: {date, ok}, his tap or his words); no check yet or "not yet": it repeats.
+  const formHold = !!(last && plan.weeks?.some((w) => w.gate) && !formOk?.ok);
+  if (formHold) out.formHold = true;
   // Sat 10/24: a jump last time isn't the new start (jumpOf); today builds on the earlier history, under its cap.
   const jump = last && !notes?.pain && !notes?.skipped ? jumpFrom(notes?.jump, step) : null;
   const lead = jump ? `Last time's ${setOf(jump)} was a jump: ${jump.over}% over your ${jump.basis.kg} kg on ${dayOf(jump.basis.date)}, past the 30% cap, so not your new start. ` : '';
@@ -173,8 +197,14 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
   const short = last?.reps != null && Array.isArray(out.reps) && last.reps < out.reps[0];
   // Decision 3 (calf raises) and exercises without a table: one step up from the last load (decision 33).
   if (!cell || /decision 3/.test(rule) || cell.load == null) {
+    if (last?.kg != null && gap && !short) {
+      out.kg = jump ? Math.min(last.kg, jumpCap) : last.kg;
+      out.why = lead + `${gap.text}: repeat ${out.kg} kg, no step up`;
+      return out;
+    }
     out.kg = last?.kg != null ? (short ? last.kg : Math.min(r2(last.kg + step), Math.max(jumpCap, last.kg))) : null;
-    out.why = last?.kg != null ? lead + (short ? `Same as ${jump ? 'that set' : 'last time'} (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first` : out.kg < r2(last.kg + step) ? `${fromText}, ${stepText} reaches the 30% cap: ${out.kg} kg` : `${fromText} ${jump ? '' : `${last.kg} kg`}`.trim() + `, ${stepText}`) : 'No plan number and no history yet';
+    if (last?.kg != null && !short && out.kg < r2(last.kg + step)) out.capped = true;
+    out.why = last?.kg != null ? lead + (short ? `Same as ${jump ? 'that set' : 'last time'} (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first` : out.kg < r2(last.kg + step) ? `${fromText}, ${plusText(out.kg, last.kg)} reaches the 30% cap: ${out.kg} kg (a full ${stepText} would pass it)` : `${fromText} ${jump ? '' : `${last.kg} kg`}`.trim() + `, ${stepText}`) : 'No plan number and no history yet';
     return out;
   }
   if (cell.load.type === 'bodyweight') { out.bodyweight = true; out.why = 'bodyweight'; return out; }
@@ -198,9 +228,9 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     return out;
   }
   if (lone) {
-    out.kg = Math.min(r2(lone.kg + step), table);
+    out.kg = gap || formHold ? lone.kg : Math.min(r2(lone.kg + step), table);
     if (lone.reps != null && Array.isArray(out.reps) && lone.reps < out.reps[0]) out.kg = lone.kg;
-    out.why = `Only one set at ${last.kg} kg last time, the other was ${setOf(lone)}: ${out.kg === lone.kg ? `same weight, get to ${out.reps[0]} reps first` : `${stepText} from there`}, ${out.kg} kg. Goal: ${table} kg`;
+    out.why = `Only one set at ${last.kg} kg last time, the other was ${setOf(lone)}: ${out.kg === lone.kg ? (lone.reps != null && Array.isArray(out.reps) && lone.reps < out.reps[0] ? `same weight, get to ${out.reps[0]} reps first` : gap ? `${gap.text}, same weight` : 'same weight till your form is consistent on video') : `${stepText} from there`}, ${out.kg} kg. Goal: ${table} kg`;
     out.loneLast = true;
     return out;
   }
@@ -224,15 +254,25 @@ export function targetFor({ plan, week, last = null, barKg = null, smallestPlate
     return out;
   }
   const ceiling = Math.min(table, out.capKg ?? Infinity, jump ? jump.limit : Infinity);
+  // Thu 10/22, his words: "why is it telling me to do 40?": the table's number is the goal, not today's load.
+  const goal = week > 4 && progressKg != null ? `Goal (week ${week}, confirmed): ${table} kg` : `Goal (The Comeback, week ${out.week}): ${table} kg`;
+  // A gap, or a form gate not yet passed: the last load again, no step (never over the cap or the table).
+  if ((gap || formHold) && !short) {
+    out.kg = Math.min(last.kg, jump ? Math.max(jump.base.kg, loadable(jump.limit, { barKg, smallestPlate }) ?? jump.limit) : Infinity);
+    const reason = gap ? gap.text : 'Next step only once your form is consistent on video (tell me or tap Form OK)';
+    out.why = lead + `${reason}: repeat ${out.kg} kg, no step up. ${goal}`;
+    return out;
+  }
   // A step on top of what he lifted is loadable as it is (1.25 a side more); a ceiling is rounded down to his plates.
   out.kg = up <= ceiling ? up : loadable(ceiling, { barKg, smallestPlate }) ?? ceiling;
   if (jump && out.kg < last.kg && !short) out.kg = last.kg;
-  // Thu 10/22, his words: "why is it telling me to do 40?": the table's number is the goal, not today's load.
-  const goal = week > 4 && progressKg != null ? `Goal (week ${week}, confirmed): ${table} kg` : `Goal (The Comeback, week ${out.week}): ${table} kg`;
   const capFirst = Math.min(out.capKg ?? Infinity, jump ? jump.limit : Infinity);
+  // Thu 11/5: the 30% CAP badge only when the cap (not the plan) is what held the number down.
+  if (!short && up > ceiling && capFirst < table) out.capped = true;
   out.why = lead + (short ? `Same as ${jump ? 'that set' : 'last time'} (${last.kg} kg × ${last.reps}): get to ${out.reps[0]} reps first. ${goal}`
     : up <= ceiling ? `${fromText}${jump ? '' : ` ${last.kg} kg`}, ${stepText}. ${goal}`
-      : `${fromText}${jump ? '' : ` ${last.kg} kg`}, ${stepText} reaches the ${table <= capFirst ? 'plan' : '30% cap'}: ${out.kg} kg`);
+      : out.kg <= last.kg ? `${fromText}${jump ? '' : ` ${last.kg} kg`}: the next step you can load is over the ${table <= capFirst ? `plan (${table} kg)` : `30% cap (${capFirst} kg)`}, so stay at ${out.kg} kg`
+        : `${fromText}${jump ? '' : ` ${last.kg} kg`}, ${plusText(out.kg, last.kg)} reaches the ${table <= capFirst ? 'plan' : '30% cap'}: ${out.kg} kg${table <= capFirst ? '' : ` (a full ${stepText} would pass it)`}`);
   return out;
 }
 
@@ -259,4 +299,57 @@ export function guardCheck({ kg, capClass, history, today, barKg = null, smalles
     capKg,
     suggest: loadable(capKg, { barKg, smallestPlate }),
   };
+}
+
+/**
+ * How far back his programme lifts are, against their pre-layoff numbers (meta.preLayoffCeilings): the median of last
+ * load since the comeback / pre-layoff kg, over the lifts he has done since the comeback (same day type first). Used
+ * only to estimate a start for an exercise outside the programme he last did before the layoff. null when none.
+ */
+export function comebackRatio({ meta, history, dayType = null, since = null }) {
+  const pairs = [];
+  for (const c of meta?.preLayoffCeilings || []) {
+    if (!(c.kg > 0)) continue;
+    const e = (history.all ? history.all(c.name) : []).find((x) => x.heaviest?.kg != null && (!since || x.date >= since));
+    if (e) pairs.push({ name: c.name, ratio: e.heaviest.kg / c.kg, dayType: e.dayType ?? null });
+  }
+  const same = dayType ? pairs.filter((p) => p.dayType === dayType) : [];
+  const pool = same.length ? same : pairs;
+  if (!pool.length) return null;
+  const sorted = pool.map((p) => p.ratio).sort((a, b) => a - b);
+  const mid = sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  return { value: mid, names: pool.map((p) => p.name) };
+}
+
+/**
+ * Today's target for an exercise outside the programme (Thu 11/5, his words: Leg Press Horizontal had no target; build
+ * one from his history the way it's done for programme lifts). entries: history.all(name), newest first.
+ * - Done since the comeback: last load + one step (decision 33) when he reached the bottom of the reps last time,
+ *   else the same; a gap of GAP_DAYS or more: the same, with why. The 30% cap is the outer limit.
+ * - Only from before the layoff: an estimate, his last pre-layoff load × how far back his programme lifts are
+ *   (comebackRatio), rounded down to a loadable weight, marked approx.
+ * Returns {kg, reps, why, approx?, estimate?, gap?, capKg} or null when he never did it.
+ */
+export function freeTarget({ entries = [], today = null, dayType = null, comebackStart = null, ratio = null, reps = null, barKg = null, equipment = null, name = '', smallestPlate = 1.25 }) {
+  const lifted = entries.filter((e) => e.heaviest?.kg != null);
+  const now = lifted.filter((e) => !comebackStart || e.date >= comebackStart);
+  const r2 = (x) => Math.round(x * 100) / 100;
+  if (now.length) {
+    const e = now[0];
+    const last = { ...e.heaviest, date: e.date, dayType: e.dayType ?? null };
+    const step = stepFor({ barKg, equipment, name, smallestPlate });
+    const gap = gapOf(last, today, dayType);
+    const short = last.reps != null && Array.isArray(reps) && last.reps < reps[0];
+    const capKg = capOf(last.kg);
+    const kg = gap || short ? last.kg : Math.min(r2(last.kg + step), capKg);
+    const why = gap ? `${gap.text}: repeat ${kg} kg, no step up`
+      : short ? `Same as last time (${setOf(last)}): get to ${reps[0]} reps first`
+        : `Last time ${setOf(last)} (${dayOf(last.date)}), +${r2(kg - last.kg)} kg`;
+    return { kg, reps, why, capKg, ...(gap ? { gap } : {}) };
+  }
+  const old = lifted[0];
+  if (!old) return null;
+  if (!ratio?.value) return { kg: null, reps, why: `Last done before the layoff: ${setOf(old.heaviest)} (${dayOf(old.date)}). No start to estimate from yet`, approx: true };
+  const kg = loadable(old.heaviest.kg * ratio.value, { barKg, smallestPlate });
+  return { kg, reps, approx: true, estimate: true, why: `Estimate: before the layoff ${setOf(old.heaviest)} (${dayOf(old.date)}); your programme lifts are back to about ${Math.round(ratio.value * 100)}% of their pre-layoff numbers, so ${kg} kg` };
 }

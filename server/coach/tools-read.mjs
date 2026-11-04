@@ -32,6 +32,7 @@ import { restFor, restText } from '../../app/js/lib/settings.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
 import { afterMeals, mealSpansFor, morningContext } from '../notify.mjs';
+import { painEntries, painByArea, repeatFlags, areaText } from '../../app/js/lib/pain.js';
 import { PAIN_WORDS } from '../../app/js/lib/nudges.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
@@ -439,10 +440,21 @@ export function contextLine({ store, tz, now, screen = null }) {
   lines.push(...pathLines(s));
   lines.push(...phasePlanLines(s));
   lines.push(...recoveryContext(s));
+  lines.push(...painContextLines(s));
   lines.push(...noticeLines(s));
   lines.push(morningContext(store, s.now, s.tz));
   lines.push(...situationLines(s));
   return lines.filter(Boolean).join('\n');
+}
+
+/** The pain lines for the coach's context: areas with pain in the last 21 days, and repeats. Empty when none. */
+function painContextLines(s) {
+  const since = new Date(Date.parse(`${s.today}T12:00:00Z`) - 21 * 864e5).toISOString().slice(0, 10);
+  const entries = painEntries({ sessions: s.list('sessions'), sets: s.list('sets').filter((x) => x.note), log: s.list('pain-log') });
+  const recent = painByArea(entries.filter((e) => e.date >= since));
+  if (!recent.length) return [];
+  const flags = repeatFlags(entries).filter((f) => f.dates[0] >= since);
+  return [`Pain log, last 21 days (his words in workouts and his own entries; tool pain for all of it; no advice): ${recent.map((a) => areaText(a, (d) => dayText(d, s.today), 3)).join(' | ')}.${flags.length ? ` Same lift, same area again: ${flags.map((f) => `${f.lift} and ${f.label.toLowerCase()} (${f.dates.slice(0, 3).map((d) => dayText(d, s.today)).join(', ')})`).join('; ')}.` : ''}`];
 }
 
 /**
@@ -629,7 +641,7 @@ function programmeText(s, { dayType = null, week = null } = {}) {
     const { session, sets } = buildSession({
       routine, meta: s.meta(), programmeRoutines: progDocs, lib, history, today: date, now: s.now,
       smallestPlate: s.minPlate(), gym: null, warmupSteps: st.warmup.steps, sameRoutine: st.previousFrom === 'same-routine',
-      bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress, lighter,
+      bodyweightKg: currentBodyweight({ healthDocs: s.list('health'), measurements: s.list('measurements'), manual: st.bodyweight, now: s.now })?.kg ?? null, progress, lighter, formChecks: s.list('form-checks'),
     });
     session.exercises.forEach((ex, i) => {
       const mine = sets.filter((x) => x.exKey === ex.key);
@@ -651,7 +663,8 @@ function programmeText(s, { dayType = null, week = null } = {}) {
       const ex = lib.get(re.exerciseId) || { barKg: null };
       if (!pe) { lines.push(`${i + 1}. ${re.name}: not in the table (follows his last load).`); continue; }
       const last = history.lastLifted(re.name);
-      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date } : null, notes: repNotes(history, re.name), barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null, equipment: ex.equipment ?? null, name: re.name });
+      const formOk = (s.list('form-checks') || []).filter((c) => c?.name === re.name).sort((x, y) => (y.at ?? 0) - (x.at ?? 0))[0] || null;
+      const t = targetFor({ plan: pe, week: wk, last: last?.heaviest ? { ...last.heaviest, date: last.date, dayType: last.dayType ?? null } : null, notes: repNotes(history, re.name), today: date, dayType: type, formOk, barKg: ex.barKg ?? null, smallestPlate: s.minPlate(), progressKg: wk > 4 ? confirmedKg(progress, type, wk, pe.name)?.kg ?? null : null, equipment: ex.equipment ?? null, name: re.name });
       const cell = pe.weeks?.find((w) => w.week === Math.min(4, wk));
       lines.push(`${i + 1}. ${re.name}: ${t.bodyweight ? 'bodyweight' : t.kg != null ? loadText(t.kg, ex.barKg) : '?'} × ${repsText(t.reps)}, ${plural(t.sets ?? 0, 'set')}. Why: ${t.why}.${cell ? ` Table: ${cell.text}.` : ''}`);
     }

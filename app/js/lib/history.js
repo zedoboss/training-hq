@@ -42,6 +42,16 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
     setsBySession.get(x.sessionId).push(x);
   }
   const ownDates = new Map();
+  // Thu 11/5: a swap for one day (squat -> leg press) links both histories: {date, sessionId, from, to} under each name.
+  const swaps = new Map();
+  const swapped = (name, x) => { if (!swaps.has(name)) swaps.set(name, []); swaps.get(name).push(x); };
+  for (const s of done) {
+    for (const ex of s.exercises || []) {
+      if (!ex.swappedFrom?.name || ex.swappedFrom.name === ex.name) continue;
+      const x = { date: isoDate(new Date(s.startedAt)), at: s.startedAt, sessionId: s.id, from: ex.swappedFrom.name, to: ex.name, title: s.title };
+      swapped(ex.swappedFrom.name, x); swapped(ex.name, x);
+    }
+  }
   for (const s of done) {
     const ss = (setsBySession.get(s.id) || []).sort((a, b) => a.order - b.order);
     for (const ex of s.exercises || []) {
@@ -50,7 +60,7 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
       const date = isoDate(new Date(s.startedAt));
       // Thu 10/22: his notes that day (the exercise's and the sets'), so the next target can see "back pain" and such.
       const note = [ex.notes, ...ss.filter((x) => x.exKey === ex.key && x.note).map((x) => x.note)].filter(Boolean).join(' | ');
-      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine), ...(note ? { note } : {}), ...(ex.oneArm ? { oneArm: true } : {}) });
+      push(ex.name, { date, at: s.startedAt, source: s.source || 'training-hq', sessionId: s.id, title: s.title, dayType: s.dayType ?? null, routineId: s.routineId ?? null, bodyweightKg: s.bodyweightKg ?? null, sets: mine, heaviest: heaviestOf(mine), ...(note ? { note } : {}), ...(ex.oneArm ? { oneArm: true } : {}), ...(ex.swappedFrom?.name ? { swappedFrom: ex.swappedFrom.name } : {}) });
       ownDates.set(`${ex.name}|${date}`, true);
     }
   }
@@ -66,6 +76,8 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
     /** Newest entry for an exercise name, or null. */
     last: (name) => byName.get(name)?.[0] ?? null,
     all: (name) => byName.get(name) ?? [],
+    /** Swaps for one day that involve this exercise, newest first: [{date, sessionId, from, to, title}]. */
+    swaps: (name) => [...(swaps.get(name) || [])].sort((a, b) => b.at - a.at),
     /**
      * Sessions with rep sets (not holds or warm-ups only), newest first (Sat 10/24, his words: "Why is there no previous weight on
      * cupping??"): an exercise he does both as reps and as a hold builds today's weight on his last rep sets, not on a

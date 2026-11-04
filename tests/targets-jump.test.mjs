@@ -24,7 +24,8 @@ test('his rear delt fly: F 50 × 6, 36 × 12 after 29 × 12 is a jump; today is 
   // A higher table: the cap from the earlier weeks (29 × 1.3 = 37.7) holds, rounded down to 37.5.
   const big = tFor(his, 4, { ...fly, weeks: [...fly.weeks.slice(0, 3), w(43, [6, 8], { count: 2 })] });
   assert.equal(big.kg, 37.5);
-  assert.match(big.why, /From your other set, 36 kg × 12, \+5 kg reaches the 30% cap: 37\.5 kg$/);
+  assert.match(big.why, /From your other set, 36 kg × 12, \+1\.5 kg reaches the 30% cap: 37\.5 kg \(a full \+5 kg would pass it\)$/);
+  assert.equal(big.capped, true, 'the cap held it down: the 30% CAP badge shows');
 });
 
 test('every set at the jump: back to the load before it, one step up, under its cap', () => {

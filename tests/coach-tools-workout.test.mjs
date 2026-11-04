@@ -98,14 +98,15 @@ test('remove: untouched at once; with logged sets only after his yes', async () 
   assert.deepEqual(session().exercises.map((e) => e.key), ['c']);
 });
 
-test('replace: same place, target from his last load since the comeback; logged sets stay as the old exercise', async () => {
+test('replace: same place, target from his last load since the comeback (+ one step, Thu 11/5); a swap for today; logged sets stay as the old exercise', async () => {
   const r = await call('workout_edit', { action: 'replace', exercise: 'leg extension', with: 'leg press machine' });
-  assert.match(r.text, /^Replaced Leg Extension \(Machine\) with Leg Press \(Machine\) in Push, same place: 2 sets × 6-8 at 100 kg\. On his phone now\./, 'the slot keeps its reps');
+  assert.match(r.text, /^Replaced Leg Extension \(Machine\) with Leg Press \(Machine\) in Push, same place: 2 sets × 6-8 at 105 kg\. On his phone now, marked as a swap for today \(the next workout brings Leg Extension \(Machine\) back\)\. Its target \(say it, with the number\): Last time 100 kg × 10 \(Tuesday 11\/3\), \+5 kg\./, 'the slot keeps its reps; 100 × 10 reached 6-8: one step');
   const ex = session().exercises;
   assert.deepEqual(ex.map((e) => e.name), ['Bench Press (Barbell)', 'Leg Press (Machine)', 'Seated Leg Curl (Machine)']);
   assert.equal(ex[1].key, 'x');
   assert.equal(ex[1].exerciseId, 'leg-press-machine');
-  assert.deepEqual(setsOf('now', 'x').map((x) => [x.type, x.kg, x.target.reps, x.done]), [['normal', 100, [6, 8], false], ['normal', 100, [6, 8], false]]);
+  assert.equal(ex[1].swappedFrom.name, 'Leg Extension (Machine)', 'the card says what it replaces');
+  assert.deepEqual(setsOf('now', 'x').map((x) => [x.type, x.kg, x.target.reps, x.done]), [['normal', 105, [6, 8], false], ['normal', 105, [6, 8], false]]);
   // Bench has two logged sets: they stay; the new one comes after it with the two sets left.
   const r2 = await call('workout_edit', { action: 'replace', exercise: 'bench', with: 'incline bench press barbell', kg: 50 });
   assert.match(r2.text, /the 2 sets he logged stay as Bench Press \(Barbell\), Incline Bench Press \(Barbell\) comes right after it: 2 sets × 6-8 at 50 kg/);

@@ -1,6 +1,7 @@
 // Building and summarising a workout session. Pure functions; the views save the results.
 // A session holds its exercise list; every set is its own record (so sync can never lose one).
-import { targetFor, stepFor, repNotes, loadable, jumpFrom, dayOf } from './targets.js';
+import { targetFor, stepFor, repNotes, loadable, jumpFrom, dayOf, gapOf, freeTarget, comebackRatio } from './targets.js';
+import { comebackStartOf } from './finish.js';
 import { weekColumn } from './programme.js';
 import { effectiveKg } from './exercise-types.js';
 import { newId, newKey, defaultSets } from './routines.js';
@@ -38,8 +39,10 @@ const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmu
  * @param {{all:boolean, names:string[], params:object, rule:number}|null} [o.lighter]  today's check-in said "go lighter"
  * @param {Map|null} [o.holdRounds] his one-arm tendon holds, name -> rounds (oneArmHoldRounds)
  */
-export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null, progress = [], lighter = null, holdRounds = null }) {
+export function buildSession({ routine, meta, programmeRoutines = [], lib, history, today, now = Date.now(), smallestPlate = 1.25, gym = null, warmupSteps, sameRoutine = false, bodyweightKg = null, progress = [], lighter = null, holdRounds = null, formChecks = [] }) {
   const id = newId('session');
+  const comebackStart = comebackStartOf(meta);
+  let ratio;
   const week = routine?.dayType && meta?.firstSessions?.[routine.dayType] ? weekColumn(meta.firstSessions[routine.dayType], today) : null;
   const session = {
     id, kind: 'workout', title: routine?.title ?? 'Workout', routineId: routine?.id ?? null, dayType: routine?.dayType ?? null, week,
@@ -54,7 +57,7 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     // Sat 10/24: the last session with a working weight (a hold-only session in between doesn't count).
     const last = history.lastLifted(re.name);
     const latest = history.last(re.name);
-    const lastHeaviest = last?.heaviest ? { ...last.heaviest, date: last.date } : null;
+    const lastHeaviest = last?.heaviest ? { ...last.heaviest, date: last.date, dayType: last.dayType ?? null } : null;
     // Thu 10/22: pain written down last time, or skipped last time (routineFromLast), changes today's number.
     const notes = repNotes(history, re.name, { skipped: re.skippedLast || null });
     const entry = {
@@ -66,7 +69,8 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     const pe = re.plan ? planExerciseFor(programmeRoutines, re.plan) : null;
     const easy = !!lighter && (lighter.all || (lighter.names || []).includes(re.name));
     if (pe) {
-      const tAt = (w) => targetFor({ plan: pe, week: w, last: lastHeaviest, notes, barKg: ex.barKg ?? null, smallestPlate, equipment: ex.equipment ?? null, name: re.name, progressKg: w > 4 ? confirmedKg(progress, routine.dayType, w, pe.name)?.kg ?? null : null });
+      const formOk = latestFormCheck(formChecks, re.name);
+      const tAt = (w) => targetFor({ plan: pe, week: w, last: lastHeaviest, notes, today, dayType: routine?.dayType ?? null, formOk, barKg: ex.barKg ?? null, smallestPlate, equipment: ex.equipment ?? null, name: re.name, progressKg: w > 4 ? confirmedKg(progress, routine.dayType, w, pe.name)?.kg ?? null : null });
       let t = tAt(week);
       if (easy) {
         const l = lighterTarget({ week, targetAt: tAt, params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
@@ -94,6 +98,14 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
       const follow = routine?.followLast !== false;
       const prev = follow ? history.previous(re.name, sameRoutine && routine ? { routineId: routine.id, dayType: routine.dayType } : null) : null;
       const seen = { warmup: 0, working: 0, hold: 0 };
+      // Thu 11/5: a target from his history (lib/targets.js freeTarget): a gap means no step; only pre-layoff loads
+      // give an estimate, never the old number itself.
+      const firstWork = base.find((x) => kindOf(x) === 'working');
+      const repsOf = (x) => (Array.isArray(x?.reps) ? x.reps : x?.reps ? [x.reps, x.reps] : null);
+      if (ratio === undefined) ratio = comebackRatio({ meta, history, dayType: routine?.dayType ?? null, since: comebackStart });
+      const ft = freeTarget({ entries: history.all(re.name), today, dayType: routine?.dayType ?? null, comebackStart, ratio, reps: repsOf(firstWork), barKg: ex.barKg ?? null, equipment: ex.equipment ?? null, name: re.name, smallestPlate });
+      const gap = gapOf(lastHeaviest, today, routine?.dayType ?? null);
+      const oldOnly = !!(comebackStart && last && last.date < comebackStart);
       planned = base.map((s) => {
         const kind = kindOf(s);
         const prevSet = prev ? prev[kind]?.[seen[kind]] ?? null : null;
@@ -105,8 +117,10 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
         const step = stepFor({ barKg: ex.barKg ?? null, equipment: ex.equipment ?? null, name: re.name, smallestPlate });
         // Holds never step up (his knee hold is the full stack; the load comes from his tendon note).
         const timed = /\bhold\b/i.test(re.name) || /duration/.test(entry.type);
-        const up = follow && !timed && fromLast != null && (s.type === 'normal' || s.type === 'failure') && (prevSet?.reps ?? 0) >= (reps?.[0] ?? 0) && !notes.pain && !notes.skipped ? step : 0;
+        const up = follow && !timed && !gap && fromLast != null && (s.type === 'normal' || s.type === 'failure') && (prevSet?.reps ?? 0) >= (reps?.[0] ?? 0) && !notes.pain && !notes.skipped ? step : 0;
         let kgGuess = follow ? (fromLast != null ? Math.round((fromLast + up) * 100) / 100 : s.kg ?? fallback) : s.kg ?? fallback;
+        // Before the layoff only: never that old load; the estimate for working sets, warm-ups left for him.
+        if (oldOnly && follow && !timed && kind !== 'hold') kgGuess = kind === 'working' ? ft?.kg ?? null : null;
         // Hurt last time after a jump: the last load that didn't hurt, plus a step (his example: 51 -> 61 hurt -> 54).
         const good = notes.pain?.prevGood?.kg;
         if (kind === 'working' && notes.pain && kgGuess != null && good != null && kgGuess > good + step + 1e-9) kgGuess = Math.round((good + step) * 100) / 100;
@@ -119,7 +133,11 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
         }
         return { type: s.type, kg: kgGuess, reps: null, durationS: s.type === 'hold' ? s.durationS ?? 30 : s.durationS ?? null, target: { kg: kgGuess, reps } };
       });
-      if (lastHeaviest && !re.sets?.length) entry.target = { kg: lastHeaviest.kg, reps: null, why: `last load (${lastHeaviest.kg})` };
+      const firstKg = planned.find((x) => x.type === 'normal' || x.type === 'failure')?.kg ?? null;
+      if (ft && follow && !/\bhold\b/i.test(re.name)) {
+        const same = firstKg == null || firstKg === ft.kg;
+        entry.target = { kg: firstKg ?? ft.kg, reps: repsOf(firstWork), why: same ? ft.why : gap ? `${gap.text}: same weights as last time, no step up` : `From your sets last time (${dayOf(last.date)}), +${stepFor({ barKg: ex.barKg ?? null, equipment: ex.equipment ?? null, name: re.name, smallestPlate })} kg where you reached the reps`, ...(ft.approx && same ? { approx: true } : {}), ...(ft.estimate && same ? { estimate: true } : {}), ...(gap ? { gap } : {}) };
+      } else if (lastHeaviest && !re.sets?.length) entry.target = { kg: lastHeaviest.kg, reps: null, why: `last load (${lastHeaviest.kg})` };
       if (notes.pain) entry.target = { ...(entry.target || {}), kg: planned.find((x) => x.type === 'normal')?.kg ?? entry.target?.kg ?? null, why: `Last time ${notes.pain.kg} kg hurt ("${notes.pain.note.slice(0, 70)}"). Only if it doesn't hurt today; if it does, skip it`, painLast: true };
       else if (notes.skipped) entry.target = { ...(entry.target || {}), kg: planned.find((x) => x.type === 'normal')?.kg ?? entry.target?.kg ?? null, why: `Skipped last time${notes.skipped.reason ? ` (${notes.skipped.reason})` : ''}: same as before`, skippedLast: true };
       if (easy) entry.target = { ...(entry.target || {}), kg: planned.find((p) => p.type === 'normal')?.kg ?? entry.target?.kg ?? null, why: `lighter (check-in): ${lighter.params?.week1Pct ?? 20}% under`, lighter: true };
@@ -144,6 +162,25 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
 }
 
 /** Sets for an exercise added during a session. */
+/** Thu 11/5: the target for an exercise put into a running workout (added, or swapped in for today), from his history
+ *  (targets.js freeTarget): since the comeback last load + a step (none after a gap), else an estimate. */
+export function addedTarget({ name, history, meta, today, dayType = null, reps = [8, 12], barKg = null, equipment = null, smallestPlate = 1.25 }) {
+  const comebackStart = comebackStartOf(meta);
+  return freeTarget({ entries: history.all(name), today, dayType, comebackStart, ratio: comebackRatio({ meta, history, dayType, since: comebackStart }), reps, barKg, equipment, name, smallestPlate });
+}
+
+/** Thu 11/5: swap an exercise for today only. The card keeps where it came from (swappedFrom, the first one if swapped
+ *  twice); the next workout brings the original back (finish.js routineFromLast); both histories show it. */
+export function swapEntry(ex, def, target = null) {
+  const from = ex.swappedFrom || { exerciseId: ex.exerciseId ?? null, name: ex.name };
+  return { ...ex, exerciseId: def.id, name: def.name, type: def.type || 'weight_reps', capClass: def.capClass ?? null, barKg: def.barKg ?? null, restSeconds: def.restSeconds ?? null, notes: '', role: null, oneArm: undefined, skipped: null, target, ...(from.name === def.name ? { swappedFrom: null } : { swappedFrom: from }) };
+}
+
+/** His latest form check for an exercise (collection 'form-checks', Thu 11/5): {date, ok} or null. */
+export function latestFormCheck(checks = [], name) {
+  return (checks || []).filter((c) => c && c.name === name && c.date).sort((a, b) => (b.at ?? 0) - (a.at ?? 0) || b.date.localeCompare(a.date))[0] || null;
+}
+
 export function setsForAdded(sessionId, entry, lastHeaviest, startOrder) {
   return defaultSets(entry.type).map((s, i) => ({
     id: newSetId(), sessionId, exKey: entry.key, order: startOrder + i, done: false, doneAt: null, rpe: null, note: '',

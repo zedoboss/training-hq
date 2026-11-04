@@ -116,3 +116,31 @@ export function complete(ratings, areaIds, keys) {
   return areaIds.every((id) => Number.isInteger(ratings.T?.[id]) && typeof ratings.W?.[id] === 'boolean')
     && keys.every((k) => Number.isInteger(ratings[k])) && Number.isInteger(ratings.E);
 }
+
+/**
+ * His words to a 0-3 rating (Thu 11/5, his words at a check-in: "I cant rate it... somewhat sore and a tiny tiny
+ * pain"): the app proposes the number and he confirms it (the screen pre-selects it; the coach asks "that's a 1, right?").
+ * key: T (tendon area), L (legs), B (back) or E (energy); levels: his table's wording for 0-3, matched too.
+ * Qualifiers win over the plain word: "somewhat sore" is 1, not 2. A pain number out of 10 follows the T scale (his
+ * table: 1-2/10 slight, 3-4/10 at the limit, 5+/10 above). Returns {rating, level, why} or null when the words don't say.
+ */
+export function ratingFromWords(text, key, levels = []) {
+  const t = ` ${String(text || '').toLowerCase().replace(/[^a-z0-9%/ ]+/g, ' ').replace(/\s+/g, ' ')} `;
+  if (!t.trim()) return null;
+  const out = (rating, why) => ({ rating, level: levels[rating] ?? null, why });
+  if (key === 'E') {
+    if (/\b(drained|exhausted|dead|wrecked|empty|no energy|destroyed|shattered)\b/.test(t)) return out(0, 'drained');
+    if (/\b(low|tired|sleepy|meh|sluggish|not great|so so|kind of tired|bit tired|a little tired)\b/.test(t)) return out(1, 'low');
+    if (/\b(high|great|amazing|pumped|energi[sz]ed|fired up|full of energy|strong|awesome)\b/.test(t)) return out(3, 'high');
+    if (/\b(normal|ok|okay|fine|good|alright|decent|average|usual)\b/.test(t)) return out(2, 'normal');
+    return null;
+  }
+  const n = /\b(10|[0-9])\s*(\/\s*10|out of 10)\b/.exec(t);
+  if (n) { const v = Number(n[1]); return out(v === 0 ? 0 : v <= 2 ? 1 : v <= 4 ? 2 : 3, `${v}/10`); }
+  if (/\b(not sore|no pain|no soreness|nothing|none|fine|all good|good to go|feels good|feel good|perfect|zero)\b/.test(t) && !/\b(but|except|little|bit|slight|tiny)\b/.test(t)) return out(0, 'none');
+  if (/\b(very|really|extremely|super|so) (sore|painful|stiff|tight)\b|\b(hurts to move|can t move|cant move|can t walk|cant walk|a lot|severe|sharp|terrible|awful|killing)\b/.test(t)) return out(3, 'very sore');
+  if (/\b(slight\w*|little|bit|tiny|somewhat|mild\w*|minor|barely|kinda|kind of|5%|a touch|light\w*)\b/.test(t)) return out(1, 'slight');
+  if (/\b(sore|soreness|hurts?|painful|pain|stiff|tight|aches?|aching|clearly|affects)\b/.test(t)) return out(2, 'clearly sore');
+  if (/\b(no|not)\b/.test(t)) return out(0, 'none');
+  return null;
+}

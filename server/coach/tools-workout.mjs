@@ -7,7 +7,7 @@ import { offered, saidNow, confirmedNow } from './tools-app.mjs';
 import { put, del, num, guardFor, addNote } from './tools-write.mjs';
 import { currentExercise } from './tools-read.mjs';
 import { LABEL, inRotation } from '../../app/js/lib/rotation.js';
-import { newSetId, elapsedMs, summarize, BODYWEIGHT_TYPES } from '../../app/js/lib/session.js';
+import { newSetId, elapsedMs, summarize, BODYWEIGHT_TYPES, addedTarget, swapEntry } from '../../app/js/lib/session.js';
 import { comebackStartOf } from '../../app/js/lib/finish.js';
 import { restDefault, restText } from '../../app/js/lib/settings.js';
 import { warmupSets } from '../../app/js/lib/plates.js';
@@ -188,19 +188,23 @@ async function workoutEdit(a, ctx) {
     const type = def.type || 'weight_reps';
     const timed = timedType(type);
     const { last, now: lastNow } = lastNowOf(s, def.name, session.id);
-    const kgVal = num(a.kg) ?? lastNow?.heaviest?.kg ?? null;
     const work = open.filter((x) => x.type !== 'warmup');
     const oldReps = ex.target?.reps ?? work[0]?.target?.reps ?? null;
     const reps = timed ? null : (a.reps_min || a.reps_max) ? [a.reps_min ?? a.reps_max, a.reps_max ?? a.reps_min] : Array.isArray(oldReps) ? oldReps : [8, 12];
+    // Thu 11/5: no kg from him or the coach: the app's target from its own history (a gap = no step; before the
+    // layoff only = an estimate), the same one the phone builds.
+    const ft = timed ? null : addedTarget({ name: def.name, history: s.history(session.id), meta: s.meta(), today: s.today, dayType: session.dayType ?? null, reps, barKg: def.barKg ?? null, equipment: def.equipment ?? null, smallestPlate: s.minPlate() });
+    const kgVal = num(a.kg) ?? ft?.kg ?? null;
     const n = a.sets ?? (work.length || 2);
-    const why = String(a.why || '').trim().slice(0, 160) || (a.kg != null ? (lastNow ? '' : 'coach\'s estimate') : lastNow ? `last load (${k(lastNow.heaviest.kg)} kg, ${dayText(lastNow.date, s.today)})` : '');
-    const target = { kg: kgVal, reps, sets: n, ...(a.kg != null && !lastNow ? { approx: true } : {}), ...(why ? { why } : {}) };
+    const why = String(a.why || '').trim().slice(0, 160) || (a.kg != null ? (lastNow ? '' : 'coach\'s estimate') : ft?.why || '');
+    const target = { kg: kgVal, reps, sets: n, ...((a.kg != null && !lastNow) || (a.kg == null && ft?.approx) ? { approx: true } : {}), ...(why ? { why } : {}) };
     // No set logged yet: the new exercise takes its place (same card). Sets logged: those stay as they were, and the
     // new exercise comes right after it with the sets left.
     const keep = !ticked.length;
     const fresh = entryFor(def);
-    const entry = keep ? { ...ex, exerciseId: def.id, name: def.name, type, capClass: def.capClass ?? null, barKg: def.barKg ?? null, restSeconds: def.restSeconds ?? null, notes: '', role: null, oneArm: undefined, skipped: null, target, addedBy: 'coach' }
-      : { ...fresh, supersetId: ex.supersetId ?? null, target, addedBy: 'coach' };
+    // Thu 11/5: a swap for today: the card says what it replaces and the next workout brings the original back.
+    const entry = keep ? { ...swapEntry(ex, def, target), addedBy: 'coach' }
+      : { ...fresh, supersetId: ex.supersetId ?? null, target, addedBy: 'coach', swappedFrom: { exerciseId: ex.exerciseId ?? null, name: ex.name } };
     const exercises = keep ? setEx(ex.key, entry) : list.flatMap((e) => (e.key === ex.key ? [e, entry] : [e]));
     let order = open.length ? Math.min(...open.map((x) => x.order)) : (mine.length ? Math.max(...mine.map((x) => x.order)) : Math.max(-1, ...sets.map((x) => x.order))) + 0.01;
     const row = (t, kg, r, durationS = null) => ({ id: newSetId(), sessionId: session.id, exKey: entry.key, order: (order += 0.001), done: false, doneAt: null, rpe: null, note: '', type: t, kg, reps: null, durationS, target: { kg, reps: r } });
@@ -211,7 +215,7 @@ async function workoutEdit(a, ctx) {
     focus(exercises, [...sets.filter((x) => x.done || x.exKey !== ex.key), ...rows]);
     const warn = guardOn(s, session, entry, kgVal);
     const what = `${plural(n, 'set')}${reps ? ` × ${repsText(reps)}` : ` × ${a.seconds ?? 30} s`}${kgVal != null ? ` at ${loadText(kgVal, entry.barKg)}` : ''}`;
-    return wrote(`Replaced ${ex.name} with ${def.name} in ${session.title}${keep ? ', same place' : `: the ${plural(ticked.length, 'set')} he logged stay as ${ex.name}, ${def.name} comes right after it`}: ${what}${rows.some((x) => x.type === 'warmup') ? ', warm-ups first' : ''}. On his phone now.${kgVal == null ? ` No load on it: ${last ? `his last (${k(last.heaviest?.kg)} kg, ${dayText(last.date, s.today)}) is from before the comeback` : 'he has never logged it'}. Give him a number and label it your estimate, or ask; then workout_edit target sets it.` : ''}${warn ? `\n${warn}` : ''}`, `${ex.name} -> ${def.name}`);
+    return wrote(`Replaced ${ex.name} with ${def.name} in ${session.title}${keep ? ', same place' : `: the ${plural(ticked.length, 'set')} he logged stay as ${ex.name}, ${def.name} comes right after it`}: ${what}${rows.some((x) => x.type === 'warmup') ? ', warm-ups first' : ''}. On his phone now, marked as a swap for today (the next workout brings ${ex.name} back).${a.kg == null && ft?.why && kgVal != null ? ` Its target (say it, with the number): ${ft.why}.` : ''}${kgVal == null ? ` No load on it: ${last ? `his last (${k(last.heaviest?.kg)} kg, ${dayText(last.date, s.today)}) is from before the comeback` : 'he has never logged it'}. Give him a number and label it your estimate, or ask; then workout_edit target sets it.` : ''}${warn ? `\n${warn}` : ''}`, `${ex.name} -> ${def.name}`);
   }
 
   if (act === 'target') {

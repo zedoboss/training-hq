@@ -35,7 +35,7 @@ test('decision 33 (Thu 10/22, his squat at 66.3 "too big a push"): one step over
   // Near the table: the step stops at it.
   const near = targetFor({ plan: bench, week: 4, last: { kg: 68.8, reps: 8 }, barKg: 11.3 });
   assert.equal(near.kg, 68.8, '68.8 + 2.5 is over 70; 70 needs 29.35 a side, 28.75 is the most under it');
-  assert.match(near.why, /reaches the plan: 68\.8 kg$/);
+  assert.equal(near.why, 'Last time 68.8 kg: the next step you can load is over the plan (70 kg), so stay at 68.8 kg');
 });
 
 test('ahead of the table: hold at the last load, never go backwards (incline 41.6 vs week 3 table 37.5)', () => {
