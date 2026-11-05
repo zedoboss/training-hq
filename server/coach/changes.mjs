@@ -192,6 +192,7 @@ export function builderPrompt(c, { codeDir, privateDir, resultFile, others = [],
     c.verify ? 'He asked for this to be double-checked: after the change, test it end to end the way he would meet it (a dev copy, or the real function with his real case from today), not only the unit tests, and say in "checked" what you verified.' : '',
     c.cutOff?.length ? `CARRY ON WHERE IT STOPPED: an earlier try of this change was cut off (${c.cutOff.slice(-3).map((x) => `${CUT_TEXT[x.why] || 'it stopped without an answer'} at ${formatTime(new Date(x.at), tz)}`).join('; ')}). What it did is still there: its commits (git log since it started${c.startHeads?.code ? `, code ${String(c.startHeads.code).slice(0, 7)}` : ''}) and its unsaved edits (git status, git diff in both folders). Check them, keep what's right, finish the rest; don't start over and don't throw its edits away. Write the answer file as usual when done.` : '',
     leftEdits.length ? `Unsaved edits were already in ${leftEdits.join(' and ')} when you started${c.cutOff?.length ? ' (probably your earlier try\'s: pick them up). Any that aren\'t part of this change: leave' : ' (left by an earlier build that was cut off). Leave'} them alone: never git add, commit, stash, checkout or reset them; commit only your own files and hunks.` : '',
+    c.resendOf ? `SENT AGAIN: the first go at this change stopped before it finished (it crashed or ran too long). Anything it did is in git log and the working tree: check it, keep what's right, finish the job.` : '',
     c.auto ? `The coach filed this on its own${c.by === 'nightly' ? ' (the nightly review of his day)' : ''}: he complained or corrected it without asking for a change. Do only what his words ask; when they don't clearly ask for a change, change nothing and say so (status "question").` : '',
   ].filter(Boolean).join('\n');
   return `COACH CHANGE ${c.id}
@@ -500,12 +501,35 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     if (reload && (status === 'done' || extra.review)) restartDue = true;
     // His words that came in after the chat had ended: a correcting request right after it, built on top of it.
     const latest = one(c.id) || c;
-    const left = c.status === 'working' ? asksOf(latest).slice(heardOf(latest)) : [];
+    const left = c.status === 'working' && !extra.resentAs ? asksOf(latest).slice(heardOf(latest)) : [];
     if (left.length) {
       const last = left.at(-1);
       const n = put(newChange({ said: last.said, want: last.want, about: last.about, kind: c.kind === 'check' ? 'bug' : c.kind, at: now(), tz: c.tz || tz(), asks: asksOf(latest).slice(0, -1), corrects: c.id, followsOn: c.id, auto: Boolean(c.auto), earlier: [`"${clip(c.said, 200)}" -> ${answer}`], lineAt: lineAtOf(c) + 1, quiet, messages: messages() }));
       log(`coach change ${c.id}: his words came after it ended; correction ${n.id} queued first in line`);
     }
+  }
+
+  /**
+   * A change that broke down by itself (crashed every try, ran over an hour, an unreadable answer, couldn't start): sent
+   * again once, by itself, first in line; a resend that breaks down too goes to him with "Say again and I'll resend it".
+   * Plain words only (Fri 11/6, his words about "the builder stopped twice... check it in a chat on the Mac": resend it
+   * by itself, never send him to the Mac). why: for the log only.
+   */
+  async function failedSoResend(c, why) {
+    const z = c.tz || tz();
+    const askedAt = formatTime(new Date(c.askedAt || c.at), z);
+    log(`coach change ${c.id}: failed (${why})${c.resendOf ? ', already sent again once' : ', sending it again'}`);
+    if (c.resendOf) {
+      await finish(c, { status: 'failed', said: `The change you asked for at ${askedAt} didn't go through, even the second time. Say again and I'll resend it.` });
+      return;
+    }
+    const latest = one(c.id) || c;
+    const n = newChange({ said: latest.said, want: latest.want, about: latest.about, kind: latest.kind, at: now(), tz: z, auto: Boolean(latest.auto), by: latest.by, corrects: latest.corrects || null, checkOf: latest.checkOf || null, fixOf: latest.fixOf || null, followsOn: c.id, lineAt: lineAtOf(c), verify: latest.verify, review: latest.review || null, quiet: latest.by === 'nightly' || Boolean(latest.quiet), messages: messages() });
+    // All his words so far go with it, those added while it ran too (so finish files no separate correction).
+    // Filed overnight (quiet): he hears nothing of the first go; the resend is told in the morning like any other.
+    await finish(c, { status: 'failed', said: `The change you asked for at ${askedAt} stopped before it was done, so I've sent it again. Nothing for you to do.` }, { resentAs: n.id, ...(n.quiet ? { announce: 'resent' } : {}) });
+    put({ ...n, asks: asksOf(one(c.id) || latest), context: latest.context || n.context, resendOf: c.id, askedAt: latest.askedAt || latest.at });
+    log(`coach change ${c.id}: sent again as ${n.id}, first in line`);
   }
 
   /** The build is done: a second chat checks it against his words before he hears it. */
@@ -581,7 +605,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     if (existsSync(resultFile)) {
       if (!answerReady(c, resultFile, c.pid)) return;
       let result = null;
-      try { result = JSON.parse(readFileSync(resultFile, 'utf8')); } catch (e) { result = { status: 'failed', said: `The builder's answer couldn't be read (${e.message}).` }; }
+      try { result = JSON.parse(readFileSync(resultFile, 'utf8')); } catch (e) { await failedSoResend(c, `its answer couldn't be read: ${e.message}`); return; }
       await afterBuild(c, result);
       return;
     }
@@ -601,7 +625,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
       log(`coach change ${c.id}: builder stopped without an answer, queued again to carry on`);
       return;
     }
-    await finish(c, { status: 'failed', said: `The change you asked for at ${formatTime(new Date(c.at), c.tz || tz())} didn't finish on the Mac (${over ? 'it ran over an hour' : `the builder crashed ${MAX_TRIES} times`}). Say try again and I'll send it back.` });
+    await failedSoResend(c, over ? 'it ran over an hour' : `it stopped ${MAX_TRIES} times`);
   }
 
   function start(c, leftEdits = []) {
@@ -668,7 +692,7 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
       editsSince = 0;
       try { start(next, edits); } catch (e) {
         log(`coach change ${next.id}: ${e.message}`);
-        await finish(next, { status: 'failed', said: `I couldn't start the change on the Mac: ${e.message}.` });
+        await failedSoResend(next, `it couldn't start: ${e.message}`);
       }
     } finally { ticking = false; }
   }

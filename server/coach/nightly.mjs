@@ -362,7 +362,8 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const filed = diaries.flatMap((d) => d.fixes || []).map((id) => changes.find((c) => c.id === id)).filter(Boolean);
     const done = [...new Map([...filed.filter((c) => c.status === 'done'), ...quiet.filter((c) => c.status === 'done')].map((c) => [c.id, c])).values()];
     const building = filed.filter((c) => c.status === 'queued' || c.status === 'working');
-    const other = [...filed, ...quiet].filter((c) => c.status === 'failed' || c.status === 'question');
+    // A change sent again by itself (resentAs) isn't "Not fixed": its resend is told once it ends.
+    const other = [...filed, ...quiet].filter((c) => (c.status === 'failed' && !c.resentAs) || c.status === 'question');
     // A meal logged after the review (he logs the night meal once he's up): the morning's "X of Y kcal" is the Fuel total now.
     const said = diaries.map((d) => withoutFixes(d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
       ? d.morning.replace(/\b\d[\d,]* of ([\d,]+ kcal)/, `${kcalOf(d.date).toLocaleString('en-US')} of $1`) : d.morning)).filter(Boolean);

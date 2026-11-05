@@ -126,9 +126,9 @@ test('the builder: started detached in the private folder with the guard; its an
   assert.match(contextLine({ store, tz: TZ, now: clock }), /Changes finished in the last day[^\n]*\[Thursday 3\/19 9:32 AM, done, checked\] "Stop the supplement message after a snack" -> Done: no supplement/);
 });
 
-test('a builder that crashes without an answer carries on twice more, then he hears it failed; no daily limit', async () => {
-  const { q, launched, alive } = queue();
-  const c = q.request({ said: 'Talk less robotic' });
+test('a builder that crashes without an answer carries on twice more, then it is sent again once by itself; no daily limit', async () => {
+  const { q, launched, alive, pushed } = queue();
+  const c = q.request({ said: 'Talk less robotic', want: 'plain words' });
   await q.tick();
   alive.clear();
   await q.tick();
@@ -139,16 +139,96 @@ test('a builder that crashes without an answer carries on twice more, then he he
   alive.clear();
   await q.tick();
   assert.equal(store.getRecord(COL, c.id).data.tries, 3);
+  // Fri 11/6, his words: "...didn't finish on the Mac (the builder stopped twice). Ask again, or check it in a chat on the
+  // Mac.": a change that breaks down is sent again once by itself, in plain words; he does nothing.
+  clock += 60000;
   alive.clear();
   await q.tick();
   assert.equal(store.getRecord(COL, c.id).data.status, 'failed');
-  assert.match(talk()[0].text, /didn't finish on the Mac \(the builder crashed 3 times\)\. Say try again and I'll send it back\./);
-  assert.doesNotMatch(talk()[0].text, /check it|on the Mac\./);
+  assert.deepEqual(talk().map((m) => m.text), ['The change you asked for at 9:24 AM stopped before it was done, so I\'ve sent it again. Nothing for you to do.']);
+  assert.equal(pushed.at(-1).body, talk()[0].text);
+  assert.ok(talk()[0].text.length <= 120, 'the lock screen shows it whole');
+  const resent = store.listRecords(COL).map((r) => r.data).filter((x) => x.resendOf === c.id);
+  assert.equal(resent.length, 1, 'sent again once, no separate correction');
+  assert.equal(store.listRecords(COL).length, 2);
+  assert.equal(resent[0].status, 'working', 'started in the same tick, first in line');
+  assert.deepEqual(resent[0].asks.map((x) => x.said), ['Talk less robotic']);
+  assert.equal(resent[0].want, 'plain words');
+  assert.equal(store.getRecord(COL, c.id).data.resentAs, resent[0].id);
+  // A fresh go that knows the first one broke down.
+  assert.equal(launched.length, 4);
+  assert.match(launched[3].prompt, /^COACH CHANGE chg\./);
+  assert.match(launched[3].prompt, /His words: "Talk less robotic"/);
+  assert.match(launched[3].prompt, /SENT AGAIN: the first go at this change stopped before it finished/);
+  assert.equal(store.getRecord(COL, resent[0].id).data.status, 'working');
+  // It breaks down too: he hears it, with the time he asked, and it is not sent a third time.
+  for (let i = 0; i < 3; i++) { clock += 60000; alive.clear(); await q.tick(); }
+  assert.equal(store.getRecord(COL, resent[0].id).data.status, 'failed');
+  assert.equal(talk().at(-1).text, 'The change you asked for at 9:24 AM didn\'t go through, even the second time. Say again and I\'ll resend it.');
+  assert.equal(store.listRecords(COL).length, 2, 'never a third go by itself');
+  for (const m of talk()) assert.doesNotMatch(m.text, /builder|crash|check it|on the Mac|chat/i);
   // Thu 10/22, his words: "Don't have a daily build limit": the next one starts straight away.
   q.request({ said: 'Another one' });
   await q.tick();
-  assert.equal(launched.length, 4);
+  assert.equal(launched.length, 7);
   assert.equal(existsSync(q.files(c.id).logFile), true);
+});
+
+test('a change that ran over an hour, left an unreadable answer or could not start is sent again once, by itself', async () => {
+  // Over an hour.
+  const one = queue();
+  const c = one.q.request({ said: 'Fix the meal times' });
+  await one.q.tick();
+  clock += 2 * 3600000;
+  one.alive.clear(); // gone by then (no kill of a made-up pid)
+  await one.q.tick();
+  assert.equal(store.getRecord(COL, c.id).data.status, 'failed');
+  assert.match(talk().at(-1).text, /^The change you asked for at 9:24 AM stopped before it was done, so I've sent it again\. Nothing for you to do\.$/);
+  const r1 = store.listRecords(COL).map((r) => r.data).find((x) => x.resendOf === c.id);
+  assert.equal(r1?.status, 'working');
+  // Unreadable answer from the resend: it was already sent again once, so he hears "Say again".
+  clock += 60000;
+  writeFileSync(one.q.files(r1.id).resultFile, '{not json');
+  one.alive.clear();
+  await one.q.tick();
+  assert.equal(store.getRecord(COL, r1.id).data.status, 'failed');
+  assert.equal(talk().at(-1).text, 'The change you asked for at 9:24 AM didn\'t go through, even the second time. Say again and I\'ll resend it.');
+  assert.equal(store.listRecords(COL).filter((r) => r.data.resendOf).length, 1);
+  // Could not start: sent again once, then he hears it; never a loop.
+  let boom = true;
+  const two = queue({ launch: () => { if (boom) throw new Error('spawn ENOENT'); return 1; } });
+  const d = two.q.request({ said: 'Shorter reminders', separate: true });
+  await two.q.tick();
+  assert.equal(store.getRecord(COL, d.id).data.status, 'failed');
+  const r2 = store.listRecords(COL).map((r) => r.data).find((x) => x.resendOf === d.id);
+  assert.equal(r2?.status, 'queued');
+  clock += 60000;
+  await two.q.tick();
+  assert.equal(store.getRecord(COL, r2.id).data.status, 'failed', 'the resend could not start either');
+  assert.match(talk().at(-1).text, /Say again and I'll resend it\.$/);
+  await two.q.tick();
+  assert.equal(store.listRecords(COL).filter((r) => r.data.resendOf).length, 2, 'one resend each, no more');
+  for (const m of talk()) assert.doesNotMatch(m.text, /builder|ENOENT|spawn|check it|on the Mac/i);
+  assert.match(RULES, /sent again once by the Mac, on its own[\s\S]{0,120}\); when he was told it didn't go through even the second time and he says again, resend or similar, file it again at once/);
+});
+
+test('a change filed overnight that breaks down is sent again without a word; only the resend is told, in the morning', async () => {
+  const { q, alive } = queue();
+  const c = q.request({ said: 'No food nudge mid-walk', by: 'nightly', auto: true });
+  for (let i = 0; i < 4; i++) { clock += 60000; alive.clear(); await q.tick(); }
+  const first = store.getRecord(COL, c.id).data;
+  assert.equal(first.status, 'failed');
+  assert.equal(first.announce, 'resent', 'not in the morning list as "Not fixed"');
+  assert.deepEqual(talk(), []);
+  const r = store.listRecords(COL).map((x) => x.data).find((x) => x.resendOf === c.id);
+  assert.equal(r.quiet, true);
+  assert.equal(r.by, 'nightly');
+  assert.equal(r.auto, true);
+  writeFileSync(q.files(r.id).resultFile, JSON.stringify({ status: 'done', said: 'Done: no food nudge while you walk.' }));
+  alive.clear();
+  await q.tick();
+  assert.equal(store.getRecord(COL, r.id).data.announce, 'morning');
+  assert.deepEqual(talk(), []);
 });
 
 test('the builder\'s prompt and hooks carry no personal details and quote the conversation', () => {
