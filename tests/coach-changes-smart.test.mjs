@@ -257,6 +257,19 @@ test('the changes tool: open first with place and time, then finished ones with 
   assert.equal(READ_TOOLS.find((t) => t.name === 'changes').annotations.readOnlyHint, true);
 });
 
+test('the changes tool: a change sent again by itself reads as sent again, not as failed (Fri 11/6)', async () => {
+  const { q, alive } = queue();
+  const c = q.request({ said: 'Talk less robotic' });
+  await q.tick();
+  for (let i = 0; i < 3; i++) { clock += 60000; alive.clear(); await q.tick(); }
+  const n = recs().find((x) => x.resendOf === c.id);
+  assert.ok(n, 'sent again');
+  const text = (await read('changes')).text;
+  assert.match(text, new RegExp(`\\[id ${c.id.replace(/\./g, '\\.')}\\][^\\n]*SENT AGAIN BY ITSELF as ${n.id.replace(/\./g, '\\.')}`));
+  assert.match(text, new RegExp(`Sent again by itself after ${c.id.replace(/\./g, '\\.')} broke down\\.`));
+  assert.doesNotMatch(text.split('\n- ').find((x) => x.includes(`[id ${c.id}]`)), /DIDN'T GO THROUGH/);
+});
+
 test('notes carry their ids into the context; a corrected note is replaced in place, the old wording kept and dated', async () => {
   const r = await note({ text: 'Errands always wait for the meal', topic: 'memory' });
   const id = /^Noted/.test(r.text) && store.listRecords('coach-notes')[0].data.id;

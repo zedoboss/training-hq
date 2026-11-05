@@ -589,8 +589,9 @@ function changesText(s, { days = 2 }) {
   if (!list.length) return `No changes open or finished in the last ${plural(Math.round((s.now - since) / 86400000), 'day')}.`;
   const t = (ms) => whenText(ms, s.tz, s.today);
   return [`Changes he asked for (open first, in line order; then finished, oldest first). Build time lately: about ${Math.round(buildMs(all) / 60000)} minutes each.`, ...list.map((c) => [
-    `- [id ${c.id}] ${t(c.at)}, ${c.kind}${c.auto ? `, filed on its own${c.by && c.by !== 'coach' ? ` (${c.by})` : ''}` : ''}: ${STAGE_TEXT[c.status] || c.status}${isOpen(c) ? ` (${whereText(c, all, s.now)})` : c.doneAt ? ` ${t(c.doneAt)}` : ''}.`,
+    `- [id ${c.id}] ${t(c.at)}, ${c.kind}${c.auto ? `, filed on its own${c.by && c.by !== 'coach' ? ` (${c.by})` : ''}` : ''}: ${c.resentAs ? `SENT AGAIN BY ITSELF as ${c.resentAs} (not failed: that one carries it)` : STAGE_TEXT[c.status] || c.status}${isOpen(c) ? ` (${whereText(c, all, s.now)})` : c.doneAt ? ` ${t(c.doneAt)}` : ''}.`,
     ...asksOf(c).map((a) => `  ${timeText(a.at, s.tz)} he ${ASK_WORD[a.kind] || 'said'}: "${String(a.said).slice(0, 300)}"${a.want ? ` -> wants: ${String(a.want).slice(0, 200)}` : ''}`),
+    c.resendOf ? `  Sent again by itself after ${c.resendOf} broke down.` : '',
     c.corrects ? `  Corrects ${c.corrects}.` : c.checkOf ? `  Checks ${c.checkOf}.` : c.fixOf ? `  Fixes what the check of ${c.fixOf} found.` : '',
     c.verify && isOpen(c) ? '  Tested end to end before done (he asked to double-check).' : '',
     c.answer ? `  Answer he got: "${c.answer}"` : '',
