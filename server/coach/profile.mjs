@@ -7,7 +7,9 @@ import { join } from 'node:path';
 // A13: his recovery record (data/coach/recovery.md, also private) is read the same way and added after the profile.
 export const PROFILE_FILE = ['coach', 'profile.md'];
 export const RECOVERY_FILE = ['coach', 'recovery.md'];
-export const MAX_PROFILE = 48000;
+// Thu 11/5: his profile reached 47,500 characters with its corrections; 96,000 keeps the newest ones and the open
+// questions at its end from being cut off.
+export const MAX_PROFILE = 96000;
 
 const cache = new Map();
 

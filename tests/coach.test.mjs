@@ -141,6 +141,10 @@ test('the rules come from the brief and his profile is added from the private fo
   mkdirSync(join(dir, 'coach'));
   writeFileSync(join(dir, 'coach', 'profile.md'), 'He trains at 4 AM.');
   assert.equal(readProfile(dir), 'He trains at 4 AM.');
+  const big = join(dir, 'big');
+  mkdirSync(join(big, 'coach'), { recursive: true });
+  writeFileSync(join(big, 'coach', 'profile.md'), `${'x'.repeat(60000)}\n## Open questions`);
+  assert.match(readProfile(big), /## Open questions$/, 'a long profile with many corrections is read whole');
   assert.equal(recapText([{ role: 'user', text: 'a\n b' }, { role: 'assistant', text: 'x', error: true }, { role: 'marker', text: 'New' }]), 'He: a b');
   assert.match(turnText({ text: 'hi', now: Date.UTC(2026, 0, 1, 0, 5), tz: 'UTC' }), /Now: Thursday 1\/1, 12:05 AM \(2026-01-01/);
 });
