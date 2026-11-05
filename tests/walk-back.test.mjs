@@ -70,7 +70,7 @@ test('back with the minutes unknown: one ask for the minutes (not "Back?"), righ
   assert.deepEqual(told.walks[0], { at: at('06:30'), from: at('06:06'), minutes: 20, steps: null });
   // "Still out": the walk reopens from when he left.
   const out = withAnswer(doc, D, { action: 'going' }, at('06:40'));
-  assert.deepEqual(out.going, { at: at('06:06') });
+  assert.deepEqual(out.going, { at: at('06:06'), since: at('06:40') });
   assert.equal(out.walks.length, 0);
 });
 
@@ -107,4 +107,16 @@ test('the Mac closes the record on its own the moment he is back, and the coach 
     store.close?.();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('"still out" after the app closed the walk: it stays open, one more "Back?" later', () => {
+  let d = settleWalk(going(), { now: at('06:50'), userAts: [at('06:49')], asks: going().asks, steps: [], homeAt: 0 });
+  assert.equal(d.going, null, 'his 6:49 AM message after "Back?" closed it');
+  d = withAnswer(d, D, { action: 'going' }, at('06:50'));
+  assert.equal(d.going.at, at('06:06'), 'still from when he left');
+  const sig = (now) => ({ now, userAts: [at('06:49'), at('06:50')], asks: d.asks, steps: reads, homeAt: 0 });
+  assert.equal(settleWalk(d, sig(at('06:55'))).going?.at, at('06:06'), 'the same signs never close it again');
+  assert.equal(walkDue({ ...base, now: at('07:00'), doc: d }), null, 'no new "Back?" right away');
+  assert.equal(walkDue({ ...base, now: at('07:31'), doc: d })?.kind, 'back', 'one more "Back?" later');
+  assert.equal(settleWalk(d, sig(at('08:50'))).going, null, 'never open for hours after that either');
 });

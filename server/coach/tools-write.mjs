@@ -1109,8 +1109,9 @@ async function walkAnswer(a, ctx) {
     return wrote(`Walk set for ${t(at)}. No walk questions until then; at ${t(at)} he gets "walk time". Tell him so: "Okay, I'll message you at ${t(at)}."`, `walk at ${t(at)}`);
   }
   if (a.action === 'going') {
-    put(s, 'walks', date, withAnswer(doc, date, { action: 'going' }, s.now));
-    return wrote(`Out walking since ${t(s.now)}. One "back?" in about 40 minutes.`, 'walking');
+    const out = withAnswer(doc, date, { action: 'going' }, s.now);
+    put(s, 'walks', date, out);
+    return wrote(`Out walking since ${t(out.going?.at ?? s.now)}. One "back?" in about 40 minutes.`, 'walking');
   }
   if (a.action === 'done') {
     put(s, 'walks', date, withAnswer(doc, date, { action: 'done', minutes: num(a.minutes) ?? null, steps: num(a.steps) ?? null }, s.now));

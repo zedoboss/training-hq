@@ -188,17 +188,19 @@ const OVER_WHY = {
  */
 export function walkOverAt(going, { now, homeAt = 0, userAts = [], asks = [], steps = [], cfg = WALK } = {}) {
   if (!going?.at) return null;
+  // A walk he reopened ("still out", going.since) counts only signs from then on, or the same signs close it again.
+  const from = Math.max(going.at, going.since || 0);
   const signs = [];
-  if (homeAt > going.at) signs.push({ at: homeAt, why: 'home' });
-  const back = asks.find((a) => a.kind === 'back' && a.at > going.at);
+  if (homeAt > from) signs.push({ at: homeAt, why: 'home' });
+  const back = asks.find((a) => a.kind === 'back' && a.at > from);
   const said = back ? userAts.filter((t) => Number.isFinite(t) && t > back.at && t <= now).sort((a, b) => a - b)[0] : null;
   if (said) signs.push({ at: said, why: 'talk' });
-  const read = steps.filter((r) => Number.isFinite(r?.at) && r.steps != null && r.at >= going.at && r.at <= now).sort((a, b) => a.at - b.at);
+  const read = steps.filter((r) => Number.isFinite(r?.at) && r.steps != null && r.at >= from && r.at <= now).sort((a, b) => a.at - b.at);
   for (let i = 1; i < read.length; i++) {
     const a = read[i - 1], b = read[i], min = (b.at - a.at) / 60000;
     if (b.at - going.at >= cfg.backMin * 60000 && min >= cfg.flatMin && (b.steps - a.steps) / min < cfg.flatRate) { signs.push({ at: a.at, why: 'steps' }); break; }
   }
-  if (now - going.at >= cfg.maxOpenMin * 60000) signs.push({ at: going.at + cfg.maxOpenMin * 60000, why: 'long' });
+  if (now - from >= cfg.maxOpenMin * 60000) signs.push({ at: from + cfg.maxOpenMin * 60000, why: 'long' });
   return signs.length ? signs.sort((a, b) => a.at - b.at)[0] : null;
 }
 /**
@@ -327,7 +329,8 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     // Thu 10/22, 4:54 PM: "Back from the walk?" came after he'd said he was cooking. Something he did at home since he
     // went out (a meal answer, a meal, a workout) means the walk is over: no question.
     if (homeAt > d.going.at) return null;
-    if (now - d.going.at >= cfg.backMin * 60000 && !d.asks.some((a) => a.kind === 'back' && a.at > d.going.at)) {
+    const out = Math.max(d.going.at, d.going.since || 0); // reopened ("still out"): one more "Back?" from then
+    if (now - out >= cfg.backMin * 60000 && !d.asks.some((a) => a.kind === 'back' && a.at > out)) {
       return { kind: 'back', text: 'Back from the walk? How many minutes did you go?' };
     }
     return null;
@@ -418,7 +421,7 @@ export function withAnswer(doc, date, a, now) {
   const d = { ...(doc || emptyWalk(date)), answeredAt: now };
   // A walk the app closed itself (Thu 11/5): "still out" reopens it from when he left; his minutes fill it in.
   const auto = !d.going && minutesOpen(lastOf(d.walks)) ? lastOf(d.walks) : null;
-  if (auto && a.action === 'going' && now - auto.at < 3 * 3600000) return { ...d, going: { at: auto.from }, plan: null, walks: d.walks.slice(0, -1) };
+  if (auto && a.action === 'going' && now - auto.at < 3 * 3600000) return { ...d, going: { at: auto.from, since: now }, plan: null, walks: d.walks.slice(0, -1) };
   if (auto && a.action === 'done') return { ...d, walks: [...d.walks.slice(0, -1), { at: auto.at, from: auto.from, minutes: a.minutes ?? null, steps: a.steps ?? null }] };
   if (a.action === 'plan') return { ...d, plan: { at: a.at, said: a.said || null, setAt: now, ...(a.by === 'coach' ? { by: 'coach' } : {}) }, going: null };
   if (a.action === 'going') return { ...d, going: { at: now }, plan: null };
