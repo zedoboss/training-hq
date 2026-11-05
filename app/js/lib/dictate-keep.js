@@ -13,7 +13,7 @@ export const MAX_TRIES = 3;
 export const isUnreachable = (e) => /unreachable|failed to fetch|networkerror|load failed|network connection was lost|abort/i.test(String(e?.message || e || ''));
 
 /** What he reads when the Mac can't be reached at the moment he stops the mic. */
-export const KEPT_MESSAGE = 'Can\'t reach your Mac: this phone\'s Tailscale dropped. Your recording is kept and goes in the box by itself once it\'s back. Not back in a minute? Open Tailscale, turn it off and on.';
+export const KEPT_MESSAGE = 'Can\'t reach your Mac, most likely this phone\'s Tailscale dropped. Your recording is kept and goes in the box by itself once it\'s back. Not back in a minute? Open Tailscale, turn it off and on.';
 
 /**
  * Send the kept clips, oldest first, each once. Stops at the first that can't reach the Mac (it and the rest wait for
