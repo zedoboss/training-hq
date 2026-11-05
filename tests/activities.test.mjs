@@ -91,9 +91,10 @@ test('after the gym, in order: the Evolt ask, "head home" 5 min after the scan, 
   const holds = { id: 'h', kind: 'holds', area: 'wrist', status: 'done', startedAt: at('11:50'), endedAt: at('11:58'), exercises: [{ key: 'c', name: 'Cupping' }] };
   const of = (extra = {}) => { const st = reminderState({ sessions, sets, tendons, settings, scanPlan, ...extra }, TZ); return remindersFor({ date: D, ...st }); };
   const pick = (list, id) => list.find((r) => r.id === id);
-  // The cupping hold still open: no ask yet at 11:41 (it waits for the holds, 40 minutes at most).
+  // The cupping hold still open, no round started: no ask yet at 11:41; it waits 10 minutes for a round to start (Thu
+  // 11/5: not the full 40, "I finished the gym God knows how long ago"), once one starts for it to be saved.
   const before = of();
-  assert.equal(pick(before, `scan-after:${D}`).at, at('12:21'));
+  assert.equal(pick(before, `scan-after:${D}`).at, at('11:51'));
   // Holds saved at 11:58: the ask at 11:59, first; "start cooking" (12:00) waits for the scan (10 min), home (5), then 5.
   const r = of({ sessions: [...sessions, holds] });
   const ask = pick(r, `scan-after:${D}`);

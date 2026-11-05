@@ -36,8 +36,25 @@ export function stateFrom(store, tz) {
     meals: list('meals'), mealChecks: list('meal-checks'), supplements: list('supplements'), suppLog: list('supp-log'), suppAnswers: list('supp-answers'), sauna: list('sauna'), saunaPlan: one('sauna-plan', 'main'),
     scans: list('body-scans'), scanPhotos: list('scan-photos'), coachHolds: list('coach-holds'), scanPlan: one('scan-plan', 'main'), coachReminders: list('coach-reminders'),
     flexPlan: one('schedule', 'flex'), combatPlan: one('schedule', 'combat'), coachNotes: list('coach-notes'),
+    walks: list('walks'), stepReadings: stepReadingsOf(store),
     ...recoveryFrom(one, list),
   }, tz);
+}
+
+/**
+ * Every step count the phone sent for his last `days` calendar days, from the record's history: {date: [{steps, at}]}
+ * (Thu 11/5: the after-gym asks stop once his steps climb after a workout, lib/reminders.js leftGymAt).
+ */
+export function stepReadingsOf(store, days = 3) {
+  const out = {};
+  const recent = store.listRecords('health').filter((r) => !r.deleted && /^\d{4}-\d{2}-\d{2}$/.test(r.id)).map((r) => r.id).sort().slice(-days);
+  for (const id of recent) {
+    for (const v of store.historyFor('health', id)) {
+      const d = v.data == null ? null : JSON.parse(v.data);
+      if (d?.steps >= 0 && Number.isFinite(d.fileAt)) (out[id] ||= []).push({ steps: d.steps, at: d.fileAt });
+    }
+  }
+  return out;
 }
 
 /** A reminder he set has gone out (timed or at his workout start; Fri 10/23): the coach's lists stop showing it as waiting. */
@@ -1017,7 +1034,7 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const r = push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: 'walk' }) : { sent: 0 };
   sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `walk:${due.kind}` });
   // Too hot or bright: the coach planned (or moved) the walk itself; quiet until then.
-  const asked = withAsk(doc, date, due.kind, now);
+  const asked = withAsk(doc, date, due.kind, now, steps);
   store.writeLocal('walks', date, due.planAt ? withAnswer(asked, date, { action: 'plan', at: due.planAt, by: 'coach' }, now) : asked);
   store.setMeta(LAST, now);
   log(`walk ${due.kind}: ${v.body.slice(0, 80)} (${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''})`);

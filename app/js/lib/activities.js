@@ -20,12 +20,15 @@ export function activityDays({ sessions = [], sets = [], tz }) {
   const doneSets = new Map();
   for (const s of sets) if (s?.done) (doneSets.get(s.sessionId) || doneSets.set(s.sessionId, []).get(s.sessionId)).push(s);
   const flex = new Set(); const combat = new Set(); const workoutEnd = {}; const workoutStart = {}; const dayTypes = {}; const holdsEnd = {};
+  // Thu 11/5: the holds rounds he started (when) and the exercises he skipped in a finished gym workout (names), for the
+  // after-gym order (lib/reminders.js afterGym).
+  const holdsStart = {}; const skippedEx = {};
   // The gym days (Thu 10/22 audit): a stretch, a class or a home neck session doesn't make a day trained.
   const workoutDays = new Set(); const workoutStarts = [];
   for (const x of sessions) {
     if (!x?.startedAt || x.status === 'discarded') continue;
     const day = isoDate(new Date(x.startedAt), tz);
-    if (x.kind === 'holds') { if (x.status === 'done' && x.endedAt) (holdsEnd[day] ||= []).push(x.endedAt); continue; }
+    if (x.kind === 'holds') { (holdsStart[day] ||= []).push(x.startedAt); if (x.status === 'done' && x.endedAt) (holdsEnd[day] ||= []).push(x.endedAt); continue; }
     const ids = new Set((doneSets.get(x.id) || []).map((s) => (x.exercises || []).find((e) => e.key === s.exKey)?.exerciseId).filter(Boolean));
     const isFlex = x.routineId === FLEX_ROUTINE || [...ids].some((id) => FLEX_IDS.has(id));
     const isCombat = [...ids].some((id) => COMBAT_IDS.has(id));
@@ -37,9 +40,10 @@ export function activityDays({ sessions = [], sets = [], tz }) {
       workoutEnd[day] = Math.max(workoutEnd[day] || 0, x.endedAt);
       workoutStart[day] = Math.min(workoutStart[day] || Infinity, x.startedAt);
       if (x.dayType) (dayTypes[day] ||= []).push(x.dayType);
+      for (const e of x.exercises || []) if (e?.skipped && e.name) (skippedEx[day] ||= []).push(e.name);
     }
   }
-  return { flex, combat, workoutEnd, workoutStart, dayTypes, holdsEnd, workoutDays, workoutStarts: workoutStarts.sort((a, b) => a - b) };
+  return { flex, combat, workoutEnd, workoutStart, dayTypes, holdsEnd, holdsStart, skippedEx, workoutDays, workoutStarts: workoutStarts.sort((a, b) => a - b) };
 }
 
 const weekday = (date) => new Date(`${date}T12:00:00Z`).getUTCDay();

@@ -21,6 +21,7 @@ export const WALK = {
   stopBeforeBedMin: 60,  // no asks in the last hour before bed
   skipMin: 60,        // "not now" with no time: ask again after this long
   freshMs: 3 * 3600000, // a step count older than this is not trusted for "steps to go"
+  movingSteps: 500,   // Thu 11/5: steps up this much since the last ask = he's moving: "Out walking?", not "when?"
   stepsPerMin: 100,   // an estimate: about 100 steps a minute walking (Claude's estimate)
 };
 
@@ -136,18 +137,34 @@ export function safeWindowsText(weather, from, until, tz) {
   return runs.map((r) => `${t(r.start)}-${t(Math.min(r.end, until))} (UV ${Math.round(Math.max(...r.hs.map((x) => x.uv)) * 10) / 10} at most)`).join(', ');
 }
 
-/** Follow-ups to an ask (older records: follow, plan-follow, nag). */
-const CHECKS = ['check', 'follow', 'plan-follow', 'nag'];
+/** Follow-ups to an ask (older records: follow, plan-follow, nag; 'out': steps climbing, Thu 11/5). */
+const CHECKS = ['check', 'follow', 'plan-follow', 'nag', 'out'];
 /** A time the coach picked (the weather), not his: never "you said" or "you set" (Sun 10/25). */
 export const coachPlanned = (plan) => Boolean(plan && (plan.by === 'coach' || /^planned by the coach/.test(plan.said || '')));
 /** The next check-in after the last ask in `asks`, or null once they're all out: texts[n] for the n-th. */
-function checkInDue(asks, now, cfg, texts) {
+function checkInDue(asks, now, cfg, texts, outOf = () => null) {
   const i = asks.findLastIndex((a) => !CHECKS.includes(a.kind));
   if (i < 0) return null;
+  // Thu 11/5, his words: "I am walking right now. If the app's not updating, that's not my problem" ("No answer on the
+  // walk. When are you going?" at 6:02 AM with his steps at 2,189, up from 972 at the 5:42 AM ask). One "Out walking?"
+  // takes the check-in's place and ends the round, like the last check-in.
+  if (asks.slice(i).some((a) => a.kind === 'out')) return null;
   const n = asks.length - 1 - i;
   if (n >= cfg.checkInMin.length) return null;
   if (now - asks[i].at < cfg.checkInMin[n] * 60000 || now - asks[asks.length - 1].at < cfg.nagMin * 60000) return null;
-  return { kind: 'check', text: texts[Math.min(n, texts.length - 1)] };
+  const out = outOf(asks.slice(i));
+  return out ? { kind: 'out', text: out } : { kind: 'check', text: texts[Math.min(n, texts.length - 1)] };
+}
+
+/** "Out walking? ..." when a fresh step count is movingSteps+ above the one the last ask in `asks` was sent with, else null. */
+export function movingText(asks, steps, now, tz, cfg = WALK) {
+  const fresh = steps?.steps != null && steps.asOf && now - steps.asOf <= cfg.freshMs;
+  const seen = asks.filter((a) => a.steps != null);
+  if (!fresh || !seen.length) return null;
+  const from = seen.at(-1);
+  const up = steps.steps - from.steps;
+  if (up < cfg.movingSteps) return null;
+  return `Out walking? ${nf(steps.steps)} steps as of ${formatHm(hmOf(new Date(steps.asOf), tz))}, up ${nf(up)} since I asked.`;
 }
 
 export const emptyWalk = (date) => ({ id: date, date, asks: [], answeredAt: null, plan: null, going: null, walks: [], skips: [], goalAt: null });
@@ -219,7 +236,7 @@ export function usualWalkHm(docs = [], { today, tz } = {}) {
  * @param {number} o.lastUserAt      when he last wrote or spoke to the coach
  * @param {string|null} [o.usualHm]  his usual walk hour (usualWalkHm)
  * @param {number} [o.homeAt]        the last thing he did at home (a meal answer, a meal, a workout start), or 0
- * @returns {{kind: 'ask'|'check'|'again'|'plan'|'planned'|'moved'|'no-window'|'back'|'goal', text: string}|null}
+ * @returns {{kind: 'ask'|'check'|'out'|'again'|'plan'|'planned'|'moved'|'no-window'|'back'|'goal', text: string}|null}
  */
 export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, weather = null, homeAt = 0, cfg = WALK }) {
   const d = doc || emptyWalk(isoDate(new Date(now), tz));
@@ -252,6 +269,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   // Only an answer about the walk (the coach's walk tool) starts a new round (Tue 10/27: his 5:32 PM lunch message
   // restarted Monday's 5:00 PM walk, six check-ins to 8:02 PM, three the same). Anything else he writes holds the next
   // check-in for half an hour; the count goes on.
+  const outOf = (asks) => movingText(asks, steps, now, tz, cfg);
   const answered = (t) => (d.answeredAt || 0) > t;
   const talking = (t) => (lastUserAt || 0) > t && now - lastUserAt < cfg.againMin * 60000;
   // Out walking: one "back?" after a while.
@@ -287,13 +305,17 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     // His time: ask, don't order (his profile, Thu 10/22: "Did you start walking?"); the UV and rain as facts, his call.
     if (!asked.length) return { kind: 'plan', text: withRain(mine ? `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Did you start walking?${uvNote ? ` ${uvNote}` : ''} ${st}` : `Walk time: ${planTime}, the hour I picked for the weather. Going, or another time? ${st}`) };
     const l = lastOf(asked);
-    if (answered(l.at)) return now - d.answeredAt >= cfg.againMin * 60000 ? { kind: 'again', text: `Back to the walk: ${whose}, and no new time yet. Going now, or pick one? ${st}` } : null;
+    if (answered(l.at)) {
+      if (now - d.answeredAt < cfg.againMin * 60000) return null;
+      const out = outOf(asked);
+      return out ? { kind: 'out', text: out } : { kind: 'again', text: `Back to the walk: ${whose}, and no new time yet. Going now, or pick one? ${st}` };
+    }
     if (talking(l.at)) return null;
     return checkInDue(asked, now, cfg, [
       `Walk: ${whose}. Out yet? Going now, or a new time?`,
       `Still no word on the walk. ${st} Going now, or tell me a time and I'll wait for it.`,
       'Last check on the walk: going, a new time, or skipping it today?',
-    ]);
+    ], outOf);
   }
   const since = Math.max(last?.at || 0, skip?.at || 0, walked?.at || 0);
   // No time set and the UV is 3+ now: the coach plans it (his words: "he can schedule them").
@@ -314,7 +336,9 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     return { kind: 'ask', text: withRain(`${fast}Walk: ${st}${risk === 'caution' ? ` ${weatherWords(nowH)} now: shade and a hat.` : ''}${usual ? ` You usually go around ${usual}${at - u > 30 ? `; it's past that` : ''}.` : ''} When are you going?`) };
   }
   if (answered(last.at)) {
-    return now - Math.max(d.answeredAt, since) >= cfg.againMin * 60000 ? { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` } : null;
+    if (now - Math.max(d.answeredAt, since) < cfg.againMin * 60000) return null;
+    const out = outOf(d.asks.slice(d.asks.findLastIndex((a) => !CHECKS.includes(a.kind))));
+    return out ? { kind: 'out', text: out } : { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` };
   }
   if (talking(last.at)) return null;
   // The last question wasn't a walk ask (e.g. "no safe walking weather" and the weather turned): ask fresh.
@@ -325,11 +349,11 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     'No answer on the walk. When are you going? Tell me a time and I leave you alone until then.',
     `Still no time for your walk. ${st} One time, and I stop asking.`,
     'Last check on the walk: going, a time, or skipping it today?',
-  ]);
+  ], outOf);
 }
 
 /** The record with one more question asked. */
-export const withAsk = (doc, date, kind, at) => ({ ...(doc || emptyWalk(date)), asks: [...(doc?.asks || []), { at, kind }].slice(-60), ...(kind === 'goal' ? { goalAt: at } : {}) });
+export const withAsk = (doc, date, kind, at, steps = null) => ({ ...(doc || emptyWalk(date)), asks: [...(doc?.asks || []), { at, kind, ...(steps?.steps != null ? { steps: steps.steps } : {}) }].slice(-60), ...(kind === 'goal' ? { goalAt: at } : {}) });
 
 /**
  * His answer, recorded by the coach (tool 'walk').
@@ -354,6 +378,7 @@ export function walkLines(docs = [], { today, now, tz, steps = null, goal = 8000
   if (d.goalAt) parts.push('goal met today');
   else if (d.going) parts.push(`out walking since ${t(d.going.at)}`);
   else if (d.plan) parts.push(coachPlanned(d.plan) ? `the app planned it for ${t(d.plan.at)} (for the weather; his time only if he agrees, never "you said" or "you set")` : `he said he'd go at ${t(d.plan.at)}${d.plan.said ? ` ("${d.plan.said}")` : ''}`);
+  else if (last?.kind === 'out' && !((d.answeredAt || 0) > last.at)) parts.push(`his steps went up after the ask, so at ${t(last.at)} the app asked if he's out walking, no answer yet: don't ask him when he's going`);
   else if (last && !((d.answeredAt || 0) > last.at)) parts.push(`asked at ${t(last.at)}, no answer yet: get a time from him`);
   for (const w of d.walks) parts.push(`walked at ${t(w.at)}${w.minutes ? ` for ${w.minutes} min` : ''}`);
   for (const s of d.skips) parts.push(`skipped at ${t(s.at)}${s.reason ? ` (${s.reason})` : ''}`);

@@ -3,7 +3,7 @@
 // fixed ones to an iPhone Shortcut (Reminders). Each item carries `due`: whether it still applies right now
 // (a check-in already done or holds already logged switch it off).
 import { rotationDay, LABEL, addDays, lastRotationSession, daysByDate, sessionTomorrow, afterRestDay } from './rotation.js';
-import { holdSlots, roundsByDate, restChoices, openSlots, roundSeconds, roundLength, holdsAfter } from './holds.js';
+import { holdSlots, roundsByDate, restChoices, openSlots, roundSeconds, roundLength, holdsAfter, holdBase } from './holds.js';
 import { isoDate } from './time.js';
 import { weekColumn } from './programme.js';
 import { zonedTime, addMinutesHm, formatHm, formatDay } from './time.js';
@@ -120,7 +120,7 @@ const holdsCheckText = (open, say, round, evening) => say(`${byRound(open.filter
  * @param {object} [o.recovery]  A13: {plan, state, notes, photos} (lib/recovery.js), when he has a recovery record
  * @returns {Array<{id:string, kind:string, at:number, title:string, body:string, url:string, tag:string, due:boolean, fixed:boolean}>}
  */
-export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null, flexPlan = null, combatPlan = null, activity = undefined, flexTests = [] }) {
+export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], date, tz, last, days = {}, areas = [], rounds = {}, settings = null, meta = null, table = null, trainedDates = new Set(), neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], sessionStarts = [], recovery = null, flexPlan = null, combatPlan = null, activity = undefined, flexTests = [], walks = [], stepReadings = {} }) {
   const n = withDefaults(settings).notify;
   const on = (k) => n.kinds?.[k] !== false;
   const rot = rotationDay({ last, today: date, days });
@@ -211,8 +211,10 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
     // saved.
     const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds });
     if (ag?.scanAskAt) {
+      // Thu 11/5: never once he's left the gym (walking, home).
+      const left = leftGymAt({ end: ag.end, steps: stepReadings[date], walk: walks.find((w) => w?.date === date), meals: meals.filter((m) => m.date === date), mealChecks: mealChecks.filter((c) => c.date === date) });
       out.push({ id: `scan-after:${date}`, kind: 'scan', at: ag.scanAskAt, url: '#/body/scan', tag: `scan-after-${date}`, fixed: false,
-        title: 'Evolt scan?', body: 'Do it before you leave the gym, then add the results (photo or PDF).', due: true });
+        title: 'Evolt scan?', body: 'Do it before you leave the gym, then add the results (photo or PDF).', due: ag.scanAskAt < left });
     }
   }
   if (on('supps')) out.push(...planReminders({ date, tz, supps: supplements, log: suppLog, answers: suppAnswers, eveningHm: n.eveningCheck, weekday: n.suppPlanWeekday, wakeHm: n.wakeHm, bedHm: n.bedHm }));
@@ -284,9 +286,12 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
     if (ag) {
       // A meal logged, or his answer to the meal question, since the gym: no "head home" (Thu 10/22 audit).
       const fed = meals.some((m) => m.date === date && m.at >= ag.doneAt) || mealChecks.some((c) => c.date === date && c.at >= ag.doneAt);
-      out.push({ id: `home:${date}`, kind: 'meals', at: ag.homeAt, url: '#/fuel', tag: `home-${date}`, fixed: false,
-        title: 'Head home', body: 'Gym done. Get settled, food is next.', calm: true, again: false, due: !fed });
+      // Thu 11/5: not once he's out walking or home; "food is next" only with a meal prompt close (not 6 hours ahead).
+      const left = leftGymAt({ end: ag.end, steps: stepReadings[date], walk: walks.find((w) => w?.date === date), meals: meals.filter((m) => m.date === date), mealChecks: mealChecks.filter((c) => c.date === date) });
       const from = activity.workoutStart?.[date] ?? ag.doneAt;
+      const food = out.some((i) => (i.kind === 'meals' || i.kind === 'cook') && i.due && i.at >= from && i.at <= ag.homeAt + AFTER_GYM.foodNextMin * 60000);
+      out.push({ id: `home:${date}`, kind: 'meals', at: ag.homeAt, url: '#/fuel', tag: `home-${date}`, fixed: false,
+        title: 'Head home', body: food ? 'Gym done. Get settled, food is next.' : 'Gym done. Get settled.', calm: true, again: false, due: !fed && ag.homeAt < left });
       const inGym = (i) => (i.kind === 'meals' || i.kind === 'cook') && i.id !== `home:${date}` && i.at >= from && i.at < ag.mealAt;
       // Check-ins (until he answers) that fell in the gym time: none; the moved prompt asks once.
       for (const i of out) if (inGym(i) && i.group) i.due = false;
@@ -308,7 +313,13 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // Thu 10/22, his words after Legs: "the first notification I got prompted was the meal. Wrong. It should be the Evolt
 // scan... After I do that, don't immediately prompt me with the meal. Wait 5 minutes, bare minimum... a softer prompt
 // first: get home now... And then 5 minutes after that one, the first meal."
-export const AFTER_GYM = { holdsMaxMin: 40, scanAskMin: 1, scanWaitMin: 10, homeMin: 5, mealMin: 5 };
+// Thu 11/5, his words: "Why did I get a message at home: gym done, get settled, food is next? I finished the gym God
+// knows how long ago... obviously you know I'm on a walk right now" ("Head home" at 6:18 AM and "Evolt scan? Do it before
+// you leave the gym" at 6:03 AM after Legs ended at 5:22 AM: the leg extension hold he skipped "I'll do at home" and the
+// cupping round he never started held the gym open its full 40 minutes). Now a hold skipped in the workout isn't waited
+// for, and one not started within holdsStartMin isn't either; once he's left (steps up leftSteps+ since the workout,
+// a walk, a meal) neither goes out; "food is next" only when a meal prompt is within foodNextMin.
+export const AFTER_GYM = { holdsMaxMin: 40, holdsStartMin: 10, scanAskMin: 1, scanWaitMin: 10, homeMin: 5, mealMin: 5, leftSteps: 500, foodNextMin: 60 };
 
 /**
  * After a workout, in order: the gym is done when the workout is and the holds due after it are too (their round
@@ -319,16 +330,35 @@ export const AFTER_GYM = { holdsMaxMin: 40, scanAskMin: 1, scanWaitMin: 10, home
 export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], scanPlan = null, photoScanIds = [] }) {
   const end = activity?.workoutEnd?.[date];
   if (!end) return null;
+  // A hold he skipped in the workout (Thu 11/5: "Ill do at home") is not owed at the gym.
+  const skipped = new Set((activity.skippedEx?.[date] || []).map(holdBase));
   const open = (activity.dayTypes?.[date] || []).flatMap((t) => holdsAfter(areas, t))
-    .some((h) => { const a = areas.find((x) => x.label === h.area); return a && !(rounds[a.id]?.[date] > 0); });
-  const doneAt = open ? end + AFTER_GYM.holdsMaxMin * 60000 : Math.max(end, ...(activity.holdsEnd?.[date] || []));
+    .some((h) => { const a = areas.find((x) => x.label === h.area); return a && !(rounds[a.id]?.[date] > 0) && !skipped.has(holdBase(h.exercise)); });
+  // Open holds keep the gym open only once he starts a round (within holdsStartMin of the end): then till it's saved,
+  // 40 minutes at most. None started: the gym is done holdsStartMin after the workout.
+  const started = (activity.holdsStart?.[date] || []).some((t) => t >= end && t <= end + AFTER_GYM.holdsStartMin * 60000);
+  const doneAt = open ? end + (started ? AFTER_GYM.holdsMaxMin : AFTER_GYM.holdsStartMin) * 60000 : Math.max(end, ...(activity.holdsEnd?.[date] || []));
   // (Once the workout is saved the planner's next scan is tomorrow: a scan day is every training day, or the date set.)
   const scanDay = cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date;
   const scan = scans.find((s) => s.date === date && isDone(s));
   const scanAskAt = scanDay && !scanTakenOn(scans, date, photoScanIds) ? doneAt + AFTER_GYM.scanAskMin * 60000 : null;
   const base = scanAskAt ? scanAskAt + AFTER_GYM.scanWaitMin * 60000 : Math.max(doneAt, scan?.confirmedAt ?? scan?.at ?? 0);
   const homeAt = base + AFTER_GYM.homeMin * 60000;
-  return { doneAt, scanAskAt, homeAt, mealAt: homeAt + AFTER_GYM.mealMin * 60000 };
+  return { doneAt, scanAskAt, homeAt, mealAt: homeAt + AFTER_GYM.mealMin * 60000, end };
+}
+
+/**
+ * When he was first seen out of the gym after a workout that ended at `end` (ms), or Infinity: a step reading
+ * leftSteps+ above the last one before the end (steps: [{steps, at}] of that day), a walk started or logged, a meal
+ * or his answer to a meal question (Thu 11/5: "obviously you know I'm on a walk right now").
+ */
+export function leftGymAt({ end, steps = [], walk = null, meals = [], mealChecks = [] }) {
+  const after = (t) => Number.isFinite(t) && t >= end;
+  const signs = [walk?.going?.at, ...(walk?.walks || []).map((w) => w.at), ...meals.map((m) => m.at), ...mealChecks.map((c) => c.at)].filter(after);
+  const read = steps.filter((r) => Number.isFinite(r?.at) && r.steps != null).sort((a, b) => a.at - b.at);
+  const base = read.filter((r) => r.at <= end).at(-1);
+  if (base) { const up = read.find((r) => r.at > end && r.steps - base.steps >= AFTER_GYM.leftSteps); if (up) signs.push(up.at); }
+  return signs.length ? Math.min(...signs) : Infinity;
 }
 
 /** Items to send now: due, their time has come, not older than the grace window, not sent before. */
@@ -346,7 +376,7 @@ export function sessionStartAt(r, sessionStarts, tz) {
 }
 
 /** The planner's input from the stored data (the Mac's database or the phone's copy). */
-export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [], flexPlan = null, combatPlan = null, coachNotes = [], scanPhotos = [], coachHolds = [] }, tz) {
+export function reminderState({ sessions = [], sets = [], tendons = [], bridge = null, settings = null, meta = null, days = [], neck = null, meals = [], mealChecks = [], supplements = [], suppLog = [], suppAnswers = [], sauna = [], saunaPlan = null, scans = [], scanPlan = null, coachReminders = [], recoveryPlan = null, recoveryState = null, notes = [], photos = [], flexPlan = null, combatPlan = null, coachNotes = [], scanPhotos = [], coachHolds = [], walks = [], stepReadings = {} }, tz) {
   const areas = tendons.filter((d) => d?.kind === 'area');
   const activity = activityDays({ sessions, sets, tz });
   return {
@@ -379,6 +409,9 @@ export function reminderState({ sessions = [], sets = [], tendons = [], bridge =
     activity,
     photoScanIds: scanPhotos.map((p) => p?.scanId).filter(Boolean),
     holdoffs: coachHolds,
+    // Thu 11/5: signs he's left the gym (leftGymAt): his walk records, and the step readings of each day ({date: [{steps, at}]}).
+    walks,
+    stepReadings,
     flexTests: coachNotes.filter((x) => /^flex/i.test(x?.topic || '')).map((x) => x.date || isoDate(new Date(x.at), tz)),
   };
 }
