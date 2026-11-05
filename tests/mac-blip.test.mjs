@@ -55,3 +55,22 @@ test('while he records, the coach screen never says the Mac is unreachable', () 
   assert.match(src, /d\.stop\(\{ onRetry/);
   assert.doesNotMatch(src, /catch\(\(\) => \{ if \(!busy\) setState\('MAC UNREACHABLE'/, 'one failed warm-up no longer flips it');
 });
+
+test('a clip being re-sent is kept on the phone from the first failed try, and dropped once it gets through', async () => {
+  const stores = new Map();
+  const caches = { async open(name) { if (!stores.has(name)) stores.set(name, new Map()); const m = stores.get(name); return {
+    async put(url, res) { m.set(String(url), await res.arrayBuffer()); }, async keys() { return [...m.keys()].map((url) => ({ url })); },
+    async match(req) { const b = m.get(req.url); return b ? new Response(b) : undefined; }, async delete(url) { return m.delete(String(url)); } }; } };
+  const { cacheStore } = await import('../app/js/lib/dictate-keep.js');
+  const st = cacheStore(caches); let calls = 0; let keptMidRetry = 0;
+  const text = await sendRiding(async () => { calls += 1; if (calls === 1) cut(); return 'words'; }, 'wav', {
+    sleep: async () => { keptMidRetry = await st.count(); },
+    onRetry: async () => { await st.keep(5000, new TextEncoder().encode('clip')); },
+  });
+  assert.equal(text, 'words');
+  assert.equal(keptMidRetry, 1, 'safe on the phone while it waits to send again');
+  await st.drop(5000);
+  assert.equal(await st.count(), 0, 'not sent twice later');
+  const src = readFileSync(new URL('../app/js/lib/dictate.js', import.meta.url), 'utf8');
+  assert.match(src, /riding\.has\(c\.at\)/, 'the kept-clip sender skips a clip still being re-sent');
+});

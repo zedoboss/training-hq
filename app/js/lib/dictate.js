@@ -36,24 +36,36 @@ export async function startDictation() {
       for (const c of chunks) { all.set(c, o); o += c.length; }
       if (n < 16000 * 0.4) return '';
       const wav = encodeWav(all);
+      // Thu 11/5, 7:05 PM: a short relay blip is ridden out (sent again for about a minute) before giving up. The clip
+      // is kept on the phone from the first failed try, so locking the phone or closing the app mid-retry loses nothing;
+      // watchKept leaves it alone while this retry runs (riding), and it is dropped again once it gets through.
+      const at = Date.now(); let keptNow = false;
       try {
-        // Thu 11/5, 7:05 PM: a short relay blip is ridden out (sent again for about a minute) before the clip is kept.
-        return await sendRiding(sendClip, wav, { onRetry });
+        const text = await sendRiding(sendClip, wav, {
+          onRetry: async (k) => {
+            if (!keptNow) { keptNow = true; riding.add(at); try { await store().keep(at, wav); } catch { /* storage gone */ } }
+            onRetry?.(k);
+          },
+        });
+        if (keptNow) { try { await store().drop(at); } catch { /* storage gone */ } }
+        return text;
       } catch (e) {
         // Thu 11/5: the Mac out of reach (this phone's Tailscale dropped) no longer loses what he said: kept, and sent
         // by itself once the Mac answers again (watchKept below).
-        if (!isUnreachable(e)) throw e;
-        await store().keep(Date.now(), wav);
+        if (!isUnreachable(e)) { if (keptNow) { try { await store().drop(at); } catch { /* storage gone */ } } throw e; }
+        if (!keptNow) await store().keep(at, wav);
         waiting = true;
         const err = new Error(KEPT_MESSAGE); err.kept = true;
         throw err;
-      }
+      } finally { riding.delete(at); }
     },
   };
 }
 
 const sendClip = async (wav) => String((await macSendRaw('/api/voice/dictate', wav, 'audio/wav', 180000)).text || '').trim();
 let kept = null; let waiting = false;
+/** Clips (their `at`) a stop() is still re-sending: watchKept skips them so they are never sent twice. */
+const riding = new Set();
 const store = () => (kept ||= cacheStore());
 
 // The chat box's draft (views/coach.js keeps the box in it as he types).
@@ -75,6 +87,7 @@ export function watchKept({ toast } = {}) {
       const words = [];
       const r = await flushKept({
         ...store(),
+        list: async () => (await store().list()).filter((c) => !riding.has(c.at)),
         send: sendClip,
         onText: (text, at) => {
           if (!text) return;

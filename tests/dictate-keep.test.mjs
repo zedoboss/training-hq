@@ -95,7 +95,7 @@ test('the words join what is already in the box', () => {
 
 test('wiring: the mic keeps an unreachable clip, the app watches from start, the chat box shows the words', () => {
   const dict = readFileSync(new URL('../app/js/lib/dictate.js', import.meta.url), 'utf8');
-  assert.match(dict, /if \(!isUnreachable\(e\)\) throw e;\s*await store\(\)\.keep\(Date\.now\(\), wav\);/);
+  assert.match(dict, /if \(!isUnreachable\(e\)\) \{[^\n]*throw e; \}\s*if \(!keptNow\) await store\(\)\.keep\(at, wav\);/);
   assert.match(dict, /thq\.coach\.draft/);
   const main = readFileSync(new URL('../app/js/main.js', import.meta.url), 'utf8');
   assert.match(main, /watchKept\(/);

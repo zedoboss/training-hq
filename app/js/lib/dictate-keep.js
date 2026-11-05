@@ -63,6 +63,8 @@ export function cacheStore(caches = globalThis.caches, origin = globalThis.locat
     },
     async remove(id) { await (await open()).delete(id); },
     async retry(clip) { const c = await open(); await c.put(keyOf(clip.at, (clip.tries || 0) + 1), new Response(clip.wav, { headers: { 'content-type': 'audio/wav' } })); await c.delete(clip.id); },
+    /** Forget the clip kept at `at` (it reached the Mac after all). */
+    async drop(at) { const c = await open(); for (const req of await c.keys()) if (Number(new URL(req.url).pathname.split('/').pop()) === at) await c.delete(req.url); },
     async count() { return (await (await open()).keys()).length; },
   };
 }
@@ -84,7 +86,7 @@ export async function sendRiding(send, wav, { waits = RETRY_WAITS, sleep = (ms) 
       return await send(wav);
     } catch (e) {
       if (!isUnreachable(e) || i >= waits.length) throw e;
-      onRetry?.(i + 1);
+      await onRetry?.(i + 1);
       await sleep(waits[i]);
     }
   }
