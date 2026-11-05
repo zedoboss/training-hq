@@ -5,7 +5,7 @@
 // started; the coach (Claude) writes the opening message itself, in the same conversation, so his reply continues it.
 // Pure: facts in, open items out. Each item: {key, priority, facts}. The facts are for the coach, not for him.
 import { addDays } from './rotation.js';
-import { areaStatus, roundsByDate, holdsAfter } from './holds.js';
+import { areaStatus, roundsByDate, holdsAfter, homeSkips, holdBase } from './holds.js';
 import { placeLabel } from './neck.js';
 
 const daysBetween = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400000);
@@ -46,8 +46,12 @@ export function openItems({ today, sessions = [], sets = [], neck = null, areas 
   // hold. Make it smarter": every hold still open goes into ONE message, not one per area.
   const holdLines = []; let holdPri = 0;
   const doneToday = [...new Set(sessions.filter((x) => x.status === 'done' && x.kind !== 'holds' && x.dayType && dayOf(x.startedAt) === today).map((x) => x.dayType))];
+  // Thu 11/5: a gym hold he skipped "to do at home" is said as the area's home hold, at home.
+  const atHome = new Map(homeSkips(sessions, today, dayOf).map((k) => [holdBase(k.name), k]));
   for (const h of doneToday.flatMap((t) => holdsAfter(areas, t).map((x) => ({ ...x, after: t })))) {
     const a = areas.find((x) => x.label === h.area);
+    const k = atHome.get(holdBase(h.exercise)); const home = k && (a?.holds || []).find((x) => x.where === 'home');
+    if (a && home && !(rounds[a.id]?.[today] > 0)) { holdLines.push(`${a.label}: the ${home.exercise} hold at home today is still open (${home.sets || 3} × ${home.seconds || 30} s), in place of the gym ${h.exercise} he skipped ("${k.reason}")`); holdPri = Math.max(holdPri, 60); continue; }
     if (a && !(rounds[a.id]?.[today] > 0)) { holdLines.push(`${a.label}: the ${h.exercise} hold after ${h.after.charAt(0).toUpperCase() + h.after.slice(1)} today is still open (${h.sets} × ${h.seconds} s, at the gym)`); holdPri = Math.max(holdPri, 60); }
   }
   for (const a of areas) {

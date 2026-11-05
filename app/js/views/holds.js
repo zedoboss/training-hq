@@ -2,7 +2,7 @@
 // Rules come from the owner's tendon note; the app adds no rehab advice of its own.
 import { ready, saveSettings, macPost } from '../lib/data.js';
 import { setQuiet } from '../lib/quiet.js';
-import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase } from '../lib/holds.js';
+import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase, homeSkips } from '../lib/holds.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, sessionTomorrow, afterRestDay, addDays } from '../lib/rotation.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
@@ -80,7 +80,7 @@ function renderList(view, repo) {
     const dayType = rot.today.kind === 'rest' ? null : rot.today.dayType;
     // Sat 10/24: on a rest day before a session, a weekly gym hold goes after that session (not asked today).
     const nextSession = sessionTomorrow(rot, today);
-    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today), nextSession, carriedFrom: afterRestDay(rot, today, days), roundsYesterday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[addDays(today, -1)] || 0])) });
+    const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: prefs.holdsMorning, evening: prefs.holdsEvening }, restChoices: restChoices(days, today), nextSession, carriedFrom: afterRestDay(rot, today, days), roundsYesterday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[addDays(today, -1)] || 0])), homeSkips: homeSkips(sessions, today) });
     const areaOf = (id) => areas.find((a) => a.id === id);
     // Thu 10/22, his words: "the shoulder should be there in this tendons": an area behind its weekly count (fix or
     // maintenance) with nothing planned today is listed under today too, to do any day.
@@ -96,11 +96,11 @@ function renderList(view, repo) {
       if (x.skipped && !x.done) return `<div class="hold-row slot-row is-skipped" data-slot="${esc(x.area)}:rest"><div><span class="hud c-muted">REST DAY · SKIPPED TODAY (YOUR CHOICE)</span>
           <div><b>${esc(x.label)}</b> · no hold today</div></div><button class="pill" data-rc-change="${esc(x.area)}" type="button">Change</button></div>`;
       return `<div class="hold-row slot-row${x.done ? ' is-done' : ''}" data-slot="${esc(x.area)}:${esc(x.slot)}"><div><span class="hud ${x.done ? 'c-green' : 'c-cyan'}">${esc(slotWhen(x).toUpperCase())}${x.slot === 'rest' && x.holdIndex === 'other' ? ' · YOUR HOLD' : ''}</span>
-          <div><b>${esc(x.label)}</b> · ${esc(x.exercise)}${x.where ? ` <span class="hint">(${esc(x.where)})</span>` : ''}${x.also?.length ? `<div class="hint">then ${esc(x.also.join(', '))}</div>` : ''}</div>
+          <div><b>${esc(x.label)}</b> · ${esc(x.exercise)}${x.where ? ` <span class="hint">(${esc(x.where)})</span>` : ''}${x.also?.length ? `<div class="hint">then ${esc(x.also.join(', '))}</div>` : ''}${x.fromGym ? `<div class="hint">In place of ${esc(x.fromGym.exercise)} at the gym, skipped: ${esc(x.fromGym.reason)}</div>` : ''}</div>
           ${x.slot === 'rest' && !x.done ? `<button class="link-btn" data-rc-change="${esc(x.area)}" type="button">Change today's choice</button>` : ''}</div>
           ${x.done ? '<span class="hud c-green">DONE</span>' : `<a class="pill is-on" href="#/holds/${esc(x.area)}/${x.holdIndex}">Start</a>`}</div>`;
     };
-    const slotWhen = (x) => (x.slot === 'after' ? `After ${LABEL[dayType]}` : x.slot === 'rest' ? `Rest day · ${formatHm(x.time)}` : `${x.slot === 'morning' ? 'Morning' : 'Evening'} · ${formatHm(x.time)}`);
+    const slotWhen = (x) => (x.slot === 'after' ? `After ${LABEL[dayType]}` : x.slot === 'home' ? 'At home today' : x.slot === 'rest' ? `Rest day · ${formatHm(x.time)}` : `${x.slot === 'morning' ? 'Morning' : 'Evening'} · ${formatHm(x.time)}`);
     const timesOpen = !prefs.holdTimesConfirmedOn;
     const unconfirmed = areas.filter((a) => a.holds?.length && a.phase !== 'unknown'
       && (a.timingConfirmed === false || a.timesConfirmed === false || a.holds.some((h) => h.timingConfirmed === false)));

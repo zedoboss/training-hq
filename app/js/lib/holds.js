@@ -124,6 +124,24 @@ export function duePhasePlans(areas = [], date) {
     .map((a) => ({ ...withPhase(a, a.phasePlan.next, { date: a.phasePlan.on, reason: `his plan of ${a.phasePlan.from}${a.phasePlan.said ? `: "${a.phasePlan.said}"` : ''}` }), phasePlan: { ...a.phasePlan, done: true, doneOn: date } }));
 }
 
+/**
+ * Thu 11/5 (he skipped "Leg Extension Hold (Machine)" at 5:18 AM with "Ill do at home"; at 7:55 AM Holds, Today, the
+ * coach and the 4:30 PM "Still open today" still said "Knees after the session: Leg Extension (Machine), open"): a gym
+ * hold skipped in today's workout with a reason that says home becomes the area's home hold, due at home today.
+ * The names skipped that way on `date` in his gym workouts (running or done; not holds rounds, not discarded); tz: a
+ * time zone or a (ms) => date function.
+ */
+export const homeReason = (reason) => /\bhome\b/i.test(String(reason || ''));
+export function homeSkips(sessions = [], date, tz) {
+  const out = [];
+  const dayOf = typeof tz === 'function' ? tz : (ms) => isoDate(new Date(ms), tz);
+  for (const x of sessions || []) {
+    if (!x?.startedAt || x.status === 'discarded' || x.kind === 'holds' || dayOf(x.startedAt) !== date) continue;
+    for (const e of x.exercises || []) if (e?.skipped && e.name && homeReason(e.skipped.reason)) out.push({ name: e.name, reason: String(e.skipped.reason).trim(), at: e.skipped.at || null });
+  }
+  return out;
+}
+
 /** Default clock times for hold reminders (Settings notify.holdsMorning / holdsEvening); he confirms them once. */
 export const HOLD_TIMES = { morning: '07:30', evening: '19:30' };
 
@@ -148,12 +166,15 @@ const onRestDays = (h) => /\brest days?\b/i.test(timingOf(h));
  * @param {string|null} [o.nextSession] on a rest day, tomorrow's session (sessionTomorrow in rotation.js)
  * @param {string|null} [o.carriedFrom] on a training day, yesterday's date when it was a rest day (afterRestDay in rotation.js)
  * @param {object} [o.roundsYesterday] {areaId: rounds logged yesterday}
- * @returns {Array<{area:string, label:string, slot:'after'|'rest'|'morning'|'evening', time:string|null,
+ * @param {Array<{name:string, reason:string}>} [o.homeSkips] gym holds he skipped today to do at home (homeSkips()):
+ *   their slot becomes 'home' with the area's home hold (none for the area: it stays as it was)
+ * @returns {Array<{area:string, label:string, slot:'after'|'home'|'rest'|'morning'|'evening', time:string|null,
  *   holdIndex:number|'other', exercise:string, where:string|null, done:boolean, ask?:boolean, choice?:string|null,
  *   skipped?:boolean, last?:object|null}>}
  */
-export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES, restChoices = {}, nextSession = null, carriedFrom = null, roundsYesterday = {} }) {
+export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, times = HOLD_TIMES, restChoices = {}, nextSession = null, carriedFrom = null, roundsYesterday = {}, homeSkips: skippedHome = [] }) {
   const out = [];
+  const homeSkip = new Map((skippedHome || []).map((k) => [holdBase(k.name), k]));
   const trainType = dayKind === 'rest' ? null : dayType;
   for (const a of areas || []) {
     const holds = a.holds || [];
@@ -194,10 +215,16 @@ export function holdSlots({ areas, dayKind, dayType = null, roundsToday = {}, ti
         if (pick?.choice === 'other' && pick.holdName) Object.assign(slots[0], { holdIndex: 'other', exercise: pick.holdName, where: null, also: [] });
       }
     }
+    // A gym hold he skipped "to do at home" today: the area's home hold, at home today (Thu 11/5).
+    const homeIdx = holds.findIndex((h) => h.where === 'home');
+    for (const sl of slots) {
+      const k = sl.slot === 'after' && homeIdx >= 0 && homeIdx !== sl.holdIndex ? homeSkip.get(holdBase(sl.exercise)) : null;
+      if (k) Object.assign(sl, { slot: 'home', time: null, holdIndex: homeIdx, exercise: holds[homeIdx].exercise, where: 'home', also: [], fromGym: { exercise: sl.exercise, reason: k.reason } });
+    }
     const done = roundsToday[a.id] || 0;
     slots.forEach((s, i) => out.push({ ...s, done: i < done, ...(i < done && s.ask ? { ask: false } : {}) }));
   }
-  const ORDER = { morning: 0, rest: 1, after: 2, evening: 3 };
+  const ORDER = { morning: 0, rest: 1, after: 2, home: 2, evening: 3 };
   return out.sort((x, y) => ORDER[x.slot] - ORDER[y.slot]);
 }
 

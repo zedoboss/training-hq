@@ -7,6 +7,7 @@
 // - Boxing / kickboxing: before each class (his days and time, or a one-off trial), and "how was it?" after, unless
 //   he already logged it.
 import { zonedTime, formatHm, addMinutesHm, isoDate } from './time.js';
+import { homeSkips } from './holds.js';
 
 export const FLEX_ROUTINE = 'flex-legs';
 export const FLEX_IDS = new Set(['leg-swing-front-to-back', 'leg-swing-side-to-side', 'kneeling-hip-flexor-stretch', 'lying-hamstring-stretch-strap',
@@ -22,7 +23,7 @@ export function activityDays({ sessions = [], sets = [], tz }) {
   const flex = new Set(); const combat = new Set(); const workoutEnd = {}; const workoutStart = {}; const dayTypes = {}; const holdsEnd = {};
   // Thu 11/5: the holds rounds he started (when) and the exercises he skipped in a finished gym workout (names), for the
   // after-gym order (lib/reminders.js afterGym).
-  const holdsStart = {}; const skippedEx = {};
+  const holdsStart = {}; const skippedEx = {}; const homeSkipped = {};
   // The gym days (Thu 10/22 audit): a stretch, a class or a home neck session doesn't make a day trained.
   const workoutDays = new Set(); const workoutStarts = [];
   for (const x of sessions) {
@@ -36,6 +37,8 @@ export function activityDays({ sessions = [], sets = [], tz }) {
     if (isCombat) combat.add(day);
     const gym = !isFlex && !isCombat && x.routineId !== FLEX_ROUTINE && x.dayType !== 'neck';
     if (gym) { workoutDays.add(day); workoutStarts.push(x.startedAt); }
+    // A hold he skipped to do at home (Thu 11/5: "Ill do at home"), at once, the running workout too (lib/holds.js).
+    if (gym) for (const k of homeSkips([x], day, tz)) (homeSkipped[day] ||= []).push(k);
     if (x.status === 'done' && x.endedAt && gym) {
       workoutEnd[day] = Math.max(workoutEnd[day] || 0, x.endedAt);
       workoutStart[day] = Math.min(workoutStart[day] || Infinity, x.startedAt);
@@ -43,7 +46,7 @@ export function activityDays({ sessions = [], sets = [], tz }) {
       for (const e of x.exercises || []) if (e?.skipped && e.name) (skippedEx[day] ||= []).push(e.name);
     }
   }
-  return { flex, combat, workoutEnd, workoutStart, dayTypes, holdsEnd, holdsStart, skippedEx, workoutDays, workoutStarts: workoutStarts.sort((a, b) => a - b) };
+  return { flex, combat, workoutEnd, workoutStart, dayTypes, holdsEnd, holdsStart, skippedEx, homeSkips: homeSkipped, workoutDays, workoutStarts: workoutStarts.sort((a, b) => a - b) };
 }
 
 const weekday = (date) => new Date(`${date}T12:00:00Z`).getUTCDay();

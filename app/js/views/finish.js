@@ -18,7 +18,7 @@ import * as rest from '../lib/rest-timer.js';
 import { confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
-import { holdsAfter, holdBase, isHoldSet } from '../lib/holds.js';
+import { holdsAfter, holdBase, isHoldSet, homeSkips } from '../lib/holds.js';
 import { neckTodayText, neckDoneOn } from '../lib/neck.js';
 import { withDefaults } from '../lib/settings.js';
 
@@ -123,7 +123,9 @@ export function render(view, params = []) {
     // Each due hold leaves the prompt once it is logged in this workout, as a hold set or as its hold exercise (Thu 10/22:
     // "Leg Extension Hold (Machine)" counts for the leg extension hold); a hold on some other exercise doesn't count.
     const heldNames = new Set(done.map((s) => [s, session.exercises.find((e) => e.key === s.exKey)]).filter(([s, e]) => isHoldSet(s, e)).map(([, e]) => holdBase(e?.name)));
-    const due = holdsAfter(areas, session.dayType).filter((h) => !heldNames.has(holdBase(h.exercise)));
+    // Thu 11/5: one he skipped "to do at home" isn't a hold now; Holds and Today list his home hold for it.
+    const atHome = new Set(homeSkips([session], day).map((k) => holdBase(k.name)));
+    const due = holdsAfter(areas, session.dayType).filter((h) => !heldNames.has(holdBase(h.exercise)) && !atHome.has(holdBase(h.exercise)));
     const hold = due.length ? { text: due.map((h) => `${h.exercise} hold, ${h.sets} × ${h.seconds} s`).join(' · ') } : null;
     const holdDone = !hold;
     // Neck (decision 14, his answer Sun 10/18): after the session his plan puts it behind, offer it next.

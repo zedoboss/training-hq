@@ -156,7 +156,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
 
   // Tendon holds (decisions 17, 18): morning (and rest-day) holds, evening holds.
   const roundsToday = Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[date] || 0]));
-  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday, times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(days, date), nextSession: sessionTomorrow(rot, date), carriedFrom: afterRestDay(rot, date, days), roundsYesterday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[addDays(date, -1)] || 0])) });
+  const slots = holdSlots({ areas, dayKind: rot.today.kind, dayType, roundsToday, times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(days, date), nextSession: sessionTomorrow(rot, date), carriedFrom: afterRestDay(rot, date, days), roundsYesterday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[addDays(date, -1)] || 0])), homeSkips: activity?.homeSkips?.[date] || [] });
   if (on('holds')) {
     const st = withDefaults(settings);
     const round = roundLength(roundSeconds({ getReadyS: st.holds?.getReadyS ?? 15, restS: st.rest?.holdS ?? 120 }));
@@ -235,7 +235,10 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
     const eveningAt = zonedTime(date, n.eveningCheck, tz);
     // Holds the holds stream asks about aren't listed again (Sat 10/24, "knees ... knees" at 10:30 PM); only the ones
     // after a workout, which it doesn't.
-    const open = heldOff('holds', holdoffs, eveningAt) ? [] : openSlots(slots).filter((s) => !on('holds') || s.slot === 'after');
+    // A gym hold moved home (Thu 11/5, "Ill do at home") is listed by its home hold, unless an evening holds round of
+    // that area is still to come (the evening reminder says it then).
+    const eveningRound = (s) => slots.some((y) => y.area === s.area && y.slot === 'evening' && !y.skipped);
+    const open = heldOff('holds', holdoffs, eveningAt) ? [] : openSlots(slots).filter((s) => !on('holds') || s.slot === 'after' || (s.slot === 'home' && !eveningRound(s)));
     const tomorrow = addDays(date, 1);
     const rot2 = rotationDay({ last, today: tomorrow, days });
     let next = '';
@@ -245,7 +248,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
       next = hm2 ? `Tomorrow: ${LABEL[rot2.today.dayType]} at ${formatHm(hm2)}${lead2 == null ? '' : `, check-in at ${formatHm(addMinutesHm(hm2, -lead2))}`}.`
         : `Tomorrow: ${LABEL[rot2.today.dayType]}. No time set yet.`;
     }
-    const still = open.length ? `Still open: ${byRound(open).map((s) => `${s.label.toLowerCase()} (${s.exercise}${s.n > 1 ? `, ${s.n} rounds` : ''})`).join(', ')}.` : '';
+    const still = open.length ? `Still open: ${byRound(open).map((s) => `${s.label.toLowerCase()} (${s.exercise}${s.n > 1 ? `, ${s.n} rounds` : ''}${s.slot === 'home' ? ', at home' : ''})`).join(', ')}.` : '';
     const suppText = supps.open.length && !heldOff('supps', holdoffs, eveningAt) ? `Supplements still open: ${supps.open.join(', ')}.` : '';
     if (still || suppText || next) {
       out.push({

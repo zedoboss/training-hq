@@ -9,7 +9,7 @@ import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js'
 import { targetFor, repNotes } from '../../app/js/lib/targets.js';
 import { confirmedKg, modeOf, isConfirmed } from '../../app/js/lib/progression.js';
 import { currentBodyweight, healthDays, hoursText, weightSeries, withSleepLog } from '../../app/js/lib/health.js';
-import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds, restAskAreas } from '../../app/js/lib/holds.js';
+import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds, restAskAreas, homeSkips } from '../../app/js/lib/holds.js';
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
@@ -195,7 +195,7 @@ function slotsToday(s) {
   const rot = s.rotation();
   const rounds = roundsByDate(areas, s.list('sessions'), s.list('sets'), s.one('bridge', 'last-loads'));
   const st = s.settings().notify;
-  return { areas, slots: holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today), nextSession: sessionTomorrow(rot, s.today), carriedFrom: afterRestDay(rot, s.today, s.days()), roundsYesterday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[addDays(s.today, -1)] || 0])) }) };
+  return { areas, slots: holdSlots({ areas, dayKind: rot.today.kind, dayType: rot.today.kind === 'rest' ? null : rot.today.dayType, roundsToday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[s.today] || 0])), times: { morning: st.holdsMorning, evening: st.holdsEvening }, restChoices: restChoices(s.days(), s.today), nextSession: sessionTomorrow(rot, s.today), carriedFrom: afterRestDay(rot, s.today, s.days()), roundsYesterday: Object.fromEntries(Object.entries(rounds).map(([id, d]) => [id, d[addDays(s.today, -1)] || 0])), homeSkips: homeSkips(s.list('sessions'), s.today, s.tz) }) };
 }
 
 /**
@@ -220,6 +220,7 @@ export function holdsDueText(s) {
     const when = mine.map((x) => {
       const name = x.slot === 'evening' ? 'evening' : x.slot === 'morning' ? 'morning' : 'rest-day';
       if (x.slot === 'after') return 'after the session';
+      if (x.slot === 'home') return `at home today (in place of the gym ${x.fromGym.exercise}, which he skipped: "${x.fromGym.reason}")`;
       if (x.time && nowHm >= x.time) {
         if (nowSaid) return `the ${name} one later, once there's a gap (the ${formatHm(x.time)} round is late too)`;
         nowSaid = true;
@@ -245,7 +246,7 @@ function holdLines(s) {
   const nowHm = hmOf(new Date(s.now), s.tz);
   const lateMorning = slots.filter((x) => x.slot === 'morning' && !x.done && !x.skipped && x.time && nowHm >= x.time);
   const evening = slots.find((x) => x.slot === 'evening' && !x.done && x.time && nowHm < x.time);
-  const out = [`Tendon holds today: ${slots.map((x) => `${x.label} ${x.slot === 'after' ? 'after the session' : x.slot === 'rest' ? `rest day (${formatHm(x.time)})` : `${x.slot} ${formatHm(x.time)}`}: ${x.skipped ? 'skipped today (his choice)' : `${x.exercise}${x.also?.length ? ` + ${x.also.join(', ')}` : ''}${x.slot === 'rest' && x.holdIndex === 'other' ? ' (his own hold)' : ''}, ${x.done ? 'DONE' : x.ask ? 'not answered yet' : 'open'}`}`).join('; ')}.`];
+  const out = [`Tendon holds today: ${slots.map((x) => `${x.label} ${x.slot === 'after' ? 'after the session' : x.slot === 'home' ? `at home today (he skipped the gym ${x.fromGym.exercise}: "${x.fromGym.reason}")` : x.slot === 'rest' ? `rest day (${formatHm(x.time)})` : `${x.slot} ${formatHm(x.time)}`}: ${x.skipped ? 'skipped today (his choice)' : `${x.exercise}${x.also?.length ? ` + ${x.also.join(', ')}` : ''}${x.slot === 'rest' && x.holdIndex === 'other' ? ' (his own hold)' : ''}, ${x.done ? 'DONE' : x.ask ? 'not answered yet' : 'open'}`}`).join('; ')}.`];
   out.push(roundLine);
   if (lateMorning.length) out.push(`The morning round${lateMorning.length > 1 ? 's' : ''} (${lateMorning.map((x) => x.label).join(', ')}, due ${formatHm(lateMorning[0].time)}) ${lateMorning.length > 1 ? 'are' : 'is'} late: call it late, not "morning". One round now${evening ? `, the evening one at ${formatHm(evening.time)}` : ' and one later'}; not back to back.`);
   // A2: the rest-day question. He answers; the coach never suggests a hold.

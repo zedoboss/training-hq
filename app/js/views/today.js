@@ -10,7 +10,7 @@ import { ready, saveSettings } from '../lib/data.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, REST_TEXT, sessionTomorrow, afterRestDay, addDays } from '../lib/rotation.js';
 import { fastingOn } from '../lib/fast.js';
 import { weekColumn } from '../lib/programme.js';
-import { roundsByDate, holdSlots, restChoices, openSlots } from '../lib/holds.js';
+import { roundsByDate, holdSlots, restChoices, openSlots, homeSkips } from '../lib/holds.js';
 import { logMealFromFile, cameraInput } from './meal.js';
 import { dayTotals } from '../lib/meals.js';
 import { checklist, dayKindFrom } from '../lib/supplements.js';
@@ -75,7 +75,7 @@ async function trainToday(repo) {
   const areas = tendons.filter((d) => d.kind === 'area');
   const rounds = roundsByDate(areas, sessions, sets, bridge);
   const n = withDefaults(getState().settings).notify;
-  const slots = holdSlots({ areas, dayKind: t.kind, dayType: t.kind === 'rest' ? null : t.dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(daysByDate(dayList), today), nextSession: sessionTomorrow(rot, today), carriedFrom: afterRestDay(rot, today, daysByDate(dayList)), roundsYesterday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[addDays(today, -1)] || 0])) });
+  const slots = holdSlots({ areas, dayKind: t.kind, dayType: t.kind === 'rest' ? null : t.dayType, roundsToday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[today] || 0])), times: { morning: n.holdsMorning, evening: n.holdsEvening }, restChoices: restChoices(daysByDate(dayList), today), nextSession: sessionTomorrow(rot, today), carriedFrom: afterRestDay(rot, today, daysByDate(dayList)), roundsYesterday: Object.fromEntries(areas.map((a) => [a.id, rounds[a.id]?.[addDays(today, -1)] || 0])), homeSkips: homeSkips(sessions, today) });
   const open = openSlots(slots).length;
   const holds = slots.length ? { readout: open ? `${open} OPEN` : slots.every((x) => x.skipped) ? 'SKIPPED' : 'DONE', progress: (slots.length - open) / slots.length } : { readout: 'NONE TODAY', progress: null };
   const hm = daysByDate(dayList)[rot.next.date]?.sessionTime;
