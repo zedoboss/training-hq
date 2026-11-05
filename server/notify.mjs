@@ -577,7 +577,8 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
   const items = planned
     .map((i) => (g.hold && held(i) && i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, morning: 'waiting' }
       : !g.hold && g.state.from && g.openAt && held(i) && i.at < g.openAt ? { ...i, at: g.openAt, morning: 'after', heldAt: i.at } : i));
-  return afterMeals(afterWorkouts(items, workoutSpans(st, recordsOf(store, 'sessions'), now, tz), now, waits), mealSpansFor(store, now, tz), st.coachReminders);
+  const gym = afterWorkouts(items, workoutSpans(st, recordsOf(store, 'sessions'), now, tz), now, waits);
+  return afterMeals(afterWalks(gym, walkSpans(recordsOf(store, 'walks'), now), now), mealSpansFor(store, now, tz), st.coachReminders);
 }
 
 // ---- A workout in progress (Sat 10/24, his words: "Why did you randomly remind me about holds... when I'm mid-workout?
@@ -615,6 +616,58 @@ export function afterWorkouts(items, spans, now, waits) {
     if (!s) return i;
     if (s.open) return i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, workout: 'waiting' } : i;
     return { ...i, at: s.release, workout: 'after', heldAt: i.heldAt ?? i.at };
+  });
+}
+
+// ---- Out walking (Thu 11/5, his words: "Dig even further", on "Start cooking: first meal at 6:30 AM" at 6:23 AM and
+// "First meal time... Eaten, cooking, or skipping?" at 6:30 AM while he was out on the walk he'd told me about at 6:06
+// AM). His meal-time questions (start cooking, the meal ask, its check-ins) that come due while he's out walking wait
+// until he's back: his "back" answer, or the signs the app reads (lib/walks.js walkOverAt), from when the app saw them.
+// Then the meal ask alone, afterBackMin later (start cooking folds into it); check-ins that fell in the walk, or that
+// would follow it within the first check-in's gap, don't go out. Claude's numbers.
+export const WALK_HOLD = { afterBackMin: 5, openMaxMin: 180, lookbackMin: 24 * 60 };
+const WALK_MEAL_ASK = /^meal(-cook|-again)?:/;
+
+/**
+ * His walks as spans {start, end, open, release}: the one in progress (open; end Infinity), and the last day's walks
+ * done with a known start (from, or minutes before the end). end = when the app knew he was back (the later of the
+ * walk's end and when it saw it, seenAt); release = afterBackMin after that.
+ */
+export function walkSpans(docs = [], now, cfg = WALK_HOLD) {
+  const out = [];
+  for (const d of docs) {
+    if (!d) continue;
+    if (Number.isFinite(d.going?.at) && d.going.at <= now && now - d.going.at < cfg.openMaxMin * 60000) out.push({ start: d.going.at, end: Infinity, open: true });
+    for (const w of d.walks || []) {
+      if (!Number.isFinite(w?.at) || now - w.at > cfg.lookbackMin * 60000) continue;
+      const start = Number.isFinite(w.from) ? w.from : w.minutes > 0 ? w.at - w.minutes * 60000 : null;
+      if (start == null) continue;
+      const end = Math.max(w.at, Number.isFinite(w.seenAt) ? w.seenAt : 0);
+      out.push({ start, end, open: false, release: end + cfg.afterBackMin * 60000 });
+    }
+  }
+  return out;
+}
+
+/** Meal-time questions due during a walk (walkSpans): held while he's out, then the meal ask once he's back. */
+export function afterWalks(items, spans, now, cfg = WALK_HOLD) {
+  if (!spans.length) return items;
+  const ask = (i) => WALK_MEAL_ASK.test(String(i.id || '')) && i.due !== false;
+  const moved = items.map((i) => {
+    if (!ask(i)) return i;
+    const s = spans.find((x) => i.at >= x.start && i.at < x.end);
+    if (!s) return i;
+    if (i.group) return { ...i, due: false, walk: 'missed' };
+    if (s.open) return i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, walk: 'waiting' } : i;
+    return { ...i, at: s.release, walk: 'after', heldAt: i.heldAt ?? i.at };
+  });
+  // One question per meal once he's back: the meal ask over its "start cooking" (the later one); its check-ins start
+  // after it, not minutes behind it.
+  const back = new Map();
+  for (const i of moved) if (i.walk === 'after' && !(back.get(i.tag)?.heldAt > i.heldAt)) back.set(i.tag, i);
+  return moved.filter((i) => i.walk !== 'after' || back.get(i.tag) === i).map((i) => {
+    const b = i.group && back.get(i.tag);
+    return b && i.due !== false && i.at >= b.at && i.at < b.at + MEAL_NUDGE.checkInMin[0] * 60000 ? { ...i, due: false, walk: 'missed' } : i;
   });
 }
 
@@ -856,6 +909,8 @@ export function nudgeInputs(store, now, tz) {
         next: nextSuppsText(groups, { bedAt, tz, nowHm, done: ['after-meal'] }) } : null,
       suppsBed: bedOpen.length && Number.isFinite(bedAt) ? { open: bedOpen.map((i) => `${i.supp.name} ${i.dose}`.trim()), bedAt, dayKey: food } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
+      // Thu 11/5: out walking (a walk in progress, not yet seen over): no food nudge till he's back.
+      walkingSince: (() => { const g = one('walks', food)?.going?.at ?? one('walks', date)?.going?.at; return Number.isFinite(g) && now - g < WALK_HOLD.openMaxMin * 60000 ? g : null; })(),
       // Thu 11/5: at the gym (his arrival Shortcut): no morning routine nudge.
       arrivedAt: st.days?.[date]?.arrivedAt ?? null,
       session: { started: trained, done: trained },
@@ -1235,7 +1290,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
         // What waited for his morning or a workout: one short ask of what to do now (heldPlanText: one line a thing, no
         // passed times; Mon 10/26), one line in his moods at the end.
         // A single one too, half an hour overdue, when its words name a clock time (it would read back a passed one).
-        const after = items.filter((i) => i.morning === 'after' || i.workout === 'after').sort((a, b) => a.heldAt - b.heldAt);
+        const after = items.filter((i) => i.morning === 'after' || i.workout === 'after' || i.walk === 'after').sort((a, b) => a.heldAt - b.heldAt);
         const merged = after.length > 1 || after.some((i) => t - i.heldAt >= HELD_OVERDUE_MIN * 60000 && /\d:\d\d\s?[AP]M/i.test(`${i.title} ${i.body}`));
         if (merged) {
           const v = coachVoice(heldPlanText(after, { now: t, tz: zone }), { ...opts, calm: after.some((i) => i.calm) });

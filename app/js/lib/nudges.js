@@ -162,8 +162,11 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, arrivedAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, sent = {} }) {
+  wokeAt = null, arrivedAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, walkingSince = null, sent = {} }) {
   const out = [];
+  // Thu 11/5 ("Start cooking" and "First meal time" went out mid-walk): out walking, no food nudge; the meal-time
+  // questions wait till he's back (server/notify.mjs afterWalks).
+  const walking = Number.isFinite(walkingSince) && walkingSince <= now;
   if (scanPaused) scanToday = null;
   const evoltFirst = scanPaused ? '' : ' Evolt first.';
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
@@ -212,7 +215,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
       `Still nothing logged since your ${doneHm} workout. When are you eating, or are you skipping it?`,
       'Last check on your meal after the gym. Eating now, or skipping it today?',
     ];
-    if (k >= 0 && now < handOver) out.push({ key: `meal-after:${workoutEndedAt}:${k}`, priority: 89, gapMin: ONCE_MIN, url: '#/fuel', text: said[k] });
+    if (k >= 0 && now < handOver && !walking) out.push({ key: `meal-after:${workoutEndedAt}:${k}`, priority: 89, gapMin: ONCE_MIN, url: '#/fuel', text: said[k] });
   }
   const nowHm = formatHm(hmOf(new Date(now), tz));
   const sinceWake = ((minOf(hmOf(new Date(now), tz)) - minOf(wakeHm)) + 1440) % 1440;
@@ -335,7 +338,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   const sinceWakeMin = (minOf(hmOf(new Date(now), tz)) - minOf(wakeHm) + 1440) % 1440;
   const beforeFirstMeal = Number.isFinite(firstMealAt) && !reminders.some((r) => String(r.id).startsWith('meal:') && r.at <= now)
     && sinceWakeMin + (firstMealAt - now) / 60000 < ((minOf(bedHm) - minOf(wakeHm) + 1440) % 1440 || 1440);
-  if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked && !beforeFirstMeal) {
+  if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked && !beforeFirstMeal && !walking) {
     const expect = targets.kcal * frac;
     // Tue 10/27 (Monday's "Food: 1,028 of 3,174 kcal... You should be near 2,300 kcal by now. Eat." every hour, 5:42 to
     // 9:50 PM, the same words, while he was quiet): FOOD_CHECKS check-ins, further apart, new words each, then quiet.

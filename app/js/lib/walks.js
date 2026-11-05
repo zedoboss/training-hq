@@ -212,7 +212,8 @@ export function settleWalk(doc, signs) {
   if (!doc?.going) return doc;
   const over = walkOverAt(doc.going, signs);
   if (!over) return doc;
-  return { ...doc, going: null, walks: [...(doc.walks || []), { at: over.at, from: doc.going.at, minutes: null, steps: null, auto: over.why }] };
+  // seenAt: when the app saw it (a steps-flat sign can be well before that); what waited for the walk goes out then.
+  return { ...doc, going: null, walks: [...(doc.walks || []), { at: over.at, from: doc.going.at, minutes: null, steps: null, auto: over.why, ...(Number.isFinite(signs?.now) ? { seenAt: signs.now } : {}) }] };
 }
 /** A walk the app closed itself with no minutes from him (Thu 11/5). */
 export const minutesOpen = (w) => Boolean(w?.auto && w.minutes == null);
@@ -425,7 +426,7 @@ export function withAnswer(doc, date, a, now) {
   if (auto && a.action === 'done') return { ...d, walks: [...d.walks.slice(0, -1), { at: auto.at, from: auto.from, minutes: a.minutes ?? null, steps: a.steps ?? null }] };
   if (a.action === 'plan') return { ...d, plan: { at: a.at, said: a.said || null, setAt: now, ...(a.by === 'coach' ? { by: 'coach' } : {}) }, going: null };
   if (a.action === 'going') return { ...d, going: { at: now }, plan: null };
-  if (a.action === 'done') return { ...d, going: null, plan: null, walks: [...d.walks, { at: now, minutes: a.minutes ?? null, steps: a.steps ?? null }] };
+  if (a.action === 'done') return { ...d, going: null, plan: null, walks: [...d.walks, { at: now, ...(d.going?.at ? { from: d.going.at } : {}), minutes: a.minutes ?? null, steps: a.steps ?? null }] };
   if (a.action === 'skip') return { ...d, plan: null, skips: [...d.skips, { at: now, reason: a.reason || '', until: a.until ?? now + WALK.skipMin * 60000 }] };
   if (a.action === 'clear') return { ...d, plan: null };
   return d;

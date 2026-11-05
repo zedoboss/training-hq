@@ -95,7 +95,7 @@ test('the Mac closes the record on its own the moment he is back, and the coach 
     assert.deepEqual(walkSigns(store, at('06:06'), at('06:56'), TZ).homeAt, at('06:55'));
     const [w, more] = settleWalks(store, at('06:56'), TZ);
     assert.equal(more, undefined);
-    assert.deepEqual(w, { at: at('06:55'), from: at('06:06'), minutes: null, steps: null, auto: 'home' });
+    assert.deepEqual(w, { at: at('06:55'), from: at('06:06'), minutes: null, steps: null, auto: 'home', seenAt: at('06:56') });
     const rec = store.getRecord('walks', D).data;
     assert.equal(rec.going, null);
     assert.equal(rec.walks.length, 1);
