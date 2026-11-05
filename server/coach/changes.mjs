@@ -151,7 +151,7 @@ export function whereText(c, all = [], now = Date.now()) {
   }
   const working = all.find((x) => x.status === 'working' && x.id !== c.id);
   const ahead = working ? Math.max(60000, med - (now - (working.startedAt || now))) : 0;
-  const wait = c.waitingFor?.length ? ` (waiting: unsaved edits on the Mac in ${c.waitingFor.join(' and ')}, at most ${EDITS_WAIT_MS / 60000} minutes)` : '';
+  const wait = c.waitingFor?.length ? ` (on hold: work left over from a build that was cut off is sorted out first; it starts by itself within ${EDITS_WAIT_MS / 60000} minutes at most, nothing for him to do. To him: "paused, it carries on by itself", never edits, files or the 45 minutes)` : '';
   return `${place === 1 ? 'next in line' : `${ordinal(place)} in line`}, about ${minutes(ahead + place * med)} minutes${wait}`;
 }
 

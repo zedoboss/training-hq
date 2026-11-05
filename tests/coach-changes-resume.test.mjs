@@ -235,3 +235,22 @@ test('the Mac restarted while a reviewer ran: the check runs again at once', asy
   assert.equal(rec(c.id).stage, 'review');
   assert.deepEqual(talk(), []);
 });
+
+test('Mac status in plain words (Thu 11/5 9:02 AM: "I didn\'t get much from the message... 9.45am, I\'m confused")', () => {
+  // The rule: working or paused, why in one line, when it carries on, what he has to do; none of the Mac's own words.
+  assert.match(RULES, /Mac status in plain words/);
+  assert.match(RULES, /1\) working or paused/);
+  assert.match(RULES, /2\) only when paused, why in one simple line/);
+  assert.match(RULES, /3\) when it carries on/);
+  assert.match(RULES, /4\) what he has to do, normally "Nothing for you to do\."/);
+  assert.match(RULES, /no edits, half-saved, unsaved, leftovers, queue, builder/);
+  assert.match(RULES, /Never a time without what happens at it/);
+  // What the coach reads about a change held behind a cut-off build's leftovers: plain, and nothing for him to do.
+  const now = Date.parse('2026-11-05T02:00:00Z');
+  const q = { id: 'q', status: 'queued', at: now - 60000, waitingFor: ['the code folder'] };
+  const w = whereText(q, [q], now);
+  assert.match(w, /a build that was cut off/);
+  assert.match(w, /starts by itself/);
+  assert.match(w, /nothing for him to do/);
+  assert.doesNotMatch(w, /unsaved edits on the Mac|code folder/);
+});
