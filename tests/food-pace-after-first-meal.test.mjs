@@ -22,12 +22,17 @@ test('his Wednesday: no "you should be near X kcal" before his 8:10 AM first mea
   assert.deepEqual(food(cands(at('07:52'), reminders, { eaten: { kcal: 100, protein: 5 } })), []);
 });
 
-test('once his first meal time has come and he answered it, the pace nudge speaks as before', () => {
+test('once his meal times have come and he answered them, the pace nudge speaks as before', () => {
   const mealTimes = [{ name: 'First meal', time: '08:10', latest: '09:40', cookMin: 30 }, { name: 'Last meal', time: '12:10', latest: '12:40', cookMin: 30 }];
-  // Skipped the first meal: its questions stop, the pace nudge may come (behind after the first meal time).
-  const reminders = mealReminders({ date: D, tz: TZ, meals: [], mealTimes, checks: [{ id: `${D}.0810`, answer: 'skipped', at: at('08:15') }] });
-  assert.equal(food(cands(at('09:00'), reminders)).length, 1);
-  assert.match(food(cands(at('09:00'), reminders))[0].text, /^Food: 0 of 3,174 kcal/);
+  // Skipped the first meal: its questions stop; his 12:10 PM meal time is still ahead, so no pace nudge before it
+  // (Fri 11/6: not between meals either).
+  const skipped = [{ id: `${D}.0810`, answer: 'skipped', at: at('08:15') }];
+  assert.deepEqual(food(cands(at('09:00'), mealReminders({ date: D, tz: TZ, meals: [], mealTimes, checks: skipped }))), []);
+  // Both skipped, no meal time left today: behind speaks.
+  const both = [...skipped, { id: `${D}.1210`, answer: 'skipped', at: at('12:15') }];
+  const after = food(cands(at('13:00'), mealReminders({ date: D, tz: TZ, meals: [], mealTimes, checks: both })));
+  assert.equal(after.length, 1);
+  assert.match(after[0].text, /^Food: 0 of 3,174 kcal/);
 });
 
 test('a first meal with no latest time: quiet until its ask, 45 minutes after the meal time', () => {

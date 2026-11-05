@@ -334,11 +334,15 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Thu 11/5, his words: "Food: 0 of 3,174 kcal... at 7:52 AM. You should be near 500 kcal by now. Eat." came 18
   // minutes before his 8:10 AM first meal time, right after "Start cooking". No pace nudge before his first meal time
   // of this waking day (its question, the meal: ask) has come.
-  const firstMealAt = Math.min(Infinity, ...reminders.filter((r) => String(r.id).startsWith('meal:') && r.at > now).map((r) => r.at));
+  // Fri 11/6 (Thursday, breakfast eaten, last meal set for 1:00 PM: "You should be near 1,300 kcal by now. Eat." at
+  // 8:56 AM, "Still behind on food... What's your next meal, and when?" at 10:57 AM, "Get a big meal in" at 12:57 PM):
+  // between meals too. While any set meal time of this waking day is still ahead, no pace nudge; it never asks when a
+  // meal is that already has its time.
+  const nextMealAt = Math.min(Infinity, ...reminders.filter((r) => String(r.id).startsWith('meal:') && r.at > now).map((r) => r.at));
   const sinceWakeMin = (minOf(hmOf(new Date(now), tz)) - minOf(wakeHm) + 1440) % 1440;
-  const beforeFirstMeal = Number.isFinite(firstMealAt) && !reminders.some((r) => String(r.id).startsWith('meal:') && r.at <= now)
-    && sinceWakeMin + (firstMealAt - now) / 60000 < ((minOf(bedHm) - minOf(wakeHm) + 1440) % 1440 || 1440);
-  if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked && !beforeFirstMeal && !walking) {
+  const beforeNextMeal = Number.isFinite(nextMealAt)
+    && sinceWakeMin + (nextMealAt - now) / 60000 < ((minOf(bedHm) - minOf(wakeHm) + 1440) % 1440 || 1440);
+  if (targets?.kcal && frac >= 0.15 && !eaten.unread && !mealAsked && !beforeNextMeal && !walking) {
     const expect = targets.kcal * frac;
     // Tue 10/27 (Monday's "Food: 1,028 of 3,174 kcal... You should be near 2,300 kcal by now. Eat." every hour, 5:42 to
     // 9:50 PM, the same words, while he was quiet): FOOD_CHECKS check-ins, further apart, new words each, then quiet.
