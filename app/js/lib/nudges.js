@@ -155,13 +155,16 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.mealAfterGymAt  no meal nudge before this after the gym (reminders.js afterGym), ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
+ * @param {boolean} [o.scanPaused]  he paused body scans (a scan hold-off, Thu 11/5): no scan checklist, no "Evolt first", no Evolt number ask
  * @param {Object<string, number>} [o.sent]  nudge key -> when it went out (the nudge state's byKey): counts check-ins
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, sent = {} }) {
+  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, sent = {} }) {
   const out = [];
+  if (scanPaused) scanToday = null;
+  const evoltFirst = scanPaused ? '' : ' Evolt first.';
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
   // A fasting day (Wed 10/21): nothing about food or supplements.
   if (fasting) { suppsAfterMeal = null; suppsUntimed = null; suppsBed = null; targets = null; workoutEndedAt = workoutEndedAt && lastMealAt > workoutEndedAt ? workoutEndedAt : null; }
@@ -231,7 +234,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   const train0 = rot?.today?.kind === 'train';
   if (morning?.text && sinceWoke >= 0 && sinceWoke < 90) {
     out.push({ key: 'morning', priority: 88, gapMin: 18 * 60, url: '#/today',
-      text: `Morning: ${String(morning.text).replace(/[.\s]+$/, '')}.${train0 && gymText && !session.started ? ` Gym ${gymText}.` : ''}` });
+      text: `Morning: ${String(morning.text).replace(scanPaused ? /\s*\([^)]*\bEvolt\b[^)]*\)/gi : /$^/, '').replace(/[.\s]+$/, '')}.${train0 && gymText && !session.started ? ` Gym ${gymText}.` : ''}` });
   }
 
   // A body scan planned today (Tue 10/20): the checklist, once that day (Fri 10/23: it went out 4 times by 12:10 PM, "the
@@ -251,20 +254,20 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   if (train && !session.started && !session.done) {
     if (sessionHm) {
       const at = zonedTime(isoDate(new Date(now), tz), sessionHm, tz);
-      if (now >= at) out.push({ key: 'session', priority: 80, gapMin: 30, url: '#/train', text: `${label} was due at ${formatHm(sessionHm)}. Go now, or tell me the new time. Evolt first.` });
-      else if (now >= at - 60 * 60000) out.push({ key: 'session', priority: 70, gapMin: 45, url: '#/train', text: `${label} at ${formatHm(sessionHm)}. Evolt first when you get there, then train.` });
+      if (now >= at) out.push({ key: 'session', priority: 80, gapMin: 30, url: '#/train', text: `${label} was due at ${formatHm(sessionHm)}. Go now, or tell me the new time.${evoltFirst}` });
+      else if (now >= at - 60 * 60000) out.push({ key: 'session', priority: 70, gapMin: 45, url: '#/train', text: `${label} at ${formatHm(sessionHm)}.${scanPaused ? ' See you there.' : ' Evolt first when you get there, then train.'}` });
     } else if (!lateEvening(now, tz, bedHm)) {
       // Mon 10/26 (Sunday: "Push today and no time set... Your plan: 1:40 PM to 2:10 PM" 6 times, 2:40 to 11:35 PM, the
       // same words, a plan he had woken too late for): SESSION_CHECKS check-ins, new words each, his plan only while it
       // is still ahead, then quiet; none late in the evening (the day rolls to tomorrow).
       const day = `session:${isoDate(new Date(now), tz)}:`;
       const k = Object.keys(sent || {}).filter((x) => x.startsWith(day)).length;
-      const text = sessionOpenText(k, label, gymText);
+      const text = sessionOpenText(k, label, gymText, scanPaused);
       if (text) out.push({ key: `${day}${k}`, priority: 65, gapMin: ONCE_MIN, spaceMin: SESSION_CHECKS.spaceMin, url: '#/train', text });
     }
   }
   // Not all evening: up to 3 hours after the workout (Thu 10/22 audit: every 40 minutes until bed, with no way to say no).
-  if (gymDay && (session.started || session.done) && !weighedToday && !(workoutEndedAt && now - workoutEndedAt > 3 * 3600000)) {
+  if (gymDay && !scanPaused && (session.started || session.done) && !weighedToday && !(workoutEndedAt && now - workoutEndedAt > 3 * 3600000)) {
     out.push({ key: 'evolt', priority: 75, gapMin: 40, url: '#/coach', text: 'Evolt number from today? Tell me the weight (and body fat if you have it).' });
   }
 
@@ -376,11 +379,11 @@ export function lateEvening(now, tz, bedHm = NUDGE_DEFAULTS.bedHm) {
 }
 
 /** The k-th "no time set" check-in, each in its own words; plan: his gym window, only while it is still ahead. Null after the last. */
-export function sessionOpenText(k, label = 'Your session', plan = null) {
+export function sessionOpenText(k, label = 'Your session', plan = null, scanPaused = false) {
   if (k >= SESSION_CHECKS.count) return null;
   const mid = label === 'Your session' ? 'your session' : label;
   return [
-    `${label} today and no time set. When are you going?${plan ? ` Your plan: ${plan}.` : ''} Evolt first when you get there.`,
+    `${label} today and no time set. When are you going?${plan ? ` Your plan: ${plan}.` : ''}${scanPaused ? '' : ' Evolt first when you get there.'}`,
     `Still no time for ${mid} today. Tell me when you're going and I'll leave it till then.`,
     `Last check on ${mid} today. Going later, or does it move to tomorrow?`,
   ][k];

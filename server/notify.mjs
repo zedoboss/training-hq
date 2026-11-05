@@ -14,7 +14,7 @@ import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart } from '.
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
 import { dayClock, bodyClock, realTimes } from '../app/js/lib/moving-day.js';
-import { heldOff, itemHeld } from '../app/js/lib/holdoffs.js';
+import { heldOff, itemHeld, scanHold } from '../app/js/lib/holdoffs.js';
 import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
 import { pickLine } from '../app/js/lib/coach-talk.js';
@@ -600,7 +600,7 @@ export function workoutSpans(st, sessions, now, tz) {
       const cap = x.startedAt + WORKOUT_BUSY_MIN * 60000;
       if (x.status === 'active') return { start: x.startedAt, end: cap, open: now < cap, release: cap };
       if (x.status !== 'done' || !Number.isFinite(x.endedAt)) return null;
-      const ag = afterGym({ date: isoDate(new Date(x.startedAt), tz), activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan, photoScanIds: st.photoScanIds });
+      const ag = afterGym({ date: isoDate(new Date(x.startedAt), tz), activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan, photoScanIds: st.photoScanIds, holdoffs: st.holdoffs });
       const release = (ag && ag.doneAt >= x.endedAt ? ag.homeAt : x.endedAt) + WORKOUT_HOLD.afterHomeMin * 60000;
       return { start: x.startedAt, end: x.endedAt, open: false, release };
     }).filter(Boolean);
@@ -843,6 +843,8 @@ export function nudgeInputs(store, now, tz) {
     lastUserAt: Math.max(0, ...list(MSGS).filter((m) => m.role === 'user').map((m) => m.at || 0)),
     args: {
       now, tz, wakeHm: n.wakeHm, bedHm: n.bedHm, fasting,
+      // Thu 11/5: scans paused (a scan hold-off): no "Evolt first", no scan checklist, no Evolt weigh-in ask.
+      scanPaused: Boolean(scanHold(st.holdoffs, now)),
       // When each one really went out (held for his morning or a workout, later than planned); null = not yet.
       reminders: remindersToday(store, st, date, now, tz).map((i) => ({ ...i, sentAt: wentOut[i.id] ?? null })),
       rot,
@@ -862,7 +864,7 @@ export function nudgeInputs(store, now, tz) {
       sleepLogged: Boolean(c) || Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null || noQuietYet(store, now),
       wokeAt: c ? c.wokeAt : one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && since(x.endedAt)).map((x) => x.endedAt)) || null,
-      mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan })?.mealAt ?? null,
+      mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan, holdoffs: st.holdoffs })?.mealAt ?? null,
       lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === food && m.at).map((m) => m.at)) || null,
       // His last answer to a meal question (eaten, about to cook, cooking, skipping): the after-workout meal nudge stops on it.
       mealAnsweredAt: Math.max(0, ...list('meal-checks').filter((c) => c.date === date && c.at).map((c) => c.at)) || null,

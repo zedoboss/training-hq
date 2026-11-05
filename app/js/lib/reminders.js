@@ -15,7 +15,7 @@ import { scanReminders, planFor, isDone, cadenceOf, scanTakenOn } from './scans.
 import { recoveryReminders } from './recovery.js';
 import { activityReminders, activityDays } from './activities.js';
 import { pathsOf } from './hold-path.js';
-import { heldOff } from './holdoffs.js';
+import { heldOff, scanHold } from './holdoffs.js';
 
 export const KINDS = [
   ['readiness', 'Readiness check-in before a session'],
@@ -205,11 +205,12 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
   if (on('sauna')) out.push(...saunaReminders({ date, tz, sessions: sauna, plan: saunaPlan || {} }).filter((i) => !(fasting && i.id.startsWith('sauna-day:'))));
   if (on('scan')) {
     const sp = planFor(scanPlan || {}, { scans, today: date, last, days });
-    out.push(...scanReminders({ date, tz, plan: sp, scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin, photoScanIds, started: trainedDates }));
+    // Thu 11/5: none that fall while he has paused scans (a scan hold-off; the phone's backup reminders follow it too).
+    out.push(...scanReminders({ date, tz, plan: sp, scans, days, eveningHm: n.scanEvening, morningLeadMin: n.readinessMin, photoScanIds, started: trainedDates }).filter((i) => !scanHold(holdoffs, i.at)));
     // Thu 10/22, his words: "if I miss one before the workout, after the workout you should ask whether I did it or
     // not. If I did it, I should be able to attach it": first thing once the gym is done (afterGym), unless a scan is
     // saved.
-    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds });
+    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds, holdoffs });
     if (ag?.scanAskAt) {
       // Thu 11/5: never once he's left the gym (walking, home).
       const left = leftGymAt({ end: ag.end, start: activity.workoutStart?.[date], steps: stepReadings[date], walk: walks.find((w) => w?.date === date), meals: meals.filter((m) => m.date === date), mealChecks: mealChecks.filter((c) => c.date === date) });
@@ -282,7 +283,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
   if (on('meals') && !fasting) {
     out.push(...mealReminders({ date, tz, meals, checks: mealChecks, mealTimes: withDefaults(settings).fuel.mealTimes }));
     // After the gym: the soft "head home" first, then meal prompts that fell in the gym time wait 5 minutes more.
-    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds });
+    const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds, holdoffs });
     if (ag) {
       // A meal logged, or his answer to the meal question, since the gym: no "head home" (Thu 10/22 audit).
       const fed = meals.some((m) => m.date === date && m.at >= ag.doneAt) || mealChecks.some((c) => c.date === date && c.at >= ag.doneAt);
@@ -327,7 +328,7 @@ export const AFTER_GYM = { holdsMaxMin: 40, holdsStartMin: 10, scanAskMin: 1, sc
  * minutes after the scan is saved (10 minutes for it when asked and not saved); meals 5 minutes after that.
  * {doneAt, scanAskAt, homeAt, mealAt} in ms, or null with no workout done that day.
  */
-export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], scanPlan = null, photoScanIds = [] }) {
+export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], scanPlan = null, photoScanIds = [], holdoffs = [] }) {
   const end = activity?.workoutEnd?.[date];
   if (!end) return null;
   // A hold he skipped in the workout (Thu 11/5: "Ill do at home") is not owed at the gym.
@@ -339,7 +340,8 @@ export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], 
   const started = (activity.holdsStart?.[date] || []).some((t) => t >= end && t <= end + AFTER_GYM.holdsStartMin * 60000);
   const doneAt = open ? end + (started ? AFTER_GYM.holdsMaxMin : AFTER_GYM.holdsStartMin) * 60000 : Math.max(end, ...(activity.holdsEnd?.[date] || []));
   // (Once the workout is saved the planner's next scan is tomorrow: a scan day is every training day, or the date set.)
-  const scanDay = cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date;
+  // Thu 11/5: scans paused (a scan hold-off then): no Evolt ask, and "head home" and the meal don't wait for one.
+  const scanDay = (cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date) && !scanHold(holdoffs, doneAt);
   const scan = scans.find((s) => s.date === date && isDone(s));
   const scanAskAt = scanDay && !scanTakenOn(scans, date, photoScanIds) ? doneAt + AFTER_GYM.scanAskMin * 60000 : null;
   const base = scanAskAt ? scanAskAt + AFTER_GYM.scanWaitMin * 60000 : Math.max(doneAt, scan?.confirmedAt ?? scan?.at ?? 0);

@@ -21,6 +21,7 @@ import { MODEL_LABEL, todayCounts } from '../lib/coach.js';
 import * as voice from '../lib/voice.js';
 import { elapsedMs, nextSetText } from '../lib/session.js';
 import { planFor, isDone, cadenceOf } from '../lib/scans.js';
+import { scanHold } from '../lib/holdoffs.js';
 import { morningItems, morningState, withMorningTick } from '../lib/morning.js';
 
 const CAMERA = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`;
@@ -89,7 +90,8 @@ async function trainToday(repo) {
   const trainsToday = t.kind === 'train' || t.kind === 'done';
   // After the workout the planner's next scan is tomorrow: today stays a scan day on the every-training-day plan.
   const scanDay = scanPlan?.next?.date === today || (t.kind === 'done' && (cadenceOf(planDoc) === 'training' || planDoc.next?.date === today));
-  const scanOpen = trainsToday && scanDay && !scans.some((x) => x.date === today && isDone(x));
+  // Thu 11/5: not while he has paused scans (a scan hold-off): no ask, no Log the scan button.
+  const scanOpen = trainsToday && scanDay && !scans.some((x) => x.date === today && isDone(x)) && !scanHold(await repo.list('coach-holds'));
   const scanAsk = scanOpen ? ' Evolt scan not logged today: did you do it?' : '';
   const active = sessions.find((x) => x.status === 'active' && x.kind !== 'holds');
   if (active) {
@@ -290,7 +292,7 @@ export function render(view) {
       talk = todayCounts(await repo.list('coach-messages'), isoDate(new Date()), (ms) => isoDate(new Date(ms)));
       if (!gone) draw(getState());
     };
-    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages', 'body-scans', 'scan-plan', 'sleep-log'].includes(c))) refresh(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['sessions', 'sets', 'days', 'bridge', 'programme', 'tendons', 'settings', 'meals', 'meal-estimates', 'fuel', 'supplements', 'supp-log', 'health', 'coach-messages', 'body-scans', 'scan-plan', 'sleep-log', 'coach-holds'].includes(c))) refresh(); });
     refresh();
     // The workout's minutes in the status line.
     minuteTimer = setInterval(() => { if (!gone && train?.live) refresh(); }, 60000);

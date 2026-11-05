@@ -19,6 +19,7 @@ import {
   METRICS, keyFor, cleanMetrics, mergeReads, conditionsFrom, withResults, metricValue, isDone, conditionNotes,
   metricsAvailable, scanSeries, latestChange,
 } from '../lib/scans.js';
+import { scanHold } from '../lib/holdoffs.js';
 import { weightSeries, dailyWeights, withBodyweights, dailyWeightsOf } from '../lib/health.js';
 import { setRows, weeklyVolume, weekStartOf } from '../lib/stats.js';
 import { mergeLibrary } from '../lib/library.js';
@@ -32,7 +33,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 /** "Sunday 10/27", with the year when it isn't this year ("Sunday 10/27/2024"). */
 const dayName = (iso) => (iso.slice(0, 4) === isoDate(new Date()).slice(0, 4) ? formatDay : formatDate)(new Date(`${iso}T12:00:00`));
 const savePlan = (repo, plan) => repo.put('scan-plan', 'main', { ...plan, id: 'main' });
-const COLS = ['scan-plan', 'body-scans', 'scan-photos', 'days', 'sessions', 'settings'];
+const COLS = ['scan-plan', 'body-scans', 'scan-photos', 'days', 'sessions', 'settings', 'coach-holds'];
 let arriveNote = null; // the last answer from the arrival link (Copy / Test / New link)
 
 /** The iPhone Shortcuts steps for the arrival automation (A10). Menu names can differ a little between iOS versions. */
@@ -53,7 +54,7 @@ async function loadAll(repo) {
   ]);
   const days = daysByDate(dayList);
   const photoScans = (await repo.list('scan-photos')).map((p) => p.scanId);
-  return { plan: planDoc || {}, scans: scans.filter((s) => s?.date), last: lastRotationSession(sessions, bridge), days, photoScans };
+  return { plan: planDoc || {}, scans: scans.filter((s) => s?.date), last: lastRotationSession(sessions, bridge), days, photoScans, paused: scanHold(await repo.list('coach-holds')) };
 }
 
 /** "Thursday 10/22 (Legs)" with the day type the rotation expects then; "(Pull or Push)" while it depends on whether
@@ -85,7 +86,9 @@ function home(view) {
     const st = scanStatus({ plan, scans, today, last: ctx.last, days: ctx.days });
     const items = protocolOf(plan);
     const n = withDefaults(getState().settings).notify;
-    const next = st.next;
+    // Thu 11/5: while he has paused scans (a scan hold-off), no next scan, no proposal, no reminders: a PAUSED card.
+    const paused = ctx.paused;
+    const next = paused ? null : st.next;
     const rec = st.prep;
     const done = scans.filter(isDone).sort((a, b) => (a.date < b.date ? 1 : -1));
     const withPhotos = new Set(ctx.photoScans);
@@ -116,12 +119,15 @@ function home(view) {
       <h1 class="view-title">Body scan</h1>
       <p class="hint">Evolt 360 at your gym. ${training ? 'Every training day' : `Every ${EVERY_DAYS / 7} weeks`}, first thing at the gym before the workout, same conditions each time, so scans stay comparable.</p>
       <div class="seg" role="group" aria-label="How often" id="sc-cadence">${CADENCE.map(([v, l]) => `<button class="pill ${v === st.cadence ? 'is-on' : ''}" type="button" data-cadence="${v}" aria-pressed="${v === st.cadence}">${esc(l)}</button>`).join('')}</div>
-      ${plan.safety?.readAt ? '' : `<section class="card pad-card confirm-card" id="sc-safety"><div class="hud c-amber">BEFORE YOUR FIRST SCAN</div>
+      ${plan.safety?.readAt || paused ? '' : `<section class="card pad-card confirm-card" id="sc-safety"><div class="hud c-amber">BEFORE YOUR FIRST SCAN</div>
         <p class="c-text">${esc(SAFETY_TEXT)}</p><p class="c-text">${esc(SAFETY_ASK)}</p>
         <p class="hint">The app records that you've read it and gives no other medical advice.</p>
         <button class="btn-ghost" type="button" id="sc-read">I've read it</button></section>`}
-      ${training && !next ? '<p class="hint" id="sc-none">No training day in the next week: the next scan comes with the next workout.</p>' : ''}
-      ${st.missed && !next ? `<p class="hint c-amber" id="sc-missed">Planned for ${esc(dayName(st.missed))}: no scan recorded.</p>` : ''}
+      ${paused ? `<section class="card pad-card scan-next" id="sc-paused"><div class="hud c-muted">SCANS PAUSED</div>
+          <b class="scan-big">Till ${esc(dayName(isoDate(new Date(paused.until))))}, ${esc(formatTime(new Date(paused.until)))}</b>
+          <span class="hint">You paused them${paused.reason ? `: ${esc(String(paused.reason).slice(0, 160))}` : ''}. No scan asks, no next date and no Evolt reminders till then. Tell the coach to turn them back on sooner.</span></section>` : ''}
+      ${training && !next && !paused ? '<p class="hint" id="sc-none">No training day in the next week: the next scan comes with the next workout.</p>' : ''}
+      ${st.missed && !next && !paused ? `<p class="hint c-amber" id="sc-missed">Planned for ${esc(dayName(st.missed))}: no scan recorded.</p>` : ''}
       ${next ? `<section class="card pad-card scan-next" id="sc-next">
           <div class="hud c-cyan">NEXT SCAN${next.date === today ? ' · TODAY' : ''}</div>
           <b class="scan-big">${esc(withType(next.date, ctx, today))}</b>
@@ -133,7 +139,7 @@ function home(view) {
             ${hm ? '' : '<span class="hint">On the day: at your session time, once you set it.</span>'}
             ${training ? '' : `<button class="link-btn" type="button" id="sc-eve">Evening reminders at ${esc(formatHm(n.scanEvening))}: change</button>`}</div>
           ${training ? '' : '<div class="btn-row"><button class="btn-ghost" type="button" id="sc-pick">Change date</button><button class="btn-ghost" type="button" id="sc-cancel">Cancel this scan</button></div>'}
-        </section>` : training ? '' : `<section class="card pad-card scan-next" id="sc-next">
+        </section>` : training || paused ? '' : `<section class="card pad-card scan-next" id="sc-next">
           <div class="hud c-amber">PROPOSED NEXT SCAN</div>
           <b class="scan-big">${esc(withType(p.date, ctx, today))}</b>
           <span class="hint">${esc(why)} Confirm it, or pick another day.</span>

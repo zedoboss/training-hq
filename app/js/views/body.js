@@ -20,6 +20,7 @@ import * as recovery from './body-recovery.js';
 import * as pain from './body-pain.js';
 import * as clinic from './body-clinic.js';
 import { isDone, cadenceOf, planFor } from '../lib/scans.js';
+import { scanHold } from '../lib/holdoffs.js';
 import { checkInStatus, photoStatus, openTasks, sinceText } from '../lib/recovery.js';
 
 const SUB = { health, measure, photos, scan, recovery, pain, clinic };
@@ -53,6 +54,7 @@ export function render(view, params = []) {
 
   const draw = async (repo) => {
     const [healthDocs, sleepLog, status, measurements, bodyPhotos, planDoc, scans, recPlan, recState, notes] = await Promise.all([repo.list('health'), repo.list('sleep-log'), repo.get('health-meta', 'status'), repo.list('measurements'), repo.list('body-photos'), repo.get('scan-plan', 'main'), repo.list('body-scans'), repo.get('recovery', 'main'), repo.get('recovery', 'state'), repo.list('coach-notes')]);
+    const paused = scanHold(await repo.list('coach-holds'));
     // Every training day: the next one comes from the rotation.
     const training = cadenceOf(planDoc) === 'training';
     const scanPlan = training ? planFor(planDoc, { scans, today: isoDate(new Date()),
@@ -108,7 +110,8 @@ export function render(view, params = []) {
     // Body scan: the confirmed date, else a nudge to plan one.
     const nextScan = scanPlan?.next?.date >= today && !scans.some((x) => x.date === scanPlan.next.date && isDone(x)) ? scanPlan.next.date : null;
     const lastScan = scans.filter(isDone).map((x) => x.date).sort().at(-1);
-    const scanLine = training ? `Every training day${nextScan ? ` · ${nextScan === today ? 'today' : `next ${dayName(nextScan)}`}` : ''}`
+    // Thu 11/5: while he has paused scans, no next date: "Paused till Friday 11/20".
+    const scanLine = paused ? `Paused till ${dayName(isoDate(new Date(paused.until)))}` : training ? `Every training day${nextScan ? ` · ${nextScan === today ? 'today' : `next ${dayName(nextScan)}`}` : ''}`
       : nextScan ? `Next ${dayName(nextScan)}${nextScan === today ? ' (today)' : ''}` : `${lastScan ? `Last ${dayName(lastScan)} · ` : ''}Plan the next one`;
 
     // A13: his recovery record, when he has one: what is due.
@@ -165,7 +168,7 @@ export function render(view, params = []) {
         <b>${w.minutes != null ? `${Math.round(w.minutes)} min` : ''}${w.kcal != null ? `<br><span class="c-faint">${n0(w.kcal)} kcal${w.distanceKm != null ? ` · ${w.distanceKm} km` : ''}</span>` : ''}</b></li>`).join('')}</ul>` : '<p class="hint">None in the last 30 days. Apple Watch walks and other apps\' workouts show here; your Training HQ sessions are on Train.</p>'}
 
       <div class="section-label">More</div>
-      <a class="card supp-card" href="#/body/scan" id="b-scan"><span class="hud c-cyan">BODY SCAN</span><span class="supp-card-line ${nextScan || scanPlan?.safety?.readAt ? '' : 'c-amber'}">${esc(scanLine)}${scanPlan?.safety?.readAt ? '' : ' · safety notice first'}</span><span class="pill is-on">Open</span></a>
+      <a class="card supp-card" href="#/body/scan" id="b-scan"><span class="hud c-cyan">BODY SCAN</span><span class="supp-card-line ${paused || nextScan || scanPlan?.safety?.readAt ? '' : 'c-amber'}">${esc(scanLine)}${paused || scanPlan?.safety?.readAt ? '' : ' · safety notice first'}</span><span class="pill is-on">Open</span></a>
       ${recCard}
       <a class="card supp-card" href="#/body/pain" id="b-pain"><span class="hud c-cyan">PAIN</span><span class="supp-card-line">Per area over days, and the lifts it was on</span><span class="pill is-on">Open</span></a>
       <a class="card supp-card" href="#/body/clinic" id="b-clinic"><span class="hud c-cyan">CLINIC SUMMARY</span><span class="supp-card-line">One printable page from your records</span><span class="pill">Open</span></a>
@@ -190,7 +193,7 @@ export function render(view, params = []) {
 
   untip = bindTips(view);
   ready.then((repo) => {
-    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'sleep-log', 'health-meta', 'measurements', 'body-photos', 'settings', 'scan-plan', 'body-scans', 'recovery', 'coach-notes', 'days', 'sessions'].includes(c))) draw(repo); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['health', 'sleep-log', 'health-meta', 'measurements', 'body-photos', 'settings', 'scan-plan', 'body-scans', 'recovery', 'coach-notes', 'days', 'sessions', 'coach-holds'].includes(c))) draw(repo); });
     draw(repo);
   });
   return () => { alive = false; off(); untip(); unx(); };

@@ -21,7 +21,7 @@ import { reviewOpen, checklist, whenText as suppWhen, outOfStock, statusOn, stoc
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
 import { walkLines, usualWalkHm, walkSteps, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
-import { activeHolds } from '../../app/js/lib/holdoffs.js';
+import { activeHolds, scanHold } from '../../app/js/lib/holdoffs.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUESTION, hadSymptoms, passed, phaseOf, saunaMarks, CHECKLIST, SYMPTOMS, GET_OUT, BREAK_MIN, OVERDUE_MIN, proposeSaunaDays, SAUNA_TIME, proposalDayText } from '../../app/js/lib/sauna.js';
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
@@ -380,7 +380,15 @@ export function mealTimesLine(s) {
   return `His meal times, every day: ${times.map((t) => `${t.name} ${formatHm(t.time)}${t.latest ? ` (${formatHm(t.latest)} at the latest)` : ''}${t.cookMin ? `, start cooking ${formatHm(addMinutesHm(t.time, -t.cookMin))}` : ''}`).join('; ')}. Guide him by these: when to cook, when to eat, and say it plainly when one is late.`;
 }
 
+/** Thu 11/5: his scan pause (a scan hold-off) in words, or '' when scans aren't paused. */
+function scanPausedText(s) {
+  const h = scanHold(s.list('coach-holds'), s.now);
+  return h ? `Body scans PAUSED by him until ${dayText(s.date(h.until), s.today)} ${timeText(h.until, s.tz)}${h.reason ? ` (${h.reason})` : ''}: no next scan, and never ask about, remind him of or plan an Evolt scan or an Evolt weigh-in till then (a weight he gives himself you still save with log_weight); scans come back when it ends or he says so (cancel the hold-off [id ${h.id}]).` : '';
+}
+
 function scanLine(s) {
+  const paused = scanPausedText(s);
+  if (paused) return paused;
   const st = scanStatus({ plan: s.one('scan-plan', 'main') || {}, scans: s.list('body-scans'), today: s.today, last: s.last(), days: s.days() });
   if (st.next) return `Body scan: ${st.cadence === 'training' ? 'every training day; ' : ''}next ${dayText(st.next.date, s.today)}${st.next.date === s.today ? ' (TODAY, first thing at the gym)' : ''}${st.cadence === 'training' ? '' : ', confirmed'}.`;
   return `Body scan: none confirmed; the app proposes ${dayText(st.proposal.date, s.today)}.`;
@@ -575,7 +583,7 @@ function noticeLines(s) {
   const moving = Boolean(s.settings().notify?.movingDay);
   return [
     recent.length ? `Your notifications to him in the last 3 hours, newest first (he may be answering one; their numbers were true when sent, possibly wrong, and the "Now:" lines are what's true now): ${recent.map((m) => `${formatTime(new Date(m.at), s.tz)} "${m.text}"`).join('; ')}.` : '',
-    `Today: weigh-in ${weighed ? 'logged' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : moving ? 'not logged yet (the moving schedule works it out when he wakes: don\'t ask)' : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
+    `Today: weigh-in ${weighed ? 'logged' : scanHold(s.list('coach-holds'), s.now) ? 'not logged (Evolt scans paused by him: don\'t ask for one)' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : moving ? 'not logged yet (the moving schedule works it out when he wakes: don\'t ask)' : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
   ].filter(Boolean);
 }
 
@@ -897,10 +905,11 @@ function scansText(s) {
   const scans = s.list('body-scans');
   const st = scanStatus({ plan, scans, today: s.today, last: s.last(), days: s.days() });
   const items = protocolOf(plan);
-  const lines = [`Body scans (Evolt 360 at his gym; ${st.cadence === 'training' ? 'every training day' : 'every 4 weeks'}, first thing at the gym before the workout, same conditions). Describe changes in numbers; never diagnose.${st.cadence === 'training' ? ' Day to day, the numbers move with water and food: compare weekly averages, not one day to the next.' : ''}`];
-  lines.push(st.next ? `Next scan: ${dayText(st.next.date, s.today)} (${st.cadence === 'training' ? 'the next training day' : 'confirmed'})${st.onRest ? `; that is now a rest day in the rotation, the next training day is ${dayText(st.onRest.to, s.today)}` : ''}.` : `No date confirmed. Proposed: ${dayText(st.proposal.date, s.today)}${st.proposal.dayType ? ` (a ${LABEL[st.proposal.dayType]} day)` : st.proposal.either ? ` (a training day either way: ${LABEL[st.proposal.either.ifMoved]} if today's ${LABEL[st.proposal.open]} moves to tomorrow, ${LABEL[st.proposal.either.ifDone]} if he does it today)` : ''}${st.proposal.lastDate ? `, 4 weeks after ${dayText(st.proposal.lastDate, s.today)}` : ', the first scan'}.`);
-  if (st.missed) lines.push(`Missed: the scan confirmed for ${dayText(st.missed, s.today)} has no results.`);
-  lines.push(plan.safety?.readAt ? `Safety notice read: ${whenText(plan.safety.readAt, s.tz, s.today)}.` : `Safety notice: not read yet. ${SAFETY_ASK}`);
+  const paused = scanPausedText(s);
+  const lines = [...(paused ? [paused] : []), `Body scans (Evolt 360 at his gym; ${st.cadence === 'training' ? 'every training day' : 'every 4 weeks'}, first thing at the gym before the workout, same conditions). Describe changes in numbers; never diagnose.${st.cadence === 'training' ? ' Day to day, the numbers move with water and food: compare weekly averages, not one day to the next.' : ''}`];
+  if (!paused) lines.push(st.next ? `Next scan: ${dayText(st.next.date, s.today)} (${st.cadence === 'training' ? 'the next training day' : 'confirmed'})${st.onRest ? `; that is now a rest day in the rotation, the next training day is ${dayText(st.onRest.to, s.today)}` : ''}.` : `No date confirmed. Proposed: ${dayText(st.proposal.date, s.today)}${st.proposal.dayType ? ` (a ${LABEL[st.proposal.dayType]} day)` : st.proposal.either ? ` (a training day either way: ${LABEL[st.proposal.either.ifMoved]} if today's ${LABEL[st.proposal.open]} moves to tomorrow, ${LABEL[st.proposal.either.ifDone]} if he does it today)` : ''}${st.proposal.lastDate ? `, 4 weeks after ${dayText(st.proposal.lastDate, s.today)}` : ', the first scan'}.`);
+  if (st.missed && !paused) lines.push(`Missed: the scan confirmed for ${dayText(st.missed, s.today)} has no results.`);
+  if (plan.safety?.readAt || !paused) lines.push(plan.safety?.readAt ? `Safety notice read: ${whenText(plan.safety.readAt, s.tz, s.today)}.` : `Safety notice: not read yet. ${SAFETY_ASK}`);
   if (plan.staff?.length) lines.push(`What his gym's staff said: ${plan.staff.map((x) => x.text).join(' | ')}`);
   const rec = st.next ? scans.find((x) => x.date === st.next.date) : null;
   lines.push(`Preparation checklist${rec ? ` for ${dayText(rec.date, s.today)}` : ''}: ${items.map((i) => `${i.text} (${i.id})${rec?.prep?.ticks?.[i.id] ? ' [ticked]' : ''}`).join(' / ')}`);
