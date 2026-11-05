@@ -12,6 +12,7 @@ import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay, timeAt, zoneOf } from '../lib/time.js';
 import { kg as fmtKg, platesPerSide } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
+import { lendHistory } from '../lib/rest-follow.js';
 import { pickExercises } from '../ui/picker.js';
 import { platesSheet, guardSheet } from '../ui/load-sheets.js';
 import { guardCheck } from '../lib/targets.js';
@@ -328,9 +329,19 @@ export function render(view, params = []) {
     talk.prepare(script);
     upcoming = { setId: n.set.id, script };
   };
+  /** The exercise the running rest follows: its own, else the one of the last ticked set. */
+  let restOf = null;
+  const restFrom = () => {
+    const key = restOf?.from?.sessionId === session.id ? restOf.from.exKey : [...sets].filter((x) => x.done && x.doneAt).sort((a, b) => b.doneAt - a.doneAt)[0]?.exKey;
+    return session.exercises.find((e) => e.key === key) || null;
+  };
   /** The rest is over (it ran out, or he skipped it): the set starts, and so does its talk. */
   const onRestOver = () => {
-    if (quietRestEnd || editing || !upcoming) return;
+    if (quietRestEnd || editing) return;
+    // Thu 11/5: the workout changed during the rest (he skipped the exercise it led to): the line is for the set now next.
+    const from = restOf && restOf.label !== 'Countdown' && restOf.next ? restFrom() : null;
+    if (from && nextSetAfter(from)?.set.id !== upcoming?.setId) planNext(from);
+    if (!upcoming) return;
     const u = upcoming; upcoming = null;
     if (!sets.some((x) => x.id === u.setId && !x.done) || setTimer) return;
     talkRun = talk.run(u.script);
@@ -418,13 +429,27 @@ export function render(view, params = []) {
     </section>`;
   };
 
+  /** Thu 11/5 ("if you escape... it should update accordingly, instantly"): a hold counting down on a set that was
+   *  deleted, or on an exercise he skipped or removed, stops, and the Mac's waiting "Hold: go / stop" are cancelled. */
+  const dropOrphanTimer = () => {
+    if (!setTimer) return;
+    const s = sets.find((x) => x.id === setTimer.setId);
+    const ex = s && session.exercises.find((e) => e.key === s.exKey);
+    if (s && ex && !ex.skipped) return;
+    if (!setTimer.cued) sendTimerAlarms([]);
+    setTimer = null; storeSetTimer(null); holdTalk = null; clearInterval(setTimerTick); setQuiet('set-timer', false); fullScreen();
+    talkRun?.stop(); scriptFor = null;
+  };
+
   const drawCards = () => {
+    dropOrphanTimer();
     const box = view.querySelector('#s-ex');
     box.innerHTML = session.exercises.map(exCard).join('') || '<p class="hint">No exercises yet. Add some below.</p>';
     header();
   };
 
   const redrawCard = (key) => {
+    dropOrphanTimer();
     const old = view.querySelector(`[data-ex="${CSS.escape(key)}"]`);
     const ex = session.exercises.find((e) => e.key === key);
     if (!old || !ex) { drawCards(); return; }
@@ -540,7 +565,7 @@ export function render(view, params = []) {
       // Sat 10/24, his words: "no rest timer after the right arm, rest only after each pair": the left arm follows.
       const arm = isOneArm(ex) ? armOf(exSets(ex.key), filled) : null;
       const pairNext = arm?.arm === 'right' && next && next.type !== 'warmup';
-      if (!editing && !pairNext && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name, nextSetWords(ex)); planNext(ex); }
+      if (!editing && !pairNext && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name, nextSetWords(ex), { sessionId: session.id, exKey: ex.key }); planNext(ex); }
       if (!editing && prefs().show.supersetJump && ex.supersetId && !restAfter(session.exercises, ex.key)) {
         const keys = session.exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
         view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -859,7 +884,17 @@ export function render(view, params = []) {
     draw();
     drawRest(rest.status());
     restWas = rest.status();
-    offRest = rest.subscribe((st) => { drawRest(st); if (restWas && !st) onRestOver(); restWas = st; });
+    restOf = restWas;
+    const offHistory = lendHistory(() => ctx.history);
+    offRest = rest.subscribe((st) => {
+      drawRest(st);
+      if (st) restOf = st;
+      if (restWas && !st) onRestOver();
+      // Thu 11/5: the set the rest leads to changed (lib/rest-follow.js): the coach's line for it is made again.
+      else if (restWas && st && st.next !== restWas.next) { const from = restFrom(); if (from) planNext(from); }
+      restWas = st;
+    });
+    const offRestOld = offRest; offRest = () => { offRestOld(); offHistory(); };
     // A15: mute the coach during this session's sets (sounds still mark a hold).
     const muteKey = 'thq.talk.muted';
     try { if (sessionStorage.getItem(muteKey) === id) talk.setMuted(true); } catch { /* private mode */ }
@@ -872,7 +907,7 @@ export function render(view, params = []) {
     showTalk();
     offTalk = talk.onChange(showTalk);
     // The set being rested for when the screen opens mid-rest.
-    if (restWas) { const last = [...sets].filter((x) => x.done && x.doneAt).sort((a, b) => b.doneAt - a.doneAt)[0]; const lex = last && session.exercises.find((e) => e.key === last.exKey); if (lex) planNext(lex); }
+    if (restWas) { const lex = restFrom(); if (lex) planNext(lex); }
     // "Next exercise" said to the coach on the Talk screen in the last 5 minutes: open on that exercise.
     let focused = false;
     try {

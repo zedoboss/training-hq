@@ -190,6 +190,10 @@ ready.then(async () => {
     const url = /^#\/session\//.test(location.hash) ? location.hash : '#/train';
     macPost('/api/rest', p ? { endsAt: p.endsAt, label: p.label, next: p.next, url } : { endsAt: null }).catch(() => {});
   });
+  // Thu 11/5 ("I skipped Hip Thrust... the notification said do Hip Thrust next"): any change to the workout, on any
+  // screen or from the Mac, rewrites the rest's next set at once, and the Mac's waiting "Rest over" with it.
+  const { keepRestInStep } = await import('./lib/rest-follow.js');
+  keepRestInStep(await ready, rest).run();
 }).catch(() => {});
 // Thu 10/22: how the timer sounds went on this phone, into the Mac's log (lib/diag.js).
 ready.then(async () => {

@@ -69,6 +69,12 @@ export async function openRepo(adapter) {
       if (!p) return (await adapter.listRecords(col)).filter((r) => !r.deleted).map((r) => r.data);
       return structuredClone([...(await p).values()]);
     },
+    /** The records of `col` that pass `keep`, copied (only those: a workout's sets, not all 8,000; Thu 11/5). */
+    async where(col, keep) {
+      const p = kept(col);
+      if (!p) return (await adapter.listRecords(col)).filter((r) => !r.deleted).map((r) => r.data).filter(keep);
+      return structuredClone([...(await p).values()].filter(keep));
+    },
     /** Read these collections from storage again next time (another tab of the app wrote them). */
     forget(cols) { for (const c of cols) lists.delete(c); },
     cols: () => adapter.listCols(),

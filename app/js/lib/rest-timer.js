@@ -51,11 +51,22 @@ export function status() {
   return { ...state, paused, leftMs: left, fraction: state.totalMs ? 1 - left / state.totalMs : 1 };
 }
 
-/** A rest of `seconds` after `label` (the exercise just ticked); `next` is the set it leads to, in words (lib/session.js nextAfterText). */
-export function start(seconds, label = '', next = '') {
+/** A rest of `seconds` after `label` (the exercise just ticked); `next` is the set it leads to, in words (lib/session.js
+ *  nextAfterText); `from` {sessionId, exKey} is the workout and exercise it follows, so `next` can follow changes. */
+export function start(seconds, label = '', next = '', from = null) {
   if (!seconds) { clear(); return; }
-  state = { endsAt: Date.now() + seconds * 1000, totalMs: seconds * 1000, label, next, rang: false };
+  state = { endsAt: Date.now() + seconds * 1000, totalMs: seconds * 1000, label, next, from: from && from.sessionId ? { sessionId: from.sessionId, exKey: from.exKey ?? null } : null, rang: false };
   store(state); loop(); emit(); plan();
+}
+
+/** Thu 11/5, his words: "I skipped [Hip Thrust]... once the rest time was over... the notification said do Hip Thrust
+ *  next. That doesn't update instantly." The set this rest leads to changed (skip, undo, reorder, add, remove, an edited
+ *  set): the rest bar, the Mac's waiting "Rest over" and the coach's line say the new one. False when nothing changed. */
+export function retarget(next) {
+  if (!state || typeof next !== 'string' || !next || state.next === next) return false;
+  state.next = next;
+  store(state); emit(); plan();
+  return true;
 }
 
 export function adjust(deltaSeconds) {

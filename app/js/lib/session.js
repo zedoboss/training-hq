@@ -373,7 +373,10 @@ const rangeText = (r) => (Array.isArray(r) ? (r[0] === r[1] ? `${r[0]}` : `${r[0
 export function nextSetText(session, sets) {
   // Thu 10/22: an exercise he skipped today is passed over.
   const skipped = new Set((session.exercises || []).filter((e) => e.skipped).map((e) => e.key));
-  const ordered = [...sets].filter((s) => !skipped.has(s.exKey)).sort((a, b) => a.order - b.order);
+  // Thu 11/5: in the workout's order as it is now (an exercise he moved up comes first), sets in their order.
+  const pos = new Map((session.exercises || []).map((e, i) => [e.key, i]));
+  const at = (s) => pos.get(s.exKey) ?? Infinity;
+  const ordered = [...sets].filter((s) => !skipped.has(s.exKey)).sort((a, b) => at(a) - at(b) || a.order - b.order);
   const next = ordered.find((s) => !s.done);
   if (!next) return '';
   const ex = (session.exercises || []).find((e) => e.key === next.exKey);
