@@ -126,7 +126,7 @@ test('the builder: started detached in the private folder with the guard; its an
   assert.match(contextLine({ store, tz: TZ, now: clock }), /Changes finished in the last day[^\n]*\[Thursday 3\/19 9:32 AM, done, checked\] "Stop the supplement message after a snack" -> Done: no supplement/);
 });
 
-test('a builder that stops without an answer runs once more, then he hears it failed; no daily limit', async () => {
+test('a builder that crashes without an answer carries on twice more, then he hears it failed; no daily limit', async () => {
   const { q, launched, alive } = queue();
   const c = q.request({ said: 'Talk less robotic' });
   await q.tick();
@@ -135,14 +135,19 @@ test('a builder that stops without an answer runs once more, then he hears it fa
   assert.equal(store.getRecord(COL, c.id).data.status, 'working', 'started again after the first stop');
   assert.equal(store.getRecord(COL, c.id).data.tries, 2);
   assert.equal(launched.length, 2);
+  assert.match(launched[1].prompt, /CARRY ON WHERE IT STOPPED: an earlier try of this change was cut off \(it stopped without an answer at 9:24 AM\)/);
+  alive.clear();
+  await q.tick();
+  assert.equal(store.getRecord(COL, c.id).data.tries, 3);
   alive.clear();
   await q.tick();
   assert.equal(store.getRecord(COL, c.id).data.status, 'failed');
-  assert.match(talk()[0].text, /didn't finish on the Mac \(the builder stopped twice\)/);
+  assert.match(talk()[0].text, /didn't finish on the Mac \(the builder crashed 3 times\)\. Say try again and I'll send it back\./);
+  assert.doesNotMatch(talk()[0].text, /check it|on the Mac\./);
   // Thu 10/22, his words: "Don't have a daily build limit": the next one starts straight away.
   q.request({ said: 'Another one' });
   await q.tick();
-  assert.equal(launched.length, 3);
+  assert.equal(launched.length, 4);
   assert.equal(existsSync(q.files(c.id).logFile), true);
 });
 

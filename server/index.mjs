@@ -31,7 +31,8 @@ import { openEngine } from './voice/engine.mjs';
 import { openVoice } from './voice/index.mjs';
 import { openWhisper } from './voice/whisper.mjs';
 import { openTts } from './voice/tts.mjs';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
+import { uptime } from 'node:os';
 import { join } from 'node:path';
 
 const log = (msg) => console.log(`${new Date().toISOString()} ${msg}`);
@@ -136,11 +137,28 @@ const coach = openCoach({ store, tools: TOOLS, profile: () => readProfile(p.data
 // him in Talk. A builder that changed server code makes the server restart itself (launchd starts it again).
 // config.coachChanges: false switches it off; changesCodeDir points a dev copy's builder at a scratch clone.
 // Unsaved edits to tracked files in the code or private folder (new untracked files, like an imported PDF, don't count).
+/** ms since the newest unsaved edit to a tracked file in these folders (Infinity: none). */
+const editedAgo = (dirs) => {
+  let newest = 0;
+  for (const dir of dirs) {
+    try {
+      for (const line of execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: dir, encoding: 'utf8', timeout: 10000 }).split('\n')) {
+        const file = line.slice(3).split(' -> ').at(-1).replace(/^"|"$/g, '');
+        if (!file) continue;
+        try { newest = Math.max(newest, statSync(join(dir, file)).mtimeMs); } catch { newest = Math.max(newest, Date.now()); } // deleted: count as now
+      }
+    } catch { /* not a repo */ }
+  }
+  return newest ? Date.now() - newest : Infinity;
+};
 const unsaved = (dir) => { try { return execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: dir, encoding: 'utf8', timeout: 10000 }).trim() !== ''; } catch { return false; } };
 const changes = config.coachChanges === false ? null : openChanges({
   store, push, codeDir: config.changesCodeDir || CODE_DIR, privateDir: p.privateDir, tz: () => phoneZone(store), log,
   restart: () => setTimeout(() => shutdown('a coach change updated the server'), 2000).unref(),
   dirty: () => [[config.changesCodeDir || CODE_DIR, 'the code folder'], [p.privateDir, 'the private folder']].filter(([d]) => unsaved(d)).map(([, name]) => name),
+  // Thu 11/5: only edits still being made hold a build; a restart of the Mac cuts off whatever started before it.
+  editedAgo: () => editedAgo([config.changesCodeDir || CODE_DIR, p.privateDir]),
+  bootedAt: () => Date.now() - uptime() * 1000,
   // Mid-workout is fine (his words: "even mid workout it can restart... as long as it saves"); a coach answer isn't.
   busy: () => Boolean(coach?.talking?.()),
 });

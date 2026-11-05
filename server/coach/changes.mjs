@@ -32,12 +32,33 @@ export const MODEL = { model: 'claude-opus-5-5', effort: 'high' };
 export const REVIEW_MODEL = { model: 'claude-opus-5-5', effort: 'medium' };
 export const TIMEOUT_MS = 60 * 60000;
 export const REVIEW_TIMEOUT_MS = 30 * 60000;
-export const MAX_TRIES = 2;
+/** Stops nobody can explain (a crash): this many tries, then he hears it didn't go through. Cut-offs don't count. */
+export const MAX_TRIES = 3;
+/**
+ * A build cut off from outside (Thu 11/5, his words: "once the limit resets, I can say continue and it will... even if I
+ * don't say continue, it will automatically retry again... every 30 minutes"; "an update... Wi-Fi being cut off or some
+ * other stuff should also all be taken into account without resetting"): the Claude usage limit, the Mac restarting,
+ * the internet or Claude's servers dropping. Nothing is lost and it doesn't count as a try: the change waits, first in
+ * line, and picks up where it stopped. The limit: again every 30 minutes and right at the reset Claude reports; the
+ * internet: every 2 minutes (every 30 after 5 in a row); a restart: at once. He can say "continue" (mac_queue).
+ */
+export const LIMIT_RETRY_MS = 30 * 60000;
+export const NET_RETRY_MS = 2 * 60000;
+/** Back after a pause: once the retry has run this long, he hears it's building again. */
+export const BACK_AFTER_MS = 90 * 1000;
+/** "continue" from him: the waiting changes start without waiting on unsaved edits, for this long. */
+export const GO_MS = 2 * 3600000;
+const CUT_TEXT = { limit: 'the Claude usage limit', restart: 'the Mac restarted', network: 'the internet or Claude dropped' };
 /**
  * A build doesn't start while the code or his private folder has unsaved edits (Thu 10/22: Claude in a chat on the Mac
  * may be mid-change; a builder would test, commit or push half of it). It waits, at most this long.
  */
 export const EDITS_WAIT_MS = 45 * 60000;
+/**
+ * Only edits still being made hold a build (Thu 11/5: a cut-off build's leftovers held the next for 45 minutes): edits
+ * nobody touched for this long are leftovers; the builder is told to leave them alone and starts at once.
+ */
+export const EDITS_IDLE_MS = 10 * 60000;
 /** A new request while another is open or finished this recently must say how it relates (amends, verify, separate). */
 export const RELATED_MS = 60 * 60000;
 /** How long a build takes when there are none to measure yet. */
@@ -102,7 +123,11 @@ export function buildMs(all = []) {
 }
 
 /** The waiting requests in the order they start. */
-export const lineOf = (all = []) => all.filter((c) => c.status === 'queued').sort((a, b) => lineAtOf(a) - lineAtOf(b) || a.at - b.at);
+export const lineOf = (all = []) => all.filter((c) => c.status === 'queued').sort((a, b) => cutFirst(a) - cutFirst(b) || lineAtOf(a) - lineAtOf(b) || a.at - b.at);
+/** A change cut off halfway carries on before anything else starts (its unsaved edits are its own). */
+const cutFirst = (c) => (c.cutOff?.length || c.reviewAgain ? 0 : 1);
+/** Paused after a cut-off: until when (null = not paused). */
+export const pausedUntil = (c, now = Date.now()) => (c?.pause && c.pause.until > now ? c.pause.until : null);
 
 const minutes = (ms) => Math.max(1, Math.round(ms / 60000));
 const ordinal = (n) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
@@ -116,7 +141,14 @@ export function whereText(c, all = [], now = Date.now()) {
     return left > 60000 ? `building now, about ${minutes(left)} minutes left` : 'building now, done any minute';
   }
   if (c.status !== 'queued') return c.status;
-  const place = lineOf(all).findIndex((x) => x.id === c.id) + 1 || 1;
+  const line = lineOf(all);
+  const place = line.findIndex((x) => x.id === c.id) + 1 || 1;
+  const held = pausedUntil(line[0], now);
+  if (held) {
+    const p = line[0].pause;
+    const what = `paused (${CUT_TEXT[p.why] || 'cut off'}${p.why === 'limit' && p.resetsAt > now ? `, resets ${formatTime(new Date(p.resetsAt), c.tz || 'UTC')}` : ''}; nothing lost, it picks up where it stopped): it tries again by itself at ${formatTime(new Date(held), c.tz || 'UTC')}${p.why === 'limit' ? ' (every 30 minutes)' : ''}, or at once when he says continue (mac_queue)`;
+    return place === 1 ? what : `${ordinal(place)} in line, after the pause: ${what}`;
+  }
   const working = all.find((x) => x.status === 'working' && x.id !== c.id);
   const ahead = working ? Math.max(60000, med - (now - (working.startedAt || now))) : 0;
   const wait = c.waitingFor?.length ? ` (waiting: unsaved edits on the Mac in ${c.waitingFor.join(' and ')}, at most ${EDITS_WAIT_MS / 60000} minutes)` : '';
@@ -150,7 +182,7 @@ const refLine = (r, tz) => `${r.id} ("${clip(r.said, 200)}", ${r.status}${r.done
  * others: requests waiting (not this one); recent: finished in the last day; ref: the request it corrects, checks or
  * fixes.
  */
-export function builderPrompt(c, { codeDir, privateDir, resultFile, others = [], recent = [], ref = null }) {
+export function builderPrompt(c, { codeDir, privateDir, resultFile, others = [], recent = [], ref = null, leftEdits = [] }) {
   const tz = c.tz || 'UTC';
   const when = c.tz ? `${formatDay(new Date(c.at), c.tz)}, ${formatTime(new Date(c.at), c.tz)}` : new Date(c.at).toISOString();
   const story = [
@@ -158,6 +190,8 @@ export function builderPrompt(c, { codeDir, privateDir, resultFile, others = [],
     c.corrects && ref ? `This corrects change ${refLine(ref, tz)}, which was ${ref.status === 'working' || ref.status === 'queued' ? 'being built' : 'built'} when he added his latest words. Its commits are in git (git log): build on top of them; keep what still stands, change what his latest words change.` : '',
     c.fixOf && ref ? `A reviewer checked change ${refLine(ref, tz)} and found it isn't right yet${c.review?.said ? `: "${c.review.said}"` : ''}${c.review?.checked ? ` (it checked: ${c.review.checked})` : ''}. Fix exactly that, on top of its commits.` : '',
     c.verify ? 'He asked for this to be double-checked: after the change, test it end to end the way he would meet it (a dev copy, or the real function with his real case from today), not only the unit tests, and say in "checked" what you verified.' : '',
+    c.cutOff?.length ? `CARRY ON WHERE IT STOPPED: an earlier try of this change was cut off (${c.cutOff.slice(-3).map((x) => `${CUT_TEXT[x.why] || 'it stopped without an answer'} at ${formatTime(new Date(x.at), tz)}`).join('; ')}). What it did is still there: its commits (git log since it started${c.startHeads?.code ? `, code ${String(c.startHeads.code).slice(0, 7)}` : ''}) and its unsaved edits (git status, git diff in both folders). Check them, keep what's right, finish the rest; don't start over and don't throw its edits away. Write the answer file as usual when done.` : '',
+    leftEdits.length ? `Unsaved edits were already in ${leftEdits.join(' and ')} when you started${c.cutOff?.length ? ' (probably your earlier try\'s: pick them up). Any that aren\'t part of this change: leave' : ' (left by an earlier build that was cut off). Leave'} them alone: never git add, commit, stash, checkout or reset them; commit only your own files and hunks.` : '',
     c.auto ? `The coach filed this on its own${c.by === 'nightly' ? ' (the nightly review of his day)' : ''}: he complained or corrected it without asking for a change. Do only what his words ask; when they don't clearly ask for a change, change nothing and say so (status "question").` : '',
   ].filter(Boolean).join('\n');
   return `COACH CHANGE ${c.id}
@@ -223,6 +257,49 @@ WHEN YOU FINISH, write ${reviewFile} with this JSON and nothing else, then end t
 {"status": "ok" | "fixed" | "failed", "said": "<ONE sentence for him, at most 120 characters: ok or fixed: what now works, starting with Done:; failed: what is still wrong, plainly>", "reload": <true if YOU changed anything under server/, else false>, "commits": ["<short sha> <subject>" of your own fixes], "checked": "<one line, at most 200 characters: what you checked>"}`;
 }
 
+// ---- cut off from outside (Thu 11/5) -------------------------------------------------------------------------------
+
+const NET_WORDS = /API Error|connection|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|fetch failed|socket hang up|timed? ?out|overloaded|Unable to connect|network/i;
+const LIMIT_WORDS = /hit your .{0,30}limit|usage limit|limit reached|limit · resets/i;
+
+/** The last try in a builder's or reviewer's log (each try starts with a "coach change ..." line). */
+export function lastTry(text = '') {
+  const i = String(text).lastIndexOf('\ncoach change ');
+  return i >= 0 ? text.slice(i + 1) : String(text);
+}
+
+/**
+ * Why a chat stopped without an answer, from its stream-json log: {why: 'limit', resetsAt} when Claude refused for the
+ * usage limit, {why: 'network'} for the internet or Claude's servers, else null (a crash: counts as a try). Only
+ * Claude Code's own events count, never tool output (a builder may well read this very code); a real answer after an
+ * error means it got past it.
+ */
+export function cutOffOf(text = '') {
+  let cut = null; let resetsAt = null;
+  for (const line of String(text).split('\n')) {
+    if (!line.startsWith('{')) continue;
+    let e; try { e = JSON.parse(line); } catch { continue; }
+    if (e.type === 'rate_limit_event') {
+      const r = e.rate_limit_info || {};
+      if (r.status === 'rejected') { cut = 'limit'; if (r.resetsAt) resetsAt = r.resetsAt * 1000; }
+    } else if (e.type === 'assistant' && e.is_api_error_message) {
+      const status = Number(e.api_error_status) || 0;
+      const words = (e.message?.content || []).map((x) => x?.text || '').join(' ');
+      if (e.error === 'rate_limit' && (e.api_error === 'usage_limit_reached' || LIMIT_WORDS.test(words))) cut = 'limit';
+      else if (status === 429 || status >= 500 || (!status && NET_WORDS.test(words))) cut = 'network';
+      else cut = null;
+      const reset = e.api_error_params?.rate_limit_info?.resetsAt;
+      if (cut === 'limit' && reset) resetsAt = reset * 1000;
+    } else if (e.type === 'assistant') {
+      cut = null; resetsAt = null; // it got past any error
+    } else if (e.type === 'result' && e.is_error && typeof e.result === 'string') {
+      if (LIMIT_WORDS.test(e.result)) cut = 'limit';
+      else if (!cut && NET_WORDS.test(e.result)) cut = 'network';
+    }
+  }
+  return cut ? { why: cut, ...(cut === 'limit' && resetsAt ? { resetsAt } : {}) } : null;
+}
+
 /** Was this process started and is it still running? */
 function alive(pid) {
   if (!pid) return false;
@@ -276,8 +353,10 @@ const changedSince = (start, end, commits = []) => commits.length > 0 || Boolean
  * @param {() => void} [o.restart] the server restarts itself (a builder changed server code)
  * @param {() => boolean} [o.busy] the coach is answering: the restart waits
  * @param {() => {code: string|null, private: string|null}} [o.heads] both repos' git HEADs
+ * @param {() => number} [o.editedAgo] ms since the newest unsaved edit in the folders (0 = just now)
+ * @param {() => number} [o.bootedAt] when the Mac last started (ms): a chat started before it was cut off by the restart
  */
-export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, dirty = () => [], heads = null, log = () => {}, now = () => Date.now(), tz = () => 'UTC', timeoutMs = TIMEOUT_MS, reviewTimeoutMs = REVIEW_TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)), moreScript = fileURLToPath(new URL('./change-more.mjs', import.meta.url)) }) {
+export function openChanges({ store, push = null, codeDir, privateDir, launch = launchBuilder, isAlive = alive, restart = () => {}, busy = () => false, dirty = () => [], editedAgo = () => 0, bootedAt = () => 0, heads = null, log = () => {}, now = () => Date.now(), tz = () => 'UTC', timeoutMs = TIMEOUT_MS, reviewTimeoutMs = REVIEW_TIMEOUT_MS, guard = fileURLToPath(new URL('./change-guard.mjs', import.meta.url)), moreScript = fileURLToPath(new URL('./change-more.mjs', import.meta.url)) }) {
   const dir = join(privateDir, 'logs', 'coach-changes');
   const headsNow = heads || (() => ({ code: gitHead(codeDir), private: gitHead(privateDir) }));
   const all = () => store.listRecords(COL).map((r) => r.data).filter(Boolean).sort((a, b) => a.at - b.at);
@@ -347,6 +426,41 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     try { if (push?.list?.().length) await push.notify({ title: 'Coach', body: text, url: '#/coach', tag: `change-${c.id}` }); } catch (e) { log(`coach change ${c.id}: notification: ${e.message}`); }
   }
 
+  /**
+   * Cut off from outside (the limit, a restart, the internet): back in line, first, without counting a try; it picks
+   * up where it stopped once it can. The limit: he hears it once when it pauses and once when it runs again.
+   */
+  async function pauseFor(c, cut) {
+    const z = c.tz || tz();
+    // The same pause carries on when a retry hits it again (no second message).
+    const prev = c.resuming && !c.resuming.back ? c.resuming : null;
+    const streak = prev?.why === cut.why ? (prev.streak || 1) + 1 : 1;
+    const gap = cut.why === 'limit' ? LIMIT_RETRY_MS : cut.why === 'network' ? (streak > 5 ? LIMIT_RETRY_MS : NET_RETRY_MS) : 0;
+    const resetsAt = cut.resetsAt > now() ? cut.resetsAt : null;
+    const until = resetsAt ? Math.min(now() + gap, resetsAt + 60000) : now() + gap;
+    const told = Boolean(prev?.told);
+    const pause = { why: cut.why, since: prev?.since || now(), until, streak, told, ...(resetsAt ? { resetsAt } : {}) };
+    const review = c.stage === 'review';
+    const { pid, resuming, stage, reviewPid, ...rest } = c;
+    const tries = review ? c.tries : Math.max(0, (c.tries || 1) - 1);
+    put({ ...rest, status: 'queued', stage: null, tries, pause, cutOff: [...(c.cutOff || []), { at: now(), why: cut.why, ...(review ? { stage: 'review' } : {}) }].slice(-20), ...(review ? { reviewAgain: true } : {}) });
+    log(`coach change ${c.id}: cut off ${review ? 'while checked ' : ''}(${CUT_TEXT[cut.why]}); nothing lost, carries on ${until <= now() ? 'now' : `at ${formatTime(new Date(until), z)}`}`);
+    if (cut.why !== 'limit' || told) return;
+    const reset = resetsAt ? ` and at the ${isoDate(new Date(resetsAt), z) === isoDate(new Date(now()), z) ? '' : `${formatDay(new Date(resetsAt), z)} `}${formatTime(new Date(resetsAt), z)} reset` : '';
+    await tell(c, `Claude limit hit, the Mac paused. Nothing's lost: it retries every 30 minutes${reset}, or say continue.`);
+    const latest = one(c.id);
+    if (latest?.pause) put({ ...latest, pause: { ...latest.pause, told: true } });
+  }
+
+  /** Running again after a limit pause he heard about: once it has run a while, he hears it's back at work. */
+  async function backAgain(c, since = c.startedAt) {
+    const r = c.resuming;
+    if (!r?.told || r.back || now() - (since || now()) < BACK_AFTER_MS) return;
+    put({ ...c, resuming: { ...r, back: true } });
+    const waiting = lineOf(all()).length;
+    await tell(c, `The Mac is building again, picking up where it stopped.${waiting ? ` ${waiting} more in line.` : ''}`);
+  }
+
   /** File one request (the coach's tool writes the same record straight into the store). */
   function request(o) {
     const c = put(newChange({ ...o, at: o.at ?? now(), tz: o.tz || tz(), messages: messages() }));
@@ -400,7 +514,8 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
     const { reviewLog, reviewFile } = files(c.id);
     const latest = one(c.id) || c;
     // The reviewer's prompt has all his words; those the builder never got are marked for it.
-    const withBuild = { ...latest, build, builderHeard: heardOf(latest), briefed: asksOf(latest).length };
+    const { reviewAgain: _r, pause: _p, go: _g, ...base } = latest;
+    const withBuild = { ...base, ...(c.resuming ? { resuming: c.resuming } : {}), status: 'working', build, builderHeard: latest.builderHeard ?? heardOf(latest), briefed: asksOf(latest).length };
     const prompt = reviewPrompt(withBuild, { codeDir, privateDir, reviewFile, ref: one(c.checkOf) });
     writeFileSync(reviewLog, `coach change review ${c.id}, ${new Date(now()).toISOString()}\n`, { flag: 'a' });
     const pid = launch({ prompt, cwd: privateDir, logFile: reviewLog, settings: guardSettings({ guard, codeDir, privateDir, more: moreHooks(c, reviewFile) }), model: REVIEW_MODEL });
@@ -447,8 +562,15 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
       return;
     }
     const over = now() - (c.reviewStartedAt || 0) > reviewTimeoutMs;
-    if (isAlive(c.reviewPid) && !over) return;
-    if (over && isAlive(c.reviewPid)) { try { process.kill(-c.reviewPid, 'SIGTERM'); } catch { /* gone */ } }
+    const rebooted = Boolean(c.reviewStartedAt && bootedAt() > c.reviewStartedAt);
+    const running = !rebooted && isAlive(c.reviewPid);
+    if (running && !over) { await backAgain(c, c.reviewStartedAt); return; }
+    if (over && running) { try { process.kill(-c.reviewPid, 'SIGTERM'); } catch { /* gone */ } }
+    // Cut off from outside while it checked: the check runs again once it can (the build stays).
+    let text = '';
+    try { text = lastTry(readFileSync(files(c.id).reviewLog, 'utf8')); } catch { /* no log */ }
+    const cut = over ? null : rebooted ? { why: 'restart' } : cutOffOf(text);
+    if (cut) { await pauseFor(c, cut); return; }
     log(`coach change ${c.id}: not reviewed (${over ? 'the reviewer ran over 30 minutes' : 'the reviewer stopped without an answer'})`);
     await finish(c, c.build || { status: 'done' }, { reviewed: false });
   }
@@ -464,34 +586,47 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
       return;
     }
     const over = now() - (c.startedAt || 0) > timeoutMs;
-    if (isAlive(c.pid) && !over) return;
-    if (over && isAlive(c.pid)) { try { process.kill(-c.pid, 'SIGTERM'); } catch { /* gone */ } }
-    let tail = '';
-    try { tail = readFileSync(logFile, 'utf8').slice(-1500); } catch { /* no log */ }
+    // The Mac restarted since it started: it's gone (its pid may belong to something else now).
+    const rebooted = Boolean(c.startedAt && bootedAt() > c.startedAt);
+    const running = !rebooted && isAlive(c.pid);
+    if (running && !over) { await backAgain(c); return; }
+    if (over && running) { try { process.kill(-c.pid, 'SIGTERM'); } catch { /* gone */ } }
+    let text = '';
+    try { text = lastTry(readFileSync(logFile, 'utf8')); } catch { /* no log */ }
+    const cut = over ? null : rebooted ? { why: 'restart' } : cutOffOf(text);
+    if (cut) { await pauseFor(c, cut); return; }
+    const tail = text.slice(-1500);
     if ((c.tries || 0) < MAX_TRIES && !over) {
-      put({ ...c, status: 'queued', pid: null, lastError: clip(tail, 300) || 'the builder stopped without an answer' });
-      log(`coach change ${c.id}: builder stopped without an answer, queued again`);
+      put({ ...c, status: 'queued', pid: null, lastError: clip(tail, 300) || 'the builder stopped without an answer', cutOff: [...(c.cutOff || []), { at: now(), why: 'crash' }].slice(-20) });
+      log(`coach change ${c.id}: builder stopped without an answer, queued again to carry on`);
       return;
     }
-    await finish(c, { status: 'failed', said: `The change you asked for at ${formatTime(new Date(c.at), c.tz || tz())} didn't finish on the Mac (${over ? 'it ran over an hour' : 'the builder stopped twice'}). Ask again, or check it in a chat on the Mac.` });
+    await finish(c, { status: 'failed', said: `The change you asked for at ${formatTime(new Date(c.at), c.tz || tz())} didn't finish on the Mac (${over ? 'it ran over an hour' : `the builder crashed ${MAX_TRIES} times`}). Say try again and I'll send it back.` });
   }
 
-  function start(c) {
+  function start(c, leftEdits = []) {
     mkdirSync(dir, { recursive: true });
+    if (c.reviewAgain) {
+      // The check was cut off: run it again on the same build (no new build).
+      const { reviewAgain, pause, go, waitingFor, waitingSince, ...rest } = c;
+      startReview({ ...rest, ...(pause ? { resuming: pause } : {}) }, c.build || { status: 'done' });
+      return;
+    }
     const { logFile, resultFile } = files(c.id);
     const everything = all();
     const others = lineOf(everything).filter((x) => x.id !== c.id);
     const recent = everything.filter((x) => x.status === 'done' && now() - (x.doneAt || 0) < 86400000);
-    const prompt = builderPrompt(c, { codeDir, privateDir, resultFile, others, recent, ref: one(c.corrects || c.checkOf || c.fixOf) });
+    const prompt = builderPrompt(c, { codeDir, privateDir, resultFile, others, recent, ref: one(c.corrects || c.checkOf || c.fixOf), leftEdits });
     writeFileSync(logFile, `coach change ${c.id}, try ${(c.tries || 0) + 1}, ${new Date(now()).toISOString()}\n`, { flag: 'a' });
     resetMore(c);
     const settings = guardSettings({ guard, codeDir, privateDir, more: moreHooks(c, resultFile) });
     // The heads the build starts from (kept across a second try): the reviewer reads the diff from here.
     const startHeads = c.startHeads || headsNow();
     const pid = launch({ prompt, cwd: privateDir, logFile, settings, model: MODEL });
-    const { waitingFor, waitingSince, ...rest } = c;
+    const { waitingFor, waitingSince, pause, go, resuming, ...rest } = c;
     // briefed: how many of his asks are in its prompt; the ones he adds later are handed over while it works.
-    put({ ...rest, status: 'working', stage: 'build', pid, startedAt: now(), tries: (c.tries || 0) + 1, startHeads, briefed: asksOf(c).length });
+    // resuming: the pause it comes back from (he hears "building again" once it runs).
+    put({ ...rest, status: 'working', stage: 'build', pid, startedAt: now(), tries: (c.tries || 0) + 1, startHeads, briefed: asksOf(c).length, ...(pause ? { resuming: pause } : {}) });
     log(`coach change ${c.id}: builder started (pid ${pid})`);
   }
 
@@ -518,14 +653,20 @@ export function openChanges({ store, push = null, codeDir, privateDir, launch = 
       // No daily limit (Thu 10/22, his words: "Don't have a daily build limit. Make it unlimited"): one at a time.
       const next = lineOf(all())[0];
       if (!next) { editsSince = 0; return; }
+      // Paused after a cut-off: it tries again by itself at the time set, or at once when he says continue (mac_queue).
+      if (pausedUntil(next, now())) return;
       const edits = dirty();
-      if (edits.length) {
+      // Edits wait only when someone is still making them: not a cut-off change's own, not leftovers nobody has
+      // touched for 10 minutes, not after he said continue.
+      const own = next.cutOff?.length || next.reviewAgain || (next.go && now() - next.go < GO_MS);
+      const stale = edits.length && editedAgo() >= EDITS_IDLE_MS;
+      if (edits.length && !own && !stale) {
         if (!editsSince) { editsSince = now(); log(`coach change ${next.id}: waits, unsaved edits in ${edits.join(', ')}`); put({ ...next, waitingFor: edits, waitingSince: editsSince }); }
         if (now() - editsSince < EDITS_WAIT_MS) return;
         log(`coach change ${next.id}: edits still unsaved after ${Math.round(EDITS_WAIT_MS / 60000)} minutes; starting anyway`);
       }
       editsSince = 0;
-      try { start(next); } catch (e) {
+      try { start(next, edits); } catch (e) {
         log(`coach change ${next.id}: ${e.message}`);
         await finish(next, { status: 'failed', said: `I couldn't start the change on the Mac: ${e.message}.` });
       }
