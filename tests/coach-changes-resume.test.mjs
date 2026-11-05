@@ -249,7 +249,7 @@ test('Mac status in plain words (Thu 11/5 9:02 AM: "I didn\'t get much from the 
   const now = Date.parse('2026-11-05T02:00:00Z');
   const q = { id: 'q', status: 'queued', at: now - 60000, waitingFor: ['the code folder'] };
   const w = whereText(q, [q], now);
-  assert.match(w, /a build that was cut off/);
+  assert.match(w, /other unfinished work on the Mac/);
   assert.match(w, /starts by itself/);
   assert.match(w, /nothing for him to do/);
   assert.doesNotMatch(w, /unsaved edits on the Mac|code folder/);

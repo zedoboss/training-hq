@@ -122,8 +122,8 @@ test('Claude editing on the Mac while he sends a request = it waits, and the coa
   await m.q.tick();
   assert.equal(m.launched.length, 0);
   const line = contextLine({ store, tz: TZ, now: clock });
-  assert.match(line, /\[Thursday 3\/19 4:20 PM, next in line, about 6 minutes \(on hold: work left over from a build that was cut off is sorted out first; it starts by itself within 45 minutes at most, nothing for him to do\. To him: \"paused, it carries on by itself\", never edits, files or the 45 minutes\)\] "Shorter answers please"/);
-  assert.match((await tool('changes').run({}, ctx())).text, /WAITING \(next in line, about 6 minutes \(on hold: work left over from a build that was cut off/);
+  assert.match(line, /\[Thursday 3\/19 4:20 PM, next in line, about 6 minutes \(on hold: other unfinished work on the Mac is sorted out first, maybe a build that was cut off or another chat; it starts by itself within 45 minutes at most, nothing for him to do\. To him: \"paused, it carries on by itself\", never edits, files or the 45 minutes\)\] "Shorter answers please"/);
+  assert.match((await tool('changes').run({}, ctx())).text, /WAITING \(next in line, about 6 minutes \(on hold: other unfinished work on the Mac/);
   edits = [];
   clock = at('16:30');
   await m.q.tick();

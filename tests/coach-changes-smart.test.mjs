@@ -224,7 +224,7 @@ test('place in line and time: the median of the last 8 builds; building, checkin
   const now = at('16:03');
   assert.equal(whereText(w, all, now), 'building now, about 5 minutes left');
   assert.equal(whereText(q1, all, now), 'next in line, about 13 minutes');
-  assert.equal(whereText(q2, all, now), '2nd in line, about 21 minutes (on hold: work left over from a build that was cut off is sorted out first; it starts by itself within 45 minutes at most, nothing for him to do. To him: "paused, it carries on by itself", never edits, files or the 45 minutes)');
+  assert.equal(whereText(q2, all, now), '2nd in line, about 21 minutes (on hold: other unfinished work on the Mac is sorted out first, maybe a build that was cut off or another chat; it starts by itself within 45 minutes at most, nothing for him to do. To him: "paused, it carries on by itself", never edits, files or the 45 minutes)');
   assert.equal(whereText({ ...w, stage: 'review' }, all, now), 'built, being checked before he hears done');
   assert.equal(whereText(w, all, at('16:30')), 'building now, done any minute');
 });
