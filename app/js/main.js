@@ -157,6 +157,27 @@ ready.then(async () => {
   }
 }).catch(() => {});
 registerServiceWorker();
+// Every exercise demo kept on this phone (Thu 11/5): fetched in the background a little after opening, and again when
+// the Mac adds or changes one, so opening an exercise never waits on the Mac.
+ready.then(async (repo) => {
+  const { keepAllDemos } = await import('./lib/demos.js');
+  const { fetchDemo } = await import('./lib/data.js');
+  let busy = false; let again = false;
+  const run = async () => {
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      do {
+        again = false;
+        if (!getState().paired || !navigator.onLine) break;
+        await keepAllDemos(await repo.list('demos'), fetchDemo, { stillOk: () => getState().paired && navigator.onLine });
+      } while (again);
+    } catch { /* storage refused: each demo is fetched when opened instead */ }
+    busy = false;
+  };
+  setTimeout(run, 8000);
+  repo.onChange((cols, origin) => { if (origin === 'remote' && cols.includes('demos')) setTimeout(run, 1000); });
+}).catch(() => {});
 // Squat Depth's pose files (about 19 MB) are fetched once in the background so it works at the gym with no signal.
 autoKeepOffline();
 // "Rest over" from the Mac (Thu 10/22): it learns when each rest ends and sends a notification at that moment, heard

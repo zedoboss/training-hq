@@ -15,6 +15,13 @@ let again = false;
 
 export const ready = (async () => {
   repo = await openRepo(await idbAdapter());
+  // The repo keeps read collections in memory: another open copy of the app (a second tab) says what it wrote, so
+  // this one reads those from storage again.
+  try {
+    const peers = new BroadcastChannel('thq-repo');
+    peers.onmessage = (e) => { if (Array.isArray(e.data?.cols)) repo.forget(e.data.cols); };
+    repo.onChange((cols, origin) => { if (origin === 'local') peers.postMessage({ cols }); });
+  } catch { /* no BroadcastChannel: one copy only */ }
   repo.onChange((cols) => {
     if (cols.includes('programme')) refreshProgramme();
     if (cols.includes('settings')) refreshSettings();

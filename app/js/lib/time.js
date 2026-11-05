@@ -1,11 +1,30 @@
 // Dates and times in the device's time zone, in the formats the owner asked for:
 // times as H:MM AM/PM, days with weekday and date ("Sunday 10/11").
 // Every function takes an optional IANA time zone; tests pass one explicitly.
-export const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+// Thu 11/5 (screens took about a second to open): making a date formatter is slow, on the iPhone most of all, and a
+// screen formats thousands of dates (his whole lift history). The zone is read again after a second (travel changes
+// it), and each formatter is made once and kept.
+let zoneSeen = { at: 0, tz: null };
+export const deviceTimeZone = () => {
+  const now = Date.now();
+  if (!zoneSeen.tz || now - zoneSeen.at > 1000 || now < zoneSeen.at) zoneSeen = { at: now, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  return zoneSeen.tz;
+};
+const formatters = new Map();
+export const formatterFor = (tz, opts) => {
+  const key = `${tz}|${JSON.stringify(opts)}`;
+  let f = formatters.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, ...opts });
+    if (formatters.size > 300) formatters.clear();
+    formatters.set(key, f);
+  }
+  return f;
+};
 
 const parts = (date, opts, tz = deviceTimeZone()) => {
   const out = {};
-  for (const p of new Intl.DateTimeFormat('en-US', { timeZone: tz, ...opts }).formatToParts(date)) {
+  for (const p of formatterFor(tz, opts).formatToParts(date)) {
     out[p.type] = p.value;
   }
   return out;

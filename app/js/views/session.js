@@ -90,7 +90,7 @@ async function context(repo, excludeSessionId) {
   const fullHistory = !activeBridge(bridge, sessions) && sessions.some((s) => s.source === 'hevy' && s.status === 'done');
   // Thu 11/5: the same lift hurting the same area on more than one day (lib/pain.js): flagged on its card.
   const painFlags = repeatFlags(painEntries({ sessions, sets: sets.filter((x) => x.note), log: painLog }));
-  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), lib, sessions, bridge, meta, painFlags, comebackStart: comebackStartOf(meta), fullHistory, bank, ceilings, calm };
+  return { history: buildHistory({ sessions, sets, bridge, excludeSessionId }), allSets: sets, lib, sessions, bridge, meta, painFlags, comebackStart: comebackStartOf(meta), fullHistory, bank, ceilings, calm };
 }
 
 /** The template as his last workout of its kind (routineFromLast), or the template when there is none since the comeback. */
@@ -852,8 +852,8 @@ export function render(view, params = []) {
     if (!session) { view.innerHTML = '<p class="view-sub">Loading…</p>'; await syncNow().catch(() => {}); session = await repo.get('sessions', id); }
     if (!session) { view.innerHTML = '<h1 class="view-title">Session not found</h1><p class="hint"><a href="#/train">Back to Train</a></p>'; return; }
     if (session.status !== 'active' && !(editing && session.status === 'done')) { location.replace(`#/finish/${id}`); return; }
-    sets = (await repo.list('sets')).filter((s) => s.sessionId === id);
     ctx = await context(repo, id);
+    sets = ctx.allSets.filter((s) => s.sessionId === id); delete ctx.allSets; // one read of his sets, not two
     if (!editing) await pairOpen();
     typicalMs = typicalDurationMs(session.dayType, { sessions: ctx.sessions, bridge: ctx.bridge, now: session.startedAt });
     draw();

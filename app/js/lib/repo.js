@@ -16,9 +16,33 @@ export async function openRepo(adapter) {
   // origin: 'local' for writes on this device, 'remote' for changes that arrived by sync.
   const changed = (cols, origin) => { for (const fn of listeners) fn(cols, origin); };
 
+  // Thu 11/5 (opening an exercise and going back to the workout took about a second): each screen read his whole
+  // history (8,000+ sets) from storage again. A collection read once is kept in memory and kept in step with every
+  // write here and every change from the Mac; callers get copies, so nothing they change touches the kept one.
+  // Photo collections (large pictures) are always read from storage.
+  const lists = new Map();
+  const keeps = (col) => !/photo/i.test(col);
+  const kept = (col) => {
+    if (!keeps(col)) return null;
+    let p = lists.get(col);
+    if (!p) {
+      p = adapter.listRecords(col).then((recs) => new Map(recs.filter((r) => !r.deleted).map((r) => [r.id, r.data])));
+      lists.set(col, p);
+      p.catch(() => { if (lists.get(col) === p) lists.delete(col); });
+    }
+    return p;
+  };
+  const copy = (v) => (v == null ? v : structuredClone(v));
+
   async function write(col, id, data, deleted) {
     const rec = { col, id, data: deleted ? null : data, deleted, hlc: clock.tick(), device };
     await adapter.writeLocal(rec, clock.state());
+    const p = lists.get(col);
+    if (p) {
+      const value = copy(rec.data);
+      // Runs after the read in flight (if any), so this write is never lost from the kept list.
+      await p.then((m) => { if (deleted) m.delete(id); else m.set(id, value); }, () => {});
+    }
     changed([col], 'local');
     return rec;
   }
@@ -36,12 +60,17 @@ export async function openRepo(adapter) {
     },
     remove: (col, id) => write(col, id, null, true),
     async get(col, id) {
+      if (lists.has(col)) { const m = await kept(col).catch(() => null); if (m) return copy(m.get(id) ?? null); }
       const r = await adapter.getRecord(col, id);
       return r && !r.deleted ? r.data : null;
     },
     async list(col) {
-      return (await adapter.listRecords(col)).filter((r) => !r.deleted).map((r) => r.data);
+      const p = kept(col);
+      if (!p) return (await adapter.listRecords(col)).filter((r) => !r.deleted).map((r) => r.data);
+      return structuredClone([...(await p).values()]);
     },
+    /** Read these collections from storage again next time (another tab of the app wrote them). */
+    forget(cols) { for (const c of cols) lists.delete(c); },
     cols: () => adapter.listCols(),
     outbox: () => adapter.listOutbox(),
     pendingCount: async () => (await adapter.listOutbox()).length,
@@ -50,6 +79,7 @@ export async function openRepo(adapter) {
     async applyRemote(records) {
       for (const r of records) clock.receive(r.hlc);
       const cols = await adapter.applyRemote(records, newer, clock.state());
+      for (const c of cols) lists.delete(c);
       if (cols.length) changed(cols, 'remote');
       return cols;
     },

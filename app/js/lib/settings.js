@@ -82,11 +82,14 @@ const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 
 /** Deep merge of plain objects; arrays and values from `over` replace the ones in `base`. Unknown keys are kept. */
 export function mergeDeep(base, over) {
-  if (!isObj(over)) return structuredClone(base);
-  const out = structuredClone(base);
+  return mergeInto(structuredClone(base), over);
+}
+// Thu 11/5 (screens opening slowly): the base is copied once, not again at every level.
+function mergeInto(out, over) {
+  if (!isObj(over)) return out;
   for (const [k, v] of Object.entries(over)) {
     if (v === undefined) continue;
-    out[k] = isObj(v) && isObj(base[k]) ? mergeDeep(base[k], v) : structuredClone(v);
+    out[k] = isObj(v) && isObj(out[k]) ? mergeInto(out[k], v) : (v && typeof v === 'object' ? structuredClone(v) : v);
   }
   return out;
 }

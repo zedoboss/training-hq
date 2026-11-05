@@ -40,6 +40,27 @@ export async function keptIds() {
   } catch { return new Set(); }
 }
 
+/**
+ * Thu 11/5, his words: "You can store videos here on the phone itself": every demo the Mac has is kept on this device
+ * in the background (all 177 animated demos are about 8 MB), so none waits on the Mac when he taps it.
+ * recs: the synced 'demos' records; fetchOne(id) gets the file from the Mac. Stops at the first failure (Mac not
+ * reachable) and tries again on the next call. Returns how many were fetched.
+ */
+export async function keepAllDemos(recs, fetchOne, { stillOk = () => true } = {}) {
+  let have;
+  try { have = new Set((await (await caches.open(CACHE)).keys()).map((r) => r.url)); } catch { return 0; }
+  let n = 0;
+  for (const rec of recs) {
+    if (!rec?.id || have.has(keyFor(rec.id, rec))) continue;
+    if (!stillOk()) break;
+    let blob;
+    try { blob = await fetchOne(rec.id); } catch { break; }
+    await keepClip(rec.id, rec, blob);
+    n++;
+  }
+  return n;
+}
+
 const pickType = () => {
   if (typeof MediaRecorder === 'undefined') return null;
   return ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t)) ?? null;
