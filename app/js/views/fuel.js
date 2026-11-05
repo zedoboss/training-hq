@@ -3,7 +3,8 @@
 // Supplements and the sauna join this screen later in step 6.
 import { ready, saveSettings } from '../lib/data.js';
 import { withDefaults } from '../lib/settings.js';
-import { mealTimesOf, MEAL_NUDGE } from '../lib/fuel-reminders.js';
+import { mealTimesOf, mealFitIssues, MEAL_NUDGE } from '../lib/fuel-reminders.js';
+import { phoneMealTimes } from '../lib/moving-day.js';
 import { MEAL_NAMES } from '../lib/meals.js';
 import { actionSheet, overlay } from '../ui/sheet.js';
 import { formatHm } from '../lib/time.js';
@@ -155,7 +156,7 @@ export function render(view, params) {
   const draw = async () => {
     today = await wakingDayAt(repo);
     if (!asked) date = today;
-    const [meals, estimates, photos, plan, checks, dayList, presetDoc, waterLog] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days'), repo.get('fuel', 'presets'), repo.list('water')]);
+    const [meals, estimates, photos, plan, checks, dayList, presetDoc, waterLog, dayClock] = await Promise.all([repo.list('meals'), repo.list('meal-estimates'), repo.list('meal-photos'), repo.get('fuel', 'plan'), repo.list('meal-checks'), repo.list('days'), repo.get('fuel', 'presets'), repo.list('water'), repo.get('day-clock', 'now')]);
     if (!alive) return;
     // Thu 11/5 (his list: "No water tracking"): the day's water; a daily amount only when he set one himself.
     const water = waterTotal(waterLog, date);
@@ -165,7 +166,12 @@ export function render(view, params) {
     const fasting = fastingOn(days, date, meals);
     const fast = days[date]?.fast;
     const tg = targetsOf(plan);
-    const times = mealTimesOf(withDefaults(getState().settings).fuel.mealTimes);
+    // Thu 11/5 (his words: "see if something doesn't update accordingly instantly"): the times the reminders use today,
+    // moved with his day on the moving schedule; and a time that doesn't fit his day (wake to bed) is said.
+    const stg = withDefaults(getState().settings);
+    const times = phoneMealTimes(mealTimesOf(stg.fuel.mealTimes), dayClock);
+    const moved = times.some((x) => x.moved);
+    const unfit = mealFitIssues(stg.fuel.mealTimes, stg.notify.wakeHm, stg.notify.bedHm);
     const presets = presetsOf(presetDoc);
     const mine = myFoods(plan);
     const dayChecks = checks.filter((c) => c.date === date && c.answer !== 'eaten');
@@ -206,7 +212,9 @@ export function render(view, params) {
         <p class="hint">Take the before photo. The Mac names the foods and estimates grams from your packs and usual amounts; kcal and protein come from USDA values. You confirm or fix (Fix has one-tap packs and counts).</p>` : ''}
       ${queued ? '<p class="hint c-amber">Mac unreachable: photos are kept on this phone and read when it is back.</p>' : ''}
       ${date === today ? `<section class="card pad-card fuel-times"><div class="ex-head"><span class="hud c-muted">MEAL TIMES</span><button class="link-btn" id="f-times" type="button">${times.length ? 'Change' : 'Set them'}</button></div>
-        ${times.length ? `<p class="hint c-text">${times.map((x) => `${esc(x.name)} ${formatHm(x.time)}`).join(' · ')}</p>` : '<p class="hint">Not set yet, so no meal-time reminders. Set your usual times and the app asks when one passes with nothing logged.</p>'}
+        ${times.length ? `<p class="hint c-text" id="f-times-now">${times.map((x) => `${esc(x.name)} ${formatHm(x.time)}${x.latest ? ` (latest ${formatHm(x.latest)})` : ''}`).join(' · ')}</p>
+        ${moved ? `<p class="hint">Today, moved with when you woke. Your usual day: ${times.map((x) => `${esc(x.name)} ${formatHm(x.slot)}`).join(' · ')}.</p>` : ''}
+        ${unfit.length ? `<p class="hint c-amber" id="f-times-unfit">Doesn't fit your day: ${esc(unfit.join('; '))}.</p>` : ''}` : '<p class="hint">Not set yet, so no meal-time reminders. Set your usual times and the app asks when one passes with nothing logged.</p>'}
         ${dayChecks.length ? `<p class="hint">${dayChecks.map((c) => `${esc(c.name)}: ${ANSWER[c.answer].toLowerCase()}`).join(' · ')}</p>` : ''}</section>` : ''}
       ${date === today ? `<a class="card supp-card" href="#/supps" id="f-supps"><span class="hud c-amber">SUPPLEMENTS</span><span class="supp-card-line" id="f-supps-line">Your checklist</span><span class="pill is-on">Open</span></a>` : ''}
       <section class="card pad-card" id="f-water"><div class="ex-head"><span class="hud c-cyan">WATER</span>
@@ -300,7 +308,7 @@ export function render(view, params) {
   const unsub = subscribe((s) => { const k = `${s.paired}|${s.mac.reachable}|${s.sync.pending > 0}`; if (k !== net) { const first = net === null; net = k; if (!first && alive && repo) draw(); } });
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log', 'days', 'sleep-log', 'water'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['meals', 'meal-estimates', 'meal-photos', 'settings', 'fuel', 'meal-checks', 'supplements', 'supp-log', 'days', 'sleep-log', 'water', 'day-clock'].includes(c))) draw(); });
     draw().then(() => { if (checking && alive) answerCheck(repo, date, params[2]); });
   });
   return () => { alive = false; off(); unsub(); };

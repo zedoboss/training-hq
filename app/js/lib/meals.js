@@ -39,7 +39,8 @@ export function defaultMealName(at, mealTimes = [], tz, { night = false } = {}) 
   for (const t of mealTimes || []) {
     const [th, tm] = String(t.time || '').split(':').map(Number);
     if (!Number.isFinite(th)) continue;
-    const diff = Math.abs(th * 60 + tm - mins);
+    // Around midnight too (Thu 11/5: on the moving schedule a 12:25 AM last meal eaten at 11:55 PM is that meal).
+    const d0 = Math.abs(th * 60 + tm - mins); const diff = Math.min(d0, 1440 - d0);
     if (diff <= 90 && (!best || diff < best.diff)) best = { diff, name: t.name };
   }
   if (best?.name) return best.name;

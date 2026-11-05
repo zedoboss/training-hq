@@ -12,7 +12,7 @@ import { newMeal, cleanItems, itemTotals, presetsOf, findPreset, beforeItems, le
 import { withUsda, sameFood, gramsFor, amountText, itemAmount } from '../../app/js/lib/foods.js';
 import { foodsDb, myFoods } from '../foods.mjs';
 import { WEEKDAYS, FOOD_TEXT, statusOn, withStatus, logId, daysText, doseFor, stockStatus, lastsText } from '../../app/js/lib/supplements.js';
-import { mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
+import { mealTimesOf, mealFitIssues } from '../../app/js/lib/fuel-reminders.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
 import { zonedTime, hmOf, isoDate, daysBetween, addMinutesHm } from '../../app/js/lib/time.js';
 import { addDays } from '../../app/js/lib/rotation.js';
@@ -374,7 +374,11 @@ async function fuelSettings(a, ctx) {
     const clean = mealTimesOf(storedTimes(next));
     if (JSON.stringify(storedTimes(clean)) === JSON.stringify(storedTimes(now))) return refuse(`Nothing to change. His meal times: ${timesText(now)}.`);
     put(s, 'settings', 'main', { ...cur, fuel: { ...(cur.fuel || {}), mealTimes: storedTimes(clean) } });
-    return wrote(`Meal times now: ${timesText(clean)}. Meal-time and cooking reminders follow them from now.`, 'meal times changed');
+    // Thu 11/5 (his words: "not 4:30pm i go to bed at 6pm"): a time that doesn't fit his day is said at once.
+    const n = withDefaults(cur).notify;
+    const bad = mealFitIssues(clean, n.wakeHm, n.bedHm);
+    const fit = bad.length ? ` They don't fit his day (${formatHm(n.wakeHm)} to ${formatHm(n.bedHm)}): ${bad.join('; ')}. Tell him, with a time that fits as your pick.` : '';
+    return wrote(`Meal times now: ${timesText(clean)}. Meal-time and cooking reminders follow them from now.${fit}`, 'meal times changed');
   }
 
   if (a.action === 'targets') {

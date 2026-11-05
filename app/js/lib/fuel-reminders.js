@@ -247,6 +247,28 @@ export function restockLine(r, dayText = (d) => d) {
   return `${r.supp.name} (${what}${ord})`;
 }
 
+/**
+ * Meal times that don't fit his day (Thu 11/5, his words: "not 4:30pm i go to bed at 6pm new schedule is wake up 4am";
+ * then "bare minimum 4pm but even then its too late": his day became 4:00 AM to 6:00 PM while Settings still had a 4:30
+ * PM last meal). A meal fits when it starts after he wakes and is eaten (its latest, else its time) more than
+ * bedGapMin before bed. The times and wake/bed on the same clock (Settings' usual day). ['Last meal 4:30 PM: ...'].
+ */
+export const MEAL_BED_GAP_MIN = 120;
+export function mealFitIssues(slots, wakeHm, bedHm) {
+  if (!/^\d{2}:\d{2}$/.test(wakeHm || '') || !/^\d{2}:\d{2}$/.test(bedHm || '')) return [];
+  const min = (hm) => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
+  const rel = (hm) => (min(hm) - min(wakeHm) + 1440) % 1440;
+  const bed = rel(bedHm) || 1440;
+  return mealTimesOf(slots).flatMap((t) => {
+    if (rel(t.time) >= bed) return [`${t.name} ${formatHm(t.time)} is outside the day (${formatHm(wakeHm)} to ${formatHm(bedHm)})`];
+    const end = rel(t.latest || t.time);
+    const left = end < rel(t.time) ? 0 : bed - end;
+    if (left <= 0) return [`${t.name} ${formatHm(t.time)} (latest ${formatHm(t.latest)}) runs past bedtime (${formatHm(bedHm)})`];
+    if (left <= MEAL_BED_GAP_MIN) return [`${t.name} ${formatHm(t.time)}${t.latest ? ` (latest ${formatHm(t.latest)})` : ''} is only ${left >= 60 ? `${Math.floor(left / 60)} h${left % 60 ? ` ${left % 60} min` : ''}` : `${left} min`} before bedtime (${formatHm(bedHm)}), too close to bed`];
+    return [];
+  });
+}
+
 /** Halfway through his waking day ("10:00" to "00:00" = "17:00"; works across midnight). */
 export function midDayHm(wakeHm = '07:00', bedHm = '22:00') {
   const min = (hm) => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };

@@ -8,7 +8,7 @@ import { buildHistory } from '../../app/js/lib/history.js';
 import { rotationDay, lastRotationSession, daysByDate } from '../../app/js/lib/rotation.js';
 import { platesPerSide, kg as k } from '../../app/js/lib/loads.js';
 import { wakingDay } from '../../app/js/lib/waking-day.js';
-import { signsUpTo, movingOf } from '../notify.mjs';
+import { signsUpTo, movingOf, mealTimesNow } from '../notify.mjs';
 import { oneArmIn, armOf } from '../../app/js/lib/session.js';
 
 export { k, formatHm };
@@ -39,6 +39,8 @@ export function snapshot(store, { tz, now = Date.now() } = {}) {
     // Tue 10/27: past 6:00 AM, still up from the night (signs of him, no sleep gap): still the day before, to noon.
     // The moving schedule on (lib/moving-day.js): the day he woke on, his body clock's date.
     wakingDay: (ms = now) => { const d = isoDate(new Date(ms), tz); return wakingDay(ms, { tz, sleepLog: one('sleep-log', d), health: one('health', d), sessions: list('sessions'), signs: () => signsUpTo(store, ms), moving: movingOf(store) }); },
+    /** Thu 11/5: his meal times today as the reminders use them (moved with his day on the moving schedule). */
+    mealTimes: () => m('mealTimes', () => mealTimesNow(store, now, tz)),
     /** His waking day now: food and supplements "today". */
     foodDay: () => m('foodDay', () => s.wakingDay(now)),
   };

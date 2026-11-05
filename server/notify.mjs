@@ -13,7 +13,7 @@ import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pic
 import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart, settleWalk } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
-import { dayClock, bodyClock, realTimes } from '../app/js/lib/moving-day.js';
+import { dayClock, bodyClock, realTimes, movedMealTimes } from '../app/js/lib/moving-day.js';
 import { heldOff, itemHeld, scanHold } from '../app/js/lib/holdoffs.js';
 import { duePhasePlans } from '../app/js/lib/holds.js';
 import { openItems, initiativePrompt } from '../app/js/lib/initiatives.js';
@@ -264,6 +264,32 @@ export function clockOf(store, now, tz) {
   const c = dayClock({ now, signs: signsUpTo(store, now), mealTimes: mealsAtOf(store), sleeps: sleepsOf(store), driftMin: n.driftMin });
   const body = c.wokeAt != null ? bodyClock(c.wokeAt, n.wakeHm, tz) : null;
   return { ...c, body, date: body?.date ?? null };
+}
+
+/**
+ * Thu 11/5: his meal times today as the reminders use them (movedDayItems), on the real clock: one source for the
+ * reminders, the coach and his phone. {slots (movedMealTimes), shiftMin (0: Settings' times as they are), wokeAt, moving}.
+ */
+export function mealTimesNow(store, now, tz) {
+  const slots = mealTimesOf(withDefaults(store.getRecord('settings', 'main')?.data).fuel.mealTimes);
+  const c = clockOf(store, now, tz);
+  const on = c && !c.asleep && c.body ? c.body : null;
+  const shiftMin = on ? on.shiftMin : 0;
+  // at: the meal time in ms, as its reminders have it (movedDayItems: his usual day on the body clock of the day he's in).
+  const atOf = (hm) => (on ? zonedTime(c.date, hm, on.zone) : zonedTime(isoDate(new Date(now), tz), hm, tz));
+  return { slots: movedMealTimes(slots, shiftMin).map((t) => ({ ...t, at: atOf(t.slot) })), shiftMin, wokeAt: c && !c.asleep ? c.wokeAt : null, moving: Boolean(c), asleep: Boolean(c?.asleep), date: on ? c.date : null };
+}
+
+/** The body clock the phone reads (Fuel's meal times, Thu 11/5): one record, written when it changes. */
+export const DAY_CLOCK = { col: 'day-clock', id: 'now' };
+export function publishDayClock(store, now, tz) {
+  const c = clockOf(store, now, tz);
+  const doc = c ? { moving: true, asleep: Boolean(c.asleep), date: c.date, wokeAt: c.asleep ? null : c.wokeAt, shiftMin: !c.asleep && c.body ? c.body.shiftMin : 0 }
+    : { moving: false, asleep: false, date: isoDate(new Date(now), tz), wokeAt: null, shiftMin: 0 };
+  const had = store.getRecord(DAY_CLOCK.col, DAY_CLOCK.id)?.data;
+  if (had && ['moving', 'asleep', 'date', 'wokeAt', 'shiftMin'].every((k) => had[k] === doc[k])) return had;
+  store.writeLocal(DAY_CLOCK.col, DAY_CLOCK.id, { ...doc, at: now });
+  return doc;
 }
 
 /**
@@ -1250,6 +1276,8 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       if (zone !== lastZone) { if (lastZone) log(`notify: reminders now follow ${zone}`); lastZone = zone; }
       applyPhasePlans(store, t, zone, log);
       for (const r of rearmRepeats(store, t, zone)) log(`notify: repeating reminder ${r.series} next at ${formatTime(new Date(r.at), zone)} ${r.date}`);
+      // His body clock for the phone (Fuel's meal times, Thu 11/5), whether or not a device gets notifications.
+      publishDayClock(store, t, zone);
       if (!push.list().length) return [];
       // Gone quiet (lib/silent.js): the app's own asks wait for him; what he set himself keeps its time.
       const quiet = silentOf(store, t);

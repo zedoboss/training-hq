@@ -827,7 +827,9 @@ test('tendon_phase (Wed 10/21): knees from heal to fix on his answer; the wall s
 });
 
 test('meal_check (Thu 10/22): about to cook = asked again in 5 minutes, cooking = checked back in 10, the meal nearest now; what of his planned day is still open', async () => {
-  store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }, { name: 'Last meal', time: '16:30' }] } });
+  // A fixed day: Settings' times are the day's (on the moving schedule they move with when he woke, Thu 11/5:
+  // meal-times-one-source.test.mjs).
+  store.writeLocal('settings', 'main', { notify: { movingDay: false }, fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }, { name: 'Last meal', time: '16:30' }] } });
   clock = Date.UTC(2026, 0, 20, 12, 40);
   const soon = await call('meal_check', { answer: 'soon' });
   assert.match(soon.text, /^First meal: about to cook\. The app asks again at 12:45 PM, in 5 minutes: cooking yet\?/);

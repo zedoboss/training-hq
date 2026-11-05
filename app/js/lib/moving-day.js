@@ -144,3 +144,31 @@ export function realTimes(text, shiftMin) {
     return `${hh % 12 || 12}:${String(r % 60).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`;
   });
 }
+
+/** "HH:MM" moved by shiftMin minutes, around the clock. */
+export function moveHm(hm, shiftMin) {
+  if (!hm || !shiftMin) return hm;
+  const r = ((minOf(hm) + shiftMin) % 1440 + 1440) % 1440;
+  return `${String(Math.floor(r / 60)).padStart(2, '0')}:${String(r % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Thu 11/5 (his words: "see if something doesn't update accordingly instantly whenever I talk with you"; the reminders
+ * said first meal 6:30 AM and last meal 10:30 AM, the coach's day view 12:30 PM and 4:30 PM from Settings): his meal
+ * times (fuel-reminders mealTimesOf) as the reminders use them today, on the real clock: with the moving schedule, his
+ * usual day from Settings moved by his body clock's shiftMin. time and latest moved; slot = the Settings time (the id
+ * of its reminders and meal-checks); moved = true when they differ from Settings. Order stays his day's order.
+ */
+export const movedMealTimes = (slots, shiftMin = 0) => (slots || []).map((t) => ({
+  ...t, slot: t.time, time: moveHm(t.time, shiftMin), latest: t.latest ? moveHm(t.latest, shiftMin) : t.latest, moved: Boolean(shiftMin),
+}));
+
+/**
+ * The phone's meal times today (Thu 11/5, Fuel): the Mac's day clock (server/notify.mjs publishDayClock, synced as
+ * 'day-clock' 'now') moves his usual day as the reminders do; asleep, the moving schedule off, or a clock from a stretch
+ * awake over a day old: Settings' times as they are.
+ */
+export function phoneMealTimes(slots, clock, now = Date.now()) {
+  const on = clock?.moving && !clock.asleep && Number.isFinite(clock.wokeAt) && now - clock.wokeAt < 24 * 3600000;
+  return movedMealTimes(slots, on ? Number(clock.shiftMin) || 0 : 0);
+}

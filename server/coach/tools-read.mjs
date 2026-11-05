@@ -18,7 +18,7 @@ import { amountsLine, itemAmount, myFoods } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, whenText as suppWhen, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
-import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
+import { lowAnswered, mealTimesOf, mealFitIssues } from '../../app/js/lib/fuel-reminders.js';
 import { walkLines, usualWalkHm, walkSteps, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
 import { activeHolds, scanHold } from '../../app/js/lib/holdoffs.js';
@@ -300,7 +300,7 @@ function foodLine(s) {
  * food goes only with the meal that has it.
  */
 export function mealsNowLine(s) {
-  const slots = mealTimesOf(s.settings().fuel?.mealTimes);
+  const slots = s.mealTimes().slots;
   // An empty meal (no photo, no items) counts as no meal (Thu 10/22, lib/meals.js isEmptyMeal).
   const day = s.foodDay();
   const meals = s.list('meals').filter((m) => m.date === day && !isEmptyMeal(m)).sort((a, b) => a.at - b.at);
@@ -310,7 +310,7 @@ export function mealsNowLine(s) {
   if (!slots.length) return `Meals today${wakingNote(s)}: ${had}.`;
   // Each real meal (not a snack) and each answer "eaten" or "skipped" uses up the next meal time, in order.
   const checks = s.list('meal-checks').filter((c) => c.date === day);
-  const answered = (t) => checks.some((c) => c.slot === t.time && (c.answer === 'eaten' || c.answer === 'skipped'));
+  const answered = (t) => checks.some((c) => c.slot === t.slot && (c.answer === 'eaten' || c.answer === 'skipped'));
   let real = meals.filter((m) => !/snack/i.test(m.name || '')).length;
   const nextIdx = slots.findIndex((t) => { if (answered(t)) return false; if (real > 0) { real -= 1; return false; } return true; });
   if (nextIdx < 0) return `Meals today${wakingNote(s)}: ${had}. Every meal time is done for today.`;
@@ -378,11 +378,35 @@ export function walkTextLines(s, { week = false } = {}) {
   return week ? lines : lines.slice(0, nowH ? 2 : 1);
 }
 
+/**
+ * Thu 11/5 (his words: "see if something doesn't update accordingly instantly"): the times the reminders use today, the
+ * same ones; with the moving schedule his Settings day moved to when he woke (it said 12:30 PM and 4:30 PM while the
+ * reminders said 6:30 AM and 10:30 AM).
+ */
 export function mealTimesLine(s) {
-  const times = mealTimesOf(s.settings().fuel?.mealTimes);
+  const { slots: times, shiftMin, wokeAt, moving, asleep } = s.mealTimes();
   if (!times.length) return 'Meal times: none set (Settings > Fuel).';
-  return `His meal times, every day: ${times.map((t) => `${t.name} ${formatHm(t.time)}${t.latest ? ` (${formatHm(t.latest)} at the latest)` : ''}${t.cookMin ? `, start cooking ${formatHm(addMinutesHm(t.time, -t.cookMin))}` : ''}`).join('; ')}. Guide him by these: when to cook, when to eat, and say it plainly when one is late.`;
+  const list = (xs) => xs.map((t) => `${t.name} ${formatHm(t.time)}${t.latest ? ` (${formatHm(t.latest)} at the latest)` : ''}${t.cookMin ? `, start cooking ${formatHm(addMinutesHm(t.time, -t.cookMin))}` : ''}`).join('; ');
+  if (shiftMin) {
+    const usual = times.map((t) => `${t.name} ${formatHm(t.slot)}`).join(', ');
+    return `His meal times TODAY (moving schedule: his day started when he woke at ${timeText(wokeAt, s.tz)}, so the reminders run at these): ${list(times)}. These are the only meal times to tell him today; Settings > Fuel holds his usual day from his ${formatHm(s.settings().notify.wakeHm)} wake (${usual}), never quote those as today's. To change today's, change his usual day (fuel_settings meal_times, in Settings' terms: today's time minus ${hoursMinText(shiftMin)}). Guide him by these: when to cook, when to eat, and say it plainly when one is late.${mealFitText(s)}`;
+  }
+  return `His meal times${moving ? (asleep ? ' (moving schedule: asleep now; tomorrow they move to when he wakes)' : '') : ', every day'}: ${list(times)}. Guide him by these: when to cook, when to eat, and say it plainly when one is late.${mealFitText(s)}`;
 }
+
+/**
+ * Thu 11/5 (his words: "not 4:30pm i go to bed at 6pm new schedule is wake up 4am"): meal times that no longer fit his
+ * day (Settings' wake and bed, the same clock as Settings' meal times), so the coach never guides him by them. '' when
+ * they fit.
+ */
+export function mealFitText(s) {
+  const n = s.settings().notify;
+  const bad = mealFitIssues(s.settings().fuel?.mealTimes, n.wakeHm, n.bedHm);
+  return bad.length ? ` MEAL TIMES DON'T FIT HIS DAY: ${bad.join('; ')}. Never tell him to eat then; ask him for times that fit (one short question with your pick), then set them with fuel_settings.` : '';
+}
+
+/** "6 h", "6 h 30 min", "-1 h 15 min" for a shift in minutes. */
+const hoursMinText = (min) => { const a = Math.abs(min); return `${min < 0 ? '-' : ''}${Math.floor(a / 60)} h${a % 60 ? ` ${a % 60} min` : ''}`; };
 
 /** Thu 11/5: his scan pause (a scan hold-off) in words, or '' when scans aren't paused. */
 function scanPausedText(s) {
@@ -450,7 +474,7 @@ export function contextLine({ store, tz, now, screen = null }) {
   // Thu 10/22: asked "what's up?" he repeated a wrong 2:13 PM notification ("0 of 4 taken") as today's supplements; the
   // live count is here with every message, ahead of what the notifications said.
   lines.push(`Now: ${suppLine(s)}`);
-  lines.push(`Now: ${mealsNowLine(s)}`);
+  lines.push(`Now: ${mealsNowLine(s)}${mealFitText(s)}`);
   lines.push(...pathLines(s));
   lines.push(...phasePlanLines(s));
   lines.push(...recoveryContext(s));

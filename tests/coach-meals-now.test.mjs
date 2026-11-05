@@ -15,7 +15,8 @@ let dir; let store;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'thq-meals-now-'));
   store = openStore(join(dir, 'db.sqlite'));
-  store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }] } });
+  // A fixed day (moving schedule off): Settings' times are the day's (the moving one: meal-times-one-source.test.mjs).
+  store.writeLocal('settings', 'main', { notify: { movingDay: false }, fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00', cookMin: 30 }, { name: 'Last meal', time: '16:30', latest: '17:00', cookMin: 30 }] } });
   store.writeLocal('fuel', 'presets', { kind: 'presets', presets: [
     { id: 'p1', name: 'First meal', items: [{ name: 'Eggs', grams: 600 }, { name: 'Butter', grams: 10 }] },
     { id: 'p2', name: 'Second meal', items: [{ name: 'Beef', grams: 500 }, { name: 'Rice', grams: 400 }] },

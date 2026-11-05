@@ -12,7 +12,7 @@ import { buildSession, addedTarget, previousFor, fillForTick, restAfter, guardLo
 import { guardCheck } from '../../app/js/lib/targets.js';
 import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../../app/js/lib/finish.js';
 import { restFor, restText, withDefaults } from '../../app/js/lib/settings.js';
-import { mealTimesOf, MEAL_NUDGE, restockList, restockLine } from '../../app/js/lib/fuel-reminders.js';
+import { mealTimesOf, mealFitIssues, MEAL_NUDGE, restockList, restockLine } from '../../app/js/lib/fuel-reminders.js';
 import { pathOf, pathState, movePath, stageText } from '../../app/js/lib/hold-path.js';
 import { modeOf } from '../../app/js/lib/progression.js';
 import { currentBodyweight, weightSeries, dailyWeights } from '../../app/js/lib/health.js';
@@ -605,7 +605,7 @@ async function logMeal(a, ctx) {
   // Sat 10/24: the day it counts toward: the date he gives, else his waking day (after midnight, before he has slept,
   // the day before; lib/waking-day.js).
   const date = a.date || s.wakingDay(at);
-  const name = a.name ? String(a.name).slice(0, 40) : preset ? preset.name : defaultMealName(at, s.settings().fuel?.mealTimes, s.tz, { night: date < s.date(at) });
+  const name = a.name ? String(a.name).slice(0, 40) : preset ? preset.name : defaultMealName(at, s.mealTimes().slots, s.tz, { night: date < s.date(at) });
   const meal = preset ? mealFromPreset({ id, at, preset, tz: s.tz, name, date }) : newMeal({ id, at, name, tz: s.tz, date });
   const items = [...(preset ? meal.before.items : []), ...extra];
   meal.before = { ...meal.before, items, confirmedAt: s.now };
@@ -1023,23 +1023,27 @@ async function holdPath(a, ctx) {
  */
 async function mealCheck(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
-  const slots = mealTimesOf(withDefaults(s.one('settings', 'main')).fuel.mealTimes);
+  // Thu 11/5: the meal times the reminders use today (moved with his day on the moving schedule); the record keeps the
+  // Settings time (slot) and the day of the reminders, as the phone's buttons do.
+  const mt = s.mealTimes();
+  const slots = mt.slots;
   if (!slots.length) return refuse('He has no meal times set (Settings > Fuel), so nothing asks about meals.');
+  const day = mt.date || s.today;
   const q = String(a.meal || '').toLowerCase().trim();
-  const at = (t) => zonedTime(s.today, t.time, s.tz);
+  const at = (t) => t.at;
   // No meal named: the earliest meal time that has come with nothing logged and no answer yet (Thu 10/22 audit: after
   // 2:30 PM "skipping" for a late 12:30 meal landed on the 4:30 PM one), else the one nearest now. Once a later one has
   // started (its "start cooking" or its time), that one: the app asks about it now, the earlier one is over (Fri 10/23).
-  const meals = s.list('meals').filter((m) => m.date === s.today);
-  const checks = s.list('meal-checks').filter((c) => c.date === s.today);
-  const open = slots.filter((t) => at(t) <= s.now + 60 * 60000 && !checks.some((c) => c.id === `${s.today}.${t.time.replace(':', '')}`)
+  const meals = s.list('meals').filter((m) => m.date === day);
+  const checks = s.list('meal-checks').filter((c) => c.date === day);
+  const open = slots.filter((t) => at(t) <= s.now + 60 * 60000 && !checks.some((c) => c.id === `${day}.${t.slot.replace(':', '')}`)
     && !meals.some((m) => m.at >= at(t) - MEAL_NUDGE.windowMin * 60000 && m.at <= s.now));
   const started = open.filter((t) => at(t) - (t.cookMin || 0) * 60000 <= s.now).sort((x, y) => at(x) - at(y));
-  const slot = (q && slots.find((t) => t.time === q || t.name.toLowerCase().includes(q) || q.includes(t.name.toLowerCase())))
+  const slot = (q && slots.find((t) => t.time === q || t.slot === q || t.name.toLowerCase().includes(q) || q.includes(t.name.toLowerCase())))
     || started.at(-1) || open.sort((x, y) => at(x) - at(y))[0]
     || [...slots].sort((x, y) => Math.abs(at(x) - s.now) - Math.abs(at(y) - s.now))[0];
-  const id = `${s.today}.${slot.time.replace(':', '')}`;
-  put(s, 'meal-checks', id, { id, date: s.today, slot: slot.time, name: slot.name, answer: a.answer, ...(a.until && a.answer !== 'skipped' ? { until: a.until } : {}), at: s.now, by: 'coach' });
+  const id = `${day}.${slot.slot.replace(':', '')}`;
+  put(s, 'meal-checks', id, { id, date: day, slot: slot.slot, name: slot.name, answer: a.answer, ...(a.until && a.answer !== 'skipped' ? { until: a.until } : {}), at: s.now, by: 'coach' });
   const name = slot.name;
   if (a.answer === 'soon') {
     return wrote(`${name}: about to cook. The app asks again at ${timeText(s.now + MEAL_NUDGE.soonMin * 60000, s.tz)}, in ${MEAL_NUDGE.soonMin} minutes: cooking yet? Tell him in one line, like "OK, I'll bump you in 5 minutes to see if you're cooking."${planLeftText(s, true)}`, `${name.toLowerCase()}: about to cook`);
@@ -1402,7 +1406,20 @@ function nudgeSettings(a, ctx) {
     return { text: `Nudges: ${st.nudgeEveryMin ? `every ${st.nudgeEveryMin} minutes` : 'off'}, ${st.movingDay ? `moving schedule on (his day from when he wakes, bed about ${st.driftMin} min later each day; ${formatHm(st.wakeHm)} to ${formatHm(st.bedHm)} is his usual day)` : `${formatHm(st.wakeHm)} to ${formatHm(st.bedHm)}`}${st.nudgePausedUntil > s.now ? `, paused until ${timeText(st.nudgePausedUntil, s.tz)}` : ''}.`, summary: 'nudge settings' };
   }
   s.store.writeLocal('settings', 'main', { ...cur, notify: n });
-  return wrote(`Nudges ${said.join(', ')}.`, `nudges ${said.join(', ')}`);
+  return wrote(`Nudges ${said.join(', ')}.${a.wakeHm || a.bedHm || a.movingDay != null ? mealsForDay(cur, n) : ''}`, `nudges ${said.join(', ')}`);
+}
+
+/**
+ * Thu 11/5: his day changed (wake, bed, the moving schedule), so his meal times are said with it, and the ones that no
+ * longer fit (his words: "not 4:30pm i go to bed at 6pm new schedule is wake up 4am"; Settings' 12:30 PM and 4:30 PM
+ * became the real times the moment the moving schedule went off).
+ */
+function mealsForDay(cur, n) {
+  const st = withDefaults({ ...cur, notify: n });
+  const slots = mealTimesOf(st.fuel.mealTimes);
+  if (!slots.length) return '';
+  const bad = mealFitIssues(slots, st.notify.wakeHm, st.notify.bedHm);
+  return ` Meal times${st.notify.movingDay ? ' (his usual day; they move with when he wakes)' : ' from now'}: ${slots.map((t) => `${t.name} ${formatHm(t.time)}${t.latest ? ` (latest ${formatHm(t.latest)})` : ''}`).join(', ')}.${bad.length ? ` They don't fit this day: ${bad.join('; ')}. Ask him for meal times that fit (one question, your pick first) and set them with fuel_settings; until then never guide him by these.` : ''}`;
 }
 
 const hoursText = (min) => `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
