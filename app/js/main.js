@@ -143,6 +143,8 @@ mountVoiceHud(document.getElementById('voice-chip'), document.getElementById('vo
 mountCoachCaption();
 mountWorkoutBar();
 mountMacBanner(document.querySelector('header.top'));
+// Thu 11/5: recordings kept while the Mac was out of reach go to it by themselves once it answers again.
+import('./lib/dictate.js').then(async (m) => m.watchKept({ toast: (await import('./ui/toast.js')).toast })).catch(() => {});
 resumeVoice();
 ready.then((repo) => watchNudges(repo)).catch(() => {});
 // Notifications stay connected: the Mac gets this phone's subscription at every start; if it was lost, one tap.

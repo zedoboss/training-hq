@@ -18,5 +18,7 @@ export function downSinceNext(prev, reachable, now) {
 export function reachWarning({ paired, online = true, downSince, now, afterMs = WARN_AFTER_MS }) {
   if (!paired || !online || downSince == null || now - downSince < afterMs) return null;
   const min = Math.floor((now - downSince) / 60000);
-  return `Can't reach your Mac for ${min} min, though this phone is online. If Tailscale is on, NextDNS may be blocking it. Coach, sync and notifications wait until it's back.`;
+  // Thu 11/5 (11:26 AM to 12:02 PM): the Mac stayed up but this phone's Tailscale dropped, and he restarted the app, then
+  // the phone. Tailscale off and on fixes it; restarting the app can't. Notifications don't go through Tailscale.
+  return `Can't reach your Mac for ${min} min, though this phone is online. Most likely this phone's Tailscale dropped: open Tailscale, turn it off and on (no restart needed). Still nothing? NextDNS may be blocking it. The app reconnects by itself; coach, sync and recordings wait till then.`;
 }

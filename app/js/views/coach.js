@@ -163,7 +163,7 @@ function renderChat(view) {
       try {
         const text = await d.stop();
         if (text) { box.value = `${box.value.trim()}${box.value.trim() ? ' ' : ''}${text}`; box.dispatchEvent(new Event('input')); box.focus(); } else toast('Nothing heard.');
-      } catch (e) { toast(e.message || 'The Mac could not hear that.'); }
+      } catch (e) { toast(e.message || 'The Mac could not hear that.', e.kept ? { ms: 10000 } : {}); }
       b.classList.remove('is-busy');
       return;
     }
@@ -279,6 +279,10 @@ function renderChat(view) {
     else if (e.type === 'error') { pendingLive = null; draw(); idleState(); }
   };
   window.addEventListener('thq:voice-event', onVoice);
+  // Thu 11/5: a recording kept while the Mac was out of reach was read once it came back (lib/dictate.js watchKept):
+  // its words are already in the draft; the box shows them.
+  const onKeptWords = () => { if (!gone) { box.value = draftGet(); fit(); } };
+  window.addEventListener('thq:dictation', onKeptWords);
   const unsub = subscribe(() => { if (!busy) idleState(); drawModel(); });
   let off = () => {};
   ready.then(async (r) => {
@@ -295,7 +299,7 @@ function renderChat(view) {
     // Start the coach's Claude on the Mac now, so the first answer comes sooner.
     if (getState().paired) macPost('/api/coach/warm', { model: modelOf() }).then(() => { if (!busy) idleState(); }).catch(() => { if (!busy) setState('MAC UNREACHABLE', 'c-amber'); });
   });
-  return () => { gone = true; busy?.abort(); unsub(); off(); dict?.cancel(); window.removeEventListener('thq:voice-event', onVoice); };
+  return () => { gone = true; busy?.abort(); unsub(); off(); dict?.cancel(); window.removeEventListener('thq:voice-event', onVoice); window.removeEventListener('thq:dictation', onKeptWords); };
 }
 
 function renderNotes(view) {

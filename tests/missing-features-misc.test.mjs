@@ -44,7 +44,9 @@ test('mac banner: only after 2 minutes unreachable, only when the phone is onlin
   assert.equal(down, 1000, 'kept while it stays down');
   assert.equal(reachWarning({ paired: true, online: true, downSince: down, now: 1000 + WARN_AFTER_MS - 1 }), null);
   const t = reachWarning({ paired: true, online: true, downSince: down, now: 1000 + 3 * 60000 });
-  assert.match(t, /^Can't reach your Mac for 3 min, though this phone is online\. If Tailscale is on, NextDNS may be blocking it\./);
+  assert.match(t, /^Can't reach your Mac for 3 min, though this phone is online\. Most likely this phone's Tailscale dropped: open Tailscale, turn it off and on/);
+  assert.match(t, /NextDNS/);
+  assert.doesNotMatch(t, /notifications/i, 'notifications still come: they don\'t go through Tailscale');
   assert.doesNotMatch(t, /\d+\.\d+\.\d+\.\d+|ts\.net/, 'no addresses in the public code');
   assert.equal(reachWarning({ paired: true, online: false, downSince: down, now: 1e9 }), null, 'phone offline: not the Mac');
   assert.equal(reachWarning({ paired: false, online: true, downSince: down, now: 1e9 }), null);
