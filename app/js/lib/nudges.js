@@ -150,6 +150,7 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  * @param {string} o.bedHm
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
  * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
+ * @param {number|null} [o.arrivedAt]  when he arrived at the gym today (the arrival Shortcut, days/<date>.arrivedAt), ms
  * @param {number|null} [o.healthAt]  when Apple Health last reached the Mac (the newest file), ms; null = never; left out = don't say
  * @param {{open: string[], mealAt: number, away?: boolean, toldAt?: number, next?: string}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, when that meal was eaten, whether he ate it out, when the Mac first saw it logged, and the ones due later (nextSuppsText)
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
@@ -161,7 +162,7 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, sent = {} }) {
+  wokeAt = null, arrivedAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, sent = {} }) {
   const out = [];
   if (scanPaused) scanToday = null;
   const evoltFirst = scanPaused ? '' : ' Evolt first.';
@@ -231,10 +232,17 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   }
 
   // His morning routine, once, in the first 90 minutes after he wakes (Tue 10/20).
+  // Thu 11/5 (session time set to 4:15 AM at 4:02 AM, Legs started 4:35 AM, yet at 4:32 AM: "... Gym 5:01 AM to 5:31 AM"):
+  // a session time he set is the gym time ("Legs at 4:15 AM"), not the window from his wake time; once that time has
+  // come, he's at the gym (the arrival Shortcut) or he's training, the routine is over: no morning nudge (the session
+  // nudge "was due at" speaks for a time that has passed).
   const train0 = rot?.today?.kind === 'train';
-  if (morning?.text && sinceWoke >= 0 && sinceWoke < 90) {
+  const sessionAt = train0 && sessionHm ? zonedTime(isoDate(new Date(now), tz), sessionHm, tz) : null;
+  const atGym = (arrivedAt != null && arrivedAt <= now && (!wokeAt || arrivedAt >= wokeAt)) || session.started || session.done;
+  const gymLine = sessionAt ? ` ${LABEL[rot?.today?.dayType] || 'Gym'} at ${formatHm(sessionHm)}.` : gymText ? ` Gym ${gymText}.` : '';
+  if (morning?.text && sinceWoke >= 0 && sinceWoke < 90 && !atGym && !(sessionAt && now >= sessionAt)) {
     out.push({ key: 'morning', priority: 88, gapMin: 18 * 60, url: '#/today',
-      text: `Morning: ${String(morning.text).replace(scanPaused ? /\s*\([^)]*\bEvolt\b[^)]*\)/gi : /$^/, '').replace(/[.\s]+$/, '')}.${train0 && gymText && !session.started ? ` Gym ${gymText}.` : ''}` });
+      text: `Morning: ${String(morning.text).replace(scanPaused ? /\s*\([^)]*\bEvolt\b[^)]*\)/gi : /$^/, '').replace(/[.\s]+$/, '')}.${train0 ? gymLine : ''}` });
   }
 
   // A body scan planned today (Tue 10/20): the checklist, once that day (Fri 10/23: it went out 4 times by 12:10 PM, "the

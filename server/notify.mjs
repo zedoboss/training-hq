@@ -856,6 +856,8 @@ export function nudgeInputs(store, now, tz) {
         next: nextSuppsText(groups, { bedAt, tz, nowHm, done: ['after-meal'] }) } : null,
       suppsBed: bedOpen.length && Number.isFinite(bedAt) ? { open: bedOpen.map((i) => `${i.supp.name} ${i.dose}`.trim()), bedAt, dayKey: food } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
+      // Thu 11/5: at the gym (his arrival Shortcut): no morning routine nudge.
+      arrivedAt: st.days?.[date]?.arrivedAt ?? null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
         || scanTakenOn(scans, date, scanPhotoIds),
