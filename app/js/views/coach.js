@@ -14,6 +14,7 @@ import { fileToJpeg, photoTime } from '../lib/photos.js';
 import { toast } from '../ui/toast.js';
 import { stop as voiceStop } from '../lib/voice.js';
 import { startDictation } from '../lib/dictate.js';
+import { downSinceNext, macLink } from '../lib/mac-reach.js';
 import { addDays } from '../lib/rotation.js';
 import { updateApp } from '../lib/sw-client.js';
 
@@ -119,10 +120,20 @@ function renderChat(view) {
   });
 
   const setState = (text, cls = 'c-cyan') => { const el = $('#c-state'); el.textContent = text; el.className = `hud coach-state ${cls}`; };
+  // Thu 11/5, 7:05 PM ("randomly it said the Mac was unavailable... prevents me mid-talking"): while he records, the
+  // line says so and nothing about the Mac (recording doesn't need it); a first failed check reads RECONNECTING, and
+  // MAC UNREACHABLE only after a minute (lib/mac-reach.js macLink).
+  let micPhase = null; let downSince = null;
   const idleState = () => {
     const s = getState();
-    if (!s.paired) setState('NOT PAIRED WITH YOUR MAC', 'c-amber');
-    else if (s.mac?.reachable === false) setState('MAC UNREACHABLE', 'c-amber');
+    downSince = downSinceNext(downSince, s.mac?.reachable ?? null, Date.now());
+    const link = macLink({ reachable: s.mac?.reachable, downSince, now: Date.now() });
+    if (micPhase === 'rec') setState('RECORDING · TAP THE MIC WHEN DONE');
+    else if (micPhase === 'send') setState('READING YOUR WORDS…');
+    else if (micPhase === 'retry') setState('LINK TO THE MAC BLIPPED · STILL SENDING');
+    else if (!s.paired) setState('NOT PAIRED WITH YOUR MAC', 'c-amber');
+    else if (link === 'down') setState('MAC UNREACHABLE', 'c-amber');
+    else if (link === 'reconnecting') setState('RECONNECTING TO YOUR MAC…');
     else setState(`READY · ${MODEL_LABEL[modelOf()]}`);
   };
   const drawModel = () => {
@@ -160,15 +171,18 @@ function renderChat(view) {
     const b = $('#c-mic'); const box = $('#c-text');
     if (dict) {
       const d = dict; dict = null; b.classList.remove('is-rec'); b.setAttribute('aria-pressed', 'false'); b.classList.add('is-busy');
+      micPhase = 'send'; if (!busy) idleState();
       try {
-        const text = await d.stop();
+        const text = await d.stop({ onRetry: () => { micPhase = 'retry'; if (!busy) idleState(); } });
         if (text) { box.value = `${box.value.trim()}${box.value.trim() ? ' ' : ''}${text}`; box.dispatchEvent(new Event('input')); box.focus(); } else toast('Nothing heard.');
       } catch (e) { toast(e.message || 'The Mac could not hear that.', e.kept ? { ms: 10000 } : {}); }
       b.classList.remove('is-busy');
+      micPhase = null; if (!busy && !gone) idleState();
       return;
     }
     try {
       dict = await startDictation();
+      micPhase = 'rec'; if (!busy) idleState();
       b.classList.add('is-rec'); b.setAttribute('aria-pressed', 'true');
       toast('Recording. Tap the mic again when you\'re done.');
     } catch (e) { toast(e.message || 'Microphone not available.'); }
@@ -297,7 +311,7 @@ function renderChat(view) {
     draw(); drawModel(); idleState(); fit();
     off = repo.onChange(async (cols) => { if (cols.includes('coach-messages') || cols.includes('coach-photos')) { await load(); if (!gone) draw({ scroll: !busy }); } });
     // Start the coach's Claude on the Mac now, so the first answer comes sooner.
-    if (getState().paired) macPost('/api/coach/warm', { model: modelOf() }).then(() => { if (!busy) idleState(); }).catch(() => { if (!busy) setState('MAC UNREACHABLE', 'c-amber'); });
+    if (getState().paired) macPost('/api/coach/warm', { model: modelOf() }).then(() => { if (!busy) idleState(); }).catch(() => { if (!busy) idleState(); });
   });
   return () => { gone = true; busy?.abort(); unsub(); off(); dict?.cancel(); window.removeEventListener('thq:voice-event', onVoice); window.removeEventListener('thq:dictation', onKeptWords); };
 }

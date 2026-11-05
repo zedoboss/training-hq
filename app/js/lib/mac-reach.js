@@ -22,3 +22,16 @@ export function reachWarning({ paired, online = true, downSince, now, afterMs = 
   // the phone. Tailscale off and on fixes it; restarting the app can't. Notifications don't go through Tailscale.
   return `Can't reach your Mac for ${min} min, though this phone is online. Most likely this phone's Tailscale dropped: open Tailscale, turn it off and on (no restart needed). Still nothing? NextDNS may be blocking it. The app reconnects by itself; coach, sync and recordings wait till then.`;
 }
+
+// Thu 11/5, 7:05 PM: a 35-second relay blip made the coach screen say MAC UNREACHABLE while he was talking. A first
+// failed check now reads "reconnecting" (the app retries every few seconds); "unreachable" only after a minute.
+export const BLIP_MS = 60000;
+
+/** The coach screen's state line for the Mac link: 'ok', 'reconnecting' (under BLIP_MS) or 'down'. */
+export function macLink({ reachable, downSince, now, blipMs = BLIP_MS }) {
+  if (reachable !== false) return 'ok';
+  return downSince != null && now - downSince >= blipMs ? 'down' : 'reconnecting';
+}
+
+/** After a sync: the usual 30 s, or soon (5 s, then 10, 20, capped at 30) while the Mac doesn't answer. */
+export const nextSyncMs = (ok, failsInARow) => (ok ? 30000 : Math.min(30000, 5000 * 2 ** Math.max(0, failsInARow - 1)));

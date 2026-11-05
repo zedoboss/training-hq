@@ -8,13 +8,13 @@ import { macSendRaw } from './data.js';
 import { lendMic } from './voice.js';
 import { getState, subscribe } from './store.js';
 import { formatTime } from './time.js';
-import { flushKept, cacheStore, isUnreachable, joinDraft, KEPT_MESSAGE } from './dictate-keep.js';
+import { flushKept, cacheStore, isUnreachable, joinDraft, sendRiding, KEPT_MESSAGE } from './dictate-keep.js';
 
 // Paragraphs by voice (Tue 10/20): up to 5 minutes; the Mac reads it in one go.
 const MAX_SEC = 300;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** @returns {{stop: () => Promise<string>, cancel: () => void}} */
+/** @returns {{stop: (o?: {onRetry?: (n: number) => void}) => Promise<string>, cancel: () => void}} */
 export async function startDictation() {
   const chunks = []; let n = 0; let done = false;
   const onFrame = (f) => { if (!done && n < MAX_SEC * 16000) { chunks.push(Float32Array.from(f)); n += f.length; } };
@@ -30,14 +30,15 @@ export async function startDictation() {
   const close = () => { if (done) return; done = true; try { own?.close(); } catch { /* gone */ } lease.release(); };
   return {
     cancel: close,
-    async stop() {
+    async stop({ onRetry } = {}) {
       close();
       const all = new Float32Array(n); let o = 0;
       for (const c of chunks) { all.set(c, o); o += c.length; }
       if (n < 16000 * 0.4) return '';
       const wav = encodeWav(all);
       try {
-        return await sendClip(wav);
+        // Thu 11/5, 7:05 PM: a short relay blip is ridden out (sent again for about a minute) before the clip is kept.
+        return await sendRiding(sendClip, wav, { onRetry });
       } catch (e) {
         // Thu 11/5: the Mac out of reach (this phone's Tailscale dropped) no longer loses what he said: kept, and sent
         // by itself once the Mac answers again (watchKept below).

@@ -69,3 +69,23 @@ export function cacheStore(caches = globalThis.caches, origin = globalThis.locat
 
 /** The words of a kept clip, added to what is already in the chat box (the coach screen keeps its draft there). */
 export const joinDraft = (draft, text) => (String(draft || '').trim() ? `${String(draft).trim()} ${text}` : text);
+
+// Thu 11/5, 7:05 PM, his words: "I was talking and randomly it said the Mac was unavailable... prevents me mid-talking".
+// The phone reaches the Mac only through Tailscale's relay (no direct path); at 7:05:35 PM that link stalled for about
+// 35 s and came back by itself at 7:06:10 PM, cutting the upload of what he had just said. A blip like that is now
+// ridden out: the same clip is sent again for about a minute before it is kept (the path above), so his words land in
+// the box as usual and nothing tells him the Mac is gone.
+export const RETRY_WAITS = [2000, 4000, 8000, 15000, 30000];
+
+/** Send a clip; while the Mac can't be reached, wait and send it again (RETRY_WAITS), then give up with that error. */
+export async function sendRiding(send, wav, { waits = RETRY_WAITS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onRetry } = {}) {
+  for (let i = 0; ; i++) {
+    try {
+      return await send(wav);
+    } catch (e) {
+      if (!isUnreachable(e) || i >= waits.length) throw e;
+      onRetry?.(i + 1);
+      await sleep(waits[i]);
+    }
+  }
+}

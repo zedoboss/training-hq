@@ -7,6 +7,7 @@ import { summarizeProgramme } from './programme.js';
 import { withDefaults, equipmentWithDefaults, mergeDeep } from './settings.js';
 import { lineReader } from './coach.js';
 import { setHomeZone, deviceTimeZone } from './time.js';
+import { nextSyncMs } from './mac-reach.js';
 
 let repo = null;
 let timer = null;
@@ -352,9 +353,15 @@ export async function syncNow() {
   }
 }
 
+// Thu 11/5, 7:05 PM: after a failed sync the next try comes in 5 s (then 10, 20, 30), not 30 s, so a relay blip is
+// over for the app as soon as it is over for Tailscale (lib/mac-reach.js nextSyncMs).
+let failsInARow = 0;
 function scheduleSync(ms) {
   clearTimeout(timer);
-  timer = setTimeout(() => { syncNow().finally(() => scheduleSync(30000)); }, ms);
+  timer = setTimeout(() => {
+    syncNow().then((r) => { failsInARow = r?.reason === 'unreachable' ? failsInARow + 1 : 0; }, () => { failsInARow += 1; })
+      .finally(() => scheduleSync(nextSyncMs(failsInARow === 0, failsInARow)));
+  }, ms);
 }
 
 // Sat 10/24 ("Auto greet when i open the app Too by the coach speaking"): each time the app comes on screen the Mac is
