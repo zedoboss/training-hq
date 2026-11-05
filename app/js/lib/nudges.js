@@ -237,7 +237,9 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // come, he's at the gym (the arrival Shortcut) or he's training, the routine is over: no morning nudge (the session
   // nudge "was due at" speaks for a time that has passed).
   const train0 = rot?.today?.kind === 'train';
-  const sessionAt = train0 && sessionHm ? zonedTime(isoDate(new Date(now), tz), sessionHm, tz) : null;
+  // A day that began the evening before (woke 9 PM, Legs at 1:00 AM): the time after midnight is still ahead.
+  const sessionAt0 = train0 && sessionHm ? zonedTime(isoDate(new Date(now), tz), sessionHm, tz) : null;
+  const sessionAt = sessionAt0 != null && sessionAt0 < dayStart && sessionAt0 + 24 * 3600000 - dayStart <= 8 * 3600000 ? sessionAt0 + 24 * 3600000 : sessionAt0;
   const atGym = (arrivedAt != null && arrivedAt <= now && (!wokeAt || arrivedAt >= wokeAt)) || session.started || session.done;
   const gymLine = sessionAt ? ` ${LABEL[rot?.today?.dayType] || 'Gym'} at ${formatHm(sessionHm)}.` : gymText ? ` Gym ${gymText}.` : '';
   if (morning?.text && sinceWoke >= 0 && sinceWoke < 90 && !atGym && !(sessionAt && now >= sessionAt)) {

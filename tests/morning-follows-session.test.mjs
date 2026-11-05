@@ -107,3 +107,10 @@ test('replayed: he arrives at the gym before his window: no morning plan after t
     assert.deepEqual(f.said().filter((t) => /Morning: Banana/.test(t)), []);
   } finally { f.done(); }
 });
+
+test('a day begun the evening before: a session time after midnight is still ahead, not past', () => {
+  const o = { ...base, wokeAt: at(Y, '21:00'), now: at(Y, '21:10'), sessionHm: '01:00' };
+  assert.equal(nudgeCandidates(o).find((c) => c.key === 'morning')?.text, `Morning: ${ROUTINE}. Legs at 1:00 AM.`);
+  // A time set before he woke on a normal morning stays past: no routine.
+  assert.equal(morning({ now: T('04:20'), sessionHm: '03:00' }), null);
+});
