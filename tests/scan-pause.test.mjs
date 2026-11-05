@@ -106,3 +106,10 @@ test('the coach while paused: no next scan date, no Evolt weigh-in prompt, in th
   assert.match(today(), /Body scan: every training day/);
   assert.match(RULES, /paused scans/);
 });
+
+test('the workout Finish screen asks about the Evolt only while scans are not paused', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../app/js/views/finish.js', import.meta.url), 'utf8');
+  const ask = src.slice(src.indexOf('const scanAsk ='), src.indexOf('const changed ='));
+  assert.match(ask, /!scanHold\(await repo\.list\('coach-holds'\)\)/);
+});

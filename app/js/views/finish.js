@@ -6,6 +6,7 @@ import { ready, syncNow } from '../lib/data.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { cadenceOf, isDone } from '../lib/scans.js';
+import { scanHold } from '../lib/holdoffs.js';
 import { summarize, elapsedMs, copySession } from '../lib/session.js';
 import { fileToJpeg, newPhotoId } from '../lib/photos.js';
 import { sessionBests, sessionSetRecords, workoutDetail, structureChanged, routineFromSession, previousSame, comebackStartOf } from '../lib/finish.js';
@@ -134,7 +135,9 @@ export function render(view, params = []) {
     const scanPlan = await repo.get('scan-plan', 'main');
     const scanAsk = ['pull', 'push', 'legs'].includes(session.dayType) && day === isoDate(new Date())
       && (cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === day)
-      && !(await repo.list('body-scans')).some((x) => x.date === day && isDone(x));
+      && !(await repo.list('body-scans')).some((x) => x.date === day && isDone(x))
+      // Thu 11/5: not while he has paused scans (a scan hold-off).
+      && !scanHold(await repo.list('coach-holds'));
     const changed = structureChanged(session, done, routine);
     const lib = new Map(mergeLibrary(exercises, getState().equipment).map((e) => [e.id, e]));
     const detail = workoutDetail(session, all, sessionSetRecords(session, done, history, { fullHistory, comebackStart }));
