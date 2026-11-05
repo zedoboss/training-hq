@@ -37,7 +37,10 @@ test('out walking: no "Back from the walk?" once he has said he is cooking, eate
   const doc = withAnswer(emptyWalk(D), D, { action: 'going' }, at('16:12'));
   const base = { tz: TZ, goal: 8000, wakeHm: '08:00', bedHm: '23:30', doc, steps: { steps: 4508, asOf: at('16:47') } };
   assert.equal(walkDue({ ...base, now: at('16:54') }).kind, 'back', 'nothing since: the question comes');
-  assert.equal(walkDue({ ...base, now: at('16:54'), homeAt: at('16:51') }), null, 'he said cooking at 4:51 PM');
+  // Thu 11/5: home means the walk is over: no "Back?", one ask for the minutes instead.
+  const home = walkDue({ ...base, now: at('16:54'), homeAt: at('16:51') });
+  assert.equal(home.kind, 'minutes', 'he said cooking at 4:51 PM');
+  assert.doesNotMatch(home.text, /Back/);
   assert.equal(walkDue({ ...base, now: at('16:54'), homeAt: at('16:00') }).kind, 'back', 'something before he went out does not count');
   const dir = mkdtempSync(join(tmpdir(), 'thq-home-'));
   const store = openStore(join(dir, 'db.sqlite'));

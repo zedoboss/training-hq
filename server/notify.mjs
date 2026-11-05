@@ -10,7 +10,7 @@ import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist, nextSuppsText } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING } from '../app/js/lib/nudges.js';
-import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart } from '../app/js/lib/walks.js';
+import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart, settleWalk } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
 import { dayClock, bodyClock, realTimes } from '../app/js/lib/moving-day.js';
@@ -1032,6 +1032,35 @@ export function homeSince(store, since) {
 }
 
 /**
+ * The signs he's back from a walk that began at `goingAt` (lib/walks.js walkOverAt): what he did at home since, his
+ * message times, and that day's step readings.
+ */
+export function walkSigns(store, goingAt, now, tz) {
+  const msgs = recordsOf(store, MSGS).filter((m) => m?.role === 'user' && m.at > goingAt).map((m) => m.at);
+  return { now, homeAt: homeSince(store, goingAt), userAts: msgs, steps: stepReadingsOf(store)[isoDate(new Date(goingAt), tz)] || [] };
+}
+
+/**
+ * Thu 11/5 (his words: "see if something doesn't update accordingly instantly whenever I talk with you"; at 7:55 AM
+ * the app still had him "out walking since 6:06 AM", his breakfast logged at 6:55 AM): a walk he's clearly back from
+ * is closed in the record on the next tick, quiet hours or not (older days' open walks too). Returns the walks it closed.
+ */
+export function settleWalks(store, now, tz, log = () => {}) {
+  const closed = [];
+  for (const r of store.listRecords('walks')) {
+    const doc = r.deleted ? null : r.data;
+    if (!doc?.going?.at) continue;
+    const done = settleWalk(doc, { ...walkSigns(store, doc.going.at, now, tz), asks: doc.asks || [] });
+    if (done === doc) continue;
+    store.writeLocal('walks', r.id, done);
+    const w = done.walks.at(-1);
+    log(`walk: closed the walk from ${new Date(w.from).toISOString()} (${w.auto})`);
+    closed.push(w);
+  }
+  return closed;
+}
+
+/**
  * The walk coach (Tue 10/20, his words: "bump me throughout the day... to get me to get those 8K steps... If I don't
  * respond within 5 minutes, it should bump me again and ask... When are you going for a walk?"). Its own timing (lib/
  * walks.js), not the nudges' 20 minutes; quiet while a workout or the sauna runs, 20 minutes after a workout, while
@@ -1047,12 +1076,14 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   // till 2:00 AM); on the moving schedule only what happened since he woke counts.
   const date = foodDayOf(store, now, tz);
   const docs = store.listRecords('walks').map((r) => r.data).filter(Boolean);
-  const doc = docs.find((d) => d.date === date) || null;
+  const found = docs.find((d) => d.date === date) || null;
+  // A walk he's back from is closed here too, so what's written below never reopens it (Thu 11/5).
+  const doc = found?.going ? settleWalk(found, { ...walkSigns(store, found.going.at, now, tz), asks: found.asks || [] }) : found;
   const view = dayPart(doc, inp.n.clock?.wokeAt ?? null);
   const health = (d) => { const r = store.getRecord('health', d); return r && !r.deleted ? r.data : null; };
   const steps = walkSteps(date, isoDate(new Date(now), tz), health);
   const goal = withDefaults(store.getRecord('settings', 'main')?.data).body.stepGoal || 8000;
-  const due = walkDue({ now, tz, doc: view, steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather'), homeAt: view?.going ? homeSince(store, view.going.at) : 0 });
+  const due = walkDue({ now, tz, doc: view, steps, goal, wakeHm: inp.n.wakeHm, bedHm: inp.n.bedHm, lastUserAt: inp.lastUserAt, busy: inp.busy, usualHm: usualWalkHm(docs, { today: date, tz }), fasting: inp.fasting, weather: store.getMeta('weather'), homeAt: view?.going ? homeSince(store, view.going.at) : 0, readings: view?.going ? walkSigns(store, view.going.at, now, tz).steps : [] });
   if (!due) return null;
   // Sat 10/31 (Fri 10/30, 7:05 AM, "One time, and I stop asking. Are you going to let your future self be weaker? Move."):
   // the walk coach asks when he's going; no push line, whatever the text ends on.
@@ -1230,6 +1261,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const caught = quiet ? await silentTick({ store, push, log, now: t, tz: zone, quiet }) : null;
       // Once a week, his report (server/weekly.mjs).
       const weekly = caught ? null : await weeklyTick({ store, push, log, now: t, tz: zone });
+      settleWalks(store, t, zone, log);
       const walk = quiet ? null : await walkTick({ store, push, log, now: t, tz: zone });
       // One coach notification a minute: a walk question that just went out holds the other nudges.
       const nudge = walk || quiet ? null : await nudgeTick({ store, push, log, now: t, tz: zone });

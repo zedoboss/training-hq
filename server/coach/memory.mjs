@@ -150,7 +150,11 @@ function allEvents(s) {
   for (const w of s.list('walks')) {
     if (w.plan?.setAt) ev(w.plan.setAt, 'walks', `Walk planned for ${t(w.plan.at)}${coachPlanned(w.plan) ? ' (by the app, for the weather)' : ''}${w.plan.said && !coachPlanned(w.plan) ? ` ("${clip(w.plan.said, 120)}")` : ''}`);
     if (w.going?.at) ev(w.going.at, 'walks', 'Out walking');
-    for (const x of w.walks || []) ev(x.at, 'walks', `Walk done${x.minutes ? `: ${x.minutes} min` : ''}${x.steps ? `, ${x.steps} steps` : ''}`);
+    // Thu 11/5: a walk the app closed when he was back keeps its start ("from").
+    for (const x of w.walks || []) {
+      if (x.from) ev(x.from, 'walks', 'Out walking');
+      ev(x.at, 'walks', x.auto ? `Walk over (the app saw he was back: ${{ home: 'a meal or workout at home', talk: 'he wrote after "Back?"', steps: 'steps flat', long: 'open 2 hours' }[x.auto] || x.auto}), minutes not given` : `Walk done${x.minutes ? `: ${x.minutes} min` : ''}${x.steps ? `, ${x.steps} steps` : ''}`);
+    }
     for (const x of w.skips || []) ev(x.at, 'walks', `Walk skipped${x.reason ? `: ${clip(x.reason, 120)}` : ''}`);
     if (w.goalAt) ev(w.goalAt, 'walks', 'Step goal reached');
   }

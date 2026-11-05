@@ -23,7 +23,7 @@ export function lastAnswerAt({ messages = [], meals = [], checks = [], supps = [
     ...sets.filter((x) => x?.done).map((x) => x.doneAt),
     // His day: the session time he set, his check-in, a rest day.
     ...days.flatMap((d) => [d?.timeSetAt, d?.readiness?.at, d?.rest?.at]),
-    ...walks.flatMap((w) => [w?.going?.at, ...(w?.walks || []).map((x) => x.at), ...(w?.skips || []).map((x) => x.at), w?.plan && w.plan.by !== 'coach' ? w.plan.setAt : null]),
+    ...walks.flatMap((w) => [w?.going?.at, ...(w?.walks || []).filter((x) => !x?.auto).map((x) => x.at), ...(w?.skips || []).map((x) => x.at), w?.plan && w.plan.by !== 'coach' ? w.plan.setAt : null]),
   ].filter((t) => Number.isFinite(t) && t <= now);
   return times.length ? Math.max(...times) : 0;
 }

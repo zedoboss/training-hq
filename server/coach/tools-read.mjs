@@ -31,7 +31,7 @@ import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time
 import { restFor, restText } from '../../app/js/lib/settings.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
-import { afterMeals, mealSpansFor, morningContext } from '../notify.mjs';
+import { afterMeals, mealSpansFor, morningContext, walkSigns } from '../notify.mjs';
 import { painEntries, painByArea, repeatFlags, areaText } from '../../app/js/lib/pain.js';
 import { PAIN_WORDS } from '../../app/js/lib/nudges.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
@@ -359,7 +359,10 @@ export function walkTextLines(s, { week = false } = {}) {
   // His waking day, as the walk questions count it (Thu 10/29).
   const day = s.foodDay();
   const steps = walkSteps(day, s.today, (d) => s.one('health', d));
-  const lines = walkLines(docs, { today: day, now: s.now, tz: s.tz, steps, goal: s.settings().body?.stepGoal || 8000, usualHm: usualWalkHm(docs, { today: day, tz: s.tz }) });
+  // Thu 11/5: the walk as it really stands (back = over), the moment he's back, not on the Mac's next tick.
+  const going = docs.find((x) => x?.date === day)?.going;
+  const signs = going?.at ? walkSigns(s.store, going.at, s.now, s.tz) : null;
+  const lines = walkLines(docs, { today: day, now: s.now, tz: s.tz, steps, goal: s.settings().body?.stepGoal || 8000, usualHm: usualWalkHm(docs, { today: day, tz: s.tz }), signs });
   // Wed 10/21: UV (Open-Meteo, his area), so walks are planned at UV under 3; UV only since Tue 10/27.
   const w = s.store.getMeta?.('weather');
   const nowH = (w?.hours || []).find((h) => h.at <= s.now && s.now < h.at + 3600000);

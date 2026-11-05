@@ -23,6 +23,13 @@ export const WALK = {
   freshMs: 3 * 3600000, // a step count older than this is not trusted for "steps to go"
   movingSteps: 500,   // Thu 11/5: steps up this much since the last ask = he's moving: "Out walking?", not "when?"
   stepsPerMin: 100,   // an estimate: about 100 steps a minute walking (Claude's estimate)
+  // Thu 11/5 (his words: "see if something doesn't update accordingly instantly whenever I talk with you"; "out walking
+  // since 6:06 AM" was still his state at 7:55 AM, an hour after his 6:54 AM breakfast): signs he's back. Claude's
+  // numbers: a walk open this long is over, whatever else; steps under flatRate a minute over flatMin+ minutes, judged
+  // once the walk is backMin old, mean he's stopped.
+  maxOpenMin: 120,
+  flatMin: 15,
+  flatRate: 20,
 };
 
 // Heat and sun (Wed 10/21, his words: "check the UV index. He shouldn't recommend it when it's hot outside, when it's
@@ -167,6 +174,47 @@ export function movingText(asks, steps, now, tz, cfg = WALK) {
   return `Out walking? ${nf(steps.steps)} steps as of ${formatHm(hmOf(new Date(steps.asOf), tz))}, up ${nf(up)} since I asked.`;
 }
 
+const OVER_WHY = {
+  home: 'he did something at home: a meal, a meal answer or a workout',
+  talk: 'he wrote to me after the "Back?" ask',
+  steps: 'his steps went flat',
+  long: `it was open ${WALK.maxOpenMin / 60} hours`,
+};
+/**
+ * When a walk in progress ended, from the signs he's back (Thu 11/5), or null while it may still be going: something
+ * he did at home since he went out (homeAt: a meal, a meal answer, a workout start), a message from him after the
+ * "Back from the walk?" ask (userAts: his message times), his steps flat (steps: [{steps, at}] readings of that day),
+ * or open maxOpenMin. The earliest sign wins. {at, why}.
+ */
+export function walkOverAt(going, { now, homeAt = 0, userAts = [], asks = [], steps = [], cfg = WALK } = {}) {
+  if (!going?.at) return null;
+  const signs = [];
+  if (homeAt > going.at) signs.push({ at: homeAt, why: 'home' });
+  const back = asks.find((a) => a.kind === 'back' && a.at > going.at);
+  const said = back ? userAts.filter((t) => Number.isFinite(t) && t > back.at && t <= now).sort((a, b) => a - b)[0] : null;
+  if (said) signs.push({ at: said, why: 'talk' });
+  const read = steps.filter((r) => Number.isFinite(r?.at) && r.steps != null && r.at >= going.at && r.at <= now).sort((a, b) => a.at - b.at);
+  for (let i = 1; i < read.length; i++) {
+    const a = read[i - 1], b = read[i], min = (b.at - a.at) / 60000;
+    if (b.at - going.at >= cfg.backMin * 60000 && min >= cfg.flatMin && (b.steps - a.steps) / min < cfg.flatRate) { signs.push({ at: a.at, why: 'steps' }); break; }
+  }
+  if (now - going.at >= cfg.maxOpenMin * 60000) signs.push({ at: going.at + cfg.maxOpenMin * 60000, why: 'long' });
+  return signs.length ? signs.sort((a, b) => a.at - b.at)[0] : null;
+}
+/**
+ * The record with a walk he's clearly back from closed (Thu 11/5): `going` becomes a walk done at the sign's time,
+ * minutes unknown (auto: why), so nothing shows him "out walking" for hours and the walk questions carry on. The same
+ * record when it's still open.
+ */
+export function settleWalk(doc, signs) {
+  if (!doc?.going) return doc;
+  const over = walkOverAt(doc.going, signs);
+  if (!over) return doc;
+  return { ...doc, going: null, walks: [...(doc.walks || []), { at: over.at, from: doc.going.at, minutes: null, steps: null, auto: over.why }] };
+}
+/** A walk the app closed itself with no minutes from him (Thu 11/5). */
+export const minutesOpen = (w) => Boolean(w?.auto && w.minutes == null);
+
 export const emptyWalk = (date) => ({ id: date, date, asks: [], answeredAt: null, plan: null, going: null, walks: [], skips: [], goalAt: null });
 
 const minOf = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return h * 60 + m; };
@@ -236,10 +284,12 @@ export function usualWalkHm(docs = [], { today, tz } = {}) {
  * @param {number} o.lastUserAt      when he last wrote or spoke to the coach
  * @param {string|null} [o.usualHm]  his usual walk hour (usualWalkHm)
  * @param {number} [o.homeAt]        the last thing he did at home (a meal answer, a meal, a workout start), or 0
- * @returns {{kind: 'ask'|'check'|'out'|'again'|'plan'|'planned'|'moved'|'no-window'|'back'|'goal', text: string}|null}
+ * @param {{steps:number, at:number}[]} [o.readings] that day's step readings (walkOverAt)
+ * @returns {{kind: 'ask'|'check'|'out'|'again'|'plan'|'planned'|'moved'|'no-window'|'back'|'minutes'|'goal', text: string}|null}
  */
-export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, weather = null, homeAt = 0, cfg = WALK }) {
-  const d = doc || emptyWalk(isoDate(new Date(now), tz));
+export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:00', bedHm = '22:00', lastUserAt = 0, busy = false, usualHm = null, fasting = false, weather = null, homeAt = 0, readings = [], cfg = WALK }) {
+  // A walk he's clearly back from counts as done (Thu 11/5): never "out walking" for hours, the questions carry on.
+  const d = settleWalk(doc || emptyWalk(isoDate(new Date(now), tz)), { now, homeAt, userAts: [lastUserAt], asks: doc?.asks || [], steps: readings, cfg });
   const nowMin = minOf(hmOf(new Date(now), tz));
   const wake = minOf(wakeHm); let bed = minOf(bedHm); if (bed <= wake) bed += 1440;
   const at = nowMin < wake && bed > 1440 ? nowMin + 1440 : nowMin;
@@ -283,6 +333,11 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     return null;
   }
   const walked = lastOf(d.walks);
+  // Back, and the minutes unknown (Thu 11/5, his words via the coach: "ask once for minutes if unknown"): one question,
+  // not "Back?"; none when "Back from the walk?" already went out for this walk.
+  if (minutesOpen(walked) && !d.asks.some((a) => (a.kind === 'back' || a.kind === 'minutes') && a.at > walked.from)) {
+    return { kind: 'minutes', text: `Your walk from ${t(walked.from)} is logged as done. How many minutes did you go?` };
+  }
   if (walked && now - walked.at < cfg.afterWalkMin * 60000) return null;
   // After a walk, wait for a step count that includes it (Thu 10/22 audit: "No step count... go for a walk now" right
   // after one); 3 hours at most.
@@ -361,6 +416,10 @@ export const withAsk = (doc, date, kind, at, steps = null) => ({ ...(doc || empt
  */
 export function withAnswer(doc, date, a, now) {
   const d = { ...(doc || emptyWalk(date)), answeredAt: now };
+  // A walk the app closed itself (Thu 11/5): "still out" reopens it from when he left; his minutes fill it in.
+  const auto = !d.going && minutesOpen(lastOf(d.walks)) ? lastOf(d.walks) : null;
+  if (auto && a.action === 'going' && now - auto.at < 3 * 3600000) return { ...d, going: { at: auto.from }, plan: null, walks: d.walks.slice(0, -1) };
+  if (auto && a.action === 'done') return { ...d, walks: [...d.walks.slice(0, -1), { at: auto.at, from: auto.from, minutes: a.minutes ?? null, steps: a.steps ?? null }] };
   if (a.action === 'plan') return { ...d, plan: { at: a.at, said: a.said || null, setAt: now, ...(a.by === 'coach' ? { by: 'coach' } : {}) }, going: null };
   if (a.action === 'going') return { ...d, going: { at: now }, plan: null };
   if (a.action === 'done') return { ...d, going: null, plan: null, walks: [...d.walks, { at: now, minutes: a.minutes ?? null, steps: a.steps ?? null }] };
@@ -370,17 +429,23 @@ export function withAnswer(doc, date, a, now) {
 }
 
 /** Today in one line for the coach, and the last week as memory. */
-export function walkLines(docs = [], { today, now, tz, steps = null, goal = 8000, usualHm = null } = {}) {
+export function walkLines(docs = [], { today, now, tz, steps = null, goal = 8000, usualHm = null, signs = null } = {}) {
   const t = (ms) => formatHm(hmOf(new Date(ms), tz));
-  const d = docs.find((x) => x?.date === today) || emptyWalk(today);
+  // Thu 11/5: the walk as it really stands, with the signs he's back (walkOverAt), not "out walking" from the record.
+  const raw = docs.find((x) => x?.date === today) || emptyWalk(today);
+  const d = signs ? settleWalk(raw, { now, asks: raw.asks, ...signs }) : raw;
   const last = lastOf(d.asks);
   const parts = [stepsText({ steps, goal, now, tz }).replace(/\.$/, '')];
   if (d.goalAt) parts.push('goal met today');
   else if (d.going) parts.push(`out walking since ${t(d.going.at)}`);
   else if (d.plan) parts.push(coachPlanned(d.plan) ? `the app planned it for ${t(d.plan.at)} (for the weather; his time only if he agrees, never "you said" or "you set")` : `he said he'd go at ${t(d.plan.at)}${d.plan.said ? ` ("${d.plan.said}")` : ''}`);
   else if (last?.kind === 'out' && !((d.answeredAt || 0) > last.at)) parts.push(`his steps went up after the ask, so at ${t(last.at)} the app asked if he's out walking, no answer yet: don't ask him when he's going`);
-  else if (last && !((d.answeredAt || 0) > last.at)) parts.push(`asked at ${t(last.at)}, no answer yet: get a time from him`);
-  for (const w of d.walks) parts.push(`walked at ${t(w.at)}${w.minutes ? ` for ${w.minutes} min` : ''}`);
+  else if (last && !['back', 'minutes'].includes(last.kind) && !((d.answeredAt || 0) > last.at)) parts.push(`asked at ${t(last.at)}, no answer yet: get a time from him`);
+  for (const w of d.walks) {
+    if (!minutesOpen(w)) { parts.push(`walked ${w.from ? `from ${t(w.from)} ` : ''}at ${t(w.at)}${w.minutes ? ` for ${w.minutes} min` : ''}`); continue; }
+    const asked = d.asks.find((a) => (a.kind === 'back' || a.kind === 'minutes') && a.at > w.from);
+    parts.push(`the walk from ${t(w.from)} is OVER, back by about ${t(w.at)} (${OVER_WHY[w.auto] || 'signs he is back'}): never say he's out walking; minutes unknown, ${asked ? `already asked at ${t(asked.at)}: don't ask again; record them (walk done) if he says` : 'the app asks him once; if he says, record them (walk done)'}; if he says he's still out, record walk going`);
+  }
   for (const s of d.skips) parts.push(`skipped at ${t(s.at)}${s.reason ? ` (${s.reason})` : ''}`);
   const week = docs.filter((x) => x?.date && x.date < today).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7)
     .map((x) => `${x.date.slice(5)}: ${[x.plan ? `planned ${t(x.plan.at)}${coachPlanned(x.plan) ? ' (by the app)' : ''}` : '', ...x.walks.map((w) => `walked ${t(w.at)}${w.minutes ? ` ${w.minutes} min` : ''}`), ...x.skips.map((s) => `skipped${s.reason ? ` (${s.reason})` : ''}`), x.goalAt ? 'goal met' : ''].filter(Boolean).join(', ') || 'asked, no walk'}`);
