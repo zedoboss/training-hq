@@ -80,7 +80,10 @@ test('the holds he does at the gym after the workout still come first; "food is 
 test('leftGymAt: the first sign after the end; nothing before the end counts', () => {
   const end = at('05:22');
   assert.equal(leftGymAt({ end }), Infinity);
-  assert.equal(leftGymAt({ end, steps: [{ steps: 2189, at: at('05:42') }] }), Infinity, 'no reading before the end to compare with');
+  assert.equal(leftGymAt({ end, steps: [{ steps: 2189, at: at('05:42') }] }), Infinity, 'one reading, nothing to compare with');
+  assert.equal(leftGymAt({ end, steps: [{ steps: 1200, at: at('05:30') }, { steps: 1800, at: at('05:50') }] }), at('05:50'), 'no reading in the gym: the first after it is the base');
+  assert.equal(leftGymAt({ end, start: at('04:30'), steps: [{ steps: 100, at: at('04:00') }, { steps: 900, at: at('05:25') }] }), Infinity, 'gym steps since a reading before the workout');
+  assert.equal(leftGymAt({ end, start: at('04:30'), steps: [{ steps: 100, at: at('04:00') }, { steps: 900, at: at('05:25') }, { steps: 1500, at: at('05:40') }] }), at('05:40'));
   assert.equal(leftGymAt({ end, steps: [{ steps: 100, at: at('04:00') }, { steps: 972, at: at('05:09') }] }), Infinity, 'steps in the gym');
   assert.equal(leftGymAt({ end, walk: { going: { at: at('05:00') } } }), Infinity, 'a walk before the workout');
   assert.equal(leftGymAt({ end, steps: [{ steps: 972, at: at('05:09') }, { steps: 2189, at: at('05:42') }], mealChecks: [{ at: at('05:35') }] }), at('05:35'));

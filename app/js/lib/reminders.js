@@ -212,7 +212,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
     const ag = afterGym({ date, activity, areas, rounds, scans, scanPlan, photoScanIds });
     if (ag?.scanAskAt) {
       // Thu 11/5: never once he's left the gym (walking, home).
-      const left = leftGymAt({ end: ag.end, steps: stepReadings[date], walk: walks.find((w) => w?.date === date), meals: meals.filter((m) => m.date === date), mealChecks: mealChecks.filter((c) => c.date === date) });
+      const left = leftGymAt({ end: ag.end, start: activity.workoutStart?.[date], steps: stepReadings[date], walk: walks.find((w) => w?.date === date), meals: meals.filter((m) => m.date === date), mealChecks: mealChecks.filter((c) => c.date === date) });
       out.push({ id: `scan-after:${date}`, kind: 'scan', at: ag.scanAskAt, url: '#/body/scan', tag: `scan-after-${date}`, fixed: false,
         title: 'Evolt scan?', body: 'Do it before you leave the gym, then add the results (photo or PDF).', due: ag.scanAskAt < left });
     }
@@ -287,7 +287,7 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
       // A meal logged, or his answer to the meal question, since the gym: no "head home" (Thu 10/22 audit).
       const fed = meals.some((m) => m.date === date && m.at >= ag.doneAt) || mealChecks.some((c) => c.date === date && c.at >= ag.doneAt);
       // Thu 11/5: not once he's out walking or home; "food is next" only with a meal prompt close (not 6 hours ahead).
-      const left = leftGymAt({ end: ag.end, steps: stepReadings[date], walk: walks.find((w) => w?.date === date), meals: meals.filter((m) => m.date === date), mealChecks: mealChecks.filter((c) => c.date === date) });
+      const left = leftGymAt({ end: ag.end, start: activity.workoutStart?.[date], steps: stepReadings[date], walk: walks.find((w) => w?.date === date), meals: meals.filter((m) => m.date === date), mealChecks: mealChecks.filter((c) => c.date === date) });
       const from = activity.workoutStart?.[date] ?? ag.doneAt;
       const food = out.some((i) => (i.kind === 'meals' || i.kind === 'cook') && i.due && i.at >= from && i.at <= ag.homeAt + AFTER_GYM.foodNextMin * 60000);
       out.push({ id: `home:${date}`, kind: 'meals', at: ag.homeAt, url: '#/fuel', tag: `home-${date}`, fixed: false,
@@ -352,12 +352,14 @@ export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], 
  * leftSteps+ above the last one before the end (steps: [{steps, at}] of that day), a walk started or logged, a meal
  * or his answer to a meal question (Thu 11/5: "obviously you know I'm on a walk right now").
  */
-export function leftGymAt({ end, steps = [], walk = null, meals = [], mealChecks = [] }) {
+export function leftGymAt({ end, start = -Infinity, steps = [], walk = null, meals = [], mealChecks = [] }) {
   const after = (t) => Number.isFinite(t) && t >= end;
   const signs = [walk?.going?.at, ...(walk?.walks || []).map((w) => w.at), ...meals.map((m) => m.at), ...mealChecks.map((c) => c.at)].filter(after);
   const read = steps.filter((r) => Number.isFinite(r?.at) && r.steps != null).sort((a, b) => a.at - b.at);
-  const base = read.filter((r) => r.at <= end).at(-1);
-  if (base) { const up = read.find((r) => r.at > end && r.steps - base.steps >= AFTER_GYM.leftSteps); if (up) signs.push(up.at); }
+  // The base is a reading taken during the workout; one from before it would count his gym steps as leaving, so then
+  // the first reading after the end is the base (Thu 11/5 review).
+  const base = read.filter((r) => r.at <= end && r.at >= start).at(-1) || read.find((r) => r.at > end);
+  if (base) { const up = read.find((r) => r.at > Math.max(end, base.at) && r.steps - base.steps >= AFTER_GYM.leftSteps); if (up) signs.push(up.at); }
   return signs.length ? Math.min(...signs) : Infinity;
 }
 
