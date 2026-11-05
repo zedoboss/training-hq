@@ -177,7 +177,8 @@ export function suppReminders({ date, tz, supps = [], log = [], dayKind = 'train
       });
     }
   }
-  return { items, open: groups.flatMap((g) => g.open.map((i) => shortName(i.supp))) };
+  // Still open for the evening round-up: not the ones right before bed (Thu 11/5): they're asked at his bedtime.
+  return { items, open: groups.filter((g) => !g.bed).flatMap((g) => g.open.map((i) => shortName(i.supp))) };
 }
 
 /** The latest planning answer about one supplement's current stock count, or the latest weekly one. */

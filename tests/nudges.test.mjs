@@ -82,7 +82,7 @@ test('nudges: supplements with no time set, once the morning is over', () => {
   assert.equal(nudgeCandidates({ ...base, now: at(D, '06:00'), suppsUntimed }).length, 0);
   const c = nudgeCandidates({ ...base, now: at(D, '09:00'), suppsUntimed });
   assert.deepEqual(keys(c), ['supps-untimed']);
-  assert.equal(c[0].text, 'Supplements: 2 of 8 taken today. Still open: Vitamin C, D3 + K2, Omega-3, Creatine and 2 more. Take them and tell me.');
+  assert.equal(c[0].text, "Vitamin C, D3 + K2, Omega-3, Creatine and 2 more: still open today, and they have no set moment. Take them when it suits you, or tell me when you take them (after a meal, before bed) and I'll ask then.");
   assert.equal(nudgeCandidates({ ...base, now: at(D, '09:00'), suppsUntimed: { total: 8, open: [] } }).length, 0);
 });
 
@@ -778,7 +778,7 @@ test('Fri 10/23: a meal eaten out says take the supplements once home, no dishes
     store.writeLocal('coach-holds', 'h1', hold);
     store.writeLocal('meals', 'm1', { id: 'm1', date: D, at: at(D, '16:59'), name: 'Last meal', source: 'manual', before: { items: [{ name: 'Udon', grams: 375, kcal: 500, protein: 12 }] } });
     assert.equal((await dishesTick({ store, push, now: at(D, '17:08'), tz: TZ }))?.key, 'supps-after-meal');
-    assert.equal(sent[0].body, 'Last meal logged. You ate out, so take your supplements when you\'re back home: Vitamin D3 + K2. I\'ll remind you later.');
+    assert.equal(sent[0].body, 'Last meal logged. You ate out, so take your supplements when you\'re back home: Vitamin D3 + K2. I\'ll remind you later. Next: collagen after your second meal.');
     assert.equal(await dishesTick({ store, push, now: at(D, '17:11'), tz: TZ }), null, 'no dishes after a meal out');
     assert.equal(sent.length, 1);
     // Later: the nudge asks whether he's home, not before 30 minutes after he logged it (5:08 PM; Mon 10/26).

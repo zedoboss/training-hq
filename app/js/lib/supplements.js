@@ -3,12 +3,13 @@
 // by itself. Pure functions; screens, reminders and the Mac pass the records in.
 //
 // supplements  {id, kind: 'supplement', name, short, dose, doseRest, time 'HH:MM'|null, withFood: 'with'|'without'|'either'|null,
+//               afterMeal: 'first'|'second'|null, atBed: true (right before he sleeps, on his bedtime),
 //               days: {type: 'daily'} | {type: 'weekdays', weekdays: [0-6]} | {type: 'perWeek', count, offDay: 0-6|null},
 //               status: 'active'|'paused'|'removed', history: [{on, status}], stock: {servings, countedAt}|null,
 //               perTake: {train, rest} (servings used per tick), note, order, source, changes: [{on, text}]}
 // supp-log     {id: '<date>.<supp id>', date, suppId, status: 'taken'|'skipped', reason, at, dose, dayKind, servings}
 import { addDays, rotationDay, lastRotationSession, daysByDate } from './rotation.js';
-import { isoDate } from './time.js';
+import { isoDate, formatHm, formatTime } from './time.js';
 
 export const LOW_DAYS = 7;
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -97,14 +98,42 @@ export function checklist({ supps = [], log = [], date, dayKind }) {
   for (const s of supps.filter((x) => scheduledOn(x, date) && (entries.has(x.id) || !outOf(x, log, date))).sort(byOrder)) {
     // Tue 10/20: the ones he takes right after his first meal (afterMeal 'first') are a group of their own; Thu 10/22:
     // so are the ones after his second meal (afterMeal 'second', his collagen).
+    // Thu 11/5 (his words: "magnesium, I should take it at the end, right before I sleep"): atBed, right before bed, on
+    // his bedtime (the moving one too); a time of day set on its page wins over it.
     const second = s.afterMeal === 'second';
-    const key = s.afterMeal === 'first' ? 'after-meal' : second ? 'after-meal-2' : s.time || '';
-    if (!groups.has(key)) groups.set(key, { key, time: s.time || null, afterMeal: s.afterMeal === 'first', afterMeal2: second, label: s.afterMeal === 'first' ? 'After your first meal' : second ? 'After your second meal' : s.time ? partOf(s.time) : 'No time set', items: [] });
+    const bed = !s.afterMeal && !s.time && s.atBed === true;
+    const key = s.afterMeal === 'first' ? 'after-meal' : second ? 'after-meal-2' : bed ? 'bed' : s.time || '';
+    if (!groups.has(key)) groups.set(key, { key, time: bed ? null : s.time || null, afterMeal: s.afterMeal === 'first', afterMeal2: second, bed, label: s.afterMeal === 'first' ? 'After your first meal' : second ? 'After your second meal' : bed ? 'Before bed' : s.time ? partOf(s.time) : 'No time set', items: [] });
     groups.get(key).items.push({ supp: s, dose: doseFor(s, dayKind), servings: servingsFor(s, dayKind), entry: entries.get(s.id) || null });
   }
-  const rank = (g) => (g.time ? 0 : g.afterMeal ? 1 : g.afterMeal2 ? 1.5 : 2);
+  const rank = (g) => (g.time ? 0 : g.afterMeal ? 1 : g.afterMeal2 ? 1.5 : g.bed ? 1.8 : 2);
   return [...groups.values()].sort((a, b) => rank(a) - rank(b) || String(a.time).localeCompare(String(b.time)))
     .map((g) => ({ ...g, open: g.items.filter((i) => !i.entry) }));
+}
+
+/** When a group of the checklist is taken, in words: "after your second meal", "before bed", "at 2:00 PM". */
+export function whenText(g, { bedAt = null, tz = null } = {}) {
+  if (g.afterMeal) return 'after your first meal';
+  if (g.afterMeal2) return 'after your second meal';
+  if (g.bed) return `before bed${Number.isFinite(bedAt) && tz ? `, about ${formatTime(new Date(Math.round(bedAt / 300000) * 300000), tz)}` : ''}`;
+  if (g.time) return `at ${formatHm(g.time)}`;
+  return null;
+}
+
+/**
+ * What comes next after the groups in `done` (their keys): the open ones of the later groups, each with when it's due,
+ * in the day's order (Thu 11/5, his words: "It could give me a suggestion when I should take them... It should be
+ * ordered differently"). "Next: creatine, carnitine, collagen after your second meal; magnesium before bed, about
+ * 11:40 PM." or '' when nothing is left. A group with no time set isn't said (it has no moment of its own); one at a
+ * time of day only while that time is still ahead (nowHm, "HH:MM").
+ */
+export function nextSuppsText(groups = [], { done = [], bedAt = null, tz = null, nowHm = null } = {}) {
+  const order = (g) => (g.time ? 0 : g.afterMeal ? 1 : g.afterMeal2 ? 2 : g.bed ? 3 : 9);
+  const from = Math.max(-1, ...groups.filter((g) => done.includes(g.key)).map(order));
+  const parts = groups.filter((g) => !done.includes(g.key) && g.open?.length && order(g) < 9 && (g.time ? nowHm != null && g.time > nowHm : order(g) > from))
+    .sort((a, b) => order(a) - order(b) || String(a.time).localeCompare(String(b.time)))
+    .map((g) => `${g.open.map((i) => shortName(i.supp)).join(', ')} ${whenText(g, { bedAt, tz })}`);
+  return parts.length ? `Next: ${parts.join('; ')}.` : '';
 }
 
 const RAN_OUT = /\b(ran|run|running) out\b|out of stock|none left/i;

@@ -8,7 +8,7 @@ import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
-import { checklist } from '../app/js/lib/supplements.js';
+import { checklist, nextSuppsText } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
@@ -276,6 +276,18 @@ export function hoursNow(store, now, tz) {
   if (!c) return { ...n0, wakeHm: wakeHmToday(store, now, tz, n0.wakeHm) };
   if (c.asleep || c.wokeAt == null) return { ...n0, clock: c, asleep: true };
   return { ...n0, clock: c, asleep: false, wakeHm: hmOf(new Date(c.wokeAt), tz), bedHm: hmOf(new Date(Math.max(c.bedAt, now + 3600000)), tz) };
+}
+
+/**
+ * His expected bedtime in the day he's in, ms (Thu 11/5, the supplements he takes right before bed): on the moving
+ * schedule the one it works out (clock.bedAt, later every day); else his bedtime from Settings after his wake time.
+ */
+export function bedAtOf(n, now, tz) {
+  if (n.clock) return Number.isFinite(n.clock.bedAt) ? n.clock.bedAt : null;
+  const min = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+  let start = zonedTime(isoDate(new Date(now), tz), n.wakeHm, tz);
+  if (start > now) start = zonedTime(addDays(isoDate(new Date(now), tz), -1), n.wakeHm, tz);
+  return start + (((min(n.bedHm) - min(n.wakeHm)) + 1440) % 1440 || 1440) * 60000;
 }
 
 /** Inside his waking hours now (hoursNow): on the moving schedule, while he's not asleep. */
@@ -812,7 +824,12 @@ export function nudgeInputs(store, now, tz) {
   const trained = c ? list('sessions').some((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && since(x.startedAt)) : st.trainedDates?.has?.(date) || false;
   const rot = rotationDay({ last: st.last, today: date, days: st.days || {} });
   const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date: food, dayKind: rot.today.kind === 'train' || trained ? 'train' : 'rest' });
-  const untimed = groups.filter((g) => !g.time && !g.afterMeal && !g.afterMeal2).flatMap((g) => g.items);
+  const untimed = groups.filter((g) => !g.time && !g.afterMeal && !g.afterMeal2 && !g.bed).flatMap((g) => g.items);
+  // Thu 11/5: the ones right before bed, on his expected bedtime (the moving one too); what's due next, in words.
+  const bedAt = bedAtOf(n, now, tz);
+  const bedOpen = groups.filter((g) => g.bed).flatMap((g) => g.open);
+  const nowHm = hmOf(new Date(now), tz);
+  const suppLastAt = Math.max(0, ...list('supp-log').filter((e) => e.date === food && e.at).map((e) => e.at)) || null;
   const afterMeal = groups.filter((g) => g.afterMeal).flatMap((g) => g.items);
   const firstMeal = list('meals').filter((m) => m.date === food && m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[0];
   const firstMealAt = firstMeal ? firstMeal.at : NaN;
@@ -831,8 +848,11 @@ export function nudgeInputs(store, now, tz) {
       rot,
       // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
       // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
-      suppsUntimed: untimed.length ? { total: groups.flatMap((g) => g.items).length, taken: groups.flatMap((g) => g.items).filter((i) => i.entry?.status === 'taken').length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name) } : null,
-      suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt, away: ateOut(firstMeal, holdsOf(store)), toldAt: store.getMeta(DISHES)?.seen?.[firstMeal.id] || null } : null,
+      suppsUntimed: untimed.length ? { total: groups.flatMap((g) => g.items).length, taken: groups.flatMap((g) => g.items).filter((i) => i.entry?.status === 'taken').length, open: untimed.filter((i) => !i.entry).map((i) => i.supp.name),
+        lastAt: suppLastAt, next: nextSuppsText(groups, { bedAt, tz, nowHm, done: Number.isFinite(firstMealAt) ? ['after-meal'] : [] }) } : null,
+      suppsAfterMeal: afterMeal.length && Number.isFinite(firstMealAt) ? { open: afterMeal.filter((i) => !i.entry).map((i) => i.supp.name), mealAt: firstMealAt, away: ateOut(firstMeal, holdsOf(store)), toldAt: store.getMeta(DISHES)?.seen?.[firstMeal.id] || null,
+        next: nextSuppsText(groups, { bedAt, tz, nowHm, done: ['after-meal'] }) } : null,
+      suppsBed: bedOpen.length && Number.isFinite(bedAt) ? { open: bedOpen.map((i) => `${i.supp.name} ${i.dose}`.trim()), bedAt, dayKey: food } : null,
       sessionHm: st.days?.[date]?.sessionTime || null,
       session: { started: trained, done: trained },
       weighedToday: list('measurements').some((m) => m.date === date && m.weightKg != null) || Boolean(health?.weights?.length)
@@ -893,6 +913,8 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   if (first && st && state.suppsFor?.[date] !== first.id && state.seen[first.id] === now && !heldOff('supps-after-meal', holds, now)) {
     const groups = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' });
     const open = groups.filter((g) => g.afterMeal).flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.name);
+    // Thu 11/5 (his words: "It could give me a suggestion when I should take them"): and when the rest are due.
+    const next = nextSuppsText(groups, { done: ['after-meal'], bedAt: bedAtOf(n, now, tz), tz, nowHm: hmOf(new Date(now), tz) });
     state.suppsFor = { [date]: first.id };
     if (open.length) {
       const opts = voiceOpts(store);
@@ -902,9 +924,10 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
       const away = ateOut(first, holds);
       const late = away && loggedLate(first.at, now);
       const line = away ? null : pickLine(opts.bank, 'nudge', { moods: opts.moods, intensity: opts.intensity });
+      // A late one ends on its question (Wed 10/28): nothing after it.
       const body = late ? lateSuppsText(first.name || 'First meal', open)
-        : away ? `${first.name || 'First meal'} logged. You ate out, so take your supplements when you're back home: ${open.join(', ')}. I'll remind you later.`
-        : `${first.name || 'First meal'} logged. Take your supplements now: ${open.join(', ')}.${line?.text ? ` ${line.text}` : ''}`;
+        : away ? `${first.name || 'First meal'} logged. You ate out, so take your supplements when you're back home: ${open.join(', ')}. I'll remind you later.${next ? ` ${next}` : ''}`
+        : `${first.name || 'First meal'} logged. Take your supplements now: ${open.join(', ')}.${next ? ` ${next}` : ''}${line?.text ? ` ${line.text}` : ''}`;
       const r = push.list().length ? await push.notify({ title: 'Coach', body, url: '#/supps', tag: 'supps-after-meal' }) : { sent: 0 };
       sayInTalk(store, { text: body, at: now, tz, kind: 'nudge', ref: `supps-after-meal:${first.id}` });
       store.setMeta(LAST, now);
@@ -918,8 +941,9 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
   const second = meals.filter((m) => m.at && !isSnack(m)).sort((a, b) => a.at - b.at)[1];
   const readyAt = {};
   if (second && st && second.at > now - 3 * 3600000) {
-    const open2 = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' }).filter((g) => g.afterMeal2)
-      .flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
+    const groups2 = checklist({ supps: list('supplements'), log: list('supp-log'), date, dayKind: 'train' });
+    const open2 = groups2.filter((g) => g.afterMeal2).flatMap((g) => g.items).filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
+    const next2 = nextSuppsText(groups2, { done: ['after-meal', 'after-meal-2'], bedAt: bedAtOf(n, now, tz), tz, nowHm: hmOf(new Date(now), tz) });
     const w = state.after2?.[date]?.id === second.id ? state.after2[date] : null;
     // Eaten out (Fri 10/23): take it once home, asked 30 minutes later, not every 5; then (Mon 10/26) the few check-ins
     // of lib/nudges.js AWAY_CHECK_MIN in new words, then quiet (after2GapMin).
@@ -939,8 +963,8 @@ export async function dishesTick({ store, push, log = () => {}, now, tz }) {
     if (!w && mealEatenAt(second, state.seen[second.id]) <= now && !heldOff('supps-after-meal', holds, now)) {
       state.after2 = { [date]: { id: second.id, asked: open2.length ? now : null, last: now, done: open2.length ? null : now, ...(away ? { everyMin: AWAY_REMIND_MIN } : {}), ...(late ? { n: AWAY_CHECK_MIN.length } : {}) } };
       if (open2.length) {
-        await say(late ? lateSuppsText(second.name || 'Second meal', open2) : away ? `${second.name || 'Second meal'} done. You ate out, so take your ${open2.join(', ')} when you're back home. I'll remind you in ${AWAY_REMIND_MIN} minutes.`
-          : `${second.name || 'Second meal'} done. Get up and take your ${open2.join(', ')} now. I'll ask again every ${AFTER_MEAL2_BUMP_MIN} minutes until you tick it.`, 'supps-after-meal-2');
+        await say(late ? lateSuppsText(second.name || 'Second meal', open2) : `${away ? `${second.name || 'Second meal'} done. You ate out, so take your ${open2.join(', ')} when you're back home. I'll remind you in ${AWAY_REMIND_MIN} minutes.`
+          : `${second.name || 'Second meal'} done. Get up and take your ${open2.join(', ')} now. I'll ask again every ${AFTER_MEAL2_BUMP_MIN} minutes until you tick it.`}${next2 ? ` ${next2}` : ''}`, 'supps-after-meal-2');
       }
     } else if (w?.asked && !w.done) {
       if (!open2.length) w.done = now;

@@ -111,6 +111,13 @@ export function heldPlanText(items, { now, tz, max = 150 } = {}) {
   return join(asks.slice(0, n)) + more(n);
 }
 
+/** No "still open" about supplements with no set moment this soon after he answered about any supplement (Thu 11/5). */
+export const SUPPS_AFTER_ANSWER_MIN = 120;
+/** The before-bed ones (Thu 11/5): asked this many minutes from his expected bedtime (before it, then after it). */
+export const SUPPS_BED_MIN = [-30, 30];
+/** Not past this long after his expected bedtime: he's asleep or the day is over. */
+export const SUPPS_BED_LATE_MIN = 180;
+
 // Which planned reminders are nudged again while still open: [key prefix, priority, minutes between nudges, once].
 // Not holds (Sat 10/24): they have their own few check-ins (lib/reminders.js HOLDS_CHECK), not every hour.
 // The first nudge waits those minutes after the reminder itself too; once: a single follow-up (Thu 10/29, his words on
@@ -134,14 +141,17 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  * @param {{steps: number, asOf: number}|null} o.steps   today's steps from Apple Health and when they were read
  * @param {number|null} o.stepGoal
  * @param {{items: string[]}|null} o.scanToday  a body scan planned for today and not taken: the on-the-day checklist
- * @param {{open: string[], total: number, taken?: number}|null} o.suppsUntimed  today's supplements with no time set: names
- *   still open; total and taken over all of today's (out of stock ones aren't on the list)
+ * @param {{open: string[], total: number, taken?: number, lastAt?: number|null, next?: string}|null} o.suppsUntimed  today's
+ *   supplements with no time set: names still open; total and taken over all of today's (out of stock ones aren't on
+ *   the list); lastAt: his latest supplement answer today; next: the ones with their own moment (nextSuppsText)
+ * @param {{open: string[], bedAt: number, dayKey?: string}|null} [o.suppsBed]  the ones he takes right before bed, still
+ *   open ("Magnesium bisglycinate 375 mg"), and his expected bedtime today (the moving one too), ms
  * @param {string} o.wakeHm
  * @param {string} o.bedHm
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
  * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
  * @param {number|null} [o.healthAt]  when Apple Health last reached the Mac (the newest file), ms; null = never; left out = don't say
- * @param {{open: string[], mealAt: number, away?: boolean, toldAt?: number}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, when that meal was eaten, whether he ate it out, and when the Mac first saw it logged
+ * @param {{open: string[], mealAt: number, away?: boolean, toldAt?: number, next?: string}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, when that meal was eaten, whether he ate it out, when the Mac first saw it logged, and the ones due later (nextSuppsText)
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.mealAfterGymAt  no meal nudge before this after the gym (reminders.js afterGym), ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
@@ -150,11 +160,11 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, fasting = false, sent = {} }) {
+  wokeAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, sent = {} }) {
   const out = [];
   // Tue 10/20, his words: after the first meal is logged, "come on, take your supplements" first, then the dishes.
   // A fasting day (Wed 10/21): nothing about food or supplements.
-  if (fasting) { suppsAfterMeal = null; suppsUntimed = null; targets = null; workoutEndedAt = workoutEndedAt && lastMealAt > workoutEndedAt ? workoutEndedAt : null; }
+  if (fasting) { suppsAfterMeal = null; suppsUntimed = null; suppsBed = null; targets = null; workoutEndedAt = workoutEndedAt && lastMealAt > workoutEndedAt ? workoutEndedAt : null; }
   // Eaten out (Fri 10/23): not before he can be home, and asked as "back home yet?". Not before the time he set himself
   // for being home or taking them either (ownSuppsTime).
   // Mon 10/26 (Sunday's pizza out: "Back home yet?" 11 times, 5:42 to 11:55 PM, every 30 to 45 minutes, the same
@@ -174,7 +184,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   } else if (suppsAfterMeal?.open?.length && suppsAfterMeal.mealAt && now >= suppsAfterMeal.mealAt
     && now >= ownSuppsTime(reminders, suppsAfterMeal.open, suppsAfterMeal.mealAt)) {
     out.push({ key: 'supps-after-meal', priority: 91, gapMin: 30, url: '#/supps',
-      text: `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.` });
+      text: `First meal logged: take your supplements now: ${suppsAfterMeal.open.join(', ')}. Tell me when they're down.${suppsAfterMeal.next ? ` ${suppsAfterMeal.next}` : ''}` });
   }
   // After the workout (Tue 10/20, his words: "I'm usually not hungry immediately and I obviously need to take a
   // shower... wait 20 minutes after my workout is finished and then he should bump me about my first meal"): quiet
@@ -276,10 +286,30 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Food behind the day's pace (wake up to 2 hours before bed).
   const frac = dayFraction(now, tz, wakeHm, bedHm);
   // Supplements with no time set (no planned reminder asks about them): once the morning is over.
-  if (suppsUntimed?.open?.length && frac >= 0.25) {
+  // Thu 11/5, his words: "4 out of 8 taken today... I literally just told it, not so long ago that I took 4
+  // supplements, it should have ordered it differently. It could give me a suggestion when I should take them...
+  // magnesium... right before I sleep. So that shouldn't be even added here": "Supplements: 4 of 8 taken today. Still
+  // open: magnesium, carnitine, creatine. Take them" came 24 minutes after he told me 4 he took. Now: only the ones
+  // with no moment of their own (after a meal, before bed and at a time each come then), no "X of 8", not within
+  // SUPPS_AFTER_ANSWER_MIN of his last supplement answer, asked when he takes them, and when the others are due.
+  if (suppsUntimed?.open?.length && frac >= 0.25 && !(suppsUntimed.lastAt && now - suppsUntimed.lastAt < SUPPS_AFTER_ANSWER_MIN * 60000)) {
     const o = suppsUntimed.open;
-    out.push({ key: 'supps-untimed', priority: 58, gapMin: 60, url: '#/supps',
-      text: `Supplements: ${suppsUntimed.taken ?? suppsUntimed.total - o.length} of ${suppsUntimed.total} taken today. Still open: ${o.slice(0, 4).join(', ')}${o.length > 4 ? ` and ${o.length - 4} more` : ''}. Take them and tell me.` });
+    const names = o.length > 4 ? `${o.slice(0, 4).join(', ')} and ${o.length - 4} more` : o.length > 1 ? `${o.slice(0, -1).join(', ')} and ${o.at(-1)}` : o[0];
+    out.push({ key: 'supps-untimed', priority: 58, gapMin: 3 * 60, url: '#/supps',
+      text: `${names}: still open today, and ${o.length > 1 ? 'they have' : 'it has'} no set moment. Take ${o.length > 1 ? 'them' : 'it'} when it suits you, or tell me when you take ${o.length > 1 ? 'them' : 'it'} (after a meal, before bed) and I'll ask then.${suppsUntimed.next ? ` ${suppsUntimed.next}` : ''}` });
+  }
+  // Right before bed (Thu 11/5, his words: "magnesium, I should take it at the end, right before I sleep"): on his
+  // expected bedtime, the moving one too: once SUPPS_BED_MIN[0] before it, once more SUPPS_BED_MIN[1] after it if he's
+  // still up and it's still open, then quiet. The last ones of the day: nothing comes after them.
+  if (suppsBed?.open?.length && Number.isFinite(suppsBed.bedAt)) {
+    const k = SUPPS_BED_MIN.findLastIndex((m) => now >= suppsBed.bedAt + m * 60000);
+    if (k >= 0 && now < suppsBed.bedAt + SUPPS_BED_LATE_MIN * 60000) {
+      const o = suppsBed.open;
+      const bedText = formatTime(new Date(Math.round(suppsBed.bedAt / 300000) * 300000), tz);
+      out.push({ key: `supps-bed:${suppsBed.dayKey || isoDate(new Date(suppsBed.bedAt), tz)}:${k}`, priority: 62, gapMin: ONCE_MIN, spaceMin: 30, url: '#/supps',
+        text: k === 0 ? `Bedtime's about ${bedText}. Right before you sleep: ${o.join(', ')}. Tell me when ${o.length > 1 ? "they're" : "it's"} down.`
+          : `${o.join(', ')} still open. Take ${o.length > 1 ? 'them' : 'it'} right before you sleep, then tell me.` });
+    }
   }
   // A meal still being read counts as nothing yet: no "you're behind" until it's read (Thu 10/22 audit). A meal-time
   // question he hasn't answered yet: that one asks, not this too (Fri 10/23: "Food: 0 of 3,174 kcal... Eat." between

@@ -17,7 +17,7 @@ import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STA
 import { amountsLine, itemAmount, myFoods } from '../../app/js/lib/foods.js';
 import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
 import { foodsDb } from '../foods.mjs';
-import { reviewOpen, checklist, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
+import { reviewOpen, checklist, whenText as suppWhen, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf } from '../../app/js/lib/fuel-reminders.js';
 import { walkLines, usualWalkHm, walkSteps, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
@@ -278,9 +278,11 @@ function suppLine(s) {
   const items = groups.flatMap((g) => g.items);
   const taken = items.filter((i) => i.entry?.status === 'taken').length;
   const skipped = items.filter((i) => i.entry?.status === 'skipped').length;
-  const open = items.filter((i) => !i.entry).map((i) => i.supp.short || i.supp.name);
+  // Thu 11/5 (his words on "4 of 8 taken... still open: magnesium...": "It should be ordered differently"): the open
+  // ones by when he takes them, so they're said with their moment, never as one "take the rest" list.
+  const open = groups.filter((g) => g.open.length).map((g) => `${g.open.map((i) => i.supp.short || i.supp.name).join(', ')} (${suppWhen(g) || 'no set moment'})`);
   const outs = outOfStock(supps, log, s.today);
-  return `Supplements today${wakingNote(s)}: ${items.length ? `${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join(', ')}` : ''}` : 'none scheduled'}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out, "I ordered them" with kind ordered; kind list = his restock list):${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
+  return `Supplements today${wakingNote(s)}: ${items.length ? `${taken} of ${items.length} taken${skipped ? `, ${skipped} skipped` : ''}${open.length ? `; open: ${open.join('; ')}. Say the open ones with when each is due; never "take the rest" in one go` : ''}` : 'none scheduled'}.${outs.length ? ` Out of stock (off his day until back; record his restock answers with supplement_plan kind out, "I ordered them" with kind ordered; kind list = his restock list):${outs.map(({ supp, since }) => `${supp.short || supp.name} since ${dayText(since, s.today)}`).join(', ')}.` : ''}`;
 }
 
 function foodLine(s) {

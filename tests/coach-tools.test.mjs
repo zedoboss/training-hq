@@ -84,7 +84,7 @@ test('today and the context line say the day type, week column and what is open'
   const r = await call('today');
   assert.match(r.text, /^Today: Legs \(week 3 column\), not done yet\./);
   assert.match(r.text, /Last rotation session: Push, Monday 1\/19\./);
-  assert.match(r.text, /Supplements today: 0 of 2 taken; open: powder, caps\./);
+  assert.match(r.text, /Supplements today: 0 of 2 taken; open: powder, caps \(no set moment\)\. Say the open ones with when each is due/);
   assert.match(contextLine({ store, tz: TZ, now: NOW }), /^Today: Legs \(week 3 column\)/);
 });
 
@@ -749,6 +749,15 @@ test('supplement_setup: time, with food, servings, rest-day dose; never adds one
   assert.equal(store.getRecord('supplements', 'supp.powder').data.time, null);
   assert.match((await call('supplement_setup', { supplement: 'zinc', time: '09:00' })).text, /isn't on his list/);
   assert.match((await call('supplement_setup', { supplement: 'powder' })).text, /^Nothing to change/);
+  // Thu 11/5 (his words: "magnesium... right before I sleep"): right before bed clears a time and a meal; a meal clears it.
+  await call('supplement_setup', { supplement: 'powder', time: '11:00' });
+  assert.match((await call('supplement_setup', { supplement: 'powder', bedtime: true })).text, /right before bed \(asked on his bedtime\)/);
+  const b = store.getRecord('supplements', 'supp.powder').data;
+  assert.deepEqual([b.atBed, b.time, b.afterMeal], [true, null, null]);
+  assert.match((await call('supplements')).text, /Before bed: Test powder/);
+  await call('supplement_setup', { supplement: 'powder', afterMeal: 'second' });
+  assert.deepEqual([store.getRecord('supplements', 'supp.powder').data.atBed, store.getRecord('supplements', 'supp.powder').data.afterMeal], [false, 'second']);
+  await call('supplement_setup', { supplement: 'powder', afterMeal: false });
 });
 
 test('tendons: the coach gets the real length of a round, and a late morning round is called late', async () => {
