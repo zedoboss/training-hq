@@ -125,12 +125,19 @@ test('the gap: 4 hours with no sign of him is sleep, under 4 is not; a quiet eve
   } finally { g.done(); }
   const h = night();
   try {
-    // Asleep 11:00 PM to 4:30 AM, up early: up from his first sign after 5:00 AM.
+    // Asleep 11:00 PM to 4:30 AM, up early: up from his first sign, 4:30 AM (Sat 11/7: from 3:00 AM, not 5:00 AM; his
+    // wake time is 4:00 AM). A sign before 3:00 AM after the same quiet isn't him up yet.
     h.say(at(Y, '23:00'));
     h.opens(T('04:30'));
     h.say(T('05:05'));
-    assert.equal(upAtToday(h.store, T('05:20'), TZ), T('05:05'));
+    assert.equal(upAtToday(h.store, T('05:20'), TZ), T('04:30'));
   } finally { h.done(); }
+  const k = night();
+  try {
+    k.say(at(Y, '20:00'));
+    k.opens(T('02:40'));
+    assert.equal(upAtToday(k.store, T('02:50'), TZ), null);
+  } finally { k.done(); }
 });
 
 test('his sleep log or a workout still count as up whatever came before', () => {

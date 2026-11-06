@@ -407,7 +407,7 @@ const wokeBy = (store, t, tz) => {
 };
 
 /**
- * The first sign he's up today, from 5:00 AM, after a night's sleep (SLEEP): his message, a meal or his answer to a
+ * The first sign he's up today, from 3:00 AM (SLEEP.wakeFromHm), after a night's sleep (SLEEP): his message, a meal or his answer to a
  * meal question, a supplement ticked, a workout or holds round started, the app opened (its zone report, its open
  * report); not an Apple Health send (it runs on timers too). His sleep log's wake time counts as it is.
  * A workout started after midnight counts too (his sessions start from 3:00 AM): with no answer to "Are you up?" the
@@ -417,8 +417,11 @@ export function upAtToday(store, now, tz) {
   const c = clockOf(store, now, tz);
   if (c) return c.asleep ? null : c.wokeAt;
   const date = isoDate(new Date(now), tz);
-  const from = zonedTime(date, '05:00', tz);
+  // Sat 11/7: from SLEEP.wakeFromHm (3:00 AM), not 5:00 AM: his wake time is 4:00 AM, and a reply to "Are you up?" at
+  // 4:05 AM must count as him up (the sleep gap still says whether he slept). Before, only the "still up" reading of
+  // his steps let such a morning go on, with no sleep question; now that is gone, it would wait till 5:00 AM.
   const early = zonedTime(date, SLEEP.wakeFromHm, tz);
+  const from = early;
   const workout = recordsOf(store, 'sessions').filter((x) => x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt)
     && x.startedAt <= now && isoDate(new Date(x.startedAt), tz) === date).map((x) => x.startedAt);
   const all = signsOf(store, from - 86400000, now);
@@ -428,8 +431,18 @@ export function upAtToday(store, now, tz) {
   return signs.length ? Math.min(...signs) : null;
 }
 
-/** A sign of him within SLEEP.activeH: with no sign he woke today, he's still up from the night, not asleep. */
-const stillUp = (store, now) => activityOf(store, now - SLEEP.activeH * 3600000, now).length > 0;
+/**
+ * A sign of him within SLEEP.activeH: with no sign he woke today, he's still up from the night, not asleep. Only when
+ * that stretch awake began before SLEEP.wakeFromHm with no SLEEP.gapH quiet in it (Sat 11/7, the nightly review of
+ * Fri 11/6: in bed from 7:10 PM, "Are you up?" at 4:00 AM, then a step count at 4:03 AM read as "up all night" and the
+ * held day went out: the plan at 4:10 AM, Pull, neck, meals, walks; "How did you sleep?" only at 7:37 AM). Steps after
+ * a night's quiet are no reply: the day waits for a real sign of him (upAtToday).
+ */
+const stillUp = (store, now, tz) => {
+  const a = activityOf(store, now - 36 * 3600000, now);
+  if (!a.some((t) => t >= now - SLEEP.activeH * 3600000)) return false;
+  return awakeSince(a, now, SLEEP.gapH) < zonedTime(isoDate(new Date(now), tz), SLEEP.wakeFromHm, tz);
+};
 
 /** Where his morning is now (read only): morningStep's {hold, open, ask}, with today's state and when it opened. */
 export function morningGate(store, now, tz) {
@@ -461,7 +474,7 @@ export function morningGate(store, now, tz) {
   // Not up yet: any of it in the last 4 hours and "Are you up?" waits too.
   const noQuiet = !state.open && (noQuietYet(store, now) || (upAt == null && activityOf(store, now - SLEEP.gapH * 3600000, now).length > 0));
   const step = morningStep({
-    now, wakeAt, upAt, state, upNoSleep: !c && !upAt && stillUp(store, now), noQuiet,
+    now, wakeAt, upAt, state, upNoSleep: !c && !upAt && stillUp(store, now, tz), noQuiet,
     sleepKnown: Boolean(health?.sleep || store.getRecord('sleep-log', night)?.data),
     bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness || (c && store.getRecord('days', isoDate(new Date(now), tz))?.data?.readiness)) || trainedToday,
     coachAsked: { sleep: askedBy(ASKS_SLEEP), body: askedBy(ASKS_BODY) },
