@@ -40,6 +40,9 @@ export const micTap = (s) => (s.on ? 'mute' : s.held ? 'held' : 'listen');
 /** @param {{replying: boolean}} s */
 export const showsStop = (s) => !!s.replying;
 
+/** Sat 11/7: the mic is open and what it hears can reach the coach (the chip's red dot). Not while dictation has it. */
+export const micLive = (s) => !!s.on && s.phase !== 'paused' && s.phase !== 'off' && s.phase !== 'tap';
+
 /** Why a calibration phrase was not kept, in his words. */
 export const ENROL_PROBLEM = {
   'too-short': "Didn't catch enough of that. Say it again, a bit closer.",

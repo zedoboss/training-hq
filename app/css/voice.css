@@ -21,5 +21,9 @@
 .voice-chip.is-readout { color: var(--faint); border-color: var(--border); background: var(--surface); }
 .voice-chip.is-listening svg { animation: v-pulse 2s ease-in-out infinite; }
 @keyframes v-pulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .voice-chip svg { animation: none !important; } }
+/* Sat 11/7: mic open = a red recording dot; it blinks fast while it hears speech. */
+.voice-chip.is-live::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none; animation: v-pulse 2s ease-in-out infinite; }
+.voice-chip.is-live.is-hearing { border-color: var(--red); }
+.voice-chip.is-live.is-hearing::before { animation-duration: .6s; }
+@media (prefers-reduced-motion: reduce) { .voice-chip svg, .voice-chip::before { animation: none !important; } }
 .coach-foot a { color: var(--cyan); }

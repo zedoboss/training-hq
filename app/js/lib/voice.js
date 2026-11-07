@@ -35,13 +35,16 @@ const turns = new Set();
 let phase = 'off'; // off | listening | hearing | thinking | speaking | paused | tap | error
 let readout = null; let readoutTimer = null; let error = null; let turnsInFlight = 0;
 let bargeTimer = null; let bargeSent = false; let overCoach = false;
+// Sat 11/7, 9:44 AM: his speech picked up while an earlier answer was still on its way showed THINKING, never HEARING
+// ("the icon wasn't blinking that I'm talking"). Now the chip says HEARING whenever the mic is taking his words.
+let hearingNow = false;
 const quietQueue = [];
 const subs = new Set();
 
 // The chip after the coach stops talking. Tue 10/20: it used to change only while the microphone was open, so a
 // reply or nudge spoken while the mic was off, dropped or being reopened left SPEAKING on for good, and a tap
 // (hush) couldn't clear it either.
-const restPhase = () => (lent ? (listening() ? 'paused' : 'off') : mic ? (turnsInFlight ? 'thinking' : 'listening') : held ? (listening() ? 'paused' : 'off') : listening() ? 'tap' : 'off');
+const restPhase = () => (lent ? (listening() ? 'paused' : 'off') : mic ? (hearingNow ? 'hearing' : turnsInFlight ? 'thinking' : 'listening') : held ? (listening() ? 'paused' : 'off') : listening() ? 'tap' : 'off');
 const player = createPlayer({
   context: audioContext,
   fetchSpeech: voiceSpeech,
@@ -123,7 +126,7 @@ onQuietEnd(() => { while (quietQueue.length) player.say(quietQueue.shift()); });
 /** One stretch of speech: to the Mac, then the coach's answer as it comes. */
 async function turn(wav, { overCoach: echo = false } = {}) {
   turnsInFlight++;
-  if (!player.speaking) setPhase('thinking');
+  if (!player.speaking) setPhase(restPhase());
   const split = sentenceSplitter();
   const gate = replyGate(); let ok = false;
   const me = { gen: speechGen, live: false }; turns.add(me);
@@ -141,7 +144,7 @@ async function turn(wav, { overCoach: echo = false } = {}) {
           // The rest of what he was saying, joined on the Mac to the message already on its way: that turn's answer is
           // the one to speak (Thu 10/22: treating it as a new turn dropped it: "he did set the reminder in the chat,
           // but I didn't hear anything").
-          if (e.joined) { setPhase('thinking'); return; }
+          if (e.joined) { setPhase(hearingNow ? 'hearing' : 'thinking'); return; }
           // His voice, confirmed: whatever the coach was saying stops (barge-in), the set or hold talk too (only real
           // words get this far: grunts and breathing are dropped on the Mac). Pain, stop or anything off: Calm.
           // Earlier answers still coming in are dropped; this turn speaks from here on.
@@ -153,7 +156,7 @@ async function turn(wav, { overCoach: echo = false } = {}) {
           if (e.hush) { me.gen = -1; showReadout('hush', e.score); setPhase(restPhase()); return; }
           if (callsForCalm(e.text)) talk.setCalm();
           quietQueue.length = 0;
-          setPhase('thinking'); emit();
+          setPhase(hearingNow ? 'hearing' : 'thinking'); emit();
         } else if (e.type === 'text') {
           for (const s of split.push(e.delta)) sentence(s);
         } else if (e.type === 'action') {
@@ -210,19 +213,21 @@ async function openListening() {
   opening = (async () => {
     try {
       mic = await micSession({
-        onClip: (wav) => { clearTimeout(bargeTimer); turn(wav, { overCoach }); overCoach = false; },
+        onClip: (wav) => { clearTimeout(bargeTimer); hearingNow = false; turn(wav, { overCoach }); overCoach = false; },
         onEvent: (e) => {
           if (e.type === 'start') {
             overCoach = player.speaking || talk.playing();
             // Tue 10/20: he started again while the Mac holds his last clip: tell it, so the coach waits for the rest.
             if (turnsInFlight && !overCoach) macPost('/api/voice/talking').catch(() => {});
-            if (player.speaking) bargeCheck(); else if (!turnsInFlight && !overCoach) setPhase('hearing');
+            // Anything the mic is taking that may reach the coach shows HEARING (Sat 11/7), even while an earlier
+            // answer is on its way. Only over the coach's own voice the chip stays SPEAKING (barge-in decides).
+            if (player.speaking) bargeCheck(); else { hearingNow = true; setPhase('hearing'); }
           }
-          else if (e.type === 'noise' && phase === 'hearing') setPhase('listening');
+          else if (e.type === 'noise' && hearingNow) { hearingNow = false; setPhase(restPhase()); }
         },
         // While the coach talks, its own sound must be louder than usual to count as someone speaking.
         onLevel: () => { const lv = Math.max(player.level, talk.talkLevel()); mic?.vad.setBoost(player.speaking || talk.playing() ? 1 + 4 * lv : 1); },
-        onEnded: () => { mic = null; micActive(false); letSleep(); setPhase(listening() ? 'tap' : 'off'); },
+        onEnded: () => { mic = null; hearingNow = false; micActive(false); letSleep(); setPhase(listening() ? 'tap' : 'off'); },
       });
       error = null;
       // Tue 10/20: a screen took the microphone while this one was still opening: it must not come back on behind it.
@@ -243,7 +248,7 @@ async function openListening() {
 }
 
 function closeListening() {
-  clearTimeout(bargeTimer);
+  clearTimeout(bargeTimer); hearingNow = false;
   mic?.close(); mic = null; micActive(false);
   letSleep();
 }
@@ -310,6 +315,7 @@ export const hush = () => { speechGen++; player.stop(); quietQueue.length = 0; i
  * Dictation into the chat box (Tue 10/20). While he dictates the coach hears nothing. The coach's microphone, if open,
  * stays open and hands its sound to dictation: closing it and opening a second one at once often fails on iPhone, and
  * then the coach got his words in pieces while the box stayed empty. Otherwise dictation opens its own (own: true).
+ * When it ends, listening is off on this device (Sat 11/7): he taps the chip to have the coach listen again.
  * @returns {Promise<{own: boolean, release: () => void}>}
  */
 export async function lendMic(onFrame) {
@@ -317,6 +323,7 @@ export async function lendMic(onFrame) {
   if (opening) await opening.catch(() => {});
   const m = mic;
   if (m) { m.pause(); m.tap(onFrame); }
+  hearingNow = false;
   speechGen++; player.stop(); quietQueue.length = 0;
   setPhase(restPhase()); emit();
   let done = false;
@@ -328,8 +335,12 @@ export async function lendMic(onFrame) {
       m?.tap(null);
       lent = Math.max(0, lent - 1);
       if (lent) return;
-      if (m && m === mic) m.resume();
-      else if (listening() && !held) openListening().catch(() => {});
+      // Sat 11/7, 9:44 AM and 9:48 AM: the end of a dictation switched the always-on mic back on by itself (from TAP TO
+      // LISTEN even, where it had been closed), and what he then said to someone else at the Mac went to the coach as
+      // messages. He thinks of the mic as off once he taps it to stop. So a dictation ends with this device's listening
+      // off (the chip says MIC OFF): only a tap on the chip switches it on again.
+      ls.set(KEY, null);
+      closeListening();
       if (!isQuiet()) while (quietQueue.length) player.say(quietQueue.shift());
       setPhase(player.speaking ? 'speaking' : restPhase()); emit();
     },

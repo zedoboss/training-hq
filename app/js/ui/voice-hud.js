@@ -3,7 +3,7 @@
 // (only his mic: the coach's answer still plays). The X beside it, while the coach answers, stops the coach talking.
 // Hidden on devices where voice was never switched on.
 import * as voice from '../lib/voice.js';
-import { REASON_TEXT, micTap, showsStop } from '../lib/voice-text.js';
+import { REASON_TEXT, micTap, showsStop, micLive } from '../lib/voice-text.js';
 import { toast } from './toast.js';
 
 const MIC = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
@@ -19,7 +19,8 @@ export function mountVoiceHud(el, stopEl) {
     const r = s.readout;
     const text = r ? `${REASON_TEXT[r.reason] || (r.reason === 'mac' ? 'MAC UNREACHABLE' : String(r.reason).toUpperCase())}${r.score != null ? ` · ${r.score.toFixed(2)}` : ''}` : LABEL[s.phase] || s.phase.toUpperCase();
     el.innerHTML = `${MIC}<span>${text}</span>`;
-    el.className = `voice-chip is-${s.phase}${r ? ' is-readout' : ''}`;
+    // Sat 11/7: while the mic is open and taking words for the coach, a red recording dot shows it plainly.
+    el.className = `voice-chip is-${s.phase}${r ? ' is-readout' : ''}${micLive(s) ? ' is-live' : ''}`;
     el.setAttribute('aria-label', `Voice: ${text}`);
   };
   el.addEventListener('click', async () => {

@@ -12,7 +12,7 @@ import { messagesOf, MODEL_LABEL, toolChips, runAction, textHtml, changeView } f
 import { actionSheet, confirmSheet, overlay } from '../ui/sheet.js';
 import { fileToJpeg, photoTime } from '../lib/photos.js';
 import { toast } from '../ui/toast.js';
-import { stop as voiceStop } from '../lib/voice.js';
+import { stop as voiceStop, listening as voiceListening } from '../lib/voice.js';
 import { startDictation } from '../lib/dictate.js';
 import { downSinceNext, macLink } from '../lib/mac-reach.js';
 import { addDays } from '../lib/rotation.js';
@@ -181,10 +181,12 @@ function renderChat(view) {
       return;
     }
     try {
+      // Sat 11/7: a dictation ends with the coach's listening off (lib/voice.js lendMic); if it was on, he hears so now.
+      const wasListening = voiceListening();
       dict = await startDictation();
       micPhase = 'rec'; if (!busy) idleState();
       b.classList.add('is-rec'); b.setAttribute('aria-pressed', 'true');
-      toast('Recording. Tap the mic again when you\'re done.');
+      toast(wasListening ? 'Recording. Tap the mic again when you\'re done. The mic at the top stays off after.' : 'Recording. Tap the mic again when you\'re done.');
     } catch (e) { toast(e.message || 'Microphone not available.'); }
   });
 
