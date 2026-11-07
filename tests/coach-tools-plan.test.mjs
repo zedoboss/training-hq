@@ -276,6 +276,46 @@ test('tendon_hold: a home round logged as the hold timer saves it; hold load and
   assert.equal(rec('tendons', 'area.shoulder').phase, before.shoulder);
 });
 
+test('tendon_hold rounds (Sat 11/7, his words: "you should be able to untick the round"): list, reopen, fix and remove a hold, delete', async () => {
+  const name = 'Toes Wall Squat Hold';
+  const hold = (id, order, extra = {}) => store.writeLocal('sets', id, { id, sessionId: 'hr', exKey: 'k', order, type: 'hold', kg: null, durationS: 30, done: true, doneAt: at('2026-01-22', 9) + order * 60000, pain: 1, ...extra });
+  store.writeLocal('sessions', 'hr', { id: 'hr', kind: 'holds', area: 'knees', title: 'Knees holds', startedAt: at('2026-01-22', 9), endedAt: at('2026-01-22', 9) + 120000, status: 'done', round: 'morning', exercises: [{ key: 'k', name, type: 'duration' }] });
+  hold('h1', 1);
+  const ls = await call('tendon_hold', { action: 'rounds', area: 'knees' });
+  assert.match(ls.text, /^Knees rounds Thursday 1\/22: 1\. Toes Wall Squat Hold at 9:00 AM, done: set 1: 30 s, pain 1\/10$/);
+  // Marked done after 1 of 3: reopened, it no longer counts and the timer carries on at hold 2.
+  const re = await call('tendon_hold', { action: 'reopen_round', area: 'knees', said: 'untick the round' });
+  assert.match(re.text, /^Reopened Knees, Thursday 1\/22: Toes Wall Squat Hold at 9:00 AM, 1 hold saved\. It isn't done: 2 holds to go; the hold timer picks up at the next one this morning\./);
+  assert.equal(rec('sessions', 'hr').status, 'active');
+  assert.equal(rec('sessions', 'hr').endedAt, null);
+  assert.equal(list('sets').filter((x) => x.sessionId === 'hr').length, 1, 'his hold stays');
+  assert.match((await call('tendon_hold', { action: 'reopen_round', area: 'knees' })).text, /already open\. It does not count until its holds are done/);
+  assert.match((await call('tendon_hold', { action: 'rounds', area: 'knees' })).text, /open, 2 holds to go \(not counted yet\)/);
+  // A hold's numbers corrected; a hold logged by mistake removed only on his words.
+  hold('h2', 2); hold('h3', 3);
+  assert.match((await call('tendon_hold', { action: 'rounds', area: 'knees' })).text, /open, all holds saved \(counts\)/);
+  const fx = await call('tendon_hold', { action: 'fix_set', area: 'knees', set_no: 2, seconds: 25, pain: 2 });
+  assert.match(fx.text, /^Knees Thursday 1\/22: set 2: 25 s, pain 2\/10 \(was 30 s, pain 1\/10\)\./);
+  assert.equal(rec('sets', 'h2').durationS, 25); assert.equal(rec('sets', 'h2').pain, 2);
+  assert.match((await call('tendon_hold', { action: 'fix_set', area: 'knees', set_no: 2, pain: 6 })).text, /over his 3-4 limit/);
+  assert.match((await call('tendon_hold', { action: 'remove_set', area: 'knees', set_no: 3 })).text, /needs his explicit words/);
+  assert.ok(rec('sets', 'h3'));
+  assert.match((await call('tendon_hold', { action: 'remove_set', area: 'knees', set_no: 3, said: 'take off hold 3' })).text, /^Removed Knees set 3: 30 s, pain 1\/10 .*2 holds left in it\./);
+  assert.equal(rec('sets', 'h3'), null);
+  assert.match((await call('tendon_hold', { action: 'remove_set', area: 'knees', set_no: 7, said: 'x' })).text, /^That round has set 1/);
+  // A done round that loses a hold opens again.
+  store.writeLocal('sessions', 'hr', { ...rec('sessions', 'hr'), status: 'done', endedAt: NOW });
+  assert.match((await call('tendon_hold', { action: 'remove_set', area: 'knees', said: 'remove the last one' })).text, /the round is open again/);
+  assert.equal(rec('sessions', 'hr').status, 'active');
+  // Delete: only on his words; the round and its holds go.
+  assert.match((await call('tendon_hold', { action: 'delete_round', area: 'knees' })).text, /needs his explicit words/);
+  assert.match((await call('tendon_hold', { action: 'delete_round', area: 'knees', said: 'delete that round' })).text, /^Deleted Knees, Thursday 1\/22/);
+  assert.equal(rec('sessions', 'hr'), null);
+  assert.equal(list('sets').filter((x) => x.sessionId === 'hr').length, 0);
+  assert.match((await call('tendon_hold', { action: 'reopen_round', area: 'knees' })).text, /^No Knees round Thursday 1\/22\./);
+  assert.match((await call('tendon_hold', { action: 'rounds', area: 'knees', date: '2026-01-21' })).text, /^No Knees rounds Wednesday 1\/21\./);
+});
+
 test('bodyweight: Apple Health is stale, his number is used for pull-ups (and on the workout in progress); clear', async () => {
   assert.match((await call('bodyweight', { action: 'show' })).text, /^No bodyweight in the last 30 days \(newest weigh-in 80 kg, Saturday 11\/1\/2025/);
   store.writeLocal('sessions', 'act', { id: 'act', kind: 'workout', title: 'Pull', dayType: 'pull', startedAt: NOW - 60000, status: 'active', exercises: [], bodyweightKg: null });

@@ -22,6 +22,41 @@ export function holdDemoIds(name, exerciseId = null) {
 }
 export const isHoldSet = (set, ex) => Boolean(set?.done) && (set.type === 'hold' || (/\bhold\b/i.test(ex?.name || '') && (set.durationS || 0) > 0));
 
+/** The hold a holds round is for: the area's hold with its exercise's name, else the first. */
+function roundHold(session, areas) {
+  const area = areas.find((a) => a.id === session?.area);
+  const name = session?.exercises?.[0]?.name;
+  return area?.holds?.find((h) => h.exercise === name) || area?.holds?.find((h) => holdBase(h.exercise) === holdBase(name)) || null;
+}
+/** Holds still to do in a holds round: its sets (3 by default) times its sides, less the holds saved. */
+export function roundSetsLeft(session, sets, areas) {
+  const h = roundHold(session, areas);
+  const need = (h?.sets || 3) * (h?.sides?.length > 1 ? h.sides.length : 1);
+  return Math.max(0, need - sets.filter((x) => x.sessionId === session.id && x.done).length);
+}
+/**
+ * Sat 11/7, his words: "I just did the first round of holds. And then I came here to this chat... I went back and it said
+ * that they are done": the round he left open on the timer for this hold, today and in the same half of the day
+ * (morning before 12, evening after), with holds still to do, so the timer picks up at the next hold. Null when none.
+ * Returns {session, saved, nextSet}: nextSet is the first set without all its sides (arms) saved.
+ */
+export function openRoundFor(sessions, sets, areaId, holdName, { now = Date.now(), sides = 1 } = {}) {
+  const half = (t) => (new Date(t).getHours() < 12 ? 'morning' : 'evening');
+  const today = isoDate(new Date(now));
+  const s = sessions.filter((x) => x.kind === 'holds' && x.status === 'active' && x.area === areaId && x.startedAt
+    && isoDate(new Date(x.startedAt)) === today && (x.round || half(x.startedAt)) === half(now)
+    && holdBase(x.exercises?.[0]?.name) === holdBase(holdName))
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+  if (!s) return null;
+  const saved = sets.filter((x) => x.sessionId === s.id && x.done);
+  if (!saved.length) return null;
+  const perSet = {};
+  for (const x of saved) { const n = Math.floor(Number(x.order) || 0); perSet[n] = (perSet[n] || 0) + 1; }
+  let nextSet = 1;
+  while ((perSet[nextSet] || 0) >= Math.max(1, sides)) nextSet++;
+  return { session: s, saved, nextSet };
+}
+
 /**
  * Rounds per area logged on each date: {areaId: {'YYYY-MM-DD': count}}.
  * Hold sets on an area's hold exercises or on the exercises that load it count for that area.
@@ -29,12 +64,13 @@ export const isHoldSet = (set, ex) => Boolean(set?.done) && (set.type === 'hold'
  */
 export function roundsByDate(areas, sessions, sets, rawBridge = null) {
   const bridge = activeBridge(rawBridge, sessions);
-  // A holds round left open with sets saved counts too (Thu 10/22: the 11:52 AM wrist round, left when he restarted it),
-  // unless a finished round of that area the same day already does.
+  // A holds round left open counts only once all its holds are saved (Thu 10/22: the 11:52 AM wrist round, left when he
+  // restarted it), unless a finished round of that area the same day already does. Sat 11/7, his words: "I just did the
+  // first round of holds... I went back and it said that they are done, which they're not done": 1 of 3 is not a round.
   const dayKey = (s) => `${s.area}|${isoDate(new Date(s.startedAt))}`;
   const doneRounds = new Set(sessions.filter((s) => s.kind === 'holds' && s.status === 'done' && s.startedAt).map(dayKey));
   const holdSessions = sessions.filter((s) => s.status === 'done' || (s.kind === 'holds' && s.status === 'active' && s.startedAt
-    && !doneRounds.has(dayKey(s)) && sets.some((x) => x.sessionId === s.id && x.done)));
+    && !doneRounds.has(dayKey(s)) && roundSetsLeft(s, sets, areas) === 0));
   const byArea = Object.fromEntries(areas.map((a) => [a.id, {}]));
   const exToArea = new Map();
   for (const a of areas) {

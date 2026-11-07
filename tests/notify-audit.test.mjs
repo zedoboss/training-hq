@@ -39,12 +39,13 @@ test('"head home" is not sent once he answered the meal question after the gym',
   assert.equal(remindersFor({ date: D, ...st }).find((i) => i.id === `home:${D}`).due, false);
 });
 
-test('a holds round left open with sets counts once; not on top of a finished round that day', () => {
+test('a holds round left open with all its holds counts once; not on top of a finished round that day', () => {
   const areas = [{ kind: 'area', id: 'wrist', label: 'Wrist', holds: [{ exercise: 'Cupping' }] }];
-  const open = { id: 'a', kind: 'holds', area: 'wrist', status: 'active', startedAt: at('11:52') };
-  const sets = [{ sessionId: 'a', exKey: 'k', done: true, type: 'hold' }];
+  const open = { id: 'a', kind: 'holds', area: 'wrist', status: 'active', startedAt: at('11:52'), exercises: [{ key: 'k', name: 'Cupping' }] };
+  const sets = [1, 2, 3].map((order) => ({ sessionId: 'a', exKey: 'k', done: true, type: 'hold', order }));
   assert.equal(roundsByDate(areas, [open], sets).wrist[D], 1);
   assert.equal(roundsByDate(areas, [open], []).wrist[D], undefined, 'no sets: not a round');
+  assert.equal(roundsByDate(areas, [open], sets.slice(0, 1)).wrist[D], undefined, 'Sat 11/7: 1 of 3 left open is not a round');
   const done = { id: 'b', kind: 'holds', area: 'wrist', status: 'done', startedAt: at('11:55') };
   assert.equal(roundsByDate(areas, [open, done], sets).wrist[D], 1);
 });

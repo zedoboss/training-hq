@@ -17,7 +17,7 @@ import { proposeWeek, confirmWeek, progressId, normalReady, modeOf } from '../..
 import { weekColumn } from '../../app/js/lib/programme.js';
 import { comebackStartOf, previousSame, routineFromLast } from '../../app/js/lib/finish.js';
 import { LABEL, addDays, withRest, withTime, rotationDay, withNextType, chosenNext, inRotation } from '../../app/js/lib/rotation.js';
-import { painOk } from '../../app/js/lib/holds.js';
+import { painOk, roundSetsLeft } from '../../app/js/lib/holds.js';
 import { currentBodyweight } from '../../app/js/lib/health.js';
 import { paramsOf, askedAreas } from '../../app/js/lib/readiness.js';
 import { formatDay, zonedTime, hmOf } from '../../app/js/lib/time.js';
@@ -576,6 +576,12 @@ function tendonHold(a, ctx) {
   if (f.error) return refuse(f.error);
   const area = f.area;
 
+  // Sat 11/7, his words: "you should be able to untick the round": his holds rounds on a date, as the holds screen and
+  // the hold timer keep them. rounds = list them; reopen_round = a round marked done is open again (it counts once all
+  // its holds are saved; the timer picks it up at its next hold the same morning or evening); delete_round, remove_set
+  // and fix_set change what he logged, on his words.
+  if (ROUND_ACTIONS.has(a.action)) return holdRounds(s, a, area, stamp);
+
   if (a.action === 'remove_area') {
     if (!String(a.said || '').trim()) return refuse(`Removing ${area.label} needs his explicit words: pass them in said. If he didn't say to remove it, ask him.`);
     const plan = area.phasePlan && !area.phasePlan.done ? area.phasePlan : null;
@@ -619,7 +625,64 @@ function tendonHold(a, ctx) {
     saveArea({ ...area, holds: area.holds.map((x, i) => (i === hi.i ? h : x)) });
     return wrote(`${area.label}: ${holdText(h)} (was ${holdText(old)}). ${FIXED}`, `${area.label}: ${h.exercise}`);
   }
-  return refuse('action: log_round, set_hold, use_hold, add_hold, remove_hold, add_area or remove_area.');
+  return refuse('action: log_round, rounds, reopen_round, delete_round, remove_set, fix_set, set_hold, use_hold, add_hold, remove_hold, add_area or remove_area.');
+}
+
+const ROUND_ACTIONS = new Set(['rounds', 'reopen_round', 'delete_round', 'remove_set', 'fix_set']);
+
+/** His holds rounds of one area on a date: list, reopen, delete, and a hold set removed or corrected. */
+function holdRounds(s, a, area, stamp) {
+  const date = a.date || s.today;
+  const D = dayText(date, s.today);
+  const allSets = s.list('sets');
+  const setsOf = (r) => allSets.filter((x) => x.sessionId === r.id && x.done).sort((p, q) => (p.order || 0) - (q.order || 0));
+  const rounds = s.list('sessions').filter((x) => x.kind === 'holds' && x.area === area.id && x.startedAt && s.date(x.startedAt) === date).sort((p, q) => p.startedAt - q.startedAt);
+  const left = (r) => roundSetsLeft(r, allSets, [area]);
+  const state = (r) => (r.status === 'done' ? 'done' : left(r) ? `open, ${plural(left(r), 'hold')} to go (not counted yet)` : 'open, all holds saved (counts)');
+  const setText = (x) => `set ${Math.floor(x.order || 0)}${x.note ? ` ${x.note.toLowerCase()}` : ''}: ${x.durationS ?? '?'} s${x.kg != null ? ` at ${k(x.kg)} kg` : ''}${x.pain != null ? `, pain ${x.pain}/10` : ''}`;
+  const roundText = (r) => `${r.exercises?.[0]?.name || 'hold'} at ${timeText(r.startedAt, s.tz)}, ${state(r)}: ${setsOf(r).map(setText).join('; ') || 'no holds saved'}`;
+  if (a.action === 'rounds') return { text: rounds.length ? `${area.label} rounds ${D}: ${rounds.map((r, i) => `${i + 1}. ${roundText(r)}`).join(' | ')}` : `No ${area.label} rounds ${D}.`, summary: `${area.label} rounds` };
+  if (!rounds.length) return refuse(`No ${area.label} round ${D}.`);
+  // Which round: the one started nearest his time, else the newest.
+  const r = a.time ? rounds.slice().sort((p, q) => Math.abs(p.startedAt - zonedTime(date, a.time, s.tz)) - Math.abs(q.startedAt - zonedTime(date, a.time, s.tz)))[0] : rounds[rounds.length - 1];
+  const sets = setsOf(r);
+  const now = () => holdsDueText(snapshot(s.store, { tz: s.tz, now: s.now }));
+  const needSaid = (what) => (String(a.said || '').trim() ? null : refuse(`${what} needs his explicit words: pass them in said. If he didn't say so, ask him.`));
+
+  if (a.action === 'reopen_round') {
+    if (r.status !== 'done') return refuse(`That round (${roundText(r)}) is already open.${left(r) ? ' It does not count until its holds are done; the hold timer picks it up at its next hold.' : ''}`);
+    put(s, 'sessions', r.id, { ...r, status: 'active', endedAt: null, reopened: stamp });
+    const l = left(r);
+    return wrote(`Reopened ${area.label}, ${D}: ${r.exercises?.[0]?.name || 'hold'} at ${timeText(r.startedAt, s.tz)}, ${plural(sets.length, 'hold')} saved. ${l ? `It isn't done: ${plural(l, 'hold')} to go; the hold timer picks up at the next one${date === s.today ? ' this ' + (r.round || 'round') : ''}.` : 'All its holds are saved, so it still counts; remove_set takes off one logged by mistake.'} ${now()}`, `${area.label} round reopened`);
+  }
+  if (a.action === 'delete_round') {
+    const no = needSaid('Deleting a round'); if (no) return no;
+    for (const x of allSets.filter((y) => y.sessionId === r.id)) del(s, 'sets', x.id);
+    del(s, 'sessions', r.id);
+    return wrote(`Deleted ${area.label}, ${D}: ${roundText(r)}. ${now()}`, `${area.label} round deleted`);
+  }
+  // A hold set in that round: its number (and arm for an arm-by-arm hold), default the last saved.
+  const armOk = (x) => !a.arm || String(x.note || '').toLowerCase().startsWith(String(a.arm).toLowerCase().split(' ')[0]);
+  const pick = a.set_no != null ? sets.filter((x) => Math.floor(x.order || 0) === a.set_no && armOk(x)) : sets.slice(-1);
+  if (!pick.length) return refuse(`That round has ${sets.length ? sets.map(setText).join('; ') : 'no holds saved'}. Which set (set_no${sets.some((x) => x.note) ? ', arm' : ''})?`);
+  if (pick.length > 1) return refuse(`Set ${a.set_no} has ${pick.map(setText).join('; ')}: which arm?`);
+  const x = pick[0];
+  if (a.action === 'remove_set') {
+    const no = needSaid('Removing a hold'); if (no) return no;
+    del(s, 'sets', x.id);
+    // A round marked done that loses a hold is open again: it counts once its holds are done.
+    const rest = sets.length - 1;
+    if (r.status === 'done') put(s, 'sessions', r.id, { ...r, status: 'active', endedAt: null, reopened: stamp });
+    return wrote(`Removed ${area.label} ${setText(x)} (${D}, round at ${timeText(r.startedAt, s.tz)}). ${plural(rest, 'hold')} left in it${r.status === 'done' ? '; the round is open again' : ''}. ${now()}`, `${area.label} hold removed`);
+  }
+  if (a.action === 'fix_set') {
+    if (a.seconds == null && a.pain == null && a.kg === undefined && !a.shaking) return refuse('What to correct: seconds, pain, kg (TOTAL) or shaking.');
+    const y = { ...x, ...(a.seconds != null ? { durationS: a.seconds } : {}), ...(a.pain != null ? { pain: a.pain } : {}), ...(a.kg !== undefined ? { kg: a.kg } : {}), ...(a.shaking ? { shaking: a.shaking } : {}), edited: stamp };
+    put(s, 'sets', x.id, y);
+    const over = a.pain != null && !painOk(a.pain) ? ` Pain ${a.pain}/10 is over his 3-4 limit. His note: next time less weight or push less hard.` : '';
+    return wrote(`${area.label} ${D}: ${setText(y)} (was ${setText(x).replace(/^set \d+[^:]*: /, '')}).${over}`, `${area.label} hold fixed`);
+  }
+  return refuse('action: rounds, reopen_round, delete_round, remove_set or fix_set.');
 }
 
 // ---- bodyweight for pull-ups (Settings, "Bodyweight today") -------------------------------------------------------
@@ -689,8 +752,8 @@ export const PLAN_TOOLS = [
     obj({ action: { type: 'string', enum: ['show', 'next', 'clear', 'week'] }, dayType: DAY, date: ISO, week: { type: 'integer', minimum: 1, maximum: 52 }, said: SAID }, ['action']), rotationSet),
   write('plan_day', 'Rest day on a date', `A rest day he plans on a coming date, or marks on a past day, or takes back (undo_rest). ${ONLY_HIS} His rule: a rest day skips that day and carries on with the next day type, no make-up; a session time set on the next training day moves with the session. Today goes through schedule's rest_today / undo_rest. A past day he trained on can't be a rest day.`,
     obj({ action: { type: 'string', enum: ['rest', 'undo_rest'] }, date: ISO, said: SAID }, ['action', 'date']), planDay),
-  write('tendon_hold', 'Tendon holds', `His tendon holds, as the holds screen does. ${ONLY_HIS} Never suggest a hold, a load or a dose. log_round = a round he did outside a session (at home, say), the way the hold timer saves it: area, hold (its name; one not set up for the area is logged under his words), sets, seconds, kg (TOTAL; default the hold's load), time (HH:MM; default just now), date (default today), pain 0-10 and shaking if he says. set_hold = change a hold's kg, sets, seconds (10-300), where (gym/home) or timing. use_hold = the area uses another hold (exercise) in place of one; add_hold = one more hold for an area; remove_hold = take one off (his explicit words in said). add_area = a new tendon area (label; optionally its first hold), phase not set (tendon_phase on his answer); remove_area = only on his explicit words (said). His tendon pain limit and phase rules are never changed here.`,
-    obj({ action: { type: 'string', enum: ['log_round', 'set_hold', 'use_hold', 'add_hold', 'remove_hold', 'add_area', 'remove_area'] }, area: { type: 'string' }, label: { type: 'string' }, hold: { type: 'string', description: 'which hold: its name, or its number in the area (1 = first)' }, exercise: { type: 'string', description: 'the hold exercise he names' }, sets: { type: 'integer', minimum: 1, maximum: 10 }, seconds: { type: 'integer', minimum: 5, maximum: 600 }, kg: { type: 'number', minimum: 0, description: 'TOTAL kg' }, clear_kg: { type: 'boolean' }, where: { type: 'string', enum: ['gym', 'home'] }, timing: TIMING, time: HM, date: ISO, pain: { type: 'number', minimum: 0, maximum: 10 }, shaking: { type: 'string', enum: ['none', 'some', 'a lot'] }, note: { type: 'string' }, said: SAID }, ['action']), tendonHold),
+  write('tendon_hold', 'Tendon holds', `His tendon holds, as the holds screen does. ${ONLY_HIS} Never suggest a hold, a load or a dose. log_round = a round he did outside a session (at home, say), the way the hold timer saves it: area, hold (its name; one not set up for the area is logged under his words), sets, seconds, kg (TOTAL; default the hold's load), time (HH:MM; default just now), date (default today), pain 0-10 and shaking if he says. His rounds of an area on a date (default today; time HH:MM picks the round started nearest it, default the newest): rounds = list them, each open or done with its holds; reopen_round = a round marked done is open again ("untick it", "it's not done"): it counts once all its holds are saved and the hold timer carries on at its next hold; delete_round = the round and its holds gone (his explicit words in said); remove_set = a hold logged by mistake (set_no, arm for an arm-by-arm hold; default the last; said), a done round that loses one opens again; fix_set = correct a logged hold's seconds, pain, kg or shaking. set_hold = change a hold's kg, sets, seconds (10-300), where (gym/home) or timing. use_hold = the area uses another hold (exercise) in place of one; add_hold = one more hold for an area; remove_hold = take one off (his explicit words in said). add_area = a new tendon area (label; optionally its first hold), phase not set (tendon_phase on his answer); remove_area = only on his explicit words (said). His tendon pain limit and phase rules are never changed here.`,
+    obj({ action: { type: 'string', enum: ['log_round', 'rounds', 'reopen_round', 'delete_round', 'remove_set', 'fix_set', 'set_hold', 'use_hold', 'add_hold', 'remove_hold', 'add_area', 'remove_area'] }, area: { type: 'string' }, set_no: { type: 'integer', minimum: 1, maximum: 10, description: 'which set of the round (1 = first)' }, arm: { type: 'string', description: 'which arm, for an arm-by-arm hold' }, label: { type: 'string' }, hold: { type: 'string', description: 'which hold: its name, or its number in the area (1 = first)' }, exercise: { type: 'string', description: 'the hold exercise he names' }, sets: { type: 'integer', minimum: 1, maximum: 10 }, seconds: { type: 'integer', minimum: 5, maximum: 600 }, kg: { type: 'number', minimum: 0, description: 'TOTAL kg' }, clear_kg: { type: 'boolean' }, where: { type: 'string', enum: ['gym', 'home'] }, timing: TIMING, time: HM, date: ISO, pain: { type: 'number', minimum: 0, maximum: 10 }, shaking: { type: 'string', enum: ['none', 'some', 'a lot'] }, note: { type: 'string' }, said: SAID }, ['action']), tendonHold),
   write('bodyweight', 'Bodyweight for pull-ups', `The bodyweight pull-ups and other bodyweight exercises count (volume and the 30% guard), as Settings > Bodyweight and the workout's "Bodyweight today" set it. ${ONLY_HIS} show = what is used now and where it is from (read only). set = his number (kg) when Apple Health is stale or wrong; it also goes on a workout in progress; a newer Apple Health or Evolt weigh-in takes over by itself. clear = drop the hand-set number. A weigh-in he reads off a scale is log_weight, not this.`,
     obj({ action: { type: 'string', enum: ['show', 'set', 'clear'] }, kg: { type: 'number', minimum: 30, maximum: 250 }, said: SAID }, ['action']), bodyweight),
   write('readiness_confirm', 'Confirm the readiness table', `Record his OK of his readiness table exactly as it is, the way its screen's Confirm does with nothing edited. Only when he says he confirms it (said = his words). It never changes the table's levels, rules or "go lighter" amounts: those are a safety rule and he edits them himself on its screen (open_screen readiness_table).`,

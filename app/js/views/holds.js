@@ -2,10 +2,10 @@
 // Rules come from the owner's tendon note; the app adds no rehab advice of its own.
 import { ready, saveSettings, macPost } from '../lib/data.js';
 import { setQuiet } from '../lib/quiet.js';
-import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase, homeSkips, holdDemoIds } from '../lib/holds.js';
+import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase, homeSkips, holdDemoIds, openRoundFor } from '../lib/holds.js';
 import { demoPanel } from '../ui/demo-panel.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, sessionTomorrow, afterRestDay, addDays } from '../lib/rotation.js';
-import { isoDate, formatDay, formatHm } from '../lib/time.js';
+import { isoDate, formatDay, formatHm, formatTime } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
 import { kg as fmtKg } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
@@ -191,6 +191,7 @@ function renderRun(view, repo, areaId, index) {
   // Phases: ready (waiting for Start) -> getready (A14: 15 s to set up, then 3, 2, 1) -> holding -> rate -> rest -> ...
   let area; let hold; let session = null; let setNo = 1; let phase = 'ready'; let endsAt = 0; let timer = null; let startedSet = 0; let endedSet = 0;
   let bank = null; let script = null; let playing = null; let calm = false; let offTalk = () => {}; let offDemo = () => {}; let gone = false;
+  let resumed = '';
   // Thu 10/22, his words: "I'm doing one arm at a time... per round it should have two timers": a hold with sides
   // (cupping: right arm, then left) runs each side in turn inside one set. Then: "2 minutes rest time per arm... in
   // between, it should be only 5 seconds", and "after it's done, it should prompt me... the pain, and then 5 seconds for
@@ -233,7 +234,7 @@ function renderRun(view, repo, areaId, index) {
     tickLoop(); draw();
   };
   const begin = () => {
-    rest.unlockAudio(); talk.unlock();
+    rest.unlockAudio(); talk.unlock(); resumed = '';
     if (!script || script.setNo !== setNo) plan();
     side = 0; armEnds = []; readyOf = script.getReadyS || 0;
     const t0 = Date.now();
@@ -299,6 +300,7 @@ function renderRun(view, repo, areaId, index) {
           : phase === 'holding' ? `<button class="btn-primary big" data-h="end" type="button">${sides() ? `End ${esc(sideLabel().toLowerCase())}` : 'End set'}</button>`
           : `<button class="btn-primary big" data-h="next" type="button">Start set ${setNo} now</button>`}</div>
         ${phase === 'rest' && sides() ? `<p class="hint">Each arm rests ${restText(holdRestS())} from when it stopped. GET READY starts on its own ${getReadyS()} s before the ${esc(sides()[0].toLowerCase())}'s rest ends.</p>`
+          : ''}${phase === 'ready' && resumed ? `<p class="hint c-green" data-k="resumed">${esc(resumed)}</p>` : ''}${phase === 'rest' && sides() ? ''
           : phase === 'ready' || phase === 'rest' ? `<p class="hint">Start gives you ${getReadyS()} s to get in position, then 3, 2, 1 and the ${secs()} s hold${sides() ? ` with the ${esc(sides()[0].toLowerCase())}. Rate it, then ${SWITCH_S} s and the ${esc(sides().slice(1).join(', ').toLowerCase())}. Each arm rests ${restText(holdRestS())} from when it stops` : ''}.</p>` : ''}`;
     } else if (phase === 'rate') {
       body.innerHTML = `
@@ -387,6 +389,14 @@ function renderRun(view, repo, areaId, index) {
       hold = c ? { exercise: c.holdName, load: 'load your choice', sets: 3, seconds: 30 } : null;
     } else hold = area?.holds?.[index];
     if (!hold) { view.innerHTML = '<h1 class="view-title">Hold not found</h1><p class="hint"><a href="#/holds">Back</a></p>'; return; }
+    // Sat 11/7, his words: "I just did the first round of holds... I went back and it said that they are done": the
+    // round he left open on this timer (today, same morning or evening) carries on at its next hold, not set 1 again.
+    const open = openRoundFor(await repo.list('sessions'), await repo.list('sets'), areaId, hold.exercise, { sides: sides()?.length || 1 });
+    if (open && open.nextSet <= total()) {
+      session = open.session; setNo = open.nextSet;
+      const n = open.nextSet - 1;
+      resumed = `${n ? `${n} of ${total()} saved` : `${open.saved.length} ${open.saved.length === 1 ? 'arm' : 'arms'} saved`}, last at ${formatTime(new Date(Math.max(...open.saved.map((x) => x.doneAt || 0))))}. Picking up at set ${setNo}.`;
+    }
     // A15: his lines; Calm when today's check-in eased this area's holds (a safety rule applies).
     bank = await repo.get('coach-lines', 'bank');
     const todayDoc = (await repo.list('days')).find((d) => d.date === isoDate(new Date()));
