@@ -22,14 +22,6 @@ test('then the plain name and the matched exercise id, no repeats', () => {
   assert.deepEqual(holdDemoIds(null), []);
 });
 
-test('the hold timer screen draws the demo under the timer and frees it on leave', () => {
-  const src = readFileSync(new URL('../app/js/views/holds.js', import.meta.url), 'utf8');
-  assert.match(src, /<div id="h-body"><\/div>\s*<div id="h-demo"><\/div>/);
-  assert.match(src, /holdDemoIds\(hold\.exercise, ex\?\.id\)/);
-  assert.match(src, /demoPanel\(view\.querySelector\('#h-demo'\)/);
-  assert.match(src, /offDemo\(\);/);
-});
-
 // On the Mac with his private folder: every hold in his areas has a demo file it finds.
 const priv = process.env.TRAINING_HQ_PRIVATE || `${process.env.HOME}/Documents/training-hq-private`;
 const seed = `${priv}/data/seed/tendons.json`;
@@ -40,4 +32,19 @@ test('every hold in his tendon areas finds a demo file (Mac only)', { skip: !exi
   const holds = list.flatMap((a) => a.holds || []);
   assert.ok(holds.some((h) => h.exercise === 'Toes Wall Squat Hold'));
   for (const h of holds) assert.ok(holdDemoIds(h.exercise).some((id) => files.has(id)), `${h.exercise} has no demo`);
+});
+
+test('the hold timer shows the demo only when he taps the hold name, never under the timer', () => {
+  // Sat 11/7, 9:09 AM, his words: "I'm clicking on the name and there's no animation" and "It should only show when I
+  // tap the name".
+  const src = readFileSync(new URL('../app/js/views/holds.js', import.meta.url), 'utf8');
+  const run = src.slice(src.indexOf('function renderRun'), src.indexOf('export function render('));
+  assert.match(run, /<button class="title-btn" id="h-name"[^>]*>.*\$\{esc\(hold\.exercise\)\}/, 'the name is a button');
+  assert.ok(!/id="h-demo"/.test(run), 'no demo slot under the timer');
+  const tap = run.slice(run.indexOf("querySelector('#h-name').onclick"));
+  assert.match(tap, /overlay\(/, 'tapping the name opens the demo sheet');
+  assert.match(tap, /demoPanel\(.*\{ id: demoId,/, 'with the hold demo found for it');
+  assert.match(run, /holdDemoIds\(hold\.exercise, ex\?\.id\)/);
+  assert.match(run, /offDemo\(\); talk\.setMuted/, 'closed and freed on leave');
+  assert.equal((run.match(/demoPanel\(/g) || []).length, 1, 'the sheet is the only place it draws');
 });

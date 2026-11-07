@@ -11,7 +11,7 @@ import { kg as fmtKg } from '../lib/loads.js';
 import * as rest from '../lib/rest-timer.js';
 import { getState } from '../lib/store.js';
 import { withDefaults, restText } from '../lib/settings.js';
-import { confirmSheet, promptText } from '../ui/sheet.js';
+import { confirmSheet, promptText, overlay } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { holdScript } from '../lib/coach-talk.js';
 import * as talk from '../lib/talk.js';
@@ -21,6 +21,7 @@ import { pathOf, pathState, movePath, stageText } from '../lib/hold-path.js';
 const holdRestS = () => withDefaults(getState().settings).rest.holdS || 120;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const DEMO_ICON = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="M8 21l3-6 3 2v4"/><path d="M6 12l3-4h5l3 4"/><path d="M11 15l1-7"/></svg>';
 const loadText = (h) => (h.loadKg != null ? `${fmtKg(h.loadKg)} kg` : h.load || 'bodyweight');
 /** Seconds on the ring: whole seconds big for GET READY and the hold (m:ss from a minute), m:ss for rest. */
 const clockText = (left, big) => {
@@ -392,10 +393,9 @@ function renderRun(view, repo, areaId, index) {
     calm = (todayDoc?.readiness?.easeHolds || []).includes(areaId);
     view.innerHTML = `
       <div class="lib-head"><a class="pill" href="#/holds">Back</a><span class="hud c-muted">${esc(area.label.toUpperCase())} · ${esc((PHASE_TEXT[area.phase] || '').split(':')[0].toUpperCase())}</span><button class="pill" id="h-mute" type="button" aria-pressed="false">Coach on</button></div>
-      <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${index === 'other' ? `${secs()} s` : `<button class="link-btn" id="h-secs" type="button">${secs()} s</button>`}${sides() ? ' per arm' : ''} · ${restText(holdRestS())} ${sides() ? 'rest per arm' : 'between'}</div></div>
+      <div><h1 class="view-title"><button class="title-btn" id="h-name" type="button" aria-label="Demo: ${esc(hold.exercise)}"><span class="ex-demo">${DEMO_ICON}</span><span>${esc(hold.exercise)}</span></button></h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${index === 'other' ? `${secs()} s` : `<button class="link-btn" id="h-secs" type="button">${secs()} s</button>`}${sides() ? ' per arm' : ''} · ${restText(holdRestS())} ${sides() ? 'rest per arm' : 'between'}</div></div>
       <div class="pinned small" id="h-note" hidden></div>
       <div id="h-body"></div>
-      <div id="h-demo"></div>
       <p class="hint">Next-day check: ${esc(tomorrow())}${area.phase === 'heal' ? ', with the morning round' : ''}.</p>
       <button class="btn-ghost" id="h-stop" type="button">End round</button>`;
     // Thu 10/22, his words: "my cupping hold notes aren't here": the exercise's pinned note, as on the workout card.
@@ -403,13 +403,23 @@ function renderRun(view, repo, areaId, index) {
     const ex = exs.find((e) => e.name === hold.exercise) || exs.find((e) => holdBase(e.name) === holdBase(hold.exercise));
     const note = ex?.pinnedNote?.text ?? ex?.pinnedNote ?? hold.note ?? '';
     if (note) { const n = view.querySelector('#h-note'); n.textContent = note; n.hidden = false; }
-    // Sat 11/7, his words: "Why is there no animation... toes wall squat hold": the hold's animated demo (or his clip)
-    // under the timer, as on the workout. Nothing when no demo exists for it.
-    for (const id of holdDemoIds(hold.exercise, ex?.id)) {
+    // Sat 11/7, his words: "Why is there no animation... toes wall squat hold", then "It should only show when I tap
+    // the name": the hold's animated demo (or his clip) opens over the timer when he taps its name, as on the workout;
+    // nothing under the timer. The hold version's demo first; none found: the slot to add one.
+    const ids = holdDemoIds(hold.exercise, ex?.id);
+    let demoId = ids.find((i) => i === ex?.id) || ids[0];
+    for (const id of ids) {
       const rec = await repo.get('demos', id);
       if (gone) break;
-      if (rec && !rec.deleted) { offDemo = demoPanel(view.querySelector('#h-demo'), { id, name: hold.exercise }); break; }
+      if (rec && !rec.deleted) { demoId = id; break; }
     }
+    view.querySelector('#h-name').onclick = () => {
+      offDemo();
+      const { el, close } = overlay(`<div class="hud c-muted sheet-title">${esc(hold.exercise)}</div><div data-demo></div><button class="sheet-btn sheet-cancel" type="button" data-cancel>Close</button>`, () => { stop(); offDemo = () => {}; });
+      const stop = demoPanel(el.querySelector('[data-demo]'), { id: demoId, name: hold.exercise }, { part: 'all' });
+      offDemo = () => close();
+      el.querySelector('[data-cancel]').addEventListener('click', () => close());
+    };
     const muteBtn = view.querySelector('#h-mute');
     const showMute = () => { muteBtn.textContent = talk.isMuted() ? 'Coach muted' : 'Coach on'; muteBtn.setAttribute('aria-pressed', String(talk.isMuted())); muteBtn.classList.toggle('is-on', !talk.isMuted()); };
     muteBtn.onclick = () => { talk.setMuted(!talk.isMuted()); showMute(); };

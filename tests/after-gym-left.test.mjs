@@ -15,6 +15,9 @@ import { openStore } from '../server/store.mjs';
 import { stepReadingsOf } from '../server/notify.mjs';
 
 const TZ = 'Asia/Ho_Chi_Minh';
+// The app counts hold rounds by the device's own day (phone and Mac run on his clock); the deploy runs tests on UTC,
+// where his 5:30 AM round falls on the day before (Sat 11/7: this blocked every deploy since Thu 11/5).
+process.env.TZ = TZ;
 const D = '2026-03-19';
 const at = (hm, d = D) => Date.parse(`${d}T${hm}:00+07:00`);
 const tendons = [

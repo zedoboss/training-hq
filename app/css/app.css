@@ -47,6 +47,7 @@ button { font: inherit; color: inherit; }
 /* View area */
 .view { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 .view-title { margin: 4px 0 0; font: 700 22px/1.2 var(--sans); }
+.title-btn { display: inline-flex; align-items: center; gap: 10px; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .view-sub { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.45; }
 
 .later {
