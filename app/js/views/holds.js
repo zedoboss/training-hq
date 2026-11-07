@@ -2,7 +2,8 @@
 // Rules come from the owner's tendon note; the app adds no rehab advice of its own.
 import { ready, saveSettings, macPost } from '../lib/data.js';
 import { setQuiet } from '../lib/quiet.js';
-import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase, homeSkips } from '../lib/holds.js';
+import { roundsByDate, areaStatus, painOk, PHASE_TEXT, holdSlots, restChoices, withRestChoice, restChoiceText, REST_CHOICES, holdBase, homeSkips, holdDemoIds } from '../lib/holds.js';
+import { demoPanel } from '../ui/demo-panel.js';
 import { rotationDay, lastRotationSession, daysByDate, LABEL, sessionTomorrow, afterRestDay, addDays } from '../lib/rotation.js';
 import { isoDate, formatDay, formatHm } from '../lib/time.js';
 import { newId, newKey } from '../lib/routines.js';
@@ -188,7 +189,7 @@ function renderList(view, repo) {
 function renderRun(view, repo, areaId, index) {
   // Phases: ready (waiting for Start) -> getready (A14: 15 s to set up, then 3, 2, 1) -> holding -> rate -> rest -> ...
   let area; let hold; let session = null; let setNo = 1; let phase = 'ready'; let endsAt = 0; let timer = null; let startedSet = 0; let endedSet = 0;
-  let bank = null; let script = null; let playing = null; let calm = false; let offTalk = () => {};
+  let bank = null; let script = null; let playing = null; let calm = false; let offTalk = () => {}; let offDemo = () => {}; let gone = false;
   // Thu 10/22, his words: "I'm doing one arm at a time... per round it should have two timers": a hold with sides
   // (cupping: right arm, then left) runs each side in turn inside one set. Then: "2 minutes rest time per arm... in
   // between, it should be only 5 seconds", and "after it's done, it should prompt me... the pain, and then 5 seconds for
@@ -394,6 +395,7 @@ function renderRun(view, repo, areaId, index) {
       <div><h1 class="view-title">${esc(hold.exercise)}</h1><div class="hint">${esc(loadText(hold))} · ${total()} × ${index === 'other' ? `${secs()} s` : `<button class="link-btn" id="h-secs" type="button">${secs()} s</button>`}${sides() ? ' per arm' : ''} · ${restText(holdRestS())} ${sides() ? 'rest per arm' : 'between'}</div></div>
       <div class="pinned small" id="h-note" hidden></div>
       <div id="h-body"></div>
+      <div id="h-demo"></div>
       <p class="hint">Next-day check: ${esc(tomorrow())}${area.phase === 'heal' ? ', with the morning round' : ''}.</p>
       <button class="btn-ghost" id="h-stop" type="button">End round</button>`;
     // Thu 10/22, his words: "my cupping hold notes aren't here": the exercise's pinned note, as on the workout card.
@@ -401,6 +403,13 @@ function renderRun(view, repo, areaId, index) {
     const ex = exs.find((e) => e.name === hold.exercise) || exs.find((e) => holdBase(e.name) === holdBase(hold.exercise));
     const note = ex?.pinnedNote?.text ?? ex?.pinnedNote ?? hold.note ?? '';
     if (note) { const n = view.querySelector('#h-note'); n.textContent = note; n.hidden = false; }
+    // Sat 11/7, his words: "Why is there no animation... toes wall squat hold": the hold's animated demo (or his clip)
+    // under the timer, as on the workout. Nothing when no demo exists for it.
+    for (const id of holdDemoIds(hold.exercise, ex?.id)) {
+      const rec = await repo.get('demos', id);
+      if (gone) break;
+      if (rec && !rec.deleted) { offDemo = demoPanel(view.querySelector('#h-demo'), { id, name: hold.exercise }); break; }
+    }
     const muteBtn = view.querySelector('#h-mute');
     const showMute = () => { muteBtn.textContent = talk.isMuted() ? 'Coach muted' : 'Coach on'; muteBtn.setAttribute('aria-pressed', String(talk.isMuted())); muteBtn.classList.toggle('is-on', !talk.isMuted()); };
     muteBtn.onclick = () => { talk.setMuted(!talk.isMuted()); showMute(); };
@@ -430,7 +439,7 @@ function renderRun(view, repo, areaId, index) {
     plan();
     draw();
   })();
-  return () => { clearInterval(timer); playing?.stop(); offTalk(); talk.setMuted(false); setQuiet('hold', false); };
+  return () => { gone = true; clearInterval(timer); playing?.stop(); offTalk(); offDemo(); talk.setMuted(false); setQuiet('hold', false); };
 }
 
 export function render(view, params = []) {

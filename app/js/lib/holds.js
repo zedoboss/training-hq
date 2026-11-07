@@ -2,12 +2,24 @@
 // A round is 3 holds of ~30 s. Rounds come from hold sessions (kind "holds") and from hold sets inside workouts.
 import { isoDate } from './time.js';
 import { activeBridge } from './history.js';
+import { slug } from '../data/exercise-library.js';
 
 /**
  * Thu 10/22 (he did his knee holds with the new "Leg Extension Hold (Machine)" and the app still asked for them): a
  * hold exercise is the hold of its base exercise, and its timed sets are holds whatever their set type.
  */
 export const holdBase = (name) => String(name || '').replace(/\s+Hold\b/i, '').replace(/\s+/g, ' ').trim();
+/**
+ * Sat 11/7, his words: "Why is there no animation when I'm on... toes wall squat hold": the demo ids to try for a hold,
+ * best first. The hold version of the exercise ("Leg Extension (Machine)" -> leg-extension-hold-machine, "Cupping" ->
+ * cupping-hold), then the name as it is (toes-wall-squat-hold), then the matched exercise's own id.
+ */
+export function holdDemoIds(name, exerciseId = null) {
+  const n = String(name || '').replace(/\s+/g, ' ').trim();
+  if (!n) return exerciseId ? [exerciseId] : [];
+  const holdName = /\bhold\b/i.test(n) ? n : /\s*\(/.test(n) ? n.replace(/\s*\(/, ' Hold (') : `${n} Hold`;
+  return [...new Set([slug(holdName), slug(n), exerciseId].filter(Boolean))];
+}
 export const isHoldSet = (set, ex) => Boolean(set?.done) && (set.type === 'hold' || (/\bhold\b/i.test(ex?.name || '') && (set.durationS || 0) > 0));
 
 /**
