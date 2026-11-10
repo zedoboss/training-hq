@@ -527,6 +527,21 @@ const holdLoad = (h) => (h.loadKg != null ? `${k(h.loadKg)} kg total` : h.load |
 const holdText = (h) => `${h.exercise}, ${holdLoad(h)}, ${h.sets ?? 3} × ${h.seconds ?? 30} s${h.where ? `, at ${h.where}` : ''}${(h.timing || []).length ? `, ${h.timing.join(' and ')}` : h.when ? `, ${h.when}` : ''}`;
 const FIXED = 'His pain limit and the phase rules stay as they are.';
 
+/**
+ * A holds round of this area already saved for the round being logged (start..end): one whose time overlaps it, or,
+ * when he named no time (recent), one done on the same day that ended in the last 2 hours. A round left open counts
+ * only with at least one hold saved. Newest first. Null when none.
+ */
+const SAME_ROUND_MS = 2 * 3600000;
+function sameRound(s, area, start, end, recent) {
+  const sets = s.list('sets');
+  const endOf = (r) => r.endedAt || Math.max(r.startedAt, ...sets.filter((x) => x.sessionId === r.id && x.done && x.doneAt).map((x) => x.doneAt));
+  return s.list('sessions')
+    .filter((r) => r.kind === 'holds' && r.area === area.id && r.startedAt && (r.status === 'done' || (r.status === 'active' && sets.some((x) => x.sessionId === r.id && x.done))))
+    .filter((r) => (r.startedAt < end && endOf(r) > start) || (recent && s.date(r.startedAt) === s.date(start) && s.now - endOf(r) <= SAME_ROUND_MS))
+    .sort((p, q) => q.startedAt - p.startedAt)[0] || null;
+}
+
 function tendonHold(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
   const areas = s.list('tendons').filter((x) => x.kind === 'area');
@@ -564,6 +579,24 @@ function tendonHold(a, ctx) {
     const total = sets * secs * (sides ? sides.length : 1) + Math.max(0, sets - 1) * restS;
     const startedAt = a.time ? zonedTime(date, a.time, s.tz) : s.now - total * 1000;
     if (startedAt > s.now) return refuse('That time is still to come.');
+    // Wed 11/11, his words: check the holds already ticked before logging; if the round is in, say so. Tue 11/10 he
+    // ticked a knee round himself (9:26-9:32 AM, pain 0), said "Did em" at 9:37 AM, and this logged a second one on top,
+    // which then counted as his evening round too. A round of the area he already has around that time (overlapping,
+    // or, with no time said, done in the last 2 hours) is that round: not logged again unless he says it was another.
+    if (!a.again) {
+      const twin = sameRound(s, area, startedAt, startedAt + total * 1000, !a.time);
+      if (twin) {
+        const mine = s.list('sets').filter((x) => x.sessionId === twin.id && x.done).sort((x, y) => (x.doneAt || 0) - (y.doneAt || 0));
+        const pains = mine.map((x) => x.pain).filter((p) => p != null);
+        const left = twin.status === 'done' ? 0 : roundSetsLeft(twin, s.list('sets'), areas);
+        const span = `${timeText(twin.startedAt, s.tz)}${twin.endedAt ? ` to ${timeText(twin.endedAt, s.tz)}` : ''}`;
+        const head = left
+          ? `Not logged: his ${area.label} round from ${timeText(twin.startedAt, s.tz)} is open on the hold timer, ${mine.length} of ${mine.length + left} holds saved. Tell him it's there and to tick the rest on the timer (it counts once all are saved); never log it a second time.`
+          : `Not logged: that round is already in. ${twin.by === 'coach' ? 'It was logged before' : 'He ticked it himself'}: ${area.label}, ${twin.exercises?.[0]?.name || hold.exercise}, ${plural(mine.length, 'hold')}, ${span}${pains.length ? `, pain ${Math.max(...pains)}/10` : ''}. Tell him it's in, in one line; never say you logged it.`;
+        if (left) ctx.action?.({ kind: 'open', url: '#/holds', label: 'Open tendon holds' });
+        return refuse(`${head} ${holdsDueText(s)} Name every round still due today. Only if he says he did another round on top of it: log_round with again: true.`);
+      }
+    }
     const key = newKey();
     const session = {
       id: newId('session'), kind: 'holds', area: area.id, title: `${area.label} holds`, startedAt, endedAt: Math.min(s.now, startedAt + total * 1000), pausedMs: 0, pausedAt: null,
@@ -775,8 +808,8 @@ export const PLAN_TOOLS = [
     obj({ action: { type: 'string', enum: ['show', 'next', 'clear', 'week', 'block'] }, dayType: { type: 'string', description: 'pull, push, legs, or a day type id of his split (upper-a, lower...)' }, block: { type: 'string', enum: ['keep', 'end'] }, date: ISO, week: { type: 'integer', minimum: 1, maximum: 52 }, said: SAID }, ['action']), rotationSet),
   write('plan_day', 'Rest day on a date', `A rest day he plans on a coming date, or marks on a past day, or takes back (undo_rest). ${ONLY_HIS} His rule: a rest day skips that day and carries on with the next day type, no make-up; a session time set on the next training day moves with the session. Today goes through schedule's rest_today / undo_rest. A past day he trained on can't be a rest day.`,
     obj({ action: { type: 'string', enum: ['rest', 'undo_rest'] }, date: ISO, said: SAID }, ['action', 'date']), planDay),
-  write('tendon_hold', 'Tendon holds', `His tendon holds, as the holds screen does. ${ONLY_HIS} Never suggest a hold, a load or a dose. log_round = a round he did outside a session (at home, say), the way the hold timer saves it: area, hold (its name; one not set up for the area is logged under his words), sets, seconds, kg (TOTAL; default the hold's load), time (HH:MM; default just now), date (default today), pain 0-10 and shaking if he says. His rounds of an area on a date (default today; time HH:MM picks the round started nearest it, default the newest): rounds = list them, each open or done with its holds; reopen_round = a round marked done is open again ("untick it", "it's not done"): it counts once all its holds are saved and the hold timer carries on at its next hold; delete_round = the round and its holds gone (his explicit words in said); remove_set = a hold logged by mistake (set_no, arm for an arm-by-arm hold; default the last; said), a done round that loses one opens again; fix_set = correct a logged hold's seconds, pain, kg or shaking. set_hold = change a hold's kg, sets, seconds (10-300), where (gym/home) or timing. use_hold = the area uses another hold (exercise) in place of one; add_hold = one more hold for an area; remove_hold = take one off (his explicit words in said). add_area = a new tendon area (label; optionally its first hold), phase not set (tendon_phase on his answer); remove_area = only on his explicit words (said). His tendon pain limit and phase rules are never changed here.`,
-    obj({ action: { type: 'string', enum: ['log_round', 'rounds', 'reopen_round', 'delete_round', 'remove_set', 'fix_set', 'set_hold', 'use_hold', 'add_hold', 'remove_hold', 'add_area', 'remove_area'] }, area: { type: 'string' }, set_no: { type: 'integer', minimum: 1, maximum: 10, description: 'which set of the round (1 = first)' }, arm: { type: 'string', description: 'which arm, for an arm-by-arm hold' }, label: { type: 'string' }, hold: { type: 'string', description: 'which hold: its name, or its number in the area (1 = first)' }, exercise: { type: 'string', description: 'the hold exercise he names' }, sets: { type: 'integer', minimum: 1, maximum: 10 }, seconds: { type: 'integer', minimum: 5, maximum: 600 }, kg: { type: 'number', minimum: 0, description: 'TOTAL kg' }, clear_kg: { type: 'boolean' }, where: { type: 'string', enum: ['gym', 'home'] }, timing: TIMING, time: HM, date: ISO, pain: { type: 'number', minimum: 0, maximum: 10 }, shaking: { type: 'string', enum: ['none', 'some', 'a lot'] }, note: { type: 'string' }, said: SAID }, ['action']), tendonHold),
+  write('tendon_hold', 'Tendon holds', `His tendon holds, as the holds screen does. ${ONLY_HIS} Never suggest a hold, a load or a dose. log_round = a round he did outside a session (at home, say), the way the hold timer saves it; a round he already ticked himself around that time is never logged twice (the tool says it's in and what is still due): area, hold (its name; one not set up for the area is logged under his words), sets, seconds, kg (TOTAL; default the hold's load), time (HH:MM; default just now), date (default today), pain 0-10 and shaking if he says. His rounds of an area on a date (default today; time HH:MM picks the round started nearest it, default the newest): rounds = list them, each open or done with its holds; reopen_round = a round marked done is open again ("untick it", "it's not done"): it counts once all its holds are saved and the hold timer carries on at its next hold; delete_round = the round and its holds gone (his explicit words in said); remove_set = a hold logged by mistake (set_no, arm for an arm-by-arm hold; default the last; said), a done round that loses one opens again; fix_set = correct a logged hold's seconds, pain, kg or shaking. set_hold = change a hold's kg, sets, seconds (10-300), where (gym/home) or timing. use_hold = the area uses another hold (exercise) in place of one; add_hold = one more hold for an area; remove_hold = take one off (his explicit words in said). add_area = a new tendon area (label; optionally its first hold), phase not set (tendon_phase on his answer); remove_area = only on his explicit words (said). His tendon pain limit and phase rules are never changed here.`,
+    obj({ action: { type: 'string', enum: ['log_round', 'rounds', 'reopen_round', 'delete_round', 'remove_set', 'fix_set', 'set_hold', 'use_hold', 'add_hold', 'remove_hold', 'add_area', 'remove_area'] }, area: { type: 'string' }, set_no: { type: 'integer', minimum: 1, maximum: 10, description: 'which set of the round (1 = first)' }, arm: { type: 'string', description: 'which arm, for an arm-by-arm hold' }, label: { type: 'string' }, hold: { type: 'string', description: 'which hold: its name, or its number in the area (1 = first)' }, exercise: { type: 'string', description: 'the hold exercise he names' }, sets: { type: 'integer', minimum: 1, maximum: 10 }, seconds: { type: 'integer', minimum: 5, maximum: 600 }, kg: { type: 'number', minimum: 0, description: 'TOTAL kg' }, clear_kg: { type: 'boolean' }, where: { type: 'string', enum: ['gym', 'home'] }, timing: TIMING, time: HM, date: ISO, pain: { type: 'number', minimum: 0, maximum: 10 }, shaking: { type: 'string', enum: ['none', 'some', 'a lot'] }, note: { type: 'string' }, again: { type: 'boolean', description: 'log_round only: he says he did another round on top of one already saved around that time' }, said: SAID }, ['action']), tendonHold),
   write('bodyweight', 'Bodyweight for pull-ups', `The bodyweight pull-ups and other bodyweight exercises count (volume and the 30% guard), as Settings > Bodyweight and the workout's "Bodyweight today" set it. ${ONLY_HIS} show = what is used now and where it is from (read only). set = his number (kg) when Apple Health is stale or wrong; it also goes on a workout in progress; a newer Apple Health or Evolt weigh-in takes over by itself. clear = drop the hand-set number. A weigh-in he reads off a scale is log_weight, not this.`,
     obj({ action: { type: 'string', enum: ['show', 'set', 'clear'] }, kg: { type: 'number', minimum: 30, maximum: 250 }, said: SAID }, ['action']), bodyweight),
   write('readiness_confirm', 'Confirm the readiness table', `Record his OK of his readiness table exactly as it is, the way its screen's Confirm does with nothing edited. Only when he says he confirms it (said = his words). It never changes the table's levels, rules or "go lighter" amounts: those are a safety rule and he edits them himself on its screen (open_screen readiness_table).`,

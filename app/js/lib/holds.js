@@ -92,9 +92,18 @@ export function roundsByDate(areas, sessions, sets, rawBridge = null) {
       byArea[area][e.date] = (byArea[area][e.date] || 0) + 1;
     }
   }
-  for (const s of holdSessions) {
+  // Wed 11/11: two rounds of one area whose times overlap are one round done once (Tue 11/10 he ticked a knee round,
+  // 9:26-9:32 AM, and the coach logged his "Did em" as a second one, 9:31-9:37 AM, which then ticked off his evening
+  // round too). Counted once.
+  const spans = {};
+  const endOf = (s) => s.endedAt || Math.max(s.startedAt, ...sets.filter((x) => x.sessionId === s.id && x.done && x.doneAt).map((x) => x.doneAt));
+  for (const s of [...holdSessions].sort((p, q) => (p.startedAt || 0) - (q.startedAt || 0))) {
     const date = isoDate(new Date(s.startedAt));
     if (s.kind === 'holds' && s.area && byArea[s.area]) {
+      const end = endOf(s);
+      const seen = (spans[s.area] ||= []);
+      if (seen.some(([a, b]) => s.startedAt < b && end > a)) continue;
+      seen.push([s.startedAt, end]);
       byArea[s.area][date] = (byArea[s.area][date] || 0) + 1;
       continue;
     }
