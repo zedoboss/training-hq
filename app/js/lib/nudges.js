@@ -125,6 +125,9 @@ export const SUPPS_BED_LATE_MIN = 180;
 // in new words; the reminder's own againText when it has one).
 const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps: ['supps', 60, 45], recovery: ['recovery', 40, 120, true] };
 
+/** The meal after the gym, named by how many meals came before it today. */
+const MEAL_ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth'];
+
 /**
  * Everything worth a nudge right now, most important first.
  * @param {object} o
@@ -156,13 +159,15 @@ const AGAIN = { readiness: ['checkin', 85, 20], meals: ['meals', 55, 30], supps:
  * @param {number|null} o.workoutEndedAt  when today's workout was finished, ms
  * @param {number|null} o.mealAfterGymAt  no meal nudge before this after the gym (reminders.js afterGym), ms
  * @param {number|null} o.lastMealAt      his latest meal today, ms
+ * @param {number[]} [o.mealsAt]  when each of today's meals was eaten (snacks and empty meals left out), ms: the meal
+ *   after the gym is named by how many came before it ("second meal" after a breakfast)
  * @param {boolean} [o.scanPaused]  he paused body scans (a scan hold-off, Thu 11/5): no scan checklist, no "Evolt first", no Evolt number ask
  * @param {Object<string, number>} [o.sent]  nudge key -> when it went out (the nudge state's byKey): counts check-ins
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
 export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
-  wokeAt = null, arrivedAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, walkingSince = null, sent = {} }) {
+  wokeAt = null, arrivedAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, mealsAt = [], healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, walkingSince = null, sent = {} }) {
   const out = [];
   // Thu 11/5 ("Start cooking" and "First meal time" went out mid-walk): out walking, no food nudge; the meal-time
   // questions wait till he's back (server/notify.mjs afterWalks).
@@ -211,8 +216,13 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     const times = [0, ...MEAL_NUDGE.checkInMin].map((m) => quietTo + m * 60000);
     const k = times.findLastIndex((t) => t <= now);
     const doneHm = formatHm(hmOf(new Date(workoutEndedAt), tz));
+    // Wed 11/11, his words on Tuesday's 2:21 PM "Workout done at 1:56 PM. Time for your first meal: 78 of 242.5 g
+    // protein so far today" (his breakfast eaten at 9:56 AM): with a meal already logged today, the one after the gym
+    // is his second meal (third after two), never "first".
+    const before = (Array.isArray(mealsAt) ? mealsAt : []).filter((t) => Number.isFinite(t) && t <= workoutEndedAt).length;
+    const which = MEAL_ORDINAL[before] || 'next';
     const said = [
-      `Workout done at ${doneHm}. Time for your first meal${targets?.protein && !eaten.unread ? `: ${nf(eaten.protein)} of ${targets.protein} g protein so far today` : ''}. Tell me what you eat.`,
+      `Workout done at ${doneHm}. Time for your ${which} meal${targets?.protein && !eaten.unread ? `: ${nf(eaten.protein)} of ${targets.protein} g protein so far today` : ''}. Tell me what you eat.`,
       'Your meal after the gym: haven\'t heard from you. Eaten, cooking, or skipping it?',
       `Still nothing logged since your ${doneHm} workout. When are you eating, or are you skipping it?`,
       'Last check on your meal after the gym. Eating now, or skipping it today?',

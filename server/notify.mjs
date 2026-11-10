@@ -1057,6 +1057,8 @@ export function nudgeInputs(store, now, tz) {
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && since(x.endedAt)).map((x) => x.endedAt)) || null,
       mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan, holdoffs: st.holdoffs })?.mealAt ?? null,
       lastMealAt: Math.max(0, ...list('meals').filter((m) => m.date === food && m.at).map((m) => m.at)) || null,
+      // Wed 11/11: today's meals (not snacks), so the meal after the gym says "second meal" after a breakfast.
+      mealsAt: list('meals').filter((m) => m.date === food && m.at && !isSnack(m)).map((m) => m.at),
       // His last answer to a meal question (eaten, about to cook, cooking, skipping): the after-workout meal nudge stops on it.
       mealAnsweredAt: Math.max(0, ...list('meal-checks').filter((c) => c.date === date && c.at).map((c) => c.at)) || null,
       morning: n.morning && noQuietYet(store, now) ? { ...n.morning, text: null } : n.morning || null,
