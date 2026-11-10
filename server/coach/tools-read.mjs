@@ -19,7 +19,7 @@ import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/m
 import { foodsDb } from '../foods.mjs';
 import { reviewOpen, checklist, whenText as suppWhen, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf, mealFitIssues } from '../../app/js/lib/fuel-reminders.js';
-import { walkLines, usualWalkHm, walkSteps, hourRisk, weatherWords, safeWindowsText, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
+import { walkLines, usualWalkHm, walkSteps, hourRisk, weatherWords, safeWindowsText, uvClimb, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
 import { fastingOn } from '../../app/js/lib/fast.js';
 import { activeHolds, scanHold } from '../../app/js/lib/holdoffs.js';
 import { scanStatus, protocolOf, lastDone, isDone, conditionNotes, latestChange, scanMarks, SAFETY_ASK, projectRotation, projectRotationEitherWay } from '../../app/js/lib/scans.js';
@@ -337,9 +337,16 @@ export function mealsNowLine(s) {
 }
 
 // Tue 10/27, his words: "Anything under 3 UV is okay for a walk"; "strictly by UV nothing else"; rain: "i take the risk".
-const WALK_RULE = 'Walking rule (his, Tue 10/27): UV only. UV under 3 = fine to walk, whatever the temperature; never hold, move or plan a walk for the heat or feels-like, and never quote a UV under 3 as a problem. UV 3+ = plan it for the first hour under 3 (UV 6+: never suggest it). Rain never holds or moves a walk: when it is raining or the chance is high, say so plainly ("rain 60%, it could rain"), and that if he walks he takes the risk; his call. A time he set himself is never moved for the weather.';
+// Tue 11/10, his words: "UV 3.9 now too strong that's not too strong... It should be about four... you can say you can
+// walk for a bit, but then go hide because it's gonna get too strong": the line is 4.
+const WALK_RULE = 'Walking rule (his, Tue 10/27; the line moved to 4 on Tue 11/10): UV only. UV under 4 = fine to walk, whatever the temperature; never hold, move or plan a walk for the heat or feels-like, never call a UV under 4 too strong or a problem. Under 4 but climbing past 4 within 2 hours (a morning 3.9): say he can walk for a bit now, but be in the shade by the time it passes 4 (say that time); don\'t hold it to the afternoon. UV 4+ = plan it for the first hour under 4 (UV 6+: never suggest it). Rain never holds or moves a walk: when it is raining or the chance is high, say so plainly ("rain 60%, it could rain"), and that if he walks he takes the risk; his call. A time he set himself is never moved for the weather.';
 
 /** The weather now and the next 12 hours (Wed 10/21: "check if it's raining for me"). */
+/** Tue 11/10: under 4 now, past 4 within 2 hours: walk for a bit, in the shade by then. '' otherwise. */
+function climbLine(w, s) {
+  const c = uvClimb(w, s.now);
+  return c ? `UV is under 4 now but climbing: it passes 4 by ${timeText(c.at, s.tz)} (${weatherWords(c.h)}). Fine to walk for a bit now; he should be in the shade by then.` : '';
+}
 function weatherText(s) {
   const w = s.store.getMeta?.('weather');
   if (!w?.hours?.length) return 'No weather data on the Mac yet (it fetches from Open-Meteo about every 15 minutes). Ask him what he sees outside.';
@@ -349,6 +356,7 @@ function weatherText(s) {
     ...rainNowLines(w, s),
     cur ? `Model now: ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm of rain in the last hour` : ''}, ${Math.round(cur.temp)}°C, feels ${Math.round(cur.feels)}°C.` : '',
     `Next hours (forecast): ${hours.map((h) => `${timeText(h.at, s.tz)} UV ${Math.round(h.uv * 10) / 10}, feels ${Math.round(h.feels)}°C, ${rainChanceText(h)} (${hourRisk(h)})`).join('; ')}.`,
+    climbLine(w, s),
     WALK_RULE].filter(Boolean).join('\n');
 }
 
@@ -379,7 +387,7 @@ export function walkTextLines(s, { week = false } = {}) {
   const going = docs.find((x) => x?.date === day)?.going;
   const signs = going?.at ? walkSigns(s.store, going.at, s.now, s.tz) : null;
   const lines = walkLines(docs, { today: day, now: s.now, tz: s.tz, steps, goal: s.settings().body?.stepGoal || 8000, usualHm: usualWalkHm(docs, { today: day, tz: s.tz }), signs });
-  // Wed 10/21: UV (Open-Meteo, his area), so walks are planned at UV under 3; UV only since Tue 10/27.
+  // Wed 10/21: UV (Open-Meteo, his area), so walks are planned at UV under 4 (3 until Tue 11/10); UV only since Tue 10/27.
   const w = s.store.getMeta?.('weather');
   const nowH = (w?.hours || []).find((h) => h.at <= s.now && s.now < h.at + 3600000);
   if (nowH) {
@@ -388,7 +396,8 @@ export function walkTextLines(s, { week = false } = {}) {
     const cur = w.current && s.now - w.current.at < 2 * 3600000 ? w.current : null;
     const next = (w.hours || []).filter((h) => h.at > s.now && h.at <= s.now + 4 * 3600000).map((h) => `${timeText(h.at, s.tz)} ${rainChanceText(h)}`).join(', ');
     const wet = rainingNow(w, s.now);
-    lines.splice(1, 0, `Walking weather (${w.label || 'his area'}, Open-Meteo forecast model, updated ${timeText(w.fetchedAt, s.tz)}; a forecast, not what is at his door): ${cur ? `model now ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm in the last hour` : ''}, ` : 'now '}${weatherWords(nowH)}: ${{ safe: 'fine to walk (UV under 3)', caution: 'UV 3+: only with shade and a hat, and only if no hour under 3 is left today', never: 'UV 6+: NOT a walk to suggest' }[hourRisk(nowH)] || 'unknown'}${wet?.sure ? '; RAINING now (confirmed): his call, umbrella if he goes' : wet ? '; rain MAYBE (model only, not confirmed): his call' : ''}. ${rainNowLines(w, s).join(' ')} Chance of rain next hours: ${next || 'unknown'}. Windows under UV 3 left today: ${windows || 'none'}. ${WALK_RULE}`);
+    const climb = uvClimb(w, s.now);
+    lines.splice(1, 0, `Walking weather (${w.label || 'his area'}, Open-Meteo forecast model, updated ${timeText(w.fetchedAt, s.tz)}; a forecast, not what is at his door): ${cur ? `model now ${weatherCodeText(cur.code) || 'unknown'}${cur.precip != null ? `, ${cur.precip} mm in the last hour` : ''}, ` : 'now '}${weatherWords(nowH)}: ${{ safe: climb ? `fine to walk for a bit (UV under 4), but it passes 4 by ${timeText(climb.at, s.tz)} (${weatherWords(climb.h)}): he should be in the shade by then` : 'fine to walk (UV under 4)', caution: 'UV 4+: only with shade and a hat, and only if no hour under 4 is left today', never: 'UV 6+: NOT a walk to suggest' }[hourRisk(nowH)] || 'unknown'}${wet?.sure ? '; RAINING now (confirmed): his call, umbrella if he goes' : wet ? '; rain MAYBE (model only, not confirmed): his call' : ''}. ${rainNowLines(w, s).join(' ')} Chance of rain next hours: ${next || 'unknown'}. Windows under UV 4 left today: ${windows || 'none'}. ${WALK_RULE}`);
   }
   return week ? lines : lines.slice(0, nowH ? 2 : 1);
 }

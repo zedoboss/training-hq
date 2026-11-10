@@ -40,7 +40,11 @@ export const WALK = {
 // rain and that it could rain and i take the risk if i do walk" (a 6:11 PM walk at UV 0.1 had been moved for "feels
 // 34°C, rain 42%"). Now UV alone decides: under 3 = safe, 3 to under 6 = caution, 6+ = never. The feels-like
 // temperature is never a reason; rain (forecast or now) never holds or moves a walk: he's told the chance, his risk.
-export const HEAT = { uvSafe: 3, uvNever: 6, rainHigh: 50, rainNowMm: 0.3 };
+// Tue 11/10, his words: "It said the walk UV 3.9 now too strong that's not too strong... It should be about four... you
+// can say you can walk for a bit, but then go hide because it's gonna get too strong" (9:19 AM: "Walk: UV 3.9 now, too
+// strong. I planned it for 3:00 PM"). The line is now 4: under 4 = safe, 4 to under 6 = caution, 6+ = never. Under 4 and
+// climbing past it within 2 hours (uvClimb): fine for a bit now, in the shade by the hour it passes 4; never held.
+export const HEAT = { uvSafe: 4, uvNever: 6, rainHigh: 50, rainNowMm: 0.3 };
 // Thu 10/22, his words: "there are clouds above me... but there is no rain... improve the weather system": the model's
 // "drizzle, 0.2 mm" had been told to him as fact, with an umbrella. Now a model alone never makes it "raining": a drizzle
 // code under 0.3 mm doesn't count, the nearest weather station's observation (a real one, server/weather.mjs) can veto
@@ -113,7 +117,7 @@ export function weatherCodeText(code) {
   if (code >= 95) return 'thunderstorm';
   return 'unsettled';
 }
-/** The hour's UV in words: "UV 4.2". Only ever given as a reason when it is 3 or more (Tue 10/27). */
+/** The hour's UV in words: "UV 4.2". Only ever given as a reason when it is 4 or more (Tue 10/27, 4 since Tue 11/10). */
 export const weatherWords = (h) => (h?.uv != null ? `UV ${Math.round(h.uv * 10) / 10}` : '');
 /**
  * Rain, for him to weigh (Tue 10/27): raining now, or a high chance (50%+) this hour, said plainly with "your call";
@@ -126,7 +130,7 @@ export function rainNote(weather, now, h = hourAt(weather, now)) {
   return '';
 }
 /**
- * The next good time to walk from `from` until `until`: the first safe hour (UV under 3), else the first caution hour.
+ * The next good time to walk from `from` until `until`: the first safe hour (UV under 4), else the first caution hour.
  * Rain doesn't count (Tue 10/27). The current hour counts if it is good (then `from` itself). Null when there is none.
  */
 export function nextWalkTime(weather, from, until) {
@@ -135,7 +139,18 @@ export function nextWalkTime(weather, from, until) {
   const h = pick((x) => hourRisk(x) === 'safe') || pick((x) => hourRisk(x) === 'caution');
   return h ? { at: Math.max(h.at, from), h, risk: hourRisk(h) } : null;
 }
-/** Safe stretches (UV under 3) from `from` until `until`, as "5:00 PM-11:00 PM (UV 1 at most)". */
+/**
+ * Under 4 now and 4+ within the next 2 hours (Tue 11/10, a morning UV 3.9 on its way up): {at, h} for the first forecast
+ * hour at 4 or more, the time to be in the shade by; null otherwise (not safe now, or not climbing past 4 soon).
+ */
+export function uvClimb(weather, now) {
+  if (hourRisk(hourAt(weather, now)) !== 'safe') return null;
+  const h = (weather?.hours || []).find((x) => x.at > now && x.at <= now + 2 * HOUR && x.uv != null && x.uv >= HEAT.uvSafe);
+  return h ? { at: h.at, h } : null;
+}
+/** "UV 3.9 now: fine to walk for a bit, but it passes 4 by 10:00 AM (UV 5.1), so be in the shade by then." */
+export const climbText = (nowH, c, t) => `${weatherWords(nowH)} now: fine to walk for a bit, but it passes 4 by ${t(c.at)} (${weatherWords(c.h)}), so be in the shade by then.`;
+/** Safe stretches (UV under 4) from `from` until `until`, as "5:00 PM-11:00 PM (UV 1 at most)". */
 export function safeWindowsText(weather, from, until, tz) {
   const hours = (weather?.hours || []).filter((h) => h.at + HOUR > from && h.at < until && hourRisk(h) === 'safe');
   const runs = [];
@@ -307,7 +322,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   if (busy) return null;
   const st = stepsText({ steps, goal, now, tz });
   const last = lastOf(d.asks);
-  // Weather: when the UV is 3+ now, plan (or move the app's own time) to the next good time. UV only (Tue 10/27): never
+  // Weather: when the UV is 4+ now, plan (or move the app's own time) to the next good time. UV only (Tue 10/27): never
   // the heat, never rain; rain is told as his risk (rainNote).
   const endMs = now + (bed - cfg.stopBeforeBedMin - at) * 60000;
   const nowH = hourAt(weather, now);
@@ -317,8 +332,11 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
   const rainNow = weather ? rainNote(weather, now, nowH) : '';
   const withRain = (text) => (rainNow ? `${text} ${rainNow}` : text);
   const t = (ms) => formatHm(hmOf(new Date(ms), tz));
-  // UV 3+ now, said as a fact at his own time (never moved): "UV 7 now, strong sun: under 3 from 5:00 PM."
-  const uvNote = risk === 'caution' || risk === 'never' ? `${weatherWords(nowH)} now, strong sun: shade and a hat${better && better.risk === 'safe' && better.at > now ? `; under 3 from ${t(better.at)}` : ''}.` : '';
+  // UV 4+ now, said as a fact at his own time (never moved): "UV 7 now, strong sun: under 4 from 5:00 PM." Under 4 and
+  // climbing past it soon (Tue 11/10): fine for a bit, in the shade by the hour it passes 4.
+  const climb = weather ? uvClimb(weather, now) : null;
+  const climbNote = climb ? climbText(nowH, climb, t) : '';
+  const uvNote = risk === 'caution' || risk === 'never' ? `${weatherWords(nowH)} now, strong sun: shade and a hat${better && better.risk === 'safe' && better.at > now ? `; under 4 from ${t(better.at)}` : ''}.` : climbNote;
   // Only an answer about the walk (the coach's walk tool) starts a new round (Tue 10/27: his 5:32 PM lunch message
   // restarted Monday's 5:00 PM walk, six check-ins to 8:02 PM, three the same). Anything else he writes holds the next
   // check-in for half an hour; the count goes on.
@@ -353,7 +371,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     if (now < d.plan.at) return null;
     // Whose time it is: his words back to him, or the hour the coach picked; never "you set" for the coach's.
     const mine = !coachPlanned(d.plan);
-    // The app's own time came and the UV is 3+ now: move it to the next good time, once per plan. A time he set himself
+    // The app's own time came and the UV is 4+ now: move it to the next good time, once per plan. A time he set himself
     // is never moved for the weather (Tue 10/27: his 6:11 PM walk was moved to 7:00 PM at UV 0.1).
     if (!mine && badNow && better && better.at > now && !d.asks.some((a) => a.kind === 'moved' && a.at >= d.plan.setAt)) {
       return { kind: 'moved', planAt: better.at, text: withRain(`It's ${weatherWords(nowH)} now, too strong for a walk. I moved it to ${t(better.at)} (${weatherWords(better.h)}). Say if you want to go anyway.`) };
@@ -362,7 +380,7 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     const planTime = formatHm(hmOf(new Date(d.plan.at), tz));
     const whose = mine ? `you said ${planTime}` : `${planTime} was the hour I picked for the weather`;
     // His time: ask, don't order (his profile, Thu 10/22: "Did you start walking?"); the UV and rain as facts, his call.
-    if (!asked.length) return { kind: 'plan', text: withRain(mine ? `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Did you start walking?${uvNote ? ` ${uvNote}` : ''} ${st}` : `Walk time: ${planTime}, the hour I picked for the weather. Going, or another time? ${st}`) };
+    if (!asked.length) return { kind: 'plan', text: withRain(mine ? `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Did you start walking?${uvNote ? ` ${uvNote}` : ''} ${st}` : `Walk time: ${planTime}, the hour I picked for the weather. Going, or another time?${climbNote ? ` ${climbNote}` : ''} ${st}`) };
     const l = lastOf(asked);
     if (answered(l.at)) {
       if (now - d.answeredAt < cfg.againMin * 60000) return null;
@@ -377,10 +395,10 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     ], outOf);
   }
   const since = Math.max(last?.at || 0, skip?.at || 0, walked?.at || 0);
-  // No time set and the UV is 3+ now: the coach plans it (his words: "he can schedule them").
+  // No time set and the UV is 4+ now: the coach plans it (his words: "he can schedule them").
   if (badNow) {
     if (better && better.at > now) return { kind: 'planned', planAt: better.at, text: `${fasting ? 'Fasting today, so moving is the job. ' : ''}Walk: ${weatherWords(nowH)} now, too strong. I planned it for ${t(better.at)}, when it's ${weatherWords(better.h)}. ${st} Tell me if another time suits you.` };
-    if (!d.asks.some((a) => a.kind === 'no-window')) return { kind: 'no-window', text: `UV under 3 doesn't come again before your bedtime (now ${weatherWords(nowH)}). Steps can wait for early morning or after sunset.` };
+    if (!d.asks.some((a) => a.kind === 'no-window')) return { kind: 'no-window', text: `UV under 4 doesn't come again before your bedtime (now ${weatherWords(nowH)}). Steps can wait for early morning or after sunset.` };
     return null;
   }
   if (!last || (skip && skip.at > last.at)) {
@@ -392,17 +410,17 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     const u = usualHm ? minOf(usualHm) + (minOf(usualHm) < wake && bed > 1440 ? 1440 : 0) : null;
     const usual = u != null && u <= bed - cfg.stopBeforeBedMin ? formatHm(usualHm) : null;
     if (usual && u - at > 30) return { kind: 'ask', text: `${fast}Walk: ${st} You usually go around ${usual}. Going then, or another time?` };
-    return { kind: 'ask', text: withRain(`${fast}Walk: ${st}${risk === 'caution' ? ` ${weatherWords(nowH)} now: shade and a hat.` : ''}${usual ? ` You usually go around ${usual}${at - u > 30 ? `; it's past that` : ''}.` : ''} When are you going?`) };
+    return { kind: 'ask', text: withRain(`${fast}Walk: ${st}${risk === 'caution' ? ` ${weatherWords(nowH)} now: shade and a hat.` : climbNote ? ` ${climbNote}` : ''}${usual ? ` You usually go around ${usual}${at - u > 30 ? `; it's past that` : ''}.` : ''} When are you going?`) };
   }
   if (answered(last.at)) {
     if (now - Math.max(d.answeredAt, since) < cfg.againMin * 60000) return null;
     const out = outOf(d.asks.slice(d.asks.findLastIndex((a) => !CHECKS.includes(a.kind))));
-    return out ? { kind: 'out', text: out } : { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` };
+    return out ? { kind: 'out', text: out } : { kind: 'ask', text: `Walk: ${st} No time set yet.${climbNote ? ` ${climbNote}` : ''} When are you going?` };
   }
   if (talking(last.at)) return null;
   // The last question wasn't a walk ask (e.g. "no safe walking weather" and the weather turned): ask fresh.
   if (lastOf(d.asks.filter((a) => !CHECKS.includes(a.kind)))?.kind !== 'ask') {
-    return { kind: 'ask', text: `Walk: ${st} No time set yet. When are you going?` };
+    return { kind: 'ask', text: `Walk: ${st} No time set yet.${climbNote ? ` ${climbNote}` : ''} When are you going?` };
   }
   return checkInDue(d.asks, now, cfg, [
     'No answer on the walk. When are you going? Tell me a time and I leave you alone until then.',

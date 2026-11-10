@@ -897,6 +897,21 @@ test('hold_path (Thu 10/22): start, step up after he confirms, not yet, back; th
   assert.match((await call('hold_path', { action: 'back' })).text, /Stage 1 of 2: Flat Smith/);
 });
 
+test('weather (Tue 11/10): the walk line is UV 4; a 3.9 climbing past 4 = walk for a bit, in the shade by then', async () => {
+  const h = (min, uv) => ({ at: NOW + min * 60000, uv, feels: 36, temp: 32, rain: 10 });
+  const saved = store.getMeta('weather');
+  store.setMeta('weather', { fetchedAt: NOW, label: 'test place', hours: [h(0, 3.9), h(60, 5.4), h(120, 7)] });
+  let text = (await call('weather')).text;
+  assert.match(text, /3:00 AM UV 3\.9, feels 36°C, [^;]*\(safe\); 4:00 AM UV 5\.4[^;]*\(caution\)/);
+  assert.match(text, /UV is under 4 now but climbing: it passes 4 by 4:00 AM \(UV 5\.4\)\. Fine to walk for a bit now; he should be in the shade by then\./);
+  assert.match(text, /UV under 4 = fine to walk/);
+  assert.doesNotMatch(text, /under 3/);
+  store.setMeta('weather', { fetchedAt: NOW, label: 'test place', hours: [h(0, 3.9), h(60, 2), h(120, 0)] });
+  text = (await call('weather')).text;
+  assert.doesNotMatch(text, /UV is under 4 now but climbing/);
+  store.setMeta('weather', saved ?? null);
+});
+
 test('meal_check with no meal named (Thu 10/22 audit): the earliest meal asked and not answered, not the nearest one', async () => {
   store.writeLocal('settings', 'main', { fuel: { mealTimes: [{ name: 'First meal', time: '12:30', latest: '14:00' }, { name: 'Last meal', time: '16:30' }] } });
   clock = Date.UTC(2026, 0, 20, 14, 45);

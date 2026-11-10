@@ -117,7 +117,7 @@ test('walks and the weather (Wed 10/21, UV only since Tue 10/27): UV 3+ -> the c
   const mine = withAnswer(withAsk(null, D, 'ask', at('11:00')), D, { action: 'plan', at: at('13:00'), said: 'at 1' }, at('11:05'));
   const m = walkDue({ ...base, now: at('13:00'), doc: mine, steps: steps(3000, '12:00'), weather });
   assert.equal(m.kind, 'plan');
-  assert.match(m.text, /^Walk time: you said "at 1"\. Did you start walking\? UV 8 now, strong sun: shade and a hat; under 3 from 4:00 PM\./);
+  assert.match(m.text, /^Walk time: you said "at 1"\. Did you start walking\? UV 8 now, strong sun: shade and a hat; under 4 from 4:00 PM\./);
   assert.equal(m.planAt, undefined);
   // UV 3 to 6 with no hour under 3 left before bed: asked, with shade (not held).
   const late = { hours: [hour('20:00', 4, 30), hour('21:00', 4, 30), hour('22:00', 4, 30), hour('23:00', 4, 30)] };
@@ -126,6 +126,64 @@ test('walks and the weather (Wed 10/21, UV only since Tue 10/27): UV 3+ -> the c
   assert.match(c.text, / UV 4 now: shade and a hat\. When are you going\?$/);
   // No weather known: as before.
   assert.equal(walkDue({ ...base, now: at('12:30'), doc: null, steps: steps(3000, '12:00') }).kind, 'ask');
+});
+
+test('Tue 11/10: the walk UV line is 4; a morning 3.9 on its way up = walk for a bit, in the shade by the hour it passes 4', async () => {
+  // His 9:19 AM: "Walk: UV 3.9 now, too strong. I planned it for 3:00 PM, when it's UV 2.2." His words: "that's not too
+  // strong... It should be about four... you can walk for a bit, but then go hide because it's gonna get too strong".
+  const { hourRisk, uvClimb, safeWindowsText } = await import('../app/js/lib/walks.js');
+  const hour = (hm, uv) => ({ at: at(hm), uv, feels: 36, rain: 10 });
+  const weather = { hours: [hour('08:00', 2.6), hour('09:00', 3.9), hour('10:00', 5.4), hour('11:00', 7.2), hour('12:00', 8.5), hour('13:00', 8), hour('14:00', 5.8), hour('15:00', 2.2), hour('16:00', 1), hour('17:00', 0.2), hour('18:00', 0), hour('19:00', 0), hour('20:00', 0), hour('21:00', 0), hour('22:00', 0), hour('23:00', 0)] };
+  assert.equal(hourRisk({ uv: 3.9 }), 'safe');
+  assert.equal(hourRisk({ uv: 3 }), 'safe');
+  assert.equal(hourRisk({ uv: 4 }), 'caution');
+  assert.equal(hourRisk({ uv: 6 }), 'never');
+  const day = { ...base, wakeHm: '06:30', bedHm: '23:59', steps: steps(1200, '09:00'), weather };
+  // 9:19 AM, nothing planned: asked, not held to the afternoon, with when to be in the shade.
+  const a = walkDue({ ...day, now: at('09:19'), doc: null });
+  assert.equal(a.kind, 'ask');
+  assert.equal(a.planAt, undefined);
+  assert.match(a.text, / UV 3\.9 now: fine to walk for a bit, but it passes 4 by 10:00 AM \(UV 5\.4\), so be in the shade by then\. When are you going\?$/);
+  assert.doesNotMatch(a.text, /too strong|planned|3:00 PM/);
+  // 8:10 AM, UV 2.6 and 4+ only from 10:00 AM: within 2 hours, so the shade time is said too.
+  assert.match(walkDue({ ...day, now: at('08:10'), doc: null }).text, /UV 2\.6 now: fine to walk for a bit, but it passes 4 by 10:00 AM/);
+  // 7:30 AM, 4+ more than 2 hours away: no sun note at all.
+  const early = walkDue({ ...day, now: at('07:30'), doc: null, weather: { hours: [hour('07:00', 1.5), ...weather.hours] } });
+  assert.equal(early.kind, 'ask');
+  assert.doesNotMatch(early.text, /UV|shade/);
+  // 10:15 AM, UV 5.4: 4+ is too strong, planned for the first hour under 4.
+  const p = walkDue({ ...day, now: at('10:15'), doc: null });
+  assert.equal(p.kind, 'planned');
+  assert.equal(p.planAt, at('15:00'));
+  assert.match(p.text, /^Walk: UV 5\.4 now, too strong\. I planned it for 3:00 PM, when it's UV 2\.2\./);
+  // Afternoon 3.9 on its way down: a plain ask, the UV not mentioned.
+  const down = { hours: [hour('15:00', 3.9), hour('16:00', 2), hour('17:00', 0.5)] };
+  const d = walkDue({ ...day, now: at('15:10'), doc: null, weather: down });
+  assert.equal(d.kind, 'ask');
+  assert.doesNotMatch(d.text, /UV|shade|too strong/);
+  assert.equal(uvClimb(down, at('15:10')), null);
+  assert.equal(uvClimb(weather, at('10:15')), null, 'already 4+: not a climb, a plan');
+  // His own time at 9:19 AM and the app's own time at 9:19 AM: asked, with the shade time; neither moved.
+  const mine = withAnswer(withAsk(null, D, 'ask', at('08:00')), D, { action: 'plan', at: at('09:19'), said: 'after breakfast' }, at('08:05'));
+  const m = walkDue({ ...day, now: at('09:19'), doc: mine });
+  assert.equal(m.kind, 'plan');
+  assert.match(m.text, /^Walk time: you said "after breakfast"\. Did you start walking\? UV 3\.9 now: fine to walk for a bit, but it passes 4 by 10:00 AM \(UV 5\.4\), so be in the shade by then\./);
+  const coach = withAnswer(withAsk(null, D, 'planned', at('07:00')), D, { action: 'plan', at: at('09:19'), by: 'coach' }, at('07:00'));
+  const c = walkDue({ ...day, now: at('09:19'), doc: coach });
+  assert.equal(c.kind, 'plan');
+  assert.match(c.text, /^Walk time: 9:19 AM, the hour I picked for the weather\. Going, or another time\? UV 3\.9 now: fine to walk for a bit, but it passes 4 by 10:00 AM/);
+  // The app's own time at UV 4.5 with an hour under 4 later: moved, said with "under 4".
+  const coach2 = withAnswer(withAsk(null, D, 'planned', at('07:00')), D, { action: 'plan', at: at('10:15'), by: 'coach' }, at('07:00'));
+  assert.equal(walkDue({ ...day, now: at('10:15'), doc: coach2 }).kind, 'moved');
+  // His own time at UV 5.4: not moved, the fact said with "under 4 from".
+  const mine2 = withAnswer(withAsk(null, D, 'ask', at('08:00')), D, { action: 'plan', at: at('10:15'), said: 'at 10:15' }, at('08:05'));
+  assert.match(walkDue({ ...day, now: at('10:15'), doc: mine2 }).text, /UV 5\.4 now, strong sun: shade and a hat; under 4 from 3:00 PM\./);
+  // A 3.9 hour counts in today's safe windows; nothing 4+ is "under 4" anywhere.
+  assert.equal(safeWindowsText(weather, at('14:30'), at('23:00'), TZ), '3:00 PM-11:00 PM (UV 2.2 at most)');
+  assert.equal(safeWindowsText({ hours: [hour('16:00', 3.9), hour('17:00', 1)] }, at('16:00'), at('18:00'), TZ), '4:00 PM-6:00 PM (UV 3.9 at most)');
+  // UV 4 to 6 all evening: asked with shade, "under 4" never promised.
+  const late = { hours: ['20:00', '21:00', '22:00', '23:00'].map((h) => hour(h, 4.2)) };
+  assert.match(walkDue({ ...day, now: at('20:10'), doc: null, weather: late }).text, / UV 4\.2 now: shade and a hat\. When are you going\?$/);
 });
 
 test('Tue 10/27: UV under 3 = walk on, whatever the heat; rain is told as his risk, never holds or moves a walk', () => {
