@@ -250,10 +250,16 @@ export function restockLine(r, dayText = (d) => d) {
 /**
  * Meal times that don't fit his day (Thu 11/5, his words: "not 4:30pm i go to bed at 6pm new schedule is wake up 4am";
  * then "bare minimum 4pm but even then its too late": his day became 4:00 AM to 6:00 PM while Settings still had a 4:30
- * PM last meal). A meal fits when it starts after he wakes and is eaten (its latest, else its time) more than
+ * PM last meal). A meal fits when it starts at least MEAL_WAKE_GAP_MIN after he wakes and is eaten (its latest, else its time) more than
  * bedGapMin before bed. The times and wake/bed on the same clock (Settings' usual day). ['Last meal 4:30 PM: ...'].
  */
 export const MEAL_BED_GAP_MIN = 120;
+/**
+ * Tue 11/10, his words: "Why would my first meal by the moment i wake up??" (his wake moved from 4:00 AM to 6:30 AM and
+ * his 6:30 AM first meal stayed put, so it sat right at his wake time; his mornings: banana, bathroom, stretching, the
+ * gym, a shower, then food). A meal less than this many minutes after he wakes doesn't fit his day either.
+ */
+export const MEAL_WAKE_GAP_MIN = 60;
 export function mealFitIssues(slots, wakeHm, bedHm) {
   if (!/^\d{2}:\d{2}$/.test(wakeHm || '') || !/^\d{2}:\d{2}$/.test(bedHm || '')) return [];
   const min = (hm) => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
@@ -261,6 +267,7 @@ export function mealFitIssues(slots, wakeHm, bedHm) {
   const bed = rel(bedHm) || 1440;
   return mealTimesOf(slots).flatMap((t) => {
     if (rel(t.time) >= bed) return [`${t.name} ${formatHm(t.time)} is outside the day (${formatHm(wakeHm)} to ${formatHm(bedHm)})`];
+    if (rel(t.time) < MEAL_WAKE_GAP_MIN) return [`${t.name} ${formatHm(t.time)} is ${rel(t.time) ? `only ${rel(t.time)} min after wake-up` : 'right at wake-up'} (${formatHm(wakeHm)}), too soon after waking`];
     const end = rel(t.latest || t.time);
     const left = end < rel(t.time) ? 0 : bed - end;
     if (left <= 0) return [`${t.name} ${formatHm(t.time)} (latest ${formatHm(t.latest)}) runs past bedtime (${formatHm(bedHm)})`];

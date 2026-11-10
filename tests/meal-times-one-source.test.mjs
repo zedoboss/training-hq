@@ -104,9 +104,9 @@ test('his new day, 4:00 AM to 6:00 PM: a 4:30 PM last meal is called out at once
   try {
     const now = at(TUE, '07:59');
     const r = await f.tool('nudges', { wakeHm: '04:00', bedHm: '18:00', movingDay: false }, now);
-    assert.match(r.text, /Meal times from now: First meal 12:30 PM \(latest 2:00 PM\), Last meal 4:30 PM \(latest 5:00 PM\)\./);
-    assert.match(r.text, /They don't fit this day: Last meal 4:30 PM \(latest 5:00 PM\) is only 1 h before bedtime \(6:00 PM\), too close to bed\. Ask him/);
-    assert.doesNotMatch(r.text, /First meal 12:30 PM[^;.]*too close/);
+    assert.match(r.text, /Settings still has First meal 12:30 PM \(latest 2:00 PM\), Last meal 4:30 PM \(latest 5:00 PM\), and they don't fit this day: Last meal 4:30 PM \(latest 5:00 PM\) is only 1 h before bedtime \(6:00 PM\), too close to bed\./);
+    assert.match(r.text, /Ask him in one short question/);
+    assert.doesNotMatch(r.text, /First meal 12:30 PM \(latest 2:00 PM\) is only/);
     // The coach sees it with every message until the times fit.
     assert.match(contextLine({ store: f.store, tz: TZ, now }), /MEAL TIMES DON'T FIT HIS DAY: Last meal 4:30 PM/);
     // His "bare minimum 4pm but even then its too late": 4:00 PM is still called out.
