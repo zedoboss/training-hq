@@ -2,6 +2,7 @@
 // decision 23). Pure helpers: which areas today's session loads, the rule that decides, and how "lighter" changes
 // a target. The rules are applied exactly as written; the app adds no advice of its own.
 import { loadable } from './targets.js';
+import { coversOf, isBlockType } from './rotation.js';
 
 /** The adjustable numbers of the table. Defaults are the draft's own wording (brief section 2). */
 export const DEFAULT_PARAMS = {
@@ -31,9 +32,10 @@ export function exercisesLoading(areas, ids, exerciseNames) {
 /** Working-area soreness keys for a day type (Legs: L and B; Pull: B; Push: none, in the draft). */
 // Tue 11/10: an Upper/Lower day checks the areas of the day types it holds (Upper: Pull's and Push's; Lower: Legs'), so
 // the check-in asks as much as before.
-const HOLDS_TYPES = { 'upper-a': ['pull', 'push'], 'upper-b': ['pull', 'push'], lower: ['legs'] };
-export const workingKeys = (table, dayType) => (table?.workingArea?.[dayType] && !HOLDS_TYPES[dayType] ? table.workingArea[dayType]
-  : HOLDS_TYPES[dayType] ? [...new Set([...(table?.workingArea?.[dayType] || []), ...HOLDS_TYPES[dayType].flatMap((t) => table?.workingArea?.[t] || [])])] : []);
+// Any day type of a split the coach built checks the areas of the days it covers.
+const holdsTypes = (t) => (isBlockType(t) ? coversOf(t) : null);
+export const workingKeys = (table, dayType) => (table?.workingArea?.[dayType] && !holdsTypes(dayType) ? table.workingArea[dayType]
+  : holdsTypes(dayType) ? [...new Set([...(table?.workingArea?.[dayType] || []), ...holdsTypes(dayType).flatMap((t) => table?.workingArea?.[t] || [])])] : []);
 
 /**
  * The rule that decides (first match from the top).

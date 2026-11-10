@@ -2,7 +2,7 @@
 import { ready } from '../lib/data.js';
 import { groupByFolder, newRoutine, duplicateRoutine, moveFolder, newId } from '../lib/routines.js';
 import { weekColumn } from '../lib/programme.js';
-import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, usualStart, REST_TEXT, LABEL, useBlock, activeBlock, blockLine } from '../lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, usualStart, REST_TEXT, LABEL, useBlock, activeBlock, blockLine, coversOf } from '../lib/rotation.js';
 import { isConfirmed, normalReady, modeOf } from '../lib/progression.js';
 import { buildHistory } from '../lib/history.js';
 import { ACTION_TEXT } from '../lib/readiness.js';
@@ -106,7 +106,7 @@ export function render(view) {
           ${nextRoutine ? `<a class="btn-ghost center" href="#/session/start/${esc(nextRoutine.id)}/template" title="Start from the ${esc(nextRoutine.title)} template instead of a copy of your last one">Template</a>` : ''}
           <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
         </div>
-        ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">${esc(neckTodayText(neck.place, neck.where, t.kind === 'done' ? t.dayType : next))} (your plan) ›</a>` : ''}
+        ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">${esc(neckTodayText(neck.place, neck.where, t.kind === 'done' ? t.dayType : next, t.kind))} (your plan) ›</a>` : ''}
         ${t.kind === 'train' ? '<button class="link-btn" id="rest-today" type="button">Rest today instead</button>' : ''}
         ${undoable ? '<button class="link-btn" id="undo-rest" type="button">Undo rest day</button>' : ''}
       </section>
@@ -124,7 +124,7 @@ export function render(view) {
         </div>
         <ul class="routine-list">
           ${rs.map((r) => `<li class="routine-row">
-            <span class="dot" style="background:${DOT[r.dayType] || 'var(--border-strong)'}"></span>
+            <span class="dot" style="background:${DOT[r.dayType] || DOT[coversOf(r.dayType)[0]] || 'var(--border-strong)'}"></span>
             <a class="routine-main" href="#/routine/${esc(r.id)}"><b>${esc(r.title)}</b>
               <span class="hint">${r.exercises.length} exercises${lastByRoutine.has(r.dayType) && r.folderId === 'comeback' ? ` · last ${esc(day(lastByRoutine.get(r.dayType)))}` : ''}</span></a>
             ${r.folderId === 'comeback' && meta?.firstSessions?.[r.dayType] ? `<span class="hud c-cyan">WK ${weekColumn(meta.firstSessions[r.dayType], today)}</span>` : r.dayType === 'neck' ? `<button class="hud link-hud ${neck?.planned ? 'c-cyan' : 'c-amber'}" id="neck-place" type="button">${neck?.planned ? esc(placeLabel(neck.place).toUpperCase()) : 'NOT SCHEDULED'}</button>` : '<span></span>'}

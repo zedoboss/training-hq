@@ -5,6 +5,7 @@
 // the morning after?"). The new stage replaces the hold before it. He starts the path himself. The stages and loads
 // are his data (the tendon seed); nothing here is advice of the app's own.
 import { painOk, holdBase, holdName, isHoldSet } from './holds.js';
+import { coversOf } from './rotation.js';
 
 /** The path on one of an area's holds, or null. */
 export const pathOf = (hold) => (hold?.path?.stages?.length > 1 ? hold.path : null);
@@ -24,7 +25,7 @@ export function pathState({ hold, area, sessions = [], sets = [], dayOf }) {
   if (!started) return { started, at, stage, next, quietDays: [], need, ready: false };
   const done = sessions.filter((s) => s?.status === 'done' && s.startedAt && dayOf(s.startedAt) >= path.since);
   // Tue 11/10: an upper day of his Upper/Lower block has the Push lifts, so it counts as a Push day.
-  const pushDays = new Set(done.filter((s) => s.kind !== 'holds' && (s.dayType === 'push' || /^upper-/.test(s.dayType || ''))).map((s) => dayOf(s.startedAt)));
+  const pushDays = new Set(done.filter((s) => s.kind !== 'holds' && (s.dayType === 'push' || /^upper-/.test(s.dayType || '') || coversOf(s.dayType).includes('push'))).map((s) => dayOf(s.startedAt)));
   const name = holdBase(stage.exercise);
   const ok = new Map(); // date -> every set of the stage's hold within his limit
   for (const s of done) {

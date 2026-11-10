@@ -37,7 +37,7 @@ const clip = (t, n = 200) => String(t || '').trim().slice(0, n);
 // ---- routines (the routine screen) ---------------------------------------------------------------------------------
 
 /** His routine by name; a day type ("pull") is the one Train starts for it (Normal once he switched). */
-function findRoutine(s, q) {
+export function findRoutine(s, q) {
   const routines = s.list('routines');
   const t = String(q || '').trim().toLowerCase();
   if (!t) return { error: `Which routine: ${sayList(routines.map((r) => r.title))}?` };
@@ -46,6 +46,9 @@ function findRoutine(s, q) {
     const r = routines.filter((x) => x.dayType === t && x.folderId === (mode === 'normal' ? 'normal' : 'comeback')).sort((x, y) => (x.order ?? 0) - (y.order ?? 0))[0] || routines.find((x) => x.dayType === t);
     if (r) return { r };
   }
+  // A day type of his split ("upper-a") is the routine Train starts for it.
+  const typed = routines.filter((x) => x.dayType === t).sort((x, y) => (x.order ?? 0) - (y.order ?? 0))[0];
+  if (typed) return { r: typed };
   const { item, ambiguous } = findByName(routines, q, (r) => r.title, (r) => [r.id]);
   if (!item) return { error: ambiguous.length ? `Which routine: ${sayList(ambiguous)}?` : `No routine called "${q}". His routines: ${sayList(routines.map((r) => r.title))}.` };
   return { r: item };
@@ -87,7 +90,7 @@ function placeIn(list, a, { need = false } = {}) {
 const placeText = (list, i) => (i === 0 ? 'first' : i === list.length - 1 ? `last, after ${list[i - 1].name}` : `number ${i + 1}, after ${list[i - 1].name}`);
 
 /** The routine's sets changed as he said: count, reps, kg, seconds, set type; one set (`set`, 1 = first working set) or all. */
-function patchSets(e, a, type) {
+export function patchSets(e, a, type) {
   const warm = (e.sets || []).filter((x) => x.type === 'warmup');
   let work = (e.sets || []).filter((x) => x.type !== 'warmup');
   if (!work.length) work = defaultSets(type);
@@ -125,7 +128,7 @@ function lastCopied(s, r) {
  * a skip reason stays with that workout), then the edit goes on top, stamped editedAt: his next Start is the routine
  * as changed; the workout after that copies his last one again.
  */
-function baseOf(s, r) {
+export function baseOf(s, r) {
   const last = lastCopied(s, r);
   if (!last) return r;
   const { copiedFrom, editedSince, ...c } = routineFromLast(r, last, s.list('sets').filter((x) => x.sessionId === last.id));
@@ -133,7 +136,7 @@ function baseOf(s, r) {
 }
 
 /** Said when the routine is also what his next Start copies. */
-function copyNote(s, r) {
+export function copyNote(s, r) {
   const last = lastCopied(s, r);
   return last ? ` His next ${r.title} starts from the routine as changed now, with the rest of his last ${r.title} (${dayText(s.date(last.startedAt), s.today)}) as it was; after that, Start copies his last ${r.title} again.` : '';
 }
@@ -399,7 +402,7 @@ function progressionAnswer(a, ctx) {
 
 // ---- the rotation and its week columns ---------------------------------------------------------------------------
 
-function rotationSet(a, ctx) {
+export function rotationSet(a, ctx) {
   const s = snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() });
   const rot = s.rotation();
   const days = s.days();
@@ -413,7 +416,7 @@ function rotationSet(a, ctx) {
     if (a.block === 'keep') {
       const to = a.date && a.date > s.today ? a.date : addDays(b.to > s.today ? b.to : s.today, 14);
       put(s, 'schedule', 'block', { ...b, to, answer: 'keep', answeredOn: s.today, ...(a.said ? { said: String(a.said).slice(0, 200) } : {}) });
-      return wrote(`Upper/Lower runs on to ${dayText(to, s.today)}. Pull, Push and Legs stay as routines and come back after it.`, 'block kept');
+      return wrote(`${b.name || 'Upper/Lower'} runs on to ${dayText(to, s.today)}. Pull, Push and Legs stay as routines and come back after it.`, 'block kept');
     }
     if (a.block === 'end') {
       const trainedToday = s.last()?.date === s.today && isBlockType(s.last()?.dayType);
@@ -422,7 +425,7 @@ function rotationSet(a, ctx) {
       put(s, 'schedule', 'block', ended);
       useBlock(ended);
       const after = rotationDay({ last: s.last(), today: s.today, days });
-      return wrote(`Upper/Lower is over. Next: ${LABEL[after.next.dayType]}, ${dayText(after.next.date, s.today)}; the rotation is Pull, Push, Legs again (3 on, 1 off).`, 'block ended');
+      return wrote(`${b.name || 'Upper/Lower'} is over. Next: ${LABEL[after.next.dayType]}, ${dayText(after.next.date, s.today)}; the rotation is Pull, Push, Legs again (3 on, 1 off).`, 'block ended');
     }
     return refuse('block: keep or end.');
   }
@@ -431,7 +434,7 @@ function rotationSet(a, ctx) {
     return { text: `Last: ${s.last() ? `${LABEL[s.last().dayType]}, ${dayText(s.last().date, s.today)}` : 'none'}. Next: ${nextText(rot)}${c ? ` (his choice of ${dayText(c.date, s.today)})` : ''}. Week columns today: ${['pull', 'push', 'legs'].map((t) => `${LABEL[t]} ${wk(t, s.today) ?? '-'}`).join(', ')}.`, summary: 'rotation' };
   }
   if (a.action === 'next') {
-    if (!inRotation(a.dayType)) return refuse('dayType: pull, push, legs (or upper-a, upper-b, lower in his Upper/Lower block).');
+    if (!inRotation(a.dayType)) return refuse(`dayType: pull, push, legs${s.block()?.order ? `, or a day type of his split: ${[...new Set(s.block().order.filter((t) => t !== 'rest'))].join(', ')}` : ''}.`);
     if (s.active()) return refuse('A workout is in progress; the next day type is set once it is finished.');
     const date = a.date || rot.next.date;
     if (date < s.today) return refuse('That day has passed.');
@@ -769,7 +772,7 @@ export const PLAN_TOOLS = [
   write('progression_answer', 'Progression answer', `Week 5+ numbers and the switch to the Normal programme, exactly as the progression screen's buttons (and Train's "Not yet") record them. He decides; you only record his answer, never decide or nudge. show = the app's proposal for dayType's week (default this week, 5 or later), whether it is confirmed, and whether the main lifts are ready for Normal (read only). confirm_week = his OK for that week, with any numbers he changed (kg: [{exercise, kg}], TOTAL kg; added kg for weighted pull-ups); decline_week = he doesn't confirm: nothing is saved and targets stay on the last confirmed numbers; normal = he switches that day type to its Normal programme; comeback = back to Getting Back Into; not_yet = he declines the suggested switch for now (asked again after his next session of that day type). The 30% cap still applies on top of every number.`,
     obj({ action: { type: 'string', enum: ['show', 'confirm_week', 'decline_week', 'normal', 'comeback', 'not_yet'] }, dayType: DAY, week: { type: 'integer', minimum: 5, maximum: 52 }, kg: { type: 'array', maxItems: 20, items: obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 } }, ['exercise', 'kg']) }, said: SAID }, ['action', 'dayType']), progressionAnswer),
   write('rotation_set', 'Rotation', `The rotation (Pull, Push, Legs, 3 on and 1 off). ${ONLY_HIS} show = last session, next session and the week columns (read only). next = the day type of his next session ("Legs next, not Pull"), from date (default the next training day); it holds until he does a session, then the rotation carries on from that day type as always. clear = take that choice back. week = put a day type on another week column (week), moving its week 1 by whole weeks; targets at Start use that column, the 30% cap still on top; never before the comeback. block = his Upper/Lower block (Upper A, Lower, rest, Upper B, Lower, rest, while it runs): keep = 2 more weeks (or to date), end = Pull, Push, Legs from the next day; only on his answer.`,
-    obj({ action: { type: 'string', enum: ['show', 'next', 'clear', 'week', 'block'] }, dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'upper-a', 'upper-b', 'lower'] }, block: { type: 'string', enum: ['keep', 'end'] }, date: ISO, week: { type: 'integer', minimum: 1, maximum: 52 }, said: SAID }, ['action']), rotationSet),
+    obj({ action: { type: 'string', enum: ['show', 'next', 'clear', 'week', 'block'] }, dayType: { type: 'string', description: 'pull, push, legs, or a day type id of his split (upper-a, lower...)' }, block: { type: 'string', enum: ['keep', 'end'] }, date: ISO, week: { type: 'integer', minimum: 1, maximum: 52 }, said: SAID }, ['action']), rotationSet),
   write('plan_day', 'Rest day on a date', `A rest day he plans on a coming date, or marks on a past day, or takes back (undo_rest). ${ONLY_HIS} His rule: a rest day skips that day and carries on with the next day type, no make-up; a session time set on the next training day moves with the session. Today goes through schedule's rest_today / undo_rest. A past day he trained on can't be a rest day.`,
     obj({ action: { type: 'string', enum: ['rest', 'undo_rest'] }, date: ISO, said: SAID }, ['action', 'date']), planDay),
   write('tendon_hold', 'Tendon holds', `His tendon holds, as the holds screen does. ${ONLY_HIS} Never suggest a hold, a load or a dose. log_round = a round he did outside a session (at home, say), the way the hold timer saves it: area, hold (its name; one not set up for the area is logged under his words), sets, seconds, kg (TOTAL; default the hold's load), time (HH:MM; default just now), date (default today), pain 0-10 and shaking if he says. His rounds of an area on a date (default today; time HH:MM picks the round started nearest it, default the newest): rounds = list them, each open or done with its holds; reopen_round = a round marked done is open again ("untick it", "it's not done"): it counts once all its holds are saved and the hold timer carries on at its next hold; delete_round = the round and its holds gone (his explicit words in said); remove_set = a hold logged by mistake (set_no, arm for an arm-by-arm hold; default the last; said), a done round that loses one opens again; fix_set = correct a logged hold's seconds, pain, kg or shaking. set_hold = change a hold's kg, sets, seconds (10-300), where (gym/home) or timing. use_hold = the area uses another hold (exercise) in place of one; add_hold = one more hold for an area; remove_hold = take one off (his explicit words in said). add_area = a new tendon area (label; optionally its first hold), phase not set (tendon_phase on his answer); remove_area = only on his explicit words (said). His tendon pain limit and phase rules are never changed here.`,

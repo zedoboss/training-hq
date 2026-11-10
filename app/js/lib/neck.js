@@ -1,6 +1,6 @@
 // Neck (brief section 6, decision 14): a routine now, a place in the rotation later. Until he picks one, he is asked
 // about once a week. His answers live in the synced doc schedule/neck: {planned, place, on, lastAskedOn, answers}.
-import { addDays } from './rotation.js';
+import { addDays, isBlockType, coversOf, neckOf, labelOf } from './rotation.js';
 
 export const NECK_PLACES = [
   ['after-pull', 'After Pull'],
@@ -47,19 +47,22 @@ export function withHomeNotes(session, sets, neck) {
 /** Neck is due today by his plan: after that day's session, or on a rest day. */
 export function neckToday(neck, dayKind, dayType) {
   if (!neck?.planned) return false;
+  // A split's day type the coach planned neck onto (neck: true) has it; neck: false never.
+  if (dayKind !== 'rest' && neckOf(dayType) != null) return neckOf(dayType);
   if (neck.place === 'rest-day') return dayKind === 'rest';
   // Tue 11/10: in an Upper/Lower block, neck after Push or Pull goes after both upper days, after Legs after Lower.
-  const same = BLOCK_PLACE[dayType];
+  const same = blockPlace(dayType);
   return dayKind !== 'rest' && (neck.place === `after-${dayType}` || (!!same && same.includes(neck.place)));
 }
-const BLOCK_LABEL = { 'upper-a': 'Upper A', 'upper-b': 'Upper B', lower: 'Lower' };
-const BLOCK_PLACE = { 'upper-a': ['after-push', 'after-pull'], 'upper-b': ['after-push', 'after-pull'], lower: ['after-legs'] };
+// A split's day type goes by the days it covers (an upper day = Push and Pull): neck after Push or Pull goes after it.
+const blockPlace = (t) => (isBlockType(t) ? coversOf(t).map((c) => `after-${c}`) : null);
 
 /** "Neck after Push today" / "Neck today (rest day)": the Train card and finish screen line ("at home" when so). */
-export function neckTodayText(place, where = null, dayType = null) {
+export function neckTodayText(place, where = null, dayType = null, dayKind = null) {
   const home = where === 'home' ? ', at home' : where === 'gym' ? ', at the gym' : '';
+  if (dayKind && dayKind !== 'rest' && neckOf(dayType)) return `Neck after ${labelOf(dayType)} today${home}`;
   if (place === 'rest-day') return `Neck today (rest day${home})`;
-  if (BLOCK_PLACE[dayType]?.includes(place)) return `Neck after ${BLOCK_LABEL[dayType]} today${home}`;
+  if (place !== 'rest-day' && isBlockType(dayType) && (neckOf(dayType) || blockPlace(dayType).includes(place))) return `Neck after ${labelOf(dayType)} today${home}`;
   const label = placeLabel(place);
   return label ? `Neck ${label.replace(/^After /, 'after ')} today${home}` : `Neck today${home}`;
 }

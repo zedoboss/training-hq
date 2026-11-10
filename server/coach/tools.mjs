@@ -12,9 +12,12 @@ import { UNDO_TOOLS } from './tools-undo.mjs';
 import { TRAINING_TOOLS } from './tools-training.mjs';
 import { EXTRA_TOOLS } from './tools-extra.mjs';
 import { STOCK_TOOLS } from './tools-stock.mjs';
+import { BUILD_TOOLS } from './tools-build.mjs';
 
 // APP_TOOLS (Tue 10/20): the coach works the app itself: screens, the workout in progress, settings, the phone.
 // Thu 11/5 (his words: "What else cant u do? Figure it out and let the mac give U the tools"): the workout, plan, fuel
 // and body tools cover what his screens could do that the coach could not.
-export const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...APP_TOOLS, ...WORKOUT_TOOLS, ...PLAN_TOOLS, ...FUEL_TOOLS, ...BODY_TOOLS, ...TRAINING_TOOLS, ...EXTRA_TOOLS, ...STOCK_TOOLS, ...UNDO_TOOLS];
+// Tue 11/10 (his words: "you should be able to build the routines... Do not always rely on the Mac"): BUILD_TOOLS make
+// routines and splits.
+export const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS, ...APP_TOOLS, ...WORKOUT_TOOLS, ...PLAN_TOOLS, ...BUILD_TOOLS, ...FUEL_TOOLS, ...BODY_TOOLS, ...TRAINING_TOOLS, ...EXTRA_TOOLS, ...STOCK_TOOLS, ...UNDO_TOOLS];
 export { contextLine };

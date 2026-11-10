@@ -65,7 +65,8 @@ export function projectRotation({ last, days = {}, from, n }) {
     out.push({ date, kind: rot.today.kind, dayType: rot.today.dayType });
     // A day that trains carries the streak on (three in a row -> the next day rests).
     // In an Upper/Lower block the uppers alternate (lastUpper).
-    if (rot.today.kind === 'train') cur = { dayType: rot.today.dayType, date, streak: cur && daysBetween(cur.date, date) === 1 ? (cur.streak || 1) + 1 : 1, lastUpper: /^upper-/.test(rot.today.dayType) ? rot.today.dayType : cur?.lastUpper ?? null };
+    // In a split, where the day sits in its cycle comes from the sessions before it (recent, newest first).
+    if (rot.today.kind === 'train') cur = { dayType: rot.today.dayType, date, streak: cur && daysBetween(cur.date, date) === 1 ? (cur.streak || 1) + 1 : 1, lastUpper: /^upper-/.test(rot.today.dayType) ? rot.today.dayType : cur?.lastUpper ?? null, recent: [{ dayType: rot.today.dayType, date }, ...(cur ? cur.recent || [{ dayType: cur.dayType, date: cur.date }] : [])].slice(0, 12) };
   }
   return out;
 }

@@ -3,7 +3,7 @@
 // asked for, computed by the app's own rules (the same modules the phone uses), so the coach repeats them instead of
 // working anything out.
 import { snapshot, dayText, whenText, timeText, loadText, repsText, mmss, plural, findByName, k, formatHm, oneArm, armOf, roundsText, ONE_ARM_TEXT } from './shared.mjs';
-import { LABEL, addDays, sessionTomorrow, afterRestDay } from '../../app/js/lib/rotation.js';
+import { LABEL, addDays, sessionTomorrow, afterRestDay, normBlock, cycleText } from '../../app/js/lib/rotation.js';
 import { weekColumn } from '../../app/js/lib/programme.js';
 import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js';
 import { targetFor, repNotes } from '../../app/js/lib/targets.js';
@@ -173,11 +173,22 @@ function comingUp(s, n = 8) {
  * Pull, Push and Legs stay. Empty when there is none or it is over.
  */
 export function blockText(s) {
-  const b = s.block?.() ?? s.one('schedule', 'block');
-  if (!b?.from || !b?.to || s.today > b.to) return '';
+  const raw = s.block?.() ?? s.one('schedule', 'block');
+  const b = normBlock(raw);
+  if (!b || (b.to && s.today > b.to)) return '';
+  if (raw.v >= 2) return splitText(s, b);
   const sets = b.workingSets ? ` ${b.workingSets} working set${b.workingSets > 1 ? 's' : ''} per exercise (warm-ups and tendon holds as usual; the routines and each workout's sets are already cut to that).` : '';
   const after = b.answer === 'keep' ? 'He chose to keep Upper/Lower; it runs on until the end date.' : `After it Pull, Push and Legs come back, from ${LABEL[b.then] || 'Pull'}, unless he keeps Upper/Lower: on ${dayText(b.to, s.today)} ask him (open question "block-end"), then rotation_set block keep (2 more weeks) or end.`;
   return `Training block: ${b.name || 'Upper/Lower'} from ${dayText(b.from, s.today)} to ${dayText(b.to, s.today)}: Upper A, Lower, rest, Upper B, Lower, rest (the uppers alternate; Lower = his Legs).${sets} Neck goes after both upper days; holds timed after Push or Pull come after both upper days, after Legs after Lower. His Pull, Push and Legs routines stay as they are. ${after}`;
+}
+
+/** A split the coach built (split_plan, v2): its cycle, day types and what each covers, its end. */
+function splitText(s, b) {
+  const own = b.order.filter((t, i, xs) => t !== 'rest' && xs.indexOf(t) === i);
+  const types = own.map((t) => `${LABEL[t] || b.types[t]?.label || t} (${t}; covers ${(b.types[t]?.covers || [t]).map((c) => LABEL[c]).join(' + ') || 'nothing'}${b.types[t]?.neck === true ? '; neck after it' : b.types[t]?.neck === false ? '; no neck' : ''})`).join(', ');
+  const sets = b.workingSets ? ` ${b.workingSets} working set${b.workingSets > 1 ? 's' : ''} per exercise${b.workingSetsUntil ? ` until ${dayText(b.workingSetsUntil, s.today)}` : ''} (warm-ups and holds as usual).` : '';
+  const end = !b.to ? 'It runs until he ends it (split_plan end).' : b.answer === 'keep' ? `He chose to keep it; it runs on until ${dayText(b.to, s.today)}.` : b.atEnd === 'ask' ? `On ${dayText(b.to, s.today)} ask him whether to keep it (open question "block-end"), then split_plan extend or end; if he doesn't answer, Pull, Push and Legs come back from ${LABEL[b.then] || 'Pull'}.` : `After ${dayText(b.to, s.today)} Pull, Push and Legs come back by themselves, from ${LABEL[b.then] || 'Pull'}.`;
+  return `Training split: ${b.name || 'Split'} from ${dayText(b.from, s.today)}${b.to ? ` to ${dayText(b.to, s.today)}` : ''}: ${cycleText(b)}, repeating. Day types: ${types}. Holds and neck follow what a day covers. His Pull, Push and Legs routines stay.${sets} ${end}`;
 }
 
 function rotationLines(s) {
@@ -190,7 +201,7 @@ function rotationLines(s) {
   if (bl) out.push(bl);
   if (t.kind === 'train') out.push(`Today: ${LABEL[t.dayType]}${wkText}, not done yet.`);
   else if (t.kind === 'done') out.push(`Today: ${LABEL[t.dayType]} done. Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)}${wkText}.`);
-  else out.push(`Today: rest (${t.reason === 'rotation' ? (t.block || s.last()?.dayType === 'lower' ? 'the rest day after Lower' : 'the rest day after three training days') : t.reason === 'moved' ? 'session moved to tomorrow at the check-in' : t.reason === 'rest-holds' ? 'rest and tendon holds, from the check-in' : 'a rest day he added'}). Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)}${wkText}.`);
+  else out.push(`Today: rest (${t.reason === 'rotation' ? (t.block ? `a rest day in his ${s.block?.()?.name || 'Upper/Lower'} split` : s.last()?.dayType === 'lower' ? 'the rest day after Lower' : 'the rest day after three training days') : t.reason === 'moved' ? 'session moved to tomorrow at the check-in' : t.reason === 'rest-holds' ? 'rest and tendon holds, from the check-in' : 'a rest day he added'}). Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)}${wkText}.`);
   const hm = days[nxt.date]?.sessionTime;
   const pre = s.settings().notify.readinessMin;
   const lead = hm ? checkInLead(days[nxt.date], nxt.date, s.tz, pre) : null;

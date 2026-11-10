@@ -1,6 +1,7 @@
 // Tendon holds: what is due per area, from each area's phase (the owner's tendon note) and the rounds logged.
 // A round is 3 holds of ~30 s. Rounds come from hold sessions (kind "holds") and from hold sets inside workouts.
 import { isoDate } from './time.js';
+import { coversOf, labelOf, isBlockType } from './rotation.js';
 import { activeBridge } from './history.js';
 import { slug } from '../data/exercise-library.js';
 import { holdBase } from './hold-names.js';
@@ -132,7 +133,11 @@ export function areaStatus(area, rounds, today) {
 // Tue 11/10: an upper day holds Push and Pull lifts, so the holds timed after either come after it (bench, cable lateral
 // raise, cupping); Lower is Legs (the leg extension hold, cupping).
 const AFTER_WORDS = { pull: 'Pull', push: 'Push', legs: 'Legs', 'upper-a': 'Push|Pull|Upper A|Upper(?! B)', 'upper-b': 'Push|Pull|Upper B|Upper(?! A)', lower: 'Legs|Lower' };
-const afterRe = (dayType) => (AFTER_WORDS[dayType] ? new RegExp(`\\bafter (?:${AFTER_WORDS[dayType]})\\b`, 'i') : null);
+// Tue 11/10: a day type the coach built for a split takes the holds of the days it covers, and holds timed after it by
+// its own name ("after Push Day").
+const esc = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const afterWords = (t) => AFTER_WORDS[t] || (isBlockType(t) ? [...coversOf(t).map((c) => AFTER_WORDS[c]), esc(labelOf(t))].join('|') : null);
+const afterRe = (dayType) => { const w = afterWords(dayType); return w ? new RegExp(`\\bafter (?:${w})\\b`, 'i') : null; };
 
 /** Holds due after this kind of workout, from the tendon data: holds whose timing says "after Push" and so on. */
 export function holdsAfter(areas, dayType) {
