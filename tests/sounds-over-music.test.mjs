@@ -86,12 +86,24 @@ test('an open microphone keeps its own mode (a switch while it opens leaves it d
   sounds.play('tick', 80);
   sounds.play('beeps', 80, { alarm: true });
   assert.equal(session.type, 'play-and-record');
-  sounds.micOpening(-1);
   sounds.micActive(true);
   sounds.play('tick', 80);
   assert.equal(session.type, 'play-and-record');
+  sounds.micOpening(-1);
   sounds.micActive(false);
   sounds.play('tick', 80);
+  assert.equal(session.type, 'ambient');
+});
+
+test("the microphone closing (dictation done, listening off) gives the audio back to his music at once, no sound needed", () => {
+  session.type = 'play-and-record';
+  sounds.micOpening(1);
+  assert.equal(session.type, 'play-and-record');
+  sounds.micOpening(-1);
+  assert.equal(session.type, 'ambient');
+  session.type = 'play-and-record';
+  sounds.micActive(true);
+  sounds.micActive(false);
   assert.equal(session.type, 'ambient');
 });
 

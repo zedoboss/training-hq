@@ -45,13 +45,14 @@ function ready() {
 export function unlockAudio() { ready(); unlockElement(); }
 
 /** The coach's microphone is open (its audio mode already ignores the silent switch; the mix mode must not override it). */
-export function micActive(on) { mic = !!on; }
+export function micActive(on) { mic = !!on; if (!mic) overMusic(); }
 
 // Microphones opening or open (listening, dictation, calibration). Tue 10/20, his screen recording: every tap gave the
 // orange mic dot, then "No sound from the microphone": an audio mode switch landing in the seconds the microphone
 // takes to start left it recording silence. While any is opening or open, nothing here touches the audio mode.
 let mics = 0;
-export function micOpening(delta) { mics = Math.max(0, mics + delta); }
+// Once the last one closes, back to mixing at once: the microphone's 'play-and-record' left on holds his music off.
+export function micOpening(delta) { mics = Math.max(0, mics + delta); if (!mics && delta < 0) overMusic(); }
 
 // The sauna's overdue alarm (lib/alarm.js) needs 'playback' (heard through the silent switch, a hard stop): while it is
 // armed nothing here changes the mode.

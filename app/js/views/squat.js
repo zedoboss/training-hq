@@ -176,7 +176,8 @@ const audio = {
     const ctx = this.ctx;
     this.ctx = null; this.nextDing = null;
     if (ctx) { ctx.onstatechange = null; ctx.close().catch(() => {}); }
-    try { if (navigator.audioSession) navigator.audioSession.type = 'auto'; } catch { /* not supported */ }
+    // Back to the mixing mode, not 'auto': in 'auto' the app's next sound takes the audio from his music (Tue 11/10).
+    try { if (navigator.audioSession) navigator.audioSession.type = MIX_MODE; } catch { /* not supported */ }
   },
   /** For the test buttons on the start screen: play, then release the audio channel again. */
   releaseSoonIfIdle() {
