@@ -29,7 +29,7 @@ test('walkingNow: walking now or about to, in his words; a later time, a maybe o
   }
   for (const t of ["I'll walk at 5", 'gonna walk later', 'Im not gonna walk today', 'Im gonna go walk in an hour', 'Im gonna walk around the mall at 5',
     "I'm going to walk after lunch", 'Im gonna walk at 6pm', 'I might walk after dinner', 'Should I walk now?', 'It is raining, not walking',
-    'walked 30 min', 'back from the walk', 'going to the gym', `I don't know what I'm doing. ${CUT} gym.`, 'Not yet']) {
+    'walked 30 min', 'back from the walk', "I was gonna walk but it's raining", 'I was going to walk', 'going to the gym', `I don't know what I'm doing. ${CUT} gym.`, 'Not yet']) {
     assert.equal(walkingNow(t), null, t);
   }
 });
