@@ -298,7 +298,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     // came on top of them, and after the last meal's time).
     const title = String(r.title || '').replace(/[.:]?\s*$/, '');
     out.push({ key: `${a[0]}:${r.tag || r.id}`, priority: a[1], gapMin: a[3] ? ONCE_MIN : a[2], url: r.url || '#/', calm: CALM_KINDS.has(r.kind),
-      text: r.againText || [/[?!]$/.test(title) ? title : `${title}.`, r.body].filter(Boolean).join(' ') });
+      text: r.againText || [/[?!]$/.test(title) ? title : `${title}.`, r.lateBody && now >= r.sessionAt ? r.lateBody : r.body].filter(Boolean).join(' ') });
   }
 
   // Food behind the day's pace (wake up to 2 hours before bed).

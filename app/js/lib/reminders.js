@@ -141,6 +141,9 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
         id: `readiness:${date}`, kind: 'readiness', at: at - lead * 60000, url: '#/checkin', tag: `readiness-${date}`, fixed: true,
         title: 'Sore, or good to go?',
         body: `${LABEL[dayType]} at ${formatHm(hm)}${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}, then energy` : 'Energy'}. Zero to three.`,
+        // Once the session time has passed (Tue 11/10: at 12:50 PM "Push at 12:30 PM"), it says "now", never a passed time.
+        sessionAt: at,
+        lateBody: `${LABEL[dayType]} now${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}, then energy` : 'Energy'}. Zero to three.`,
         due: !doc.readiness && !started,
       });
     }

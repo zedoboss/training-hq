@@ -861,6 +861,50 @@ export function coveredMealAsks(items, all, { sent = {}, now, reminders = [] }) 
   return new Map(items.filter((i) => MEAL_ASK.test(i.id || '') && near.length).map((i) => [i.id, near[0].id]));
 }
 
+// Tue 11/10, his words at 11:20 AM: "I will go at 12:30 only remind me 10m before". The coach set his reminder for
+// 12:20 PM ("Upper A at 12:30 PM, 10 minutes. Heading out?") and held training till then; at 12:20 PM the check-in held
+// till then went out with it, at 12:30 PM the session's own reminder ("Check-in still open"), and at 12:50 PM a check-in
+// nudge named 12:30 PM. His own reminder about a session (for up to OWN_SESSION_LEAD_MIN before it, in words about the
+// session) is the one reminder before it: the app's check-in and session reminders for it count as sent, not sent; the
+// check-in nudges wait till he answers after his reminder went out (he says he's leaving) or ticks it; the session
+// nudges ("Upper A at 12:30 PM", "was due at") wait till OWN_SESSION_LATE_MIN past the session time.
+const ABOUT_SESSION = /\b(session|workout|training|train|gym|heading out|head out|leave|leaving|upper|lower|push|pull|legs|full body)\b/i;
+export const OWN_SESSION_LEAD_MIN = 120;
+export const OWN_SESSION_LATE_MIN = 60;
+
+/**
+ * His own reminder before the session on `date`, among planned items (plan, remindersFor): {id, at, sentAt, sessionAt},
+ * sentAt when it went out (null: not yet), or null when he has none.
+ */
+export function ownSessionReminder(items, date, sent = {}) {
+  const s = items.find((i) => i.id === `session:${date}`) || items.find((i) => i.id === `readiness:${date}`);
+  const sessionAt = s?.kind === 'session' ? s.at : s?.sessionAt;
+  if (!Number.isFinite(sessionAt)) return null;
+  const r = items.filter((i) => i.kind === 'coach' && !i.trigger && i.due !== false && i.at <= sessionAt
+    && i.at >= sessionAt - OWN_SESSION_LEAD_MIN * 60000 && ABOUT_SESSION.test(i.body || '')).sort((a, b) => a.at - b.at)[0];
+  return r ? { id: r.id, at: r.at, sentAt: sent[r.id] ?? r.sentAt ?? null, sessionAt } : null;
+}
+
+/** The ids among `items` (due now) that are the app's check-in or session reminder, left to his own reminder: id -> his. */
+export function coveredSessionAsks(items, all, sent = {}) {
+  const out = new Map();
+  for (const i of items) {
+    const m = /^(readiness|session):(\d{4}-\d\d-\d\d)$/.exec(i.id || '');
+    const own = m && ownSessionReminder(all, m[2], sent);
+    if (own) out.set(i.id, own.id);
+  }
+  return out;
+}
+
+/** Does this nudge wait for his own reminder before the session (ownSessionReminder)? lastUserAt: his latest message. */
+export function waitsForOwnSession(key, own, { now, lastUserAt = 0 }) {
+  if (!own) return false;
+  const k = String(key || '');
+  if (k === 'session') return now < own.sessionAt + OWN_SESSION_LATE_MIN * 60000;
+  if (k.startsWith('checkin:readiness-')) return own.sentAt == null || (lastUserAt || 0) < own.sentAt;
+  return false;
+}
+
 /**
  * Where he is (A3: reminders follow the phone's current zone): the zone a phone reported last (doc here/<device>,
  * written by the app when its zone changes), else any device's latest, else the Mac's own.
@@ -1315,7 +1359,9 @@ export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const awake = awakeIn(inp.n, now, tz) && !morningGate(store, now, tz).hold;
   if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy, pausedUntil: inp.n.nudgePausedUntil })) return null;
   const holds = holdsOf(store);
-  const pick = pickNudge(nudgeCandidates({ ...inp.args, sent: state.byKey }).filter((c) => !heldOff(c.key, holds, now)), state.byKey, now);
+  // Tue 11/10: before a session he set his own reminder for, its check-in waits for his answer (ownSessionReminder).
+  const own = ownSessionReminder(inp.args.reminders, inp.date, {});
+  const pick = pickNudge(nudgeCandidates({ ...inp.args, sent: state.byKey }).filter((c) => !heldOff(c.key, holds, now) && !waitsForOwnSession(c.key, own, { now, lastUserAt: inp.lastUserAt })), state.byKey, now);
   if (!pick) return null;
   const v = coachVoice(pick.text, { ...voiceOpts(store), calm: pick.calm });
   const r = await push.notify({ title: v.title, body: v.body, url: pick.url, tag: `nudge-${pick.key.split(':')[0]}` });
@@ -1387,6 +1433,9 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       // A meal ask his own reminder about the meal says at the same time: counted, not sent.
       const covered = coveredMealAsks(due, all, { sent, now: t, reminders: recordsOf(store, 'coach-reminders') });
       for (const [id, by] of covered) { sent[id] = t; log(`notify ${id}: not sent (his reminder ${by} says it)`); }
+      // The check-in and session reminder before a session he set his own reminder for: his is the one (Tue 11/10).
+      const ownSession = coveredSessionAsks(due, all, sent);
+      for (const [id, by] of ownSession) { sent[id] = t; log(`notify ${id}: not sent (his reminder ${by} is the one before the session)`); }
       // Held through a workout, a reminder and its own follow-ups (one tag) come due together: the first only.
       const firstOfTag = new Map();
       for (const i of due.filter((x) => x.workout === 'after' && (!x.group || latest.get(x.group) === x)).sort((a, b) => a.heldAt - b.heldAt)) if (!firstOfTag.has(i.tag)) firstOfTag.set(i.tag, i);
@@ -1395,8 +1444,8 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       // Quiet: counted, not sent (the day's catch-up names what's open).
       const hushed = new Set(quiet ? due.filter((i) => !SILENT_PASS.has(i.kind)) : []);
       for (const i of hushed) { sent[i.id] = t; log(`notify ${i.id}: not sent (no answer from him since ${new Date(quiet.since).toISOString()})`); }
-      if (covered.size || spaced.size || repeats.size || hushed.size) store.setMeta(SENT, sent);
-      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !spaced.has(i) && !repeats.has(i) && !hushed.has(i));
+      if (covered.size || ownSession.size || spaced.size || repeats.size || hushed.size) store.setMeta(SENT, sent);
+      const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !ownSession.has(i.id) && !spaced.has(i) && !repeats.has(i) && !hushed.has(i));
       if (items.length) {
         const opts = voiceOpts(store);
         // What waited for his morning or a workout: one short ask of what to do now (heldPlanText: one line a thing, no
@@ -1414,7 +1463,8 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
         for (const i of merged ? items.filter((x) => !after.includes(x)) : items) {
           // The coach says it (Mon 10/19): title "Coach", the reminder's facts, one short line in his moods. A coach
           // reminder can carry live facts (Wed 10/21: "are my steps counted?" gets what the Shortcut really sent).
-          const v = coachReminder(i.facts === 'health' ? { ...i, body: `${i.body} ${healthSendsText(store, { since: i.since, now: t, tz: zone })}` } : i, opts);
+          // A check-in held past the session time says "now", not the passed time (Tue 11/10).
+          const v = coachReminder(i.facts === 'health' ? { ...i, body: `${i.body} ${healthSendsText(store, { since: i.since, now: t, tz: zone })}` } : i.lateBody && t >= i.sessionAt ? { ...i, body: i.lateBody } : i, opts);
           const r = await push.notify({ title: v.title, body: v.body, url: i.url, tag: i.tag });
           sent[i.id] = t;
           sayInTalk(store, { text: v.body, at: t, tz: zone, kind: 'reminder', ref: i.id });
