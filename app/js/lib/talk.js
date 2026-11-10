@@ -6,7 +6,7 @@
 import { voiceSpeech } from './data.js';
 import { audioContext } from './voice-mic.js';
 import { pcm16ToFloat } from './wav.js';
-import { play, loudFor } from './sounds.js';
+import { play, overMusic } from './sounds.js';
 import { getState } from './store.js';
 import { withDefaults } from './settings.js';
 import { scriptTexts } from './coach-talk.js';
@@ -96,8 +96,8 @@ function stopVoice() {
 }
 
 function playBuffer(run, buf) {
-  // Tue 10/20: with the microphone off, the silent switch muted the coach during his sets.
-  loudFor(buf.duration);
+  // Over his music, never pausing it (Tue 11/10; lib/sounds.js overMusic).
+  overMusic();
   const ctx = audioContext();
   const src = ctx.createBufferSource();
   src.buffer = buf; src.connect(ctx.destination);

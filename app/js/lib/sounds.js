@@ -4,7 +4,8 @@
 // - iPhone stops the app's audio ('interrupted', or 'suspended') when the screen locks, another app plays or the
 //   microphone changes; a sound scheduled on that stopped clock is never heard. Every sound now restarts it first.
 // - With the coach's microphone off, iPhone's silent switch mutes web audio (with it on, the phone is in a mode that
-//   ignores the switch). Timer sounds (the rest end, the hold's beeps) switch to playback, as the Clock app does.
+//   ignores the switch). Timer sounds switched to playback, as the Clock app does; since Tue 11/10 they don't, because
+//   playback pauses his music (overMusic below).
 // Thu 10/22 at the gym, again: "My rest time just finished. And no sound... volume to the max, not on silent, no sleep
 // mode". Web Audio can stay stopped after iPhone interrupts it (the coach's voice, the microphone, another app) and
 // restarting it needs a tap. So timer sounds (alarm) now play as a short sound file through an audio element that a
@@ -25,6 +26,8 @@ function unlockElement() {
   try {
     if (!el) { el = new Audio(); el.preload = 'auto'; el.setAttribute('playsinline', ''); }
     if (elReady) return;
+    // Mixing first: a sound file played in iPhone's 'auto' mode counts as media and pauses his music.
+    overMusic();
     el.src = SILENT;
     const p = el.play();
     if (p?.then) p.then(() => { elReady = true; }).catch(() => {}); else elReady = true;
@@ -41,28 +44,32 @@ function ready() {
 
 export function unlockAudio() { ready(); unlockElement(); }
 
-/** The coach's microphone is open (its audio mode already ignores the silent switch; playback must not override it). */
+/** The coach's microphone is open (its audio mode already ignores the silent switch; the mix mode must not override it). */
 export function micActive(on) { mic = !!on; }
 
-let restoreTimer = null;
 // Microphones opening or open (listening, dictation, calibration). Tue 10/20, his screen recording: every tap gave the
-// orange mic dot, then "No sound from the microphone": a playback switch (or its timer back to 'auto') could land in
-// the seconds the microphone takes to start and leave it recording silence. While any is opening or open, nothing
-// here touches the audio mode.
+// orange mic dot, then "No sound from the microphone": an audio mode switch landing in the seconds the microphone
+// takes to start left it recording silence. While any is opening or open, nothing here touches the audio mode.
 let mics = 0;
-export function micOpening(delta) {
-  mics = Math.max(0, mics + delta);
-  if (mics) { clearTimeout(restoreTimer); restoreTimer = null; }
-}
-/** Heard even with the silent switch on for the next `seconds` (timer sounds, the coach's voice while the mic is off). */
-export function loudFor(seconds) {
+export function micOpening(delta) { mics = Math.max(0, mics + delta); }
+
+// The sauna's overdue alarm (lib/alarm.js) needs 'playback' (heard through the silent switch, a hard stop): while it is
+// armed nothing here changes the mode.
+let pinned = false;
+export function holdPlayback(on) { pinned = !!on; if (!on) overMusic(); }
+
+/**
+ * The app's sounds and the coach's voice play over his music (Tue 11/10 at the gym, Push: "I dont like how the app
+ * Stops my music with its sounds"). They used iPhone's 'playback' mode (to beat the silent switch, Tue 10/20), and
+ * 'playback' pauses every other app's audio, as a music player does; 'ambient' plays on top and the music keeps going.
+ * iPhone's silent switch mutes 'ambient', so with it on silent only the Mac's "Rest over" notification buzzes.
+ * Set before every sound and kept (no switch back to 'auto': a sound file played in 'auto' takes the audio too).
+ */
+export const MIX_MODE = 'ambient';
+export function overMusic() {
   const s = navigator.audioSession;
-  if (!s || mic || mics) return;
-  try {
-    if (s.type !== 'playback') s.type = 'playback';
-    clearTimeout(restoreTimer);
-    restoreTimer = setTimeout(() => { try { if (!mic && !mics) s.type = 'auto'; } catch { /* gone */ } }, (seconds + 1.5) * 1000);
-  } catch { /* not supported */ }
+  if (!s || mic || mics || pinned) return;
+  try { if (s.type !== MIX_MODE) s.type = MIX_MODE; } catch { /* not supported */ }
 }
 
 // [start s, frequency Hz, length s, wave, loudness 0-1]
@@ -81,14 +88,14 @@ const PATTERNS = {
 
 /**
  * Play a sound at a volume of 0-100 ('beeps-2' = two plain beeps, the last one higher). Does nothing until audio has
- * been unlocked by a tap. `alarm`: a timer sound, heard even with the silent switch on.
+ * been unlocked by a tap. `alarm`: a timer sound, played as a sound file (it plays after iPhone stopped Web Audio).
  */
 export function play(id = 'beeps', volume = 80, { alarm = false } = {}) {
   if (!audio || !volume) return;
   const a = ready();
   const n = /^beeps-(\d)$/.exec(id);
   const notes = n ? Array.from({ length: +n[1] }, (_, i) => [i * 0.28, i === +n[1] - 1 ? 1320 : 880, 0.22]) : PATTERNS[id] || PATTERNS.beeps;
-  if (alarm) loudFor(Math.max(...notes.map(([at, , len]) => at + len)));
+  overMusic();
   if (alarm && elReady && playFile(notes, volume, a, id)) return;
   if (alarm) diag({ what: 'sound', id, path: 'webaudio', ctx: a.state, el: elReady });
   if (a.state === 'running') { schedule(a, notes, volume); return; }
@@ -167,3 +174,10 @@ function schedule(audio, notes, volume) {
     o.stop(t0 + at + len + 0.02);
   }
 }
+
+// Tue 11/10, 1:41 PM: "Even if i open the app while music plays it pauses it!?" Before any sound: the 'playback' mode
+// set for a sound was left on when the phone locked or he switched to his music (its switch back to 'auto' was a timer,
+// which iPhone freezes with the app), and opening the app again (the audio waking, the rest-over sound) took the audio
+// back from his music. Now the mode is the mixing one from the moment the app opens and every time it comes back.
+overMusic();
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => overMusic());

@@ -1,12 +1,15 @@
 // The sauna's overdue alarm (brief section 11): loud and continuous until he taps OUT. Web Audio, no sound file.
 // arm() must run inside a tap (iPhone rule); after that the alarm can start on its own while the app is on screen.
-// Where Safari supports it, the audio session is set to 'playback' so the ring/silent switch doesn't mute it.
+// Where Safari supports it, the audio session is set to 'playback' so the ring/silent switch doesn't mute it, and held
+// there while armed (the app's other sounds play over his music in 'ambient', lib/sounds.js, but not this one).
+import { holdPlayback } from './sounds.js';
 let ctx = null;
 let osc = null;
 let gain = null;
 let timer = null;
 
 export function arm() {
+  holdPlayback(true);
   try {
     if (navigator.audioSession) navigator.audioSession.type = 'playback';
   } catch { /* not supported */ }
@@ -45,4 +48,5 @@ export function stop() {
   clearInterval(timer); timer = null;
   try { osc?.stop(); } catch { /* already stopped */ }
   osc = null; gain = null;
+  holdPlayback(false);
 }

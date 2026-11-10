@@ -15,6 +15,7 @@ import { toast } from '../ui/toast.js';
 import { watchReps } from '../lib/squat-calls.js';
 import { setQuiet } from '../lib/quiet.js';
 import * as talk from '../lib/talk.js';
+import { MIX_MODE } from '../lib/sounds.js';
 import { getState } from '../lib/store.js';
 import { withDefaults } from '../lib/settings.js';
 
@@ -110,8 +111,8 @@ const audio = {
   unlock() {
     clearTimeout(this.idleTimer);
     if (!this.ctx) {
-      // Play through the speaker even with the ring/silent switch on silent (Safari 16.4+).
-      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* not supported */ }
+      // Over his music, never pausing it (Tue 11/10: 'playback' paused his music; lib/sounds.js overMusic).
+      try { if (navigator.audioSession) navigator.audioSession.type = MIX_MODE; } catch { /* not supported */ }
       const AC = window.AudioContext || window.webkitAudioContext;
       const ctx = this.ctx = new AC({ latencyHint: 'interactive' });
       this.dingBuf = this._render(0.32, (t) => {
