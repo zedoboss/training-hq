@@ -618,7 +618,8 @@ export function plan(store, now = Date.now(), tz = deviceTimeZone()) {
   const items = planned
     .map((i) => (g.hold && held(i) && i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, morning: 'waiting' }
       : !g.hold && g.state.from && g.openAt && held(i) && i.at < g.openAt ? { ...i, at: g.openAt, morning: 'after', heldAt: i.at } : i));
-  const gym = afterWorkouts(items, workoutSpans(st, recordsOf(store, 'sessions'), now, tz), now, waits);
+  const sessions = recordsOf(store, 'sessions');
+  const gym = afterWorkouts(afterGymHold(items, gymSpans(items, sessions, st, now, tz), now), workoutSpans(st, sessions, now, tz), now, waits);
   return afterMeals(afterWalks(gym, walkSpans(recordsOf(store, 'walks'), now), now), mealSpansFor(store, now, tz), st.coachReminders);
 }
 
@@ -690,25 +691,71 @@ export function walkSpans(docs = [], now, cfg = WALK_HOLD) {
   return out;
 }
 
+// ---- His session time (Tue 11/10, his words: "Getting the start cooking message immediately after [Upper A]... it
+// doesn't make sense. I'm literally about to go to the gym"): at 12:30 PM "Upper A at 12:30 PM... Come on, let's go!"
+// and, the same second, "Start cooking: last meal at 1:00 PM". Meal-time questions waited only once a workout had
+// started. Now from beforeMin before the session time he set (getting ready, heading out) until the workout is done
+// and his shower after it (AFTER_WORKOUT_QUIET_MIN, his Tue 10/20 rule; not before the after-gym order lets meals in),
+// start cooking, the meal ask and its check-ins wait, then go out as one meal ask, like after a walk. Not started
+// lateMaxMin after the time: the hold ends then. A workout without a set time holds them from its start the same way.
+// A workout started up to earlyMin before the set time is that session. Claude's numbers.
+export const GYM_HOLD = { beforeMin: 30, lateMaxMin: 90, earlyMin: 180 };
+
+/**
+ * The gym as spans {start, end, open, release} for the meal-time questions: each session time in `items` (the
+ * `session:<date>` reminders) from beforeMin before it, and each workout of the last 2 days. Open: the session time is
+ * coming or has come and it hasn't started (until lateMaxMin after it), or the workout is running (4 hours at most).
+ * Done: end = release = the later of the end + his shower and the after-gym meal time.
+ */
+export function gymSpans(items, sessions, st, now, tz) {
+  const work = (sessions || []).filter((x) => x && x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt) && x.startedAt <= now && now - x.startedAt < 2 * 86400000);
+  const times = items.filter((i) => /^session:/.test(String(i.id || '')) && Number.isFinite(i.at));
+  const out = [];
+  const used = new Set();
+  for (const s of times) {
+    const from = s.at - GYM_HOLD.beforeMin * 60000;
+    const late = s.at + GYM_HOLD.lateMaxMin * 60000;
+    const w = work.filter((x) => x.startedAt >= s.at - GYM_HOLD.earlyMin * 60000 && x.startedAt <= late).sort((a, b) => a.startedAt - b.startedAt)[0];
+    if (w) { used.add(w); continue; }
+    // Trained that day at another time (the session reminder is off): nothing to wait for.
+    if (s.due === false) continue;
+    out.push(now < late ? { start: from, end: late, open: true } : { start: from, end: late, open: false, release: late });
+  }
+  for (const w of work) {
+    const s = used.has(w) ? times.find((x) => w.startedAt >= x.at - GYM_HOLD.earlyMin * 60000 && w.startedAt <= x.at + GYM_HOLD.lateMaxMin * 60000) : null;
+    const start = Math.min(w.startedAt, s ? s.at - GYM_HOLD.beforeMin * 60000 : Infinity);
+    const cap = w.startedAt + WORKOUT_BUSY_MIN * 60000;
+    if (w.status === 'active') { out.push({ start, end: cap, open: now < cap, release: cap }); continue; }
+    if (w.status !== 'done' || !Number.isFinite(w.endedAt)) continue;
+    const ag = afterGym({ date: isoDate(new Date(w.startedAt), tz), activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan, photoScanIds: st.photoScanIds, holdoffs: st.holdoffs });
+    const release = Math.max(w.endedAt + AFTER_WORKOUT_QUIET_MIN * 60000, ag && ag.doneAt >= w.endedAt ? ag.mealAt : 0);
+    out.push({ start, end: release, open: false, release });
+  }
+  return out;
+}
+
+/** Meal-time questions due around his session (gymSpans): held, then one meal ask after the gym and his shower. */
+export const afterGymHold = (items, spans, now) => afterWalks(items, spans, now, WALK_HOLD, 'gym');
+
 /** Meal-time questions due during a walk (walkSpans): held while he's out, then the meal ask once he's back. */
-export function afterWalks(items, spans, now, cfg = WALK_HOLD) {
+export function afterWalks(items, spans, now, cfg = WALK_HOLD, mark = 'walk') {
   if (!spans.length) return items;
   const ask = (i) => WALK_MEAL_ASK.test(String(i.id || '')) && i.due !== false;
   const moved = items.map((i) => {
     if (!ask(i)) return i;
     const s = spans.find((x) => i.at >= x.start && i.at < x.end);
     if (!s) return i;
-    if (i.group) return { ...i, due: false, walk: 'missed' };
-    if (s.open) return i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, walk: 'waiting' } : i;
-    return { ...i, at: s.release, walk: 'after', heldAt: i.heldAt ?? i.at };
+    if (i.group) return { ...i, due: false, [mark]: 'missed' };
+    if (s.open) return i.at <= now + 60000 ? { ...i, at: now + 2 * 60000, [mark]: 'waiting' } : i;
+    return { ...i, at: s.release, [mark]: 'after', heldAt: i.heldAt ?? i.at };
   });
   // One question per meal once he's back: the meal ask over its "start cooking" (the later one); its check-ins start
   // after it, not minutes behind it.
   const back = new Map();
-  for (const i of moved) if (i.walk === 'after' && !(back.get(i.tag)?.heldAt > i.heldAt)) back.set(i.tag, i);
-  return moved.filter((i) => i.walk !== 'after' || back.get(i.tag) === i).map((i) => {
+  for (const i of moved) if (i[mark] === 'after' && !(back.get(i.tag)?.heldAt > i.heldAt)) back.set(i.tag, i);
+  return moved.filter((i) => i[mark] !== 'after' || back.get(i.tag) === i).map((i) => {
     const b = i.group && back.get(i.tag);
-    return b && i.due !== false && i.at >= b.at && i.at < b.at + MEAL_NUDGE.checkInMin[0] * 60000 ? { ...i, due: false, walk: 'missed' } : i;
+    return b && i.due !== false && i.at >= b.at && i.at < b.at + MEAL_NUDGE.checkInMin[0] * 60000 ? { ...i, due: false, [mark]: 'missed' } : i;
   });
 }
 
@@ -940,7 +987,9 @@ export function nudgeInputs(store, now, tz) {
       // Thu 11/5: scans paused (a scan hold-off): no "Evolt first", no scan checklist, no Evolt weigh-in ask.
       scanPaused: Boolean(scanHold(st.holdoffs, now)),
       // When each one really went out (held for his morning or a workout, later than planned); null = not yet.
-      reminders: remindersToday(store, st, date, now, tz).map((i) => ({ ...i, sentAt: wentOut[i.id] ?? null })),
+      // Tue 11/10: the meal-time questions as the gym holds them (gymSpans), so the after-workout meal nudge hands over
+      // to the one held ask instead of saying it too, and no food nudge comes while his session is on.
+      reminders: (() => { const r = remindersToday(store, st, date, now, tz); return afterGymHold(r, gymSpans(r, list('sessions'), st, now, tz), now); })().map((i) => ({ ...i, sentAt: wentOut[i.id] ?? null })),
       rot,
       // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
       // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
@@ -1333,7 +1382,7 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
         // What waited for his morning or a workout: one short ask of what to do now (heldPlanText: one line a thing, no
         // passed times; Mon 10/26), one line in his moods at the end.
         // A single one too, half an hour overdue, when its words name a clock time (it would read back a passed one).
-        const after = items.filter((i) => i.morning === 'after' || i.workout === 'after' || i.walk === 'after').sort((a, b) => a.heldAt - b.heldAt);
+        const after = items.filter((i) => i.morning === 'after' || i.workout === 'after' || i.walk === 'after' || i.gym === 'after').sort((a, b) => a.heldAt - b.heldAt);
         const merged = after.length > 1 || after.some((i) => t - i.heldAt >= HELD_OVERDUE_MIN * 60000 && /\d:\d\d\s?[AP]M/i.test(`${i.title} ${i.body}`));
         if (merged) {
           const v = coachVoice(heldPlanText(after, { now: t, tz: zone }), { ...opts, calm: after.some((i) => i.calm) });

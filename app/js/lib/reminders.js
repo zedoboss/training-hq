@@ -304,7 +304,8 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
       for (const i of moved) {
         if (moved.some((j) => j !== i && j.tag === i.tag && j.at > i.at && j.due)) i.due = false;
       }
-      for (const i of moved) i.at = ag.mealAt;
+      // When it was due kept (heldAt): a held ask naming a passed time is said as what to do now (Tue 11/10).
+      for (const i of moved) { i.heldAt = i.heldAt ?? i.at; i.at = ag.mealAt; }
     }
   }
   // Thu 10/22: flexibility (after a workout or his evening time, the weekly kick test) and boxing / kickboxing classes.

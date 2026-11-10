@@ -205,7 +205,9 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // check-ins at the meal times' own spacing (MEAL_NUDGE.checkInMin), each in its own words, then quiet; and none
   // once his meal time's questions (lib/fuel-reminders.js) speak after the workout: they are the stream then.
   if (workoutEndedAt && now - workoutEndedAt < 4 * 3600000 && !(lastMealAt > workoutEndedAt) && !(mealAnsweredAt > workoutEndedAt)) {
-    const handOver = Math.min(Infinity, ...reminders.filter((r) => r.kind === 'meals' && r.due && /^meal(-again)?:/.test(String(r.id)) && r.at > workoutEndedAt).map((r) => r.at));
+    // Tue 11/10: a meal question held through his session (server gymSpans, gym: 'after') hands over too, "start
+    // cooking" included: one ask after the gym, never two.
+    const handOver = Math.min(Infinity, ...reminders.filter((r) => r.due && r.at > workoutEndedAt && ((r.kind === 'meals' && /^meal(-again)?:/.test(String(r.id))) || r.gym === 'after')).map((r) => r.at));
     const times = [0, ...MEAL_NUDGE.checkInMin].map((m) => quietTo + m * 60000);
     const k = times.findLastIndex((t) => t <= now);
     const doneHm = formatHm(hmOf(new Date(workoutEndedAt), tz));
