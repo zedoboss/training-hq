@@ -8,7 +8,7 @@ import { snapshot, dayText, timeText, loadText, repsText, mmss, plural, findByNa
 import { offered, saidNow, toldToStart, confirmedNow } from './tools-app.mjs';
 import { currentExercise, nextSetText, activeText, mealsText, suppDayKind, saunaProposal, holdsDueText } from './tools-read.mjs';
 import { LABEL, withTime, withRest, rotationDay, addDays } from '../../app/js/lib/rotation.js';
-import { buildSession, addedTarget, previousFor, fillForTick, restAfter, guardLoad, BODYWEIGHT_TYPES, newSetId, nextAfter, nextAfterText, oneArmHoldRounds } from '../../app/js/lib/session.js';
+import { buildSession, addedTarget, previousFor, fillForTick, restAfterSet, guardLoad, BODYWEIGHT_TYPES, newSetId, nextAfter, nextAfterText, oneArmHoldRounds } from '../../app/js/lib/session.js';
 import { guardCheck } from '../../app/js/lib/targets.js';
 import { setRecord, comebackStartOf, routineFromLast, previousSame } from '../../app/js/lib/finish.js';
 import { restFor, restText, withDefaults } from '../../app/js/lib/settings.js';
@@ -167,7 +167,9 @@ async function logSet(a, ctx) {
   const arm = ex.oneArm || oneArm(s, ex.name, [ex.notes, ...after.map((x) => x.note)]) ? armOf(after, filled) : null;
   // Sat 10/24: on a one-arm exercise the left arm follows the right straight away, so no rest timer after the right.
   const pairNext = arm?.arm === 'right' && next?.exKey === ex.key && next.type !== 'warmup';
-  if (!pairNext && !(set.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) {
+  // Tue 11/10, his words: "When i finish last set last exercise there shouldnt be a timer with a skip Instead a finish
+  // button": a set logged by voice or chat that ends the workout starts no rest either; the phone shows Finish.
+  if (!pairNext && !(set.type === 'normal' && next?.type === 'dropset') && restAfterSet(session.exercises, [...sets.filter((x) => x.id !== filled.id), filled], ex.key)) {
     const secs = restFor(ex, filled.type, st);
     if (secs) { ctx.action({ kind: 'rest', seconds: secs, label: ex.name, next: restNext(s, session, [...sets.filter((x) => x.id !== filled.id), filled], ex.key) }); restLine = ` Rest ${restText(secs)} started on his phone.`; }
   }

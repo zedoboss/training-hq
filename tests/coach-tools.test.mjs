@@ -287,6 +287,17 @@ test('a session started, sets logged by voice-style numbers, the 30% guard and t
   const t = await call('rest_timer', { action: 'add', seconds: -15 });
   assert.equal(t.text, 'Rest timer -15 s on his phone.');
   assert.deepEqual(actions.at(-1), { kind: 'rest-add', seconds: -15 });
+
+  // Tue 11/10, his words: "When i finish last set last exercise there shouldnt be a timer with a skip Instead a finish
+  // button": logging the workout's last set by voice starts no rest on his phone.
+  actions = [];
+  const e1 = await call('log_set', { exercise: 'leg extension', kg: 40, reps: 10 });
+  assert.match(e1.text, /Rest .* started on his phone/);
+  actions = [];
+  const e2 = await call('log_set', { exercise: 'leg extension', kg: 40, reps: 10 });
+  assert.doesNotMatch(e2.text, /Rest .* started/);
+  assert.match(e2.text, /That was the last set of the session/);
+  assert.equal(actions.filter((x) => x.kind === 'rest').length, 0);
 });
 
 test('supplements: taken and skipped are logged as he said, with the stock warning; never more', async () => {
