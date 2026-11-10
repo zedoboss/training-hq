@@ -18,6 +18,7 @@ import { toast } from '../ui/toast.js';
 import { SQUAT_ICON } from './squat.js';
 import { savedTargetDeg } from '../lib/squat-log.js';
 import { isDone, planFor } from '../lib/scans.js';
+import { scanHold } from '../lib/holdoffs.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)', 'upper-a': 'var(--pull)', 'upper-b': 'var(--push)', lower: 'var(--legs)' };
@@ -75,10 +76,13 @@ export function render(view) {
     const nextDate = rot.next.date;
     const hm = days[nextDate]?.sessionTime || null;
     const checkMin = withDefaults(getState().settings).notify.readinessMin;
-    // Body scan day (step 7): first thing at the gym, before this session.
-    const [planDoc, scans] = await Promise.all([repo.get('scan-plan', 'main'), repo.list('body-scans')]);
+    // Body scan day (step 7): first thing at the gym, before this session. Never while he has scans paused (Tue 11/10:
+    // "Body scan today" showed here with scans paused until Friday 11/20; Today, Body and Finish already checked it).
+    const [planDoc, scans, holds] = await Promise.all([repo.get('scan-plan', 'main'), repo.list('body-scans'), repo.list('coach-holds')]);
     const scanPlan = planFor(planDoc || {}, { scans, today, last, days });
-    const scanFirst = scanPlan?.next?.date === nextDate && t.kind !== 'done' && !scans.some((x) => x.date === nextDate && isDone(x));
+    const scanFirst = scanPlan?.next?.date === nextDate && t.kind !== 'done' && !scans.some((x) => x.date === nextDate && isDone(x)) && !scanHold(holds);
+    // In a block with a working-set cap (Upper/Lower: 1 working set for two weeks), the card says so.
+    const blockSets = activeBlock(block, nextDate)?.workingSets || null;
     const whenLine = hm
       ? `${nextDate === today ? 'Today' : esc(day(nextDate))}, ${formatHm(hm)} · check-in ${(() => { const lead = checkInLead(days[nextDate], nextDate, deviceTimeZone(), checkMin); return lead == null ? 'before you leave' : formatHm(addMinutesHm(hm, -lead)); })()}`
       : `No time set for ${nextDate === today ? 'today' : esc(day(nextDate))}`;
@@ -97,7 +101,7 @@ export function render(view) {
           : '<a class="card-note" id="rd-line" href="#/checkin">Sore, or good to go? Check in before you start ›</a>') : ''}
         ${scanFirst ? `<a class="card-note c-amber" id="scan-first" href="#/body/scan">Body scan ${nextDate === today ? 'today' : esc(day(nextDate))}: first thing at the gym, before this session. Checklist ›</a>` : ''}
         <div class="time-line"><span class="hud ${hm ? 'c-cyan' : 'c-amber'}" id="time-text">${whenLine.toUpperCase()}</span><button class="pill" id="set-time" type="button">${hm ? 'Change' : 'Set time'}</button></div>
-        <p class="hint">${nextRoutine ? `${mode === 'normal' ? 'Normal programme · ' : ''}${nextRoutine.exercises.length} exercises · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
+        <p class="hint">${nextRoutine ? `${mode === 'normal' ? 'Normal programme · ' : ''}${nextRoutine.exercises.length} exercises${blockSets ? ` · ${blockSets} working set${blockSets > 1 ? 's' : ''} each` : ''} · targets capped at last load + 30%` : 'No routine for this day yet.'}</p>
         ${needsOk ? `<a class="card-note c-amber" id="wk-ok" href="#/progression/${esc(next)}/${wk}">Week ${wk} numbers need your OK. Until then: last confirmed numbers. Review ›</a>` : ''}
         ${suggestNormal ? `<div class="card-note" id="normal-hint"><span>${esc(LABEL[next])}'s main lifts hit their week 4 numbers in the last ${suggestNormal.n} sessions. Switch to the Normal programme?</span>
           <span class="btn-row"><a class="pill is-on" href="#/progression/${esc(next)}">Review</a><button class="pill" id="normal-later" type="button">Not yet</button></span></div>` : ''}
@@ -219,7 +223,7 @@ export function render(view) {
   let off = () => {};
   ready.then((r) => {
     repo = r;
-    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression', 'schedule', 'squats', 'scan-plan', 'body-scans'].includes(c))) draw(); });
+    off = repo.onChange((cols) => { if (cols.some((c) => ['folders', 'routines', 'sessions', 'programme', 'bridge', 'days', 'progression', 'schedule', 'squats', 'scan-plan', 'body-scans', 'coach-holds'].includes(c))) draw(); });
     draw();
   });
   return () => off();

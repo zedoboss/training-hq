@@ -27,15 +27,17 @@ test('the block runs Upper A, Lower, rest, Upper B, Lower, rest from Tuesday 11/
   assert.equal(rotationDay({ last, today: '2026-11-10', block: null }).today.dayType, 'pull', 'without the block: Pull');
   assert.deepEqual(rotationDay({ last, today: '2026-11-10', block: BLOCK }).today, { kind: 'train', dayType: 'upper-a', reason: null, block: true });
   // Each day trained as planned, through the two weeks and out the other side.
-  const plan = projectRotation({ last, from: '2026-11-10', n: 16, days: {} });
+  const plan = projectRotation({ last, from: '2026-11-10', n: 18, days: {} });
   useBlock(BLOCK);
-  const withBlock = projectRotation({ last, from: '2026-11-10', n: 16, days: {} });
+  const withBlock = projectRotation({ last, from: '2026-11-10', n: 18, days: {} });
   useBlock(null);
   assert.equal(plan[0].dayType, 'pull');
   assert.deepEqual(withBlock.map((d) => `${dow(d.date)} ${d.kind === 'rest' ? 'rest' : LABEL[d.dayType]}`), [
     'Tue Upper A', 'Wed Lower', 'Thu rest', 'Fri Upper B', 'Sat Lower', 'Sun rest',
     'Mon Upper A', 'Tue Lower', 'Wed rest', 'Thu Upper B', 'Fri Lower', 'Sat rest',
-    'Sun Upper A', 'Mon Lower', 'Tue rest', 'Wed Pull',
+    // His words (10:03 AM): "two weeks... upper lower. And then I'm going to switch back to push-pull legs": Pull the
+    // day after the block, then three days on, one off as before.
+    'Sun Upper A', 'Mon Lower', 'Tue Pull', 'Wed rest', 'Thu Push', 'Fri Legs',
   ]);
 });
 
@@ -47,10 +49,15 @@ test('in the block: a missed day carries the same type over; uppers alternate fr
   assert.equal(rotationDay({ last, today: '2026-11-13', block: BLOCK }).today.dayType, 'upper-b');
   // He skips Friday: Saturday is still Upper B.
   assert.equal(rotationDay({ last, today: '2026-11-14', block: BLOCK }).today.dayType, 'upper-b');
-  // Trained Lower on the last day, Monday 11/23: Tuesday rests, Wednesday is Pull (the day that was next before it).
+  // Trained Lower on the last day, Monday 11/23: Tuesday 11/24 is Pull (the day that was next before it); the cycle's
+  // rest after Lower falls outside the two weeks.
   const end = lastRotationSession([...s, done('s4', 'upper-b', '2026-11-22'), done('s5', 'lower', '2026-11-23')], null, TZ);
   const r = rotationDay({ last: end, today: '2026-11-23', block: BLOCK });
-  assert.deepEqual([r.today.kind, r.next.date, r.next.dayType], ['done', '2026-11-25', 'pull']);
+  assert.deepEqual([r.today.kind, r.next.date, r.next.dayType], ['done', '2026-11-24', 'pull']);
+  assert.deepEqual(rotationDay({ last: end, today: '2026-11-24', block: BLOCK }).today, { kind: 'train', dayType: 'pull', reason: null });
+  // Lower on Friday 11/20 still rests on Saturday 11/21 (inside the block).
+  const fri = lastRotationSession([...s, done('s4', 'upper-b', '2026-11-19'), done('s5', 'lower', '2026-11-20')], null, TZ);
+  assert.equal(rotationDay({ last: fri, today: '2026-11-21', block: BLOCK }).today.kind, 'rest');
   // He kept it 2 more weeks: Upper A after that Lower.
   assert.equal(rotationDay({ last: end, today: '2026-11-25', block: { ...BLOCK, to: '2026-12-07' } }).today.dayType, 'upper-a');
   // Upper/Lower types are rotation types (a session of them moves the rotation; the coach can choose one next).
@@ -167,7 +174,7 @@ test('hold names: "<lift> · Hold"; the older forms are the same hold; their his
   const wrist = { id: 'wrist', label: 'Wrist', phase: 'fix', holds: [{ exercise: 'Cupping · Hold', timing: ['after Pull'] }], loadsArea: { exercises: ['Cupping'] } };
   const round = { id: 'r1', kind: 'holds', status: 'done', area: 'wrist', startedAt: at('2026-11-10', '09:00'), exercises: [{ key: 'h', name: 'Cupping · Hold' }] };
   assert.equal(roundsByDate([wrist], [round], [])['wrist']['2026-11-10'], 1);
-  const inWorkout = { id: 'w1', kind: 'workout', status: 'done', dayType: 'upper-b', startedAt: at('2026-11-13'), exercises: [{ key: 'h2', name: 'Cupping · Hold' }] };
+  const inWorkout = { id: 'w1', kind: 'workout', status: 'done', dayType: 'upper-b', startedAt: at('2026-11-13', '09:00'), exercises: [{ key: 'h2', name: 'Cupping · Hold' }] };
   assert.equal(roundsByDate([wrist], [inWorkout], [{ sessionId: 'w1', exKey: 'h2', done: true, type: 'hold', durationS: 30 }])['wrist']['2026-11-13'], 1);
   // One arm at a time, by either name.
   const rounds = oneArmHoldRounds([{ holds: [{ exercise: 'Cupping · Hold', sides: ['Right arm', 'Left arm'], sets: 3 }] }]);
@@ -235,4 +242,32 @@ test('the check-in asks as much on Upper/Lower days: Lower checks the Legs areas
   assert.deepEqual(workingKeys(table, 'legs'), ['L', 'B']);
   assert.deepEqual(workingKeys(table, 'push'), []);
   assert.ok(typeof decide === 'function');
+});
+
+test('every day of the block from his real start (Legs Monday 11/9): today and next are the block day, never Pull, until Tuesday 11/24', () => {
+  // Tue 11/10, 10:00 AM: Train said "Today · Pull, week 7" on Upper A's day. Day by day as he'd meet it, each session
+  // done on its day: what today is in the morning, and what's next once it's done.
+  const sessions = [done('p', 'pull', '2026-11-07'), done('l', 'legs', '2026-11-09')];
+  const seen = [];
+  useBlock(BLOCK);
+  try {
+    for (let i = 0; i < 18; i++) {
+      const d = new Date(Date.UTC(2026, 10, 10 + i)).toISOString().slice(0, 10);
+      const morning = rotationDay({ last: lastRotationSession(sessions, null, TZ), today: d });
+      if (morning.today.kind === 'train') {
+        sessions.push(done(`s${i}`, morning.today.dayType, d));
+        const after = rotationDay({ last: lastRotationSession(sessions, null, TZ), today: d });
+        assert.equal(after.today.kind, 'done');
+        seen.push(`${dow(d)} ${d.slice(5)} ${LABEL[morning.today.dayType]} > next ${LABEL[after.next.dayType]} ${after.next.date.slice(5)}`);
+      } else seen.push(`${dow(d)} ${d.slice(5)} rest > next ${LABEL[morning.next.dayType]} ${morning.next.date.slice(5)}`);
+    }
+  } finally { useBlock(null); }
+  assert.deepEqual(seen, [
+    'Tue 11-10 Upper A > next Lower 11-11', 'Wed 11-11 Lower > next Upper B 11-13', 'Thu 11-12 rest > next Upper B 11-13',
+    'Fri 11-13 Upper B > next Lower 11-14', 'Sat 11-14 Lower > next Upper A 11-16', 'Sun 11-15 rest > next Upper A 11-16',
+    'Mon 11-16 Upper A > next Lower 11-17', 'Tue 11-17 Lower > next Upper B 11-19', 'Wed 11-18 rest > next Upper B 11-19',
+    'Thu 11-19 Upper B > next Lower 11-20', 'Fri 11-20 Lower > next Upper A 11-22', 'Sat 11-21 rest > next Upper A 11-22',
+    'Sun 11-22 Upper A > next Lower 11-23', 'Mon 11-23 Lower > next Pull 11-24',
+    'Tue 11-24 Pull > next Push 11-26', 'Wed 11-25 rest > next Push 11-26', 'Thu 11-26 Push > next Legs 11-27', 'Fri 11-27 Legs > next Pull 11-28',
+  ]);
 });

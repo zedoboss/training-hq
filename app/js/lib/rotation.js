@@ -139,6 +139,11 @@ export function restDaysAfter(last, block = current) {
   if (pos >= 0) {
     let n = 0;
     while (n < b.order.length - 1 && b.order[(pos + 1 + n) % b.order.length] === 'rest') n++;
+    // Tue 11/10, his words: "two weeks... upper lower. And then I'm going to switch back to push-pull legs": a cycle
+    // rest that would fall after the block's last day doesn't happen; Pull, Push and Legs start the day after it
+    // (Lower on Monday 11/23, Pull on Tuesday 11/24), unless he keeps the block (its `to` moves on).
+    // Past the end, the rotation's own rule (three days on, one off) decides.
+    if (b.to && n > daysBetween(last.date, b.to)) return Math.max(daysBetween(last.date, b.to), (last.streak || 1) >= 3 ? 1 : 0);
     return n;
   }
   if (isBlockType(last.dayType, block)) return last.dayType === 'lower' ? 1 : 0;

@@ -124,7 +124,7 @@ test('then the split: Upper A, Lower, rest, Upper B, Lower, rest for two weeks, 
   assert.deepEqual(days.map((d) => `${dow(d.date)} ${d.kind === 'rest' ? 'rest' : LABEL[d.dayType]}`), [
     'Tue Upper A', 'Wed Lower', 'Thu rest', 'Fri Upper B', 'Sat Lower', 'Sun rest',
     'Mon Upper A', 'Tue Lower', 'Wed rest', 'Thu Upper B', 'Fri Lower', 'Sat rest',
-    'Sun Upper A', 'Mon Lower', 'Tue rest', 'Wed Pull',
+    'Sun Upper A', 'Mon Lower', 'Tue Pull', 'Wed rest',
   ]);
   // The coach sees it with every message.
   const ctx = contextLine({ store, tz: TZ, now: NOW });
