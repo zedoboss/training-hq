@@ -356,6 +356,23 @@ export function restAfter(exercises, key) {
   return keys[keys.length - 1] === key;
 }
 
+/**
+ * Tue 11/10, his words after Push: "When i finish last set last exercise there shouldnt be a timer with a skip Instead a
+ * finish button". A rest starts after a ticked set only when one is left to do (any exercise not skipped, earlier ones
+ * too) and it isn't mid-superset; after the workout's last set the screen shows Finish (allTicked) instead.
+ * @param {Array} sets the session's sets with the one just ticked saved as done
+ */
+export function restAfterSet(exercises, sets, key) {
+  return restAfter(exercises, key) && nextAfter(exercises, sets, key) != null;
+}
+
+/** Every set of every exercise not skipped is ticked (and there is at least one): time to finish the workout. */
+export function allTicked(exercises, sets) {
+  const keys = new Set((exercises || []).filter((e) => !e.skipped).map((e) => e.key));
+  const mine = (sets || []).filter((x) => keys.has(x.exKey));
+  return mine.length > 0 && mine.every((x) => x.done);
+}
+
 /** RPE choices with the reps-in-reserve hint. */
 export const RPE = [[10, 'nothing left'], [9.5, 'maybe 1 more'], [9, '1 more'], [8.5, '1-2 more'], [8, '2 more'], [7.5, '2-3 more'], [7, '3 more'], [6, '4+ more']];
 

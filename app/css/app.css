@@ -393,6 +393,9 @@ textarea.input.area { height: auto; padding: 10px 12px; font: 400 15px/1.4 var(-
 .rest-track { height: 4px; border-radius: 2px; background: var(--divider); overflow: hidden; }
 .rest-fill { height: 4px; background: var(--cyan); width: 0; transition: width .25s linear; }
 .rest-row { display: flex; align-items: center; gap: 8px; }
+/* Tue 11/10: after the workout's last set, Finish instead of a rest. */
+.done-bar { border-top-color: var(--green); }
+.done-bar .btn-primary { min-width: 120px; }
 .rest-time { flex: 1; display: flex; flex-direction: column; }
 .rest-label { line-height: 1.4; overflow-wrap: anywhere; }
 /* Tue 10/20: two quick taps on -15 scrolled the page (iPhone's double-tap gesture). Buttons take taps only. */

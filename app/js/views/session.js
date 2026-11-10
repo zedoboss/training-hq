@@ -6,7 +6,7 @@ import { withHomeNotes } from '../lib/neck.js';
 import { mergeLibrary } from '../lib/library.js';
 import { buildHistory, activeBridge } from '../lib/history.js';
 import { clockText } from '../lib/records.js';
-import { buildSession, setsForAdded, addedTarget, swapEntry, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad, nextAfter, nextAfterText, oneArmIn, oneArmHoldRounds, pairUpRows, armOf, armLabel } from '../lib/session.js';
+import { buildSession, setsForAdded, addedTarget, swapEntry, elapsedMs, clock, summarize, previousFor, fillForTick, copyPrevious, plateTargets, newSetId, typicalDurationMs, expectedFinish, supersetGroups, restAfter, restAfterSet, allTicked, RPE, setTimerView, setTimerResult, BODYWEIGHT_TYPES, guardLoad, nextAfter, nextAfterText, oneArmIn, oneArmHoldRounds, pairUpRows, armOf, armLabel } from '../lib/session.js';
 import { newKey } from '../lib/routines.js';
 import { SET_TYPES, setFields } from '../lib/exercise-types.js';
 import { isoDate, formatTime, formatDay, timeAt, zoneOf } from '../lib/time.js';
@@ -192,6 +192,7 @@ export function render(view, params = []) {
   };
 
   const header = () => {
+    drawDone();
     const sum = summarize(session, sets);
     const el = view.querySelector('#s-head');
     if (!el) return;
@@ -565,7 +566,11 @@ export function render(view, params = []) {
       // Sat 10/24, his words: "no rest timer after the right arm, rest only after each pair": the left arm follows.
       const arm = isOneArm(ex) ? armOf(exSets(ex.key), filled) : null;
       const pairNext = arm?.arm === 'right' && next && next.type !== 'warmup';
-      if (!editing && !pairNext && !(s.type === 'normal' && next?.type === 'dropset') && restAfter(session.exercises, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name, nextSetWords(ex), { sessionId: session.id, exKey: ex.key }); planNext(ex); }
+      if (!editing && !pairNext && !(s.type === 'normal' && next?.type === 'dropset') && restAfterSet(session.exercises, sets, ex.key)) { rest.start(restFor(ex, s.type, prefs()), ex.name, nextSetWords(ex), { sessionId: session.id, exKey: ex.key }); planNext(ex); }
+      // Tue 11/10, his words: "When i finish last set last exercise there shouldnt be a timer with a skip Instead a finish
+      // button": the workout's last set ends any rest still running (no "Rest over") and the Finish bar shows (drawDone).
+      if (!editing && allTicked(session.exercises, sets) && rest.status() && rest.status().label !== 'Countdown') { quietRestEnd = true; rest.clear(); quietRestEnd = false; }
+      drawDone();
       if (!editing && prefs().show.supersetJump && ex.supersetId && !restAfter(session.exercises, ex.key)) {
         const keys = session.exercises.filter((e) => e.supersetId === ex.supersetId).map((e) => e.key);
         view.querySelector(`[data-ex="${CSS.escape(keys[keys.indexOf(ex.key) + 1])}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -757,7 +762,11 @@ export function render(view, params = []) {
         <div class="rest-row"><div class="rest-time"><b data-k="rleft">0:00</b></div>
           <button class="btn-ghost small" data-r="-15" type="button">-15</button><button class="btn-ghost small" data-r="15" type="button">+15</button>
           <button class="btn-primary small" data-r="skip" type="button">Skip</button></div>
-      </section>`;
+      </section>
+      ${editing ? '' : `<section class="rest-bar done-bar" id="s-done" hidden aria-label="Every set ticked">
+        <div class="rest-row"><div class="rest-time"><span class="hud c-green">EVERY SET TICKED</span></div>
+          <a class="btn-primary small center" data-k="finish" href="#/finish/${esc(session.id)}">Finish</a></div>
+      </section>`}`;
     drawCards();
 
     const box = view.querySelector('#s-ex');
@@ -831,7 +840,13 @@ export function render(view, params = []) {
     }));
   };
 
+  /** Tue 11/10: every set ticked and no timer running: a Finish button where the rest bar would be. */
+  const drawDone = () => {
+    const bar = view.querySelector('#s-done');
+    if (bar) bar.hidden = !allTicked(session.exercises, sets) || Boolean(rest.status());
+  };
   const drawRest = (st) => {
+    drawDone();
     const bar = view.querySelector('#rest');
     if (!bar) return;
     bar.hidden = !st;

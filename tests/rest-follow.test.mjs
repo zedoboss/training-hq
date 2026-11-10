@@ -58,7 +58,7 @@ test('every other change during a rest: undo skip, move up, remove, add, an edit
   assert.equal(followRest(restAfterCalf, [legs()], sets.map((x) => (x.id === 'h1' ? { ...x, kg: 25 } : x))).next, 'Hip Thrust (Machine): set 1, 25 kg × 8-12', 'kg typed in');
   assert.equal(followRest(restAfterCalf, [legs()], sets.map((x) => (x.id === 'c1' ? { ...x, done: false, doneAt: null } : x))).next, 'Calf Raise (Horizontal Leg Press): set 1, 86 kg × 17', 'unticked: that set again');
   let all = legs(); for (const k of ['hip', 'crunch', 'ext']) all = skip(all, k);
-  assert.equal(followRest(restAfterCalf, [all], sets).next, 'Every set ticked: finish the workout');
+  assert.deepEqual(followRest(restAfterCalf, [all], sets), { clear: true }, 'Tue 11/10: nothing left to do: the rest ends, Finish shows');
 });
 
 test('a workout finished or discarded cancels its rest; a countdown or a rest with no set is left alone', () => {

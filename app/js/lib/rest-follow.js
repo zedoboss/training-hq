@@ -4,7 +4,8 @@
 // worked out once, when the rest started. Now every change to the workout (skip, undo skip, reorder, add, remove, swap,
 // an edited or unticked set; on this phone, by the coach or from the Mac) works it out again at once: the rest bar, the
 // workout bar, the Mac's waiting "Rest over" and the coach's line at the end of the rest name the set he'll really do.
-// A workout that ended (finished or discarded anywhere) cancels its rest, so no "Rest over" comes after it.
+// A workout that ended (finished or discarded anywhere) cancels its rest, so no "Rest over" comes after it; so does one
+// with nothing left to do (Tue 11/10: after the last set, Finish, not a rest).
 import { nextAfter, nextAfterText, oneArmIn } from './session.js';
 
 /** The workout a rest belongs to, and the exercise it follows: the rest's own, else the active workout and the exercise
@@ -34,6 +35,8 @@ export function followRest(st, sessions, sets, { history = null } = {}) {
   if (!src.session) return st.from ? { clear: true } : null;
   if (src.session.status !== 'active') return { clear: true };
   if (!src.fromKey) return null;
+  // Tue 11/10: nothing left to do (the rest exercises skipped, the last set ticked): no rest, the screen shows Finish.
+  if (!nextAfter(src.session.exercises, src.sets, src.fromKey)) return { clear: true };
   return { next: restNextText(src.session, src.sets, src.fromKey, history) };
 }
 
