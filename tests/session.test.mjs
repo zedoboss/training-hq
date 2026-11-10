@@ -248,7 +248,7 @@ test('a new workout copies his last one of its kind (Thu 10/22): its exercises, 
   assert.equal(r.id, 'legs-gbi');
   assert.equal(r.copiedFrom, 'hevy.1');
   assert.deepEqual(r.exercises.map((e) => `${e.name}${e.plan ? ' (plan)' : ''}: ${e.sets.map((x) => x.type[0]).join('')}`),
-    ['Squat (Smith Machine) (plan): wnnn', 'Hip Abduction (Machine): nn', 'Leg Extension (Machine) (plan): n', 'Leg Extension (Machine): hhh'], 'RDL was not in his last Legs');
+    ['Squat (Smith Machine) (plan): wnnn', 'Hip Abduction (Machine): nn', 'Leg Extension (Machine) (plan): n', 'Leg Extension (Machine) · Hold: hhh'], 'RDL was not in his last Legs');
   const plan = [{ kind: 'routine', id: 'legs-gbi', exercises: [{ name: 'Squat (Smith Machine)', capClass: 'main', weeks: [{ kg: 50, reps: [8, 10], sets: 2 }] }] }];
   const { session, sets } = buildSession({ routine: r, meta: null, programmeRoutines: plan, lib: new Map(), history: buildHistory({}), today: '2026-10-22' });
   const squat = sets.filter((x) => x.exKey === session.exercises[0].key);

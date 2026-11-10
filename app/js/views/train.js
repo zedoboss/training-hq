@@ -2,7 +2,7 @@
 import { ready } from '../lib/data.js';
 import { groupByFolder, newRoutine, duplicateRoutine, moveFolder, newId } from '../lib/routines.js';
 import { weekColumn } from '../lib/programme.js';
-import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, usualStart, REST_TEXT, LABEL } from '../lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, withRest, withTime, usualStart, REST_TEXT, LABEL, useBlock, activeBlock, blockLine } from '../lib/rotation.js';
 import { isConfirmed, normalReady, modeOf } from '../lib/progression.js';
 import { buildHistory } from '../lib/history.js';
 import { ACTION_TEXT } from '../lib/readiness.js';
@@ -20,7 +20,7 @@ import { savedTargetDeg } from '../lib/squat-log.js';
 import { isDone, planFor } from '../lib/scans.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)' };
+const DOT = { pull: 'var(--pull)', push: 'var(--push)', legs: 'var(--legs)', neck: 'var(--muted)', 'upper-a': 'var(--pull)', 'upper-b': 'var(--push)', lower: 'var(--legs)' };
 const day = (iso) => formatDay(new Date(`${iso}T12:00:00`));
 
 export function render(view) {
@@ -28,9 +28,10 @@ export function render(view) {
   let repo;
 
   const draw = async () => {
-    const [folders, routines, meta, sessions, bridge, dayList, squats] = await Promise.all([
-      repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days'), repo.list('squats'),
+    const [folders, routines, meta, sessions, bridge, dayList, squats, blockDoc] = await Promise.all([
+      repo.list('folders'), repo.list('routines'), repo.get('programme', 'meta'), repo.list('sessions'), repo.get('bridge', 'last-loads'), repo.list('days'), repo.list('squats'), repo.get('schedule', 'block'),
     ]);
+    const block = useBlock(blockDoc);
     const lastSquat = squats.filter((r) => r.reps?.length).sort((a, b) => b.startedAt - a.startedAt)[0];
     const active = sessions.find((s) => s.status === 'active' && s.kind !== 'holds');
     const today = isoDate(new Date());
@@ -88,6 +89,7 @@ export function render(view) {
         <div class="hud c-muted next-top"><span>ROTATION</span><span>${last ? `LAST ${esc(LABEL[last.dayType]).toUpperCase()} · ${esc(day(last.date)).toUpperCase()}` : ''}</span></div>
         <div class="next-title"><span>${esc(headline)}</span>${wk && t.kind === 'train' ? `<span class="hud c-cyan">WEEK ${wk} COLUMN</span>` : ''}</div>
         ${doneToday.map((s) => `<a class="card-note done-today" href="#/finish/${esc(s.id)}">${esc(s.title)} done · ${esc(timeAt(s.startedAt, s))}${s.endedAt ? ` · ${Math.round(elapsedMs(s) / 60000)} min` : ''} · Open ›</a>`).join('')}
+        ${activeBlock(block, rot.next.date) || activeBlock(block, today) ? `<p class="hint c-text block-line">${esc(blockLine(block))}</p>` : ''}
         ${t.kind === 'rest' ? `<p class="hint c-text rest-why">${esc(REST_TEXT[t.reason] || REST_TEXT.added)}. Tendon holds as planned.</p>` : ''}
         ${nextLine ? `<p class="hint next-line">${esc(nextLine)}${wk ? ` · week ${wk} column` : ''}</p>` : ''}
         ${t.kind === 'train' ? (rd && rd.dayType === next
@@ -104,7 +106,7 @@ export function render(view) {
           ${nextRoutine ? `<a class="btn-ghost center" href="#/session/start/${esc(nextRoutine.id)}/template" title="Start from the ${esc(nextRoutine.title)} template instead of a copy of your last one">Template</a>` : ''}
           <a class="btn-ghost center" href="#/session/start/empty">Empty</a>
         </div>
-        ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">${esc(neckTodayText(neck.place, neck.where))} (your plan) ›</a>` : ''}
+        ${neckDue ? `<a class="card-note" id="neck-today" href="#/session/start/${esc(neckRoutine.id)}">${esc(neckTodayText(neck.place, neck.where, t.kind === 'done' ? t.dayType : next))} (your plan) ›</a>` : ''}
         ${t.kind === 'train' ? '<button class="link-btn" id="rest-today" type="button">Rest today instead</button>' : ''}
         ${undoable ? '<button class="link-btn" id="undo-rest" type="button">Undo rest day</button>' : ''}
       </section>

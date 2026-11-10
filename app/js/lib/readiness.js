@@ -29,7 +29,11 @@ export function exercisesLoading(areas, ids, exerciseNames) {
 }
 
 /** Working-area soreness keys for a day type (Legs: L and B; Pull: B; Push: none, in the draft). */
-export const workingKeys = (table, dayType) => table?.workingArea?.[dayType] || [];
+// Tue 11/10: an Upper/Lower day checks the areas of the day types it holds (Upper: Pull's and Push's; Lower: Legs'), so
+// the check-in asks as much as before.
+const HOLDS_TYPES = { 'upper-a': ['pull', 'push'], 'upper-b': ['pull', 'push'], lower: ['legs'] };
+export const workingKeys = (table, dayType) => (table?.workingArea?.[dayType] && !HOLDS_TYPES[dayType] ? table.workingArea[dayType]
+  : HOLDS_TYPES[dayType] ? [...new Set([...(table?.workingArea?.[dayType] || []), ...HOLDS_TYPES[dayType].flatMap((t) => table?.workingArea?.[t] || [])])] : []);
 
 /**
  * The rule that decides (first match from the top).

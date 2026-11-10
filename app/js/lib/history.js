@@ -2,6 +2,7 @@
 // the Hevy history bridge, a stand-in for the last few Hevy sessions that is ignored once Hevy history is imported.
 // Newest first. Each entry: {date, source, dayType, routineId, sets:[{type, kg, reps, durationS, hold, depth?}], heaviest:{kg, reps}|null}.
 import { isoDate } from './time.js';
+import { holdName } from './hold-names.js';
 
 const isWorking = (s) => !s.hold && s.type !== 'warmup' && s.type !== 'hold';
 
@@ -69,6 +70,18 @@ export function buildHistory({ sessions = [], sets = [], bridge: rawBridge = nul
     for (const e of list) {
       if (ownDates.has(`${name}|${e.date}`)) continue;
       push(name, { date: e.date, at: Date.parse(`${e.start || e.date}`), source: 'hevy', title: e.title, dayType: e.dayType ?? null, routineId: null, sets: e.sets, heaviest: e.heaviest, note: e.note });
+    }
+  }
+  // Tue 11/10, his words: "make the hold for tendons, names of the exercises make sense": a hold has its own name
+  // ("Cupping · Hold"), and the holds he logged before under the lift's own name, or as "Leg Extension Hold (Machine)",
+  // are its history too. They stay under the lift as well (its weights skip hold-only days, as before).
+  for (const [name, list] of [...byName]) {
+    const hn = holdName(name);
+    if (!hn || hn === name) continue;
+    const named = /\bhold\b/i.test(name);
+    for (const e of list) {
+      const hs = named ? e.sets : e.sets.filter((x) => x.hold || x.type === 'hold');
+      if (hs.length) push(hn, { ...e, sets: hs, heaviest: heaviestOf(hs), aliasOf: name });
     }
   }
   for (const list of byName.values()) list.sort((a, b) => (b.at || 0) - (a.at || 0) || b.date.localeCompare(a.date));

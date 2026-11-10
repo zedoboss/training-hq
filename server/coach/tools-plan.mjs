@@ -16,8 +16,8 @@ import { REST_CHOICES, restText } from '../../app/js/lib/settings.js';
 import { proposeWeek, confirmWeek, progressId, normalReady, modeOf } from '../../app/js/lib/progression.js';
 import { weekColumn } from '../../app/js/lib/programme.js';
 import { comebackStartOf, previousSame, routineFromLast } from '../../app/js/lib/finish.js';
-import { LABEL, addDays, withRest, withTime, rotationDay, withNextType, chosenNext, inRotation } from '../../app/js/lib/rotation.js';
-import { painOk, roundSetsLeft } from '../../app/js/lib/holds.js';
+import { LABEL, addDays, withRest, withTime, rotationDay, withNextType, chosenNext, inRotation, isBlockType, useBlock } from '../../app/js/lib/rotation.js';
+import { painOk, roundSetsLeft, holdName } from '../../app/js/lib/holds.js';
 import { currentBodyweight } from '../../app/js/lib/health.js';
 import { paramsOf, askedAreas } from '../../app/js/lib/readiness.js';
 import { formatDay, zonedTime, hmOf } from '../../app/js/lib/time.js';
@@ -406,12 +406,32 @@ function rotationSet(a, ctx) {
   const meta = s.meta();
   const wk = (t, date) => weekColumn(meta?.firstSessions?.[t], date);
   const nextText = (r) => `${LABEL[r.next.dayType]}, ${dayText(r.next.date, s.today)}${wk(r.next.dayType, r.next.date) ? `, week ${wk(r.next.dayType, r.next.date)} column` : ''}`;
+  if (a.action === 'block') {
+    // Tue 11/10: his Upper/Lower block: keep it (2 more weeks, or to `date`) or end it (Pull, Push, Legs from the next day).
+    const b = s.block();
+    if (!b?.from) return refuse('No training block is set (schedule/block).');
+    if (a.block === 'keep') {
+      const to = a.date && a.date > s.today ? a.date : addDays(b.to > s.today ? b.to : s.today, 14);
+      put(s, 'schedule', 'block', { ...b, to, answer: 'keep', answeredOn: s.today, ...(a.said ? { said: String(a.said).slice(0, 200) } : {}) });
+      return wrote(`Upper/Lower runs on to ${dayText(to, s.today)}. Pull, Push and Legs stay as routines and come back after it.`, 'block kept');
+    }
+    if (a.block === 'end') {
+      const trainedToday = s.last()?.date === s.today && isBlockType(s.last()?.dayType);
+      const day = trainedToday ? s.today : addDays(s.today, -1);
+      const ended = { ...b, to: day < b.from ? addDays(b.from, -1) : day, answer: 'end', answeredOn: s.today, ...(a.said ? { said: String(a.said).slice(0, 200) } : {}) };
+      put(s, 'schedule', 'block', ended);
+      useBlock(ended);
+      const after = rotationDay({ last: s.last(), today: s.today, days });
+      return wrote(`Upper/Lower is over. Next: ${LABEL[after.next.dayType]}, ${dayText(after.next.date, s.today)}; the rotation is Pull, Push, Legs again (3 on, 1 off).`, 'block ended');
+    }
+    return refuse('block: keep or end.');
+  }
   if (a.action === 'show') {
     const c = chosenNext(days, s.last(), rot.next.date);
     return { text: `Last: ${s.last() ? `${LABEL[s.last().dayType]}, ${dayText(s.last().date, s.today)}` : 'none'}. Next: ${nextText(rot)}${c ? ` (his choice of ${dayText(c.date, s.today)})` : ''}. Week columns today: ${['pull', 'push', 'legs'].map((t) => `${LABEL[t]} ${wk(t, s.today) ?? '-'}`).join(', ')}.`, summary: 'rotation' };
   }
   if (a.action === 'next') {
-    if (!inRotation(a.dayType)) return refuse('dayType: pull, push or legs.');
+    if (!inRotation(a.dayType)) return refuse('dayType: pull, push, legs (or upper-a, upper-b, lower in his Upper/Lower block).');
     if (s.active()) return refuse('A workout is in progress; the next day type is set once it is finished.');
     const date = a.date || rot.next.date;
     if (date < s.today) return refuse('That day has passed.');
@@ -567,7 +587,7 @@ function tendonHold(a, ctx) {
     const id = slug(name);
     const twin = areas.find((x) => x.id === id || x.label.toLowerCase() === name.toLowerCase());
     if (twin) return refuse(`${twin.label} is already a tendon area.`);
-    const holds = a.exercise ? [{ exercise: clip(a.exercise, 80), type: 'hold', ...(a.kg != null ? { loadKg: a.kg } : {}), sets: a.sets ?? 3, seconds: a.seconds ?? 30, ...(a.where ? { where: a.where } : {}), ...(a.timing?.length ? { timing: a.timing } : {}), source: 'his words to the coach', ...stamp }] : [];
+    const holds = a.exercise ? [{ exercise: holdName(clip(a.exercise, 80)), type: 'hold', ...(a.kg != null ? { loadKg: a.kg } : {}), sets: a.sets ?? 3, seconds: a.seconds ?? 30, ...(a.where ? { where: a.where } : {}), ...(a.timing?.length ? { timing: a.timing } : {}), source: 'his words to the coach', ...stamp }] : [];
     saveArea({ kind: 'area', id, label: name, phase: 'unknown', holds, reported: clip(a.note, 300), reportedSource: `his words to the coach, ${s.today}`, addedBy: stamp });
     return wrote(`${name} is a tendon area now${holds.length ? `, hold: ${holdText(holds[0])}` : ', no hold yet'}. Its phase isn't set: ask how it feels, then tendon_phase on his answer. Which exercises load it is set on the readiness table screen. ${FIXED}`, `+ area ${name}`);
   }
@@ -591,7 +611,7 @@ function tendonHold(a, ctx) {
   }
   if (a.action === 'add_hold') {
     if (!a.exercise) return refuse('Which hold, in his words (exercise)?');
-    const h = { exercise: clip(a.exercise, 80), type: 'hold', ...(a.kg != null ? { loadKg: a.kg } : {}), sets: a.sets ?? 3, seconds: a.seconds ?? 30, ...(a.where ? { where: a.where } : {}), ...(a.timing?.length ? { timing: a.timing } : {}), source: 'his words to the coach', ...stamp };
+    const h = { exercise: holdName(clip(a.exercise, 80)), type: 'hold', ...(a.kg != null ? { loadKg: a.kg } : {}), sets: a.sets ?? 3, seconds: a.seconds ?? 30, ...(a.where ? { where: a.where } : {}), ...(a.timing?.length ? { timing: a.timing } : {}), source: 'his words to the coach', ...stamp };
     saveArea({ ...area, holds: [...(area.holds || []), h] });
     return wrote(`${area.label}: added ${holdText(h)}. ${FIXED}`, `${area.label} + hold`);
   }
@@ -608,7 +628,7 @@ function tendonHold(a, ctx) {
     if (!a.exercise) return refuse('Which hold he uses instead, in his words (exercise)?');
     if (old.path) return refuse(`${old.exercise} moves along his hold path: hold_path changes its stage.`);
     const { loadKg, load, loadNote, loadKgLogged, loadSource, note, ...keep } = old;
-    const h = { ...keep, exercise: clip(a.exercise, 80), ...(a.kg != null ? { loadKg: a.kg } : {}), ...(a.sets ? { sets: a.sets } : {}), ...(a.seconds ? { seconds: a.seconds } : {}), ...(a.where ? { where: a.where } : {}), ...(a.timing?.length ? { timing: a.timing, when: null } : {}), replaced: { exercise: old.exercise, ...stamp } };
+    const h = { ...keep, exercise: holdName(clip(a.exercise, 80)), ...(a.kg != null ? { loadKg: a.kg } : {}), ...(a.sets ? { sets: a.sets } : {}), ...(a.seconds ? { seconds: a.seconds } : {}), ...(a.where ? { where: a.where } : {}), ...(a.timing?.length ? { timing: a.timing, when: null } : {}), replaced: { exercise: old.exercise, ...stamp } };
     saveArea({ ...area, holds: area.holds.map((x, i) => (i === hi.i ? h : x)) });
     return wrote(`${area.label}: ${h.exercise} instead of ${old.exercise}: ${holdText(h)}.${a.kg == null ? ' No load recorded for it yet: ask him what he uses.' : ''} ${FIXED}`, `${area.label}: ${h.exercise}`);
   }
@@ -748,8 +768,8 @@ export const PLAN_TOOLS = [
     obj({ action: { type: 'string', enum: ['find', 'create', 'edit', 'note', 'how_to', 'bar', 'delete'] }, exercise: { type: 'string', description: 'the exercise as he calls it' }, name: { type: 'string', description: 'name for a new exercise, or the new name' }, type: { type: 'string', enum: Object.keys(TYPES) }, equipment: { type: 'string', enum: EQUIPMENT }, primary: { type: 'string', enum: MUSCLES }, secondary: { type: 'array', items: { type: 'string', enum: MUSCLES } }, text: { type: 'string' }, replace: { type: 'boolean' }, bar: { type: 'string' }, said: SAID }, ['action']), exerciseLibrary),
   write('progression_answer', 'Progression answer', `Week 5+ numbers and the switch to the Normal programme, exactly as the progression screen's buttons (and Train's "Not yet") record them. He decides; you only record his answer, never decide or nudge. show = the app's proposal for dayType's week (default this week, 5 or later), whether it is confirmed, and whether the main lifts are ready for Normal (read only). confirm_week = his OK for that week, with any numbers he changed (kg: [{exercise, kg}], TOTAL kg; added kg for weighted pull-ups); decline_week = he doesn't confirm: nothing is saved and targets stay on the last confirmed numbers; normal = he switches that day type to its Normal programme; comeback = back to Getting Back Into; not_yet = he declines the suggested switch for now (asked again after his next session of that day type). The 30% cap still applies on top of every number.`,
     obj({ action: { type: 'string', enum: ['show', 'confirm_week', 'decline_week', 'normal', 'comeback', 'not_yet'] }, dayType: DAY, week: { type: 'integer', minimum: 5, maximum: 52 }, kg: { type: 'array', maxItems: 20, items: obj({ exercise: { type: 'string' }, kg: { type: 'number', minimum: 0 } }, ['exercise', 'kg']) }, said: SAID }, ['action', 'dayType']), progressionAnswer),
-  write('rotation_set', 'Rotation', `The rotation (Pull, Push, Legs, 3 on and 1 off). ${ONLY_HIS} show = last session, next session and the week columns (read only). next = the day type of his next session ("Legs next, not Pull"), from date (default the next training day); it holds until he does a session, then the rotation carries on from that day type as always. clear = take that choice back. week = put a day type on another week column (week), moving its week 1 by whole weeks; targets at Start use that column, the 30% cap still on top; never before the comeback.`,
-    obj({ action: { type: 'string', enum: ['show', 'next', 'clear', 'week'] }, dayType: DAY, date: ISO, week: { type: 'integer', minimum: 1, maximum: 52 }, said: SAID }, ['action']), rotationSet),
+  write('rotation_set', 'Rotation', `The rotation (Pull, Push, Legs, 3 on and 1 off). ${ONLY_HIS} show = last session, next session and the week columns (read only). next = the day type of his next session ("Legs next, not Pull"), from date (default the next training day); it holds until he does a session, then the rotation carries on from that day type as always. clear = take that choice back. week = put a day type on another week column (week), moving its week 1 by whole weeks; targets at Start use that column, the 30% cap still on top; never before the comeback. block = his Upper/Lower block (Upper A, Lower, rest, Upper B, Lower, rest, while it runs): keep = 2 more weeks (or to date), end = Pull, Push, Legs from the next day; only on his answer.`,
+    obj({ action: { type: 'string', enum: ['show', 'next', 'clear', 'week', 'block'] }, dayType: { type: 'string', enum: ['pull', 'push', 'legs', 'upper-a', 'upper-b', 'lower'] }, block: { type: 'string', enum: ['keep', 'end'] }, date: ISO, week: { type: 'integer', minimum: 1, maximum: 52 }, said: SAID }, ['action']), rotationSet),
   write('plan_day', 'Rest day on a date', `A rest day he plans on a coming date, or marks on a past day, or takes back (undo_rest). ${ONLY_HIS} His rule: a rest day skips that day and carries on with the next day type, no make-up; a session time set on the next training day moves with the session. Today goes through schedule's rest_today / undo_rest. A past day he trained on can't be a rest day.`,
     obj({ action: { type: 'string', enum: ['rest', 'undo_rest'] }, date: ISO, said: SAID }, ['action', 'date']), planDay),
   write('tendon_hold', 'Tendon holds', `His tendon holds, as the holds screen does. ${ONLY_HIS} Never suggest a hold, a load or a dose. log_round = a round he did outside a session (at home, say), the way the hold timer saves it: area, hold (its name; one not set up for the area is logged under his words), sets, seconds, kg (TOTAL; default the hold's load), time (HH:MM; default just now), date (default today), pain 0-10 and shaking if he says. His rounds of an area on a date (default today; time HH:MM picks the round started nearest it, default the newest): rounds = list them, each open or done with its holds; reopen_round = a round marked done is open again ("untick it", "it's not done"): it counts once all its holds are saved and the hold timer carries on at its next hold; delete_round = the round and its holds gone (his explicit words in said); remove_set = a hold logged by mistake (set_no, arm for an arm-by-arm hold; default the last; said), a done round that loses one opens again; fix_set = correct a logged hold's seconds, pain, kg or shaking. set_hold = change a hold's kg, sets, seconds (10-300), where (gym/home) or timing. use_hold = the area uses another hold (exercise) in place of one; add_hold = one more hold for an area; remove_hold = take one off (his explicit words in said). add_area = a new tendon area (label; optionally its first hold), phase not set (tendon_phase on his answer); remove_area = only on his explicit words (said). His tendon pain limit and phase rules are never changed here.`,

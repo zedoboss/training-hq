@@ -5,7 +5,7 @@ import { isoDate, formatDay, formatDate, formatTime, formatHm } from '../../app/
 import { withDefaults, equipmentWithDefaults, smallestPlate } from '../../app/js/lib/settings.js';
 import { mergeLibrary } from '../../app/js/lib/library.js';
 import { buildHistory } from '../../app/js/lib/history.js';
-import { rotationDay, lastRotationSession, daysByDate } from '../../app/js/lib/rotation.js';
+import { rotationDay, lastRotationSession, daysByDate, useBlock } from '../../app/js/lib/rotation.js';
 import { platesPerSide, kg as k } from '../../app/js/lib/loads.js';
 import { wakingDay } from '../../app/js/lib/waking-day.js';
 import { signsUpTo, movingOf, mealTimesNow } from '../notify.mjs';
@@ -19,6 +19,8 @@ export function snapshot(store, { tz, now = Date.now() } = {}) {
   const m = (key, f) => { if (!memo.has(key)) memo.set(key, f()); return memo.get(key); };
   const list = (col) => m(`l:${col}`, () => store.listRecords(col).map((r) => r.data).filter(Boolean));
   const one = (col, id) => m(`o:${col}/${id}`, () => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; });
+  // Tue 11/10: the Upper/Lower block (schedule/block) runs the rotation in every tool.
+  useBlock(one('schedule', 'block'));
   const s = {
     store, tz, now, today: isoDate(new Date(now), tz),
     list, one,
@@ -30,6 +32,7 @@ export function snapshot(store, { tz, now = Date.now() } = {}) {
     last: () => m('last', () => lastRotationSession(list('sessions'), one('bridge', 'last-loads'), tz)),
     rotation: () => m('rot', () => rotationDay({ last: s.last(), today: s.today, days: s.days() })),
     meta: () => one('programme', 'meta'),
+    block: () => one('schedule', 'block'),
     /** The workout in progress (not a holds round), newest first. */
     active: () => m('active', () => list('sessions').filter((x) => x.status === 'active' && x.kind !== 'holds').sort((a, b) => b.startedAt - a.startedAt)[0] || null),
     setsOf: (sessionId) => list('sets').filter((x) => x.sessionId === sessionId).sort((a, b) => a.order - b.order),

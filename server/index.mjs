@@ -5,7 +5,7 @@ import { paths, loadConfig, APP_DIR, CODE_DIR } from './config.mjs';
 import { openStore } from './store.mjs';
 import { createApp } from './app.mjs';
 import { writePrecache } from '../scripts/precache.mjs';
-import { seedDocs, applySeed } from './seed.mjs';
+import { seedDocs, applySeed, renameHolds } from './seed.mjs';
 import { openDemos } from './demos.mjs';
 import { openImports } from './imports.mjs';
 import { openImportInbox } from './import-inbox.mjs';
@@ -43,6 +43,8 @@ const store = openStore(p.dbFile);
 const { version } = writePrecache(APP_DIR);
 const seeded = applySeed(store, seedDocs(p.seedDir));
 log(`seed: ${seeded.written} written, ${seeded.refreshed} refreshed, ${seeded.kept} unchanged`);
+const renamed = renameHolds(store);
+if (renamed) log(`holds: ${renamed} records renamed to "· Hold" names`);
 
 const demos = openDemos(p.demosDir, store);
 const scan = demos.rescan();

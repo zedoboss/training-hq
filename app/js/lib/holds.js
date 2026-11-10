@@ -3,12 +3,13 @@
 import { isoDate } from './time.js';
 import { activeBridge } from './history.js';
 import { slug } from '../data/exercise-library.js';
+import { holdBase } from './hold-names.js';
 
 /**
  * Thu 10/22 (he did his knee holds with the new "Leg Extension Hold (Machine)" and the app still asked for them): a
  * hold exercise is the hold of its base exercise, and its timed sets are holds whatever their set type.
  */
-export const holdBase = (name) => String(name || '').replace(/\s+Hold\b/i, '').replace(/\s+/g, ' ').trim();
+export { holdBase, holdName } from './hold-names.js';
 /**
  * Sat 11/7, his words: "Why is there no animation when I'm on... toes wall squat hold": the demo ids to try for a hold,
  * best first. The hold version of the exercise ("Leg Extension (Machine)" -> leg-extension-hold-machine, "Cupping" ->
@@ -128,13 +129,15 @@ export function areaStatus(area, rounds, today) {
   return { kind: 'unscheduled', done: todayCount, target: null, due: false, text: 'Not scheduled yet' };
 }
 
-const DAY_NAME = { pull: 'Pull', push: 'Push', legs: 'Legs' };
+// Tue 11/10: an upper day holds Push and Pull lifts, so the holds timed after either come after it (bench, cable lateral
+// raise, cupping); Lower is Legs (the leg extension hold, cupping).
+const AFTER_WORDS = { pull: 'Pull', push: 'Push', legs: 'Legs', 'upper-a': 'Push|Pull|Upper A|Upper(?! B)', 'upper-b': 'Push|Pull|Upper B|Upper(?! A)', lower: 'Legs|Lower' };
+const afterRe = (dayType) => (AFTER_WORDS[dayType] ? new RegExp(`\\bafter (?:${AFTER_WORDS[dayType]})\\b`, 'i') : null);
 
 /** Holds due after this kind of workout, from the tendon data: holds whose timing says "after Push" and so on. */
 export function holdsAfter(areas, dayType) {
-  const day = DAY_NAME[dayType];
-  if (!day) return [];
-  const after = new RegExp(`\\bafter ${day}\\b`, 'i');
+  const after = afterRe(dayType);
+  if (!after) return [];
   return areas.flatMap((a) => (a.holds || []).filter((h) => [...(h.timing || []), h.when || ''].some((t) => after.test(t)))
     .map((h) => ({ area: a.label, exercise: h.exercise, sets: h.sets || 3, seconds: h.seconds || 30 })));
 }
@@ -194,7 +197,7 @@ export function homeSkips(sessions = [], date, tz) {
 export const HOLD_TIMES = { morning: '07:30', evening: '19:30' };
 
 const timingOf = (h) => [...(h.timing || []), h.when || ''].join(' | ');
-const isAfter = (h, dayType) => DAY_NAME[dayType] && new RegExp(`\\bafter ${DAY_NAME[dayType]}\\b`, 'i').test(timingOf(h));
+const isAfter = (h, dayType) => !!afterRe(dayType)?.test(timingOf(h));
 const onRestDays = (h) => /\brest days?\b/i.test(timingOf(h));
 
 /**

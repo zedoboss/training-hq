@@ -19,7 +19,8 @@ import { confirmSheet } from '../ui/sheet.js';
 import { toast } from '../ui/toast.js';
 import { getState } from '../lib/store.js';
 import { holdsAfter, holdBase, isHoldSet, homeSkips } from '../lib/holds.js';
-import { neckTodayText, neckDoneOn } from '../lib/neck.js';
+import { neckTodayText, neckDoneOn, neckToday } from '../lib/neck.js';
+import { inRotation } from '../lib/rotation.js';
 import { withDefaults } from '../lib/settings.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -131,11 +132,11 @@ export function render(view, params = []) {
     // Neck (decision 14, his answer Sun 10/18): after the session his plan puts it behind, offer it next.
     const neck = await repo.get('schedule', 'neck');
     const neckRoutine = (await repo.list('routines')).find((r) => r.dayType === 'neck');
-    const neckNext = neckRoutine && session.dayType && neck?.planned && neck.place === `after-${session.dayType}`
+    const neckNext = neckRoutine && session.dayType && neck?.planned && neck.place !== 'rest-day' && neckToday(neck, 'done', session.dayType)
       && day === isoDate(new Date()) && !neckDoneOn(sessions, day, (ms) => isoDate(new Date(ms)));
     // Thu 10/22, his words: missed the Evolt before the workout? Asked here, with the way to add the results.
     const scanPlan = await repo.get('scan-plan', 'main');
-    const scanAsk = ['pull', 'push', 'legs'].includes(session.dayType) && day === isoDate(new Date())
+    const scanAsk = inRotation(session.dayType) && day === isoDate(new Date())
       && (cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === day)
       && !(await repo.list('body-scans')).some((x) => x.date === day && isDone(x))
       // Thu 11/5: not while he has paused scans (a scan hold-off).
@@ -163,7 +164,7 @@ export function render(view, params = []) {
       </section>
       ${hold && !holdDone ? `<a class="card hold-prompt" href="#/holds"><span><span class="hud c-cyan">TENDON HOLD NOW</span><br>${esc(hold.text)}</span><span class="pill is-on">Start</span></a>` : ''}
       ${scanAsk ? '<a class="card hold-prompt" id="scan-ask" href="#/body/scan"><span><span class="hud c-amber">EVOLT SCAN</span><br>Not logged today. Did you do it? Add the results (photo or PDF).</span><span class="pill is-on">Add</span></a>' : ''}
-      ${neckNext ? `<a class="card hold-prompt" id="neck-next" href="#/session/start/${esc(neckRoutine.id)}"><span><span class="hud c-cyan">${esc(neckTodayText(neck.place, neck.where).toUpperCase())}</span><br>Your plan: ${neckRoutine.exercises.length} neck exercises</span><span class="pill is-on">Start</span></a>` : ''}
+      ${neckNext ? `<a class="card hold-prompt" id="neck-next" href="#/session/start/${esc(neckRoutine.id)}"><span><span class="hud c-cyan">${esc(neckTodayText(neck.place, neck.where, session.dayType).toUpperCase())}</span><br>Your plan: ${neckRoutine.exercises.length} neck exercises</span><span class="pill is-on">Start</span></a>` : ''}
       ${changed ? `<section class="card pad-card" id="upd"><p class="hint c-text">This session differs from the ${esc(routine.title)} routine. Update the routine, or keep it as it was?</p>
         <div class="btn-row"><button class="btn-ghost" data-u="update" type="button">Update routine</button><button class="btn-ghost" data-u="keep" type="button">Keep as is</button></div></section>` : ''}
       ${session.gym ? `<p class="hint">Gym: ${esc(session.gym)}</p>` : ''}

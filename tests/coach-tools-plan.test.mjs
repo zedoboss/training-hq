@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../server/store.mjs';
 import { PLAN_TOOLS } from '../server/coach/tools-plan.mjs';
+import { contextLine } from '../server/coach/tools-read.mjs';
 import { rotationDay, chosenNext, withNextType, daysByDate, lastRotationSession } from '../app/js/lib/rotation.js';
 import { weekColumn } from '../app/js/lib/programme.js';
 import { comebackStartOf, routineFromLast } from '../app/js/lib/finish.js';
@@ -263,7 +264,7 @@ test('tendon_hold: a home round logged as the hold timer saves it; hold load and
   const h = rec('tendons', 'area.shoulder').holds[0];
   assert.equal(h.loadKg, 35); assert.equal(h.seconds, 45); assert.equal(h.loadNote, undefined);
 
-  assert.match((await call('tendon_hold', { action: 'use_hold', area: 'knees', hold: 'wall squat', exercise: 'Wall Sit' })).text, /^Knees: Wall Sit instead of Toes Wall Squat Hold: Wall Sit, bodyweight|^Knees: Wall Sit instead of Toes Wall Squat Hold/);
+  assert.match((await call('tendon_hold', { action: 'use_hold', area: 'knees', hold: 'wall squat', exercise: 'Wall Sit' })).text, /^Knees: Wall Sit · Hold instead of Toes Wall Squat Hold: Wall Sit · Hold, bodyweight/); // Tue 11/10: a hold's name says hold
   assert.equal(rec('tendons', 'area.knees').holds[1].where, 'home');
   assert.match((await call('tendon_hold', { action: 'add_area', label: 'Elbow' })).text, /^Elbow is a tendon area now, no hold yet\. Its phase isn't set/);
   assert.equal(rec('tendons', 'area.elbow').phase, 'unknown');
@@ -350,4 +351,23 @@ test('plan_day: a rest day on the next training day moves his session time with 
   const r = await call('plan_day', { action: 'rest', date: '2026-01-23' });
   assert.match(r.text, /^Friday 1\/23 is a rest day .*Next session: Push, Saturday 1\/24 at 4:30 PM\./);
   assert.equal(rec('days', '2026-01-24').sessionTime, '16:30');
+});
+
+test('rotation_set block (Tue 11/10, his Upper/Lower for two weeks): the coach sees it; keep = 2 more weeks; end = Pull, Push, Legs again', async () => {
+  store.writeLocal('schedule', 'block', { kind: 'block', name: 'Upper/Lower', from: '2026-01-22', to: '2026-02-04', order: ['upper-a', 'lower', 'upper-b', 'lower'], then: 'pull', workingSets: 1 });
+  assert.match((await call('rotation_set', { action: 'show' })).text, /Last: Legs, Tuesday 1\/20\. Next: Upper A, Thursday 1\/22\./);
+  const line = contextLine({ store, tz: TZ, now: NOW });
+  assert.match(line, /Training block: Upper\/Lower from Thursday 1\/22 to Wednesday 2\/4: Upper A, Lower, rest, Upper B, Lower, rest[^\n]*1 working set per exercise[^\n]*His Pull, Push and Legs routines stay as they are\. After it Pull, Push and Legs come back, from Pull/);
+  assert.match(line, /Today: Upper A, not done yet\./);
+  assert.match(line, /Coming up[^\n]*Friday 1\/23 Lower; Saturday 1\/24 rest; Sunday 1\/25 Upper B; Monday 1\/26 Lower; Tuesday 1\/27 rest/);
+  assert.match((await call('rotation_set', { action: 'next', dayType: 'lower', said: 'lower today' })).text, /^Next session: Lower, Thursday 1\/22/);
+  assert.match((await call('rotation_set', { action: 'clear' })).text, /Next: Upper A, Thursday 1\/22/);
+  assert.match((await call('rotation_set', { action: 'block', block: 'keep', said: 'keep upper lower' })).text, /^Upper\/Lower runs on to Wednesday 2\/18\./);
+  assert.deepEqual([rec('schedule', 'block').to, rec('schedule', 'block').answer], ['2026-02-18', 'keep']);
+  assert.match((await call('rotation_set', { action: 'block', block: 'end', said: 'back to ppl' })).text, /^Upper\/Lower is over\. Next: Pull, Thursday 1\/22/);
+  assert.equal(rec('schedule', 'block').to, '2026-01-21');
+  assert.doesNotMatch(contextLine({ store, tz: TZ, now: NOW }), /Training block/);
+  assert.match(contextLine({ store, tz: TZ, now: NOW }), /Today: Pull \(week 5 column\), not done yet\./);
+  // His routines are all still there.
+  assert.ok(rec('routines', 'r-pull'));
 });

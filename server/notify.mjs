@@ -3,7 +3,7 @@
 // Sent ids are remembered in the server's meta table, so nothing is sent twice; a reminder more than 30 minutes
 // late (the Mac was asleep or off) is skipped rather than sent late.
 import { remindersFor, dueNow, reminderState, afterGym } from '../app/js/lib/reminders.js';
-import { addDays, rotationDay } from '../app/js/lib/rotation.js';
+import { addDays, rotationDay, useBlock } from '../app/js/lib/rotation.js';
 import { isoDate, deviceTimeZone, validZone } from '../app/js/lib/time.js';
 import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
@@ -30,6 +30,8 @@ export const SENT = 'notify:sent';
 export function stateFrom(store, tz) {
   const list = (col) => recordsOf(store, col);
   const one = (col, id) => { const r = store.getRecord(col, id); return r && !r.deleted ? r.data : null; };
+  // Tue 11/10: the Upper/Lower block (schedule/block) runs the rotation for every reminder and nudge.
+  useBlock(one('schedule', 'block'));
   return reminderState({
     sessions: list('sessions'), sets: list('sets'), tendons: list('tendons'), bridge: one('bridge', 'last-loads'),
     settings: one('settings', 'main'), meta: one('programme', 'meta'), days: list('days'), neck: one('schedule', 'neck'),

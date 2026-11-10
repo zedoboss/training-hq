@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { holdName } from '../app/js/lib/hold-names.js';
 
 const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 
@@ -76,4 +77,42 @@ export function applySeed(store, docs) {
     }
   }
   return { written, refreshed, kept };
+}
+
+/**
+ * Tue 11/10, his words: "make the hold for tendons, names of the exercises make sense. Because I think now they're the
+ * same. They should in the name have like dot hold": every tendon hold, its path stages, and the hold entries of his
+ * routines get the hold's own name ("Cupping · Hold"), once. The old name stays on the hold as formerly. Holds he logged
+ * before keep their sets; their history shows under the new name too (lib/history.js). Returns how many were renamed.
+ */
+export function renameHolds(store) {
+  let n = 0;
+  for (const r of store.listRecords('tendons')) {
+    const a = r.data;
+    if (r.deleted || a?.kind !== 'area' || !Array.isArray(a.holds)) continue;
+    let changed = false;
+    const holds = a.holds.map((h) => {
+      if (!h?.exercise) return h;
+      const name = holdName(h.exercise);
+      const stages = h.path?.stages?.map((st) => (st?.exercise && holdName(st.exercise) !== st.exercise ? { ...st, exercise: holdName(st.exercise) } : st));
+      const pathChanged = stages && stages.some((st, i) => st !== h.path.stages[i]);
+      if (name === h.exercise && !pathChanged) return h;
+      changed = true;
+      return { ...h, exercise: name, ...(name !== h.exercise ? { formerly: h.exercise } : {}), ...(pathChanged ? { path: { ...h.path, stages } } : {}) };
+    });
+    if (changed) { store.writeLocal('tendons', r.id, { ...a, holds }); n++; }
+  }
+  for (const r of store.listRecords('routines')) {
+    const x = r.data;
+    if (r.deleted || !Array.isArray(x?.exercises)) continue;
+    let changed = false;
+    const exercises = x.exercises.map((e) => {
+      const holdsOnly = e?.role === 'tendon-hold' || (Array.isArray(e?.sets) && e.sets.length > 0 && e.sets.every((st) => st.type === 'hold'));
+      if (!holdsOnly || !e.name || holdName(e.name) === e.name) return e;
+      changed = true;
+      return { ...e, name: holdName(e.name), role: 'tendon-hold' };
+    });
+    if (changed) { store.writeLocal('routines', r.id, { ...x, exercises }); n++; }
+  }
+  return n;
 }

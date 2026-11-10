@@ -4,7 +4,7 @@
 // 'it might fit better on Pull because of X, Y and Z'"). The Mac finds what has been planned but not done, or never
 // started; the coach (Claude) writes the opening message itself, in the same conversation, so his reply continues it.
 // Pure: facts in, open items out. Each item: {key, priority, facts}. The facts are for the coach, not for him.
-import { addDays } from './rotation.js';
+import { addDays, LABEL } from './rotation.js';
 import { areaStatus, roundsByDate, holdsAfter, homeSkips, holdBase } from './holds.js';
 import { placeLabel } from './neck.js';
 
@@ -52,7 +52,7 @@ export function openItems({ today, sessions = [], sets = [], neck = null, areas 
     const a = areas.find((x) => x.label === h.area);
     const k = atHome.get(holdBase(h.exercise)); const home = k && (a?.holds || []).find((x) => x.where === 'home');
     if (a && home && !(rounds[a.id]?.[today] > 0)) { holdLines.push(`${a.label}: the ${home.exercise} hold at home today is still open (${home.sets || 3} × ${home.seconds || 30} s), in place of the gym ${h.exercise} he skipped ("${k.reason}")`); holdPri = Math.max(holdPri, 60); continue; }
-    if (a && !(rounds[a.id]?.[today] > 0)) { holdLines.push(`${a.label}: the ${h.exercise} hold after ${h.after.charAt(0).toUpperCase() + h.after.slice(1)} today is still open (${h.sets} × ${h.seconds} s, at the gym)`); holdPri = Math.max(holdPri, 60); }
+    if (a && !(rounds[a.id]?.[today] > 0)) { holdLines.push(`${a.label}: the ${h.exercise} hold after ${LABEL[h.after] || h.after} today is still open (${h.sets} × ${h.seconds} s, at the gym)`); holdPri = Math.max(holdPri, 60); }
   }
   for (const a of areas) {
     if (!a.holds?.length || a.phase === 'none' || a.phase === 'unknown') continue;

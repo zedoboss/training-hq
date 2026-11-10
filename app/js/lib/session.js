@@ -10,12 +10,27 @@ import { activeBridge } from './history.js';
 import { confirmedKg } from './progression.js';
 import { lighterTarget, lighterKg, shortReps } from './readiness.js';
 import { kg as kgText } from './loads.js';
+import { holdBase, holdName } from './holds.js';
 
 export const newSetId = () => newId('set');
 
 function planExerciseFor(programmeRoutines, plan) {
   const r = programmeRoutines.find((x) => x.id === plan.routine);
   return r?.exercises.find((e) => e.comebackName === plan.name) ?? null;
+}
+/** The day type of the programme routine a plan link points to (an Upper A lift keeps its Pull or Push week column). */
+const planDayType = (programmeRoutines, plan) => programmeRoutines.find((x) => x.id === plan?.routine)?.dayType ?? null;
+
+/**
+ * Tue 11/10, his words: "One working set for two weeks starting today": a routine with workingSets (and the last date
+ * it holds, workingSetsUntil) keeps only that many working sets per exercise. Warm-ups and holds stay; drop sets go
+ * (they are more working sets). Returns the rows, or the same rows when the routine has no such limit today.
+ */
+export function capWorkingSets(rows, routine, today) {
+  const n = routine?.workingSets;
+  if (!(n >= 1) || (routine.workingSetsUntil && today > routine.workingSetsUntil)) return rows;
+  let seen = 0;
+  return rows.filter((r) => r.type === 'warmup' || r.type === 'hold' || (r.type !== 'dropset' && ++seen <= n));
 }
 
 const kindOf = (s) => (s.type === 'hold' ? 'hold' : s.type === 'warmup' ? 'warmup' : 'working');
@@ -70,10 +85,13 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
     const easy = !!lighter && (lighter.all || (lighter.names || []).includes(re.name));
     if (pe) {
       const formOk = latestFormCheck(formChecks, re.name);
-      const tAt = (w) => targetFor({ plan: pe, week: w, last: lastHeaviest, notes, today, dayType: routine?.dayType ?? null, formOk, barKg: ex.barKg ?? null, smallestPlate, equipment: ex.equipment ?? null, name: re.name, progressKg: w > 4 ? confirmedKg(progress, routine.dayType, w, pe.name)?.kg ?? null : null });
-      let t = tAt(week);
+      // A block routine (Upper A...) has no week column of its own: each lift uses its own day type's (Pull, Push, Legs).
+      const planType = meta?.firstSessions?.[routine?.dayType] ? routine.dayType : planDayType(programmeRoutines, re.plan) ?? routine?.dayType ?? null;
+      const exWeek = planType !== routine?.dayType && meta?.firstSessions?.[planType] ? weekColumn(meta.firstSessions[planType], today) : week;
+      const tAt = (w) => targetFor({ plan: pe, week: w, last: lastHeaviest, notes, today, dayType: planType, formOk, barKg: ex.barKg ?? null, smallestPlate, equipment: ex.equipment ?? null, name: re.name, progressKg: w > 4 ? confirmedKg(progress, planType, w, pe.name)?.kg ?? null : null });
+      let t = tAt(exWeek);
       if (easy) {
-        const l = lighterTarget({ week, targetAt: tAt, params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
+        const l = lighterTarget({ week: exWeek, targetAt: tAt, params: lighter.params, barKg: ex.barKg ?? null, smallestPlate });
         t = { ...t, kg: t.bodyweight ? t.kg : l.kg ?? t.kg, reps: l.reps, why: `${l.why}${t.kg != null && !t.bodyweight ? ` (planned ${t.kg})` : ''}`, lighter: true };
       }
       if (last && latest && latest !== last && latest.sets.some((x) => x.hold || x.type === 'hold') && t.kg != null && !t.bodyweight && !t.painLast) t = { ...t, why: `${dayOf(latest.date)} was holds only, so from your rep sets: ${t.why.replace(/\b[Ll]ast time\b/, dayOf(last.date))}`, holdsLast: true };
@@ -142,6 +160,8 @@ export function buildSession({ routine, meta, programmeRoutines = [], lib, histo
       else if (notes.skipped) entry.target = { ...(entry.target || {}), kg: planned.find((x) => x.type === 'normal')?.kg ?? entry.target?.kg ?? null, why: `Skipped last time${notes.skipped.reason ? ` (${notes.skipped.reason})` : ''}: same as before`, skippedLast: true };
       if (easy) entry.target = { ...(entry.target || {}), kg: planned.find((p) => p.type === 'normal')?.kg ?? entry.target?.kg ?? null, why: `lighter (check-in): ${lighter.params?.week1Pct ?? 20}% under`, lighter: true };
     }
+    planned = capWorkingSets(planned, routine, today);
+    if (entry.target?.sets > 1 && planned.length && routine?.workingSets >= 1 && !(routine.workingSetsUntil && today > routine.workingSetsUntil)) entry.target = { ...entry.target, sets: Math.min(entry.target.sets, routine.workingSets), oneSet: true };
     // P5: calculated warm-up sets from today's first working weight (Settings steps), loadable on the bar and plates.
     // They take the place of any plain warm-up rows the routine has.
     if (re.warmup) {
@@ -412,7 +432,8 @@ export function oneArmIn(history, name, notes = []) {
 /** His tendon holds done one arm at a time (sides "Right arm", "Left arm"): exercise name -> rounds (its sets). */
 export function oneArmHoldRounds(tendonDocs = []) {
   const out = new Map();
-  for (const a of tendonDocs || []) for (const h of a?.holds || []) if (h?.exercise && (h.sides?.length ?? 0) > 1 && h.sets) out.set(h.exercise, h.sets);
+  // By its name, its lift's name and its "· Hold" name (Tue 11/10: the holds got their own names; routines may have either).
+  for (const a of tendonDocs || []) for (const h of a?.holds || []) if (h?.exercise && (h.sides?.length ?? 0) > 1 && h.sets) for (const n of [h.exercise, holdBase(h.exercise), holdName(h.exercise)]) out.set(n, h.sets);
   return out;
 }
 

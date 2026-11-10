@@ -4,7 +4,7 @@
 // his pain limit (3-4/10, his note); then the app asks the next morning and moves only when he says yes ("not worse
 // the morning after?"). The new stage replaces the hold before it. He starts the path himself. The stages and loads
 // are his data (the tendon seed); nothing here is advice of the app's own.
-import { painOk, holdBase, isHoldSet } from './holds.js';
+import { painOk, holdBase, holdName, isHoldSet } from './holds.js';
 
 /** The path on one of an area's holds, or null. */
 export const pathOf = (hold) => (hold?.path?.stages?.length > 1 ? hold.path : null);
@@ -23,7 +23,8 @@ export function pathState({ hold, area, sessions = [], sets = [], dayOf }) {
   const need = path.passDays || 2;
   if (!started) return { started, at, stage, next, quietDays: [], need, ready: false };
   const done = sessions.filter((s) => s?.status === 'done' && s.startedAt && dayOf(s.startedAt) >= path.since);
-  const pushDays = new Set(done.filter((s) => s.kind !== 'holds' && s.dayType === 'push').map((s) => dayOf(s.startedAt)));
+  // Tue 11/10: an upper day of his Upper/Lower block has the Push lifts, so it counts as a Push day.
+  const pushDays = new Set(done.filter((s) => s.kind !== 'holds' && (s.dayType === 'push' || /^upper-/.test(s.dayType || ''))).map((s) => dayOf(s.startedAt)));
   const name = holdBase(stage.exercise);
   const ok = new Map(); // date -> every set of the stage's hold within his limit
   for (const s of done) {
@@ -48,7 +49,7 @@ export function movePath(hold, how, today) {
   const to = how === 'start' ? 0 : how === 'up' ? Math.min(path.stages.length - 1, at + 1) : how === 'back' ? Math.max(0, at - 1) : at;
   const st = path.stages[to];
   return {
-    ...hold, exercise: st.exercise, loadKg: st.loadKg ?? null, loadNote: st.loadNote || '',
+    ...hold, exercise: holdName(st.exercise), loadKg: st.loadKg ?? null, loadNote: st.loadNote || '',
     path: { ...path, at: to, since: today, notYetOn: null, log: [...(path.log || []), { how, at: to, on: today }] },
   };
 }

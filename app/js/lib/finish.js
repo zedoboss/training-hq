@@ -5,6 +5,7 @@ import { newId, newKey } from './routines.js';
 import { sessionPoints, setRecordKinds } from './records.js';
 import { setValueText } from './calendar.js';
 import { SET_TYPES } from './exercise-types.js';
+import { holdName } from './hold-names.js';
 
 /** The comeback's first day: the earliest first session in the programme data (synced from the Mac), or null. */
 export const comebackStartOf = (meta) => Object.entries(meta?.firstSessions || {})
@@ -196,17 +197,26 @@ export function routineFromLast(routine, last, lastSets) {
     const swap = e0.swappedFrom?.name && e0.swappedFrom.name !== e0.name ? e0 : null;
     const e = swap ? { ...e0, exerciseId: e0.swappedFrom.exerciseId ?? null, name: e0.swappedFrom.name, notes: '', skipped: null } : e0;
     const mine = swap ? [] : lastSets.filter((s) => s.exKey === e.key && s.done).sort((a, b) => a.order - b.order);
-    const holdsOnly = mine.length > 0 && mine.every((s) => s.type === 'hold');
+    // Tue 11/10: a holds entry he skipped is still holds (its planned rows), not a second set of the lift.
+    const planned = !swap && !mine.length ? lastSets.filter((s) => s.exKey === e.key).sort((a, b) => a.order - b.order) : [];
+    // Sat 11/7: a second "Cupping" with nothing logged and his note "30s hold..." was the hold, not the lift again.
+    const i0 = (last.exercises || []).indexOf(e0);
+    const emptyHold = !swap && !mine.length && !planned.length && (e.role === 'tendon-hold' || (/\bhold\b/i.test(e.notes || '')
+      && (last.exercises || []).some((x, j) => j < i0 && (x.exerciseId === e.exerciseId || x.name === e.name))));
+    const holdsOnly = emptyHold || ((mine.length ? mine : planned).length > 0 && (mine.length ? mine : planned).every((s) => s.type === 'hold'));
     const re = holdsOnly ? null : (routine?.exercises || []).find((x) => !used.has(x.key) && (x.exerciseId === e.exerciseId || x.name === e.name));
     if (re) used.add(re.key);
-    const copied = mine.filter((s) => !(re?.warmup && s.type === 'warmup'))
-      .map((s) => ({ type: s.type, kg: s.kg ?? null, reps: s.reps != null ? [s.reps, s.reps] : null, durationS: s.durationS ?? null }));
+    const copied = emptyHold ? [1, 2, 3].map(() => ({ type: 'hold', kg: null, reps: null, durationS: 30 }))
+      : (mine.length ? mine : holdsOnly ? planned : []).filter((s) => !(re?.warmup && s.type === 'warmup'))
+        .map((s) => ({ type: s.type, kg: s.kg ?? null, reps: s.reps != null ? [s.reps, s.reps] : null, durationS: s.durationS ?? null }));
     // Skipped last time with a reason (Thu 10/22, his words: "skipped this workout, do it next time, because of X"):
     // it comes back, with the reason on the card.
     const back = swap ? `Swapped for ${swap.name} last time${last.startedAt ? ` (${formatDay(new Date(last.startedAt))})` : ''}: back to ${e.name}.` : '';
     const why = back || (e.skipped && !mine.length ? `Skipped last time${last.startedAt ? ` (${formatDay(new Date(last.startedAt))})` : ''}${e.skipped.reason ? `: ${e.skipped.reason}` : ''}.` : '');
     return {
-      key: newKey(), exerciseId: e.exerciseId, name: re?.name ?? e.name, restSeconds: re?.restSeconds ?? e.restSeconds ?? null,
+      // Tue 11/10, his words: "names of the exercises make sense... in the name have like dot hold": holds come back
+      // as "<lift> · Hold", not under the lift's own name.
+      key: newKey(), exerciseId: e.exerciseId, name: holdsOnly ? holdName(e.name) : re?.name ?? e.name, restSeconds: re?.restSeconds ?? e.restSeconds ?? null,
       notes: [re?.notes ?? e.notes ?? '', why].filter(Boolean).join('\n'), plan: re?.plan ?? null, role: re?.role ?? e.role ?? null, supersetId: e.supersetId ?? null,
       warmup: re?.warmup ?? false, sets: copied.length ? copied : re?.sets ?? [],
       ...(e.skipped && !mine.length ? { skippedLast: { reason: e.skipped.reason || '', date: last.startedAt ? isoDate(new Date(last.startedAt)) : null } } : {}),

@@ -158,7 +158,7 @@ export const ahead = (s, n = 8) => projectRotation({ last: s.last(), days: s.day
 
 /** "Coming up ...": dates and day types from the app's rotation, so nobody works out a weekday by hand. */
 function comingUp(s, n = 8) {
-  const fmt = (list) => list.map((d) => `${dayText(d.date, s.today)} ${d.kind === 'rest' ? 'rest' : `${LABEL[d.dayType]} (week ${weekOf(s, d.dayType, d.date)})`}`).join('; ');
+  const fmt = (list) => list.map((d) => `${dayText(d.date, s.today)} ${d.kind === 'rest' ? 'rest' : `${LABEL[d.dayType]}${weekOf(s, d.dayType, d.date) ? ` (week ${weekOf(s, d.dayType, d.date)})` : ''}`}`).join('; ');
   const line = `Coming up, if each planned session happens on its day: ${fmt(ahead(s, n).filter((d) => d.date > s.today))}.`;
   const t = s.rotation().today;
   if (t.kind !== 'train') return line;
@@ -168,14 +168,29 @@ function comingUp(s, n = 8) {
   return `${line} If today's ${LABEL[t.dayType]} is NOT done today, it carries over: ${fmt(carried)}. Today's session isn't done, so don't state tomorrow's day as fact: give both, or ask whether he trains today.`;
 }
 
+/**
+ * Tue 11/10: his Upper/Lower block (schedule/block), while it runs or is about to: what it is, how it ends, and that
+ * Pull, Push and Legs stay. Empty when there is none or it is over.
+ */
+export function blockText(s) {
+  const b = s.block?.() ?? s.one('schedule', 'block');
+  if (!b?.from || !b?.to || s.today > b.to) return '';
+  const sets = b.workingSets ? ` ${b.workingSets} working set${b.workingSets > 1 ? 's' : ''} per exercise (warm-ups and tendon holds as usual; the routines and each workout's sets are already cut to that).` : '';
+  const after = b.answer === 'keep' ? 'He chose to keep Upper/Lower; it runs on until the end date.' : `After it Pull, Push and Legs come back, from ${LABEL[b.then] || 'Pull'}, unless he keeps Upper/Lower: on ${dayText(b.to, s.today)} ask him (open question "block-end"), then rotation_set block keep (2 more weeks) or end.`;
+  return `Training block: ${b.name || 'Upper/Lower'} from ${dayText(b.from, s.today)} to ${dayText(b.to, s.today)}: Upper A, Lower, rest, Upper B, Lower, rest (the uppers alternate; Lower = his Legs).${sets} Neck goes after both upper days; holds timed after Push or Pull come after both upper days, after Legs after Lower. His Pull, Push and Legs routines stay as they are. ${after}`;
+}
+
 function rotationLines(s) {
   const rot = s.rotation(); const t = rot.today; const days = s.days();
   const out = [];
   const nxt = rot.next;
   const wk = weekOf(s, nxt.dayType, nxt.date);
-  if (t.kind === 'train') out.push(`Today: ${LABEL[t.dayType]} (week ${wk} column), not done yet.`);
-  else if (t.kind === 'done') out.push(`Today: ${LABEL[t.dayType]} done. Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)} (week ${wk} column).`);
-  else out.push(`Today: rest (${t.reason === 'rotation' ? 'the rest day after Legs' : t.reason === 'moved' ? 'session moved to tomorrow at the check-in' : t.reason === 'rest-holds' ? 'rest and tendon holds, from the check-in' : 'a rest day he added'}). Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)} (week ${wk} column).`);
+  const wkText = wk ? ` (week ${wk} column)` : '';
+  const bl = blockText(s);
+  if (bl) out.push(bl);
+  if (t.kind === 'train') out.push(`Today: ${LABEL[t.dayType]}${wkText}, not done yet.`);
+  else if (t.kind === 'done') out.push(`Today: ${LABEL[t.dayType]} done. Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)}${wkText}.`);
+  else out.push(`Today: rest (${t.reason === 'rotation' ? (t.block || s.last()?.dayType === 'lower' ? 'the rest day after Lower' : 'the rest day after three training days') : t.reason === 'moved' ? 'session moved to tomorrow at the check-in' : t.reason === 'rest-holds' ? 'rest and tendon holds, from the check-in' : 'a rest day he added'}). Next: ${LABEL[nxt.dayType]}, ${dayText(nxt.date, s.today)}${wkText}.`);
   const hm = days[nxt.date]?.sessionTime;
   const pre = s.settings().notify.readinessMin;
   const lead = hm ? checkInLead(days[nxt.date], nxt.date, s.tz, pre) : null;

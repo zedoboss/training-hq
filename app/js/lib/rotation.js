@@ -9,8 +9,29 @@ import { daysBetween, isoDate, hmOf } from './time.js';
 import { activeBridge } from './history.js';
 
 export const ROTATION = ['pull', 'push', 'legs'];
-export const inRotation = (t) => ROTATION.includes(t);
-export const LABEL = { pull: 'Pull', push: 'Push', legs: 'Legs', neck: 'Neck' };
+// Tue 11/10, his words: "Upper A upper B. One working set for two weeks starting today... do not remove push-pull legs":
+// a block of other day types for a set span (synced doc schedule/block: {from, to, order, then, workingSets}), run
+// Upper, Lower, rest, alternating the uppers. Pull, Push and Legs stay as they are and come back after it, from `then`.
+export const BLOCK_TYPES = ['upper-a', 'upper-b', 'lower'];
+export const isBlockType = (t) => BLOCK_TYPES.includes(t);
+export const inRotation = (t) => ROTATION.includes(t) || isBlockType(t);
+export const LABEL = { pull: 'Pull', push: 'Push', legs: 'Legs', neck: 'Neck', 'upper-a': 'Upper A', 'upper-b': 'Upper B', lower: 'Lower' };
+
+let current = null;
+/** The block in use when a caller doesn't pass one (the app and the Mac set it from schedule/block as it syncs). */
+export function useBlock(block) { current = block?.from && block?.to && Array.isArray(block.order) && block.order.length ? block : null; return current; }
+export const currentBlock = () => current;
+/** One line for Train: "Upper/Lower until Monday 11/23: Upper, Lower, rest. 1 working set per exercise." */
+export function blockLine(block) {
+  if (!block) return '';
+  const d = new Date(`${block.to}T12:00:00Z`);
+  const end = `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  const sets = block.workingSets ? ` ${block.workingSets} working set${block.workingSets > 1 ? 's' : ''} per exercise.` : '';
+  return `${block.name || 'Upper/Lower'} until ${end}: Upper, Lower, rest.${sets} Pull, Push and Legs come back after it.`;
+}
+
+/** The block when `date` falls inside it, else null. */
+export const activeBlock = (block, date) => (block?.from && block?.to && date >= block.from && date <= block.to ? block : null);
 
 /** Next day type after the last completed one (rest days are not sessions). */
 export function nextDayType(lastDayType) {
@@ -26,10 +47,10 @@ export function addDays(iso, n) {
 }
 
 /**
- * Last completed rotation session: finished workouts (Training HQ and imported) with a Pull, Push or Legs day type,
- * else the Hevy bridge. Neck and untyped sessions don't move the rotation.
- * @returns {{dayType:string, date:string, sessionId:string|null, streak:number}|null}  streak: training days in a row
- *   up to and including that day
+ * Last completed rotation session: finished workouts (Training HQ and imported) with a Pull, Push or Legs day type
+ * (or a block's Upper A, Upper B, Lower), else the Hevy bridge. Neck and untyped sessions don't move the rotation.
+ * @returns {{dayType:string, date:string, sessionId:string|null, streak:number, lastUpper:string|null}|null}  streak:
+ *   training days in a row up to and including that day; lastUpper: the newest Upper A or Upper B
  */
 export function lastRotationSession(sessions, rawBridge = null, tz) {
   const mine = sessions.filter((s) => s.status === 'done' && s.kind !== 'holds' && inRotation(s.dayType)).sort((a, b) => b.startedAt - a.startedAt);
@@ -40,13 +61,32 @@ export function lastRotationSession(sessions, rawBridge = null, tz) {
     const dates = new Set(mine.map((s) => isoDate(new Date(s.startedAt), tz)));
     let streak = 1;
     while (dates.has(addDays(ownIso, -streak))) streak++;
-    return { dayType: own.dayType, date: ownIso, sessionId: own.id, streak };
+    const lastUpper = mine.find((x) => /^upper-/.test(x.dayType))?.dayType;
+    return { dayType: own.dayType, date: ownIso, sessionId: own.id, streak, ...(lastUpper ? { lastUpper } : {}) };
   }
   return bridge ? { dayType: bridge.dayType, date: bridge.date, sessionId: null, streak: 1 } : null;
 }
 
-/** The rotation's own rest comes after three training days in a row (3 on, 1 off). */
-export const restAfter = (last) => !!last && (last.streak || 1) >= 3;
+/** The rotation's own rest comes after three training days in a row (3 on, 1 off); in a block, after every Lower
+ *  (Upper, Lower, rest). */
+export const restAfter = (last) => !!last && (last.dayType === 'lower' || (!isBlockType(last.dayType) && (last.streak || 1) >= 3));
+
+/**
+ * The day type after `last` for a session on `date`. Inside a block: its first type until a block session is done,
+ * then an upper is followed by Lower and Lower by the other upper. Outside one (or after it): Pull, Push, Legs, carrying
+ * on from the block's `then` (the PPL day that was next when it started) after a block session.
+ */
+export function nextTypeOn(last, date, block = current) {
+  const b = activeBlock(block, date);
+  const t = last?.dayType;
+  if (b) {
+    if (!isBlockType(t) || last.date < b.from) return b.order[0];
+    if (t !== 'lower') return 'lower';
+    return last.lastUpper === 'upper-a' ? 'upper-b' : 'upper-a';
+  }
+  if (isBlockType(t)) return ROTATION.includes(block?.then) ? block.then : 'pull';
+  return nextDayType(t);
+}
 
 const restOf = (days, date) => days?.[date]?.rest || null;
 
@@ -67,8 +107,8 @@ function firstTrainingDate(days, from) {
  *   next: {dayType:string, date:string}, last: object|null}}
  *   kind 'rest' reasons: 'rotation' (the day after Legs), or the day record's reason.
  */
-export function rotationDay({ last, today, days = {} }) {
-  const r = rotationDayOf({ last, today, days });
+export function rotationDay({ last, today, days = {}, block = current }) {
+  const r = rotationDayOf({ last, today, days, block });
   const c = chosenNext(days, last, r.next.date);
   if (!c || c.dayType === r.next.dayType) return r;
   return { ...r, today: r.today.kind === 'train' ? { ...r.today, dayType: c.dayType } : r.today, next: { ...r.next, dayType: c.dayType, chosen: c.date } };
@@ -100,28 +140,31 @@ export function withNextType(doc, date, dayType, { at = Date.now(), by = 'app', 
   return { ...base, date, nextType: { dayType, at, by, ...(said ? { said: String(said).slice(0, 200) } : {}) } };
 }
 
-function rotationDayOf({ last, today, days = {} }) {
-  const after = nextDayType(last?.dayType);
+function rotationDayOf({ last, today, days = {}, block = null }) {
+  const at = (date) => ({ dayType: nextTypeOn(last, date, block), date });
+  // In a block, today says so (Upper A, Lower... and its rest days): rest-day holds are asked even before an upper day.
+  const inBlock = activeBlock(block, today) ? { block: true } : {};
   if (last && last.date === today) {
-    // Trained today. After three days in a row the next day is the rotation's Rest.
+    // Trained today. After three days in a row (in a block: after Lower) the next day is the rotation's Rest.
     const from = addDays(today, restAfter(last) ? 2 : 1);
-    return { today: { kind: 'done', dayType: last.dayType, reason: null }, next: { dayType: after, date: firstTrainingDate(days, from) }, last };
+    return { today: { kind: 'done', dayType: last.dayType, reason: null, ...inBlock }, next: at(firstTrainingDate(days, from)), last };
   }
   const marked = restOf(days, today);
   if (marked) {
-    return { today: { kind: 'rest', dayType: null, reason: marked.reason || 'added' }, next: { dayType: after, date: firstTrainingDate(days, addDays(today, 1)) }, last };
+    return { today: { kind: 'rest', dayType: null, reason: marked.reason || 'added', ...inBlock }, next: at(firstTrainingDate(days, addDays(today, 1))), last };
   }
   if (restAfter(last) && daysBetween(last.date, today) === 1) {
-    return { today: { kind: 'rest', dayType: null, reason: 'rotation' }, next: { dayType: after, date: firstTrainingDate(days, addDays(today, 1)) }, last };
+    return { today: { kind: 'rest', dayType: null, reason: 'rotation', ...inBlock }, next: at(firstTrainingDate(days, addDays(today, 1))), last };
   }
-  return { today: { kind: 'train', dayType: after, reason: null }, next: { dayType: after, date: today }, last };
+  const n = at(today);
+  return { today: { kind: 'train', dayType: n.dayType, reason: null, ...inBlock }, next: n, last };
 }
 
 /**
  * On a rest day, the next session's day type when that session is tomorrow, else null (Sat 10/24: a weekly gym hold
  * isn't asked on a rest day before a training day; he's at the gym tomorrow and it goes after that session).
  */
-export const sessionTomorrow = (rot, date) => (rot?.today?.kind === 'rest' && rot.next?.date === addDays(date, 1) ? rot.next.dayType : null);
+export const sessionTomorrow = (rot, date) => (rot?.today?.kind === 'rest' && !rot.today.block && rot.next?.date === addDays(date, 1) ? rot.next.dayType : null);
 
 /**
  * On a training day, yesterday's date when yesterday was a rest day (so today's session was its next one), else null:
@@ -132,7 +175,7 @@ export const afterRestDay = (rot, date, days = {}) => {
   const k = rot?.today?.kind;
   const y = addDays(date, -1);
   const rest = k === 'train' ? !!rot.last && rot.last.date < y && rotationDay({ last: rot.last, today: y, days }).today.kind === 'rest'
-    : k === 'done' && (rot.last?.streak || 1) === 1 && (!!restOf(days, y) || rot.last.dayType === nextDayType('legs'));
+    : k === 'done' && (rot.last?.streak || 1) === 1 && (!!restOf(days, y) || rot.last.dayType === nextDayType('legs') || /^upper-/.test(rot.last.dayType));
   return rest ? y : null;
 };
 
@@ -148,7 +191,7 @@ export function withRest(doc, date, reason, at = Date.now()) {
 
 /** Plain words for a rest day's reason. */
 export const REST_TEXT = {
-  rotation: 'Rest day in the rotation (three days on, one off)',
+  rotation: 'Rest day in the rotation (three days on, one off; in Upper/Lower, the day after Lower)',
   added: 'Rest day you added',
   moved: 'Session moved to tomorrow (check-in)',
   'rest-holds': 'Rest and tendon holds (check-in)',

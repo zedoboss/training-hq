@@ -8,6 +8,7 @@ import { withDefaults, equipmentWithDefaults, mergeDeep } from './settings.js';
 import { lineReader } from './coach.js';
 import { setHomeZone, deviceTimeZone } from './time.js';
 import { nextSyncMs } from './mac-reach.js';
+import { useBlock } from './rotation.js';
 
 let repo = null;
 let timer = null;
@@ -26,11 +27,13 @@ export const ready = (async () => {
   repo.onChange((cols) => {
     if (cols.includes('programme')) refreshProgramme();
     if (cols.includes('settings')) refreshSettings();
+    if (cols.includes('schedule')) refreshBlock();
     scheduleSync(1500);
   });
   await refreshPairing();
   await refreshProgramme();
   await refreshSettings();
+  await refreshBlock();
   setState({
     sync: { lastAt: (await repo.getMeta('lastSyncAt')) ?? null, pending: await repo.pendingCount() },
     mac: { lastSeen: (await repo.getMeta('macLastSeen')) ?? null },
@@ -40,6 +43,11 @@ export const ready = (async () => {
 })();
 
 export const getRepo = () => repo;
+
+/** Tue 11/10: the training block (Upper/Lower for a span, schedule/block) the rotation uses everywhere on this phone. */
+async function refreshBlock() {
+  try { useBlock(await repo.get('schedule', 'block')); } catch { /* none yet */ }
+}
 
 async function refreshPairing() {
   const macUrl = await repo.getMeta('macUrl');

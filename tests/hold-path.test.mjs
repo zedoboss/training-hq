@@ -27,7 +27,8 @@ test('not started: nothing counts and nothing is asked; Start puts him on the fi
   const st = pathState({ hold: area.holds[0], area, dayOf });
   assert.deepEqual([st.started, st.ready, st.stage.label], [false, false, 'Flat Smith']);
   const h = movePath(area.holds[0], 'start', '2026-03-10');
-  assert.deepEqual([h.path.at, h.path.since, h.exercise], [0, '2026-03-10', 'Bench Press (Smith Machine)']);
+  // Tue 11/10: the hold carries its own name ("· Hold"), not the lift's.
+  assert.deepEqual([h.path.at, h.path.since, h.exercise], [0, '2026-03-10', 'Bench Press (Smith Machine) · Hold']);
 });
 
 test('two quiet Push days at a stage make it ready; a set over 4/10, a rest-day round or another stage does not count', () => {
@@ -56,12 +57,12 @@ test('two quiet Push days at a stage make it ready; a set over 4/10, a rest-day 
 
 test('step up replaces the hold with the next stage and counts from that day; back goes one stage back', () => {
   const up = movePath(movePath(area.holds[0], 'start', '2026-03-10'), 'up', '2026-03-16');
-  assert.deepEqual([up.exercise, up.loadKg, up.loadNote, up.path.at, up.path.since], ['Bench Press (Dumbbell)', 20, '2 × 10 kg', 1, '2026-03-16']);
+  assert.deepEqual([up.exercise, up.loadKg, up.loadNote, up.path.at, up.path.since], ['Bench Press (Dumbbell) · Hold', 20, '2 × 10 kg', 1, '2026-03-16']);
   assert.equal(stageText(up.path, up.path.at), 'Stage 2 of 3: Flat dumbbells (20 kg)');
   // A Smith round after the step up is not this stage.
   const r = round('2026-03-17', 'Bench Press (Smith Machine)', [0, 0, 0]);
   assert.deepEqual(pathState({ hold: up, area, sessions: [push('2026-03-17'), r.session], sets: r.sets, dayOf }).quietDays, []);
   const back = movePath(up, 'back', '2026-03-18');
-  assert.deepEqual([back.exercise, back.path.at], ['Bench Press (Smith Machine)', 0]);
+  assert.deepEqual([back.exercise, back.path.at], ['Bench Press (Smith Machine) · Hold', 0]);
   assert.deepEqual(back.path.log.map((x) => x.how), ['start', 'up', 'back']);
 });

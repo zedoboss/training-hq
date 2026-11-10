@@ -892,7 +892,7 @@ test('hold_path (Thu 10/22): start, step up after he confirms, not yet, back; th
   assert.match(contextLine({ store, tz: TZ, now: clock }), /Stage 1 of 2: Flat Smith \(30 kg\) since Tuesday 1\/20; quiet Push days 0 of 2; next: Flat dumbbells/);
   const up = await call('hold_path', { area: 'knees', action: 'up' });
   assert.match(up.text, /Stage 2 of 2: Flat dumbbells \(20 kg\) \(his call: 0 of 2 quiet Push days\)\. 20 kg total: 2 × 10 kg/);
-  assert.equal(list('tendons').find((x) => x.id === 'knees').holds[0].exercise, 'Bench Press (Dumbbell)');
+  assert.equal(list('tendons').find((x) => x.id === 'knees').holds[0].exercise, 'Bench Press (Dumbbell) · Hold');
   assert.match((await call('hold_path', { action: 'up' })).text, /last stage already/);
   assert.match((await call('hold_path', { action: 'back' })).text, /Stage 1 of 2: Flat Smith/);
 });

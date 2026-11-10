@@ -48,13 +48,18 @@ export function withHomeNotes(session, sets, neck) {
 export function neckToday(neck, dayKind, dayType) {
   if (!neck?.planned) return false;
   if (neck.place === 'rest-day') return dayKind === 'rest';
-  return dayKind !== 'rest' && neck.place === `after-${dayType}`;
+  // Tue 11/10: in an Upper/Lower block, neck after Push or Pull goes after both upper days, after Legs after Lower.
+  const same = BLOCK_PLACE[dayType];
+  return dayKind !== 'rest' && (neck.place === `after-${dayType}` || (!!same && same.includes(neck.place)));
 }
+const BLOCK_LABEL = { 'upper-a': 'Upper A', 'upper-b': 'Upper B', lower: 'Lower' };
+const BLOCK_PLACE = { 'upper-a': ['after-push', 'after-pull'], 'upper-b': ['after-push', 'after-pull'], lower: ['after-legs'] };
 
 /** "Neck after Push today" / "Neck today (rest day)": the Train card and finish screen line ("at home" when so). */
-export function neckTodayText(place, where = null) {
+export function neckTodayText(place, where = null, dayType = null) {
   const home = where === 'home' ? ', at home' : where === 'gym' ? ', at the gym' : '';
   if (place === 'rest-day') return `Neck today (rest day${home})`;
+  if (BLOCK_PLACE[dayType]?.includes(place)) return `Neck after ${BLOCK_LABEL[dayType]} today${home}`;
   const label = placeLabel(place);
   return label ? `Neck ${label.replace(/^After /, 'after ')} today${home}` : `Neck today${home}`;
 }
