@@ -159,6 +159,35 @@ export function safeWindowsText(weather, from, until, tz) {
   return runs.map((r) => `${t(r.start)}-${t(Math.min(r.end, until))} (UV ${Math.round(Math.max(...r.hs.map((x) => x.uv)) * 10) / 10} at most)`).join(', ');
 }
 
+/**
+ * His own words for a walk time, quoted back only when short and whole (Tue 11/10: "Walk time: you said "Probably after
+ * 3 p.m. for an actual work, or I might get most of my steps in the"", an 80-character cut of a long dictated message).
+ * Longer than this is never quoted, and never cut.
+ */
+export const SAID_MAX = 60;
+export const quotable = (said) => { const s = String(said ?? '').trim(); return s && s.length <= SAID_MAX ? s : null; };
+const INDOOR = /\b(malls?|indoors?|inside|treadmill|gym|shops?|shopping|stores?|supermarket|airport|office)\b/;
+const LATER = /\b(?:at|in|by|around) \d|\b(?:in an?|in half|later|after|tonight|tomorrow|this (?:evening|afternoon|morning)|when|if|maybe|probably|might|should|soon)\b|\d\s*(?:am|pm|a\.m|p\.m)\b/;
+/**
+ * He says he's walking now or about to (Tue 11/10, 2:47 PM, "Im gonna walk around in the mall for a bit" went
+ * unrecorded, so at 3:30 PM the app asked "Did you start walking?" with a rain warning): {indoor} or null. A time later
+ * on ("at 5", "in an hour", "later", "after dinner", "tonight", "maybe") is a plan, not a walk now; "not" is no walk.
+ */
+export function walkingNow(text) {
+  const s = String(text || '').toLowerCase().replace(/[\u2018\u2019'`]/g, '');
+  for (const part of s.split(/[.?!\n]+/)) {
+    const m = part.match(/\b(?:im|i am|ill|i will|gonna|going to|going|about to|heading (?:out )?to|off to|out)\s+(?:(?:gonna|going to|go|going|just|quickly|for|take|taking|do|doing|on)\s+){0,3}(?:a\s+(?:quick\s+|short\s+|little\s+)?)?(?:walk|walking)\b(.*)/);
+    if (!m) continue;
+    const before = part.slice(0, m.index);
+    if (/\b(not|dont|wont|cant|never|no)\s*$/.test(before) || /\b(not|dont|wont|cant|never)\b/.test(m[0].slice(0, m[0].length - m[1].length))) continue;
+    // Only the walk's own words count: "...for a bit, remind me supplements in 30mins" is a walk now.
+    const own = m[1].split(/,|;|\band\b|\bthen\b|\bbut\b|\bremind\b|\bso\b/)[0].split(/\s+/).slice(0, 9).join(' ');
+    if (LATER.test(own)) continue;
+    return { indoor: INDOOR.test(part) };
+  }
+  return null;
+}
+
 /** Follow-ups to an ask (older records: follow, plan-follow, nag; 'out': steps climbing, Thu 11/5). */
 const CHECKS = ['check', 'follow', 'plan-follow', 'nag', 'out'];
 /** A time the coach picked (the weather), not his: never "you said" or "you set" (Sun 10/25). */
@@ -380,7 +409,11 @@ export function walkDue({ now, tz, doc, steps = null, goal = 8000, wakeHm = '07:
     const planTime = formatHm(hmOf(new Date(d.plan.at), tz));
     const whose = mine ? `you said ${planTime}` : `${planTime} was the hour I picked for the weather`;
     // His time: ask, don't order (his profile, Thu 10/22: "Did you start walking?"); the UV and rain as facts, his call.
-    if (!asked.length) return { kind: 'plan', text: withRain(mine ? `Walk time: you said ${d.plan.said ? `"${d.plan.said}"` : planTime}. Did you start walking?${uvNote ? ` ${uvNote}` : ''} ${st}` : `Walk time: ${planTime}, the hour I picked for the weather. Going, or another time?${climbNote ? ` ${climbNote}` : ''} ${st}`) };
+    // Indoors (Tue 11/10, a walk in the mall): no rain or sun lines. His words only when short and whole (quotable).
+    const said = quotable(d.plan.said);
+    const sky = d.plan.indoor ? (x) => x : withRain;
+    const sun = d.plan.indoor ? '' : uvNote;
+    if (!asked.length) return { kind: 'plan', text: sky(mine ? `Walk time: you said ${said ? `"${said}"` : planTime}. Did you start walking?${sun ? ` ${sun}` : ''} ${st}` : `Walk time: ${planTime}, the hour I picked for the weather. Going, or another time?${climbNote && !d.plan.indoor ? ` ${climbNote}` : ''} ${st}`) };
     const l = lastOf(asked);
     if (answered(l.at)) {
       if (now - d.answeredAt < cfg.againMin * 60000) return null;
@@ -442,8 +475,8 @@ export function withAnswer(doc, date, a, now) {
   const auto = !d.going && minutesOpen(lastOf(d.walks)) ? lastOf(d.walks) : null;
   if (auto && a.action === 'going' && now - auto.at < 3 * 3600000) return { ...d, going: { at: auto.from, since: now }, plan: null, walks: d.walks.slice(0, -1) };
   if (auto && a.action === 'done') return { ...d, walks: [...d.walks.slice(0, -1), { at: auto.at, from: auto.from, minutes: a.minutes ?? null, steps: a.steps ?? null }] };
-  if (a.action === 'plan') return { ...d, plan: { at: a.at, said: a.said || null, setAt: now, ...(a.by === 'coach' ? { by: 'coach' } : {}) }, going: null };
-  if (a.action === 'going') return { ...d, going: { at: now }, plan: null };
+  if (a.action === 'plan') return { ...d, plan: { at: a.at, said: quotable(a.said), setAt: now, ...(a.by === 'coach' ? { by: 'coach' } : {}), ...(a.indoor ? { indoor: true } : {}) }, going: null };
+  if (a.action === 'going') return { ...d, going: { at: now, ...(a.indoor ? { indoor: true } : {}) }, plan: null };
   if (a.action === 'done') return { ...d, going: null, plan: null, walks: [...d.walks, { at: now, ...(d.going?.at ? { from: d.going.at } : {}), minutes: a.minutes ?? null, steps: a.steps ?? null }] };
   if (a.action === 'skip') return { ...d, plan: null, skips: [...d.skips, { at: now, reason: a.reason || '', until: a.until ?? now + WALK.skipMin * 60000 }] };
   if (a.action === 'clear') return { ...d, plan: null };
@@ -459,8 +492,8 @@ export function walkLines(docs = [], { today, now, tz, steps = null, goal = 8000
   const last = lastOf(d.asks);
   const parts = [stepsText({ steps, goal, now, tz }).replace(/\.$/, '')];
   if (d.goalAt) parts.push('goal met today');
-  else if (d.going) parts.push(`out walking since ${t(d.going.at)}`);
-  else if (d.plan) parts.push(coachPlanned(d.plan) ? `the app planned it for ${t(d.plan.at)} (for the weather; his time only if he agrees, never "you said" or "you set")` : `he said he'd go at ${t(d.plan.at)}${d.plan.said ? ` ("${d.plan.said}")` : ''}`);
+  else if (d.going) parts.push(`out walking since ${t(d.going.at)}${d.going.indoor ? ' (indoors: no rain or sun lines)' : ''}`);
+  else if (d.plan) parts.push(coachPlanned(d.plan) ? `the app planned it for ${t(d.plan.at)} (for the weather; his time only if he agrees, never "you said" or "you set")` : `he said he'd go at ${t(d.plan.at)}${quotable(d.plan.said) ? ` ("${quotable(d.plan.said)}")` : ''}${d.plan.indoor ? ' (indoors: no rain or sun lines)' : ''}`);
   else if (last?.kind === 'out' && !((d.answeredAt || 0) > last.at)) parts.push(`his steps went up after the ask, so at ${t(last.at)} the app asked if he's out walking, no answer yet: don't ask him when he's going`);
   else if (last && !['back', 'minutes'].includes(last.kind) && !((d.answeredAt || 0) > last.at)) parts.push(`asked at ${t(last.at)}, no answer yet: get a time from him`);
   for (const w of d.walks) {

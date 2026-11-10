@@ -10,7 +10,7 @@ import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist, nextSuppsText } from '../app/js/lib/supplements.js';
 import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING } from '../app/js/lib/nudges.js';
-import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart, settleWalk } from '../app/js/lib/walks.js';
+import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart, settleWalk, walkingNow, WALK } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
 import { dayClock, bodyClock, realTimes, movedMealTimes } from '../app/js/lib/moving-day.js';
@@ -1208,6 +1208,18 @@ export function settleWalks(store, now, tz, log = () => {}) {
 }
 
 /**
+ * His latest message saying he's walking now (lib/walks.js walkingNow) that nothing in the walk record answers yet:
+ * after the last walk answer, walk or ask, within the last maxOpenMin, and no walk open. {at, indoor} or null.
+ */
+export function toldWalking(store, doc, now, cfg = WALK) {
+  if (doc?.going || doc?.goalAt) return null;
+  const since = Math.max(now - cfg.maxOpenMin * 60000, doc?.answeredAt || 0, ...(doc?.walks || []).map((w) => w.at || 0), ...(doc?.skips || []).map((x) => x.at || 0));
+  const msgs = recordsOf(store, MSGS).filter((m) => m?.role === 'user' && m.at > since && m.at <= now).sort((a, b) => b.at - a.at);
+  for (const m of msgs) { const w = walkingNow(m.text); if (w) return { at: m.at, indoor: w.indoor }; }
+  return null;
+}
+
+/**
  * The walk coach (Tue 10/20, his words: "bump me throughout the day... to get me to get those 8K steps... If I don't
  * respond within 5 minutes, it should bump me again and ask... When are you going for a walk?"). Its own timing (lib/
  * walks.js), not the nudges' 20 minutes; quiet while a workout or the sauna runs, 20 minutes after a workout, while
@@ -1225,7 +1237,15 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   const docs = store.listRecords('walks').map((r) => r.data).filter(Boolean);
   const found = docs.find((d) => d.date === date) || null;
   // A walk he's back from is closed here too, so what's written below never reopens it (Thu 11/5).
-  const doc = found?.going ? settleWalk(found, { ...walkSigns(store, found.going.at, now, tz), asks: found.asks || [] }) : found;
+  let doc = found?.going ? settleWalk(found, { ...walkSigns(store, found.going.at, now, tz), asks: found.asks || [] }) : found;
+  // He said he's walking and the coach didn't record it (Tue 11/10: 2:47 PM "Im gonna walk around in the mall for a bit",
+  // then at 3:30 PM "Did you start walking?" with a rain warning): out walking from his message, no question.
+  const told = toldWalking(store, dayPart(doc, inp.n.clock?.wokeAt ?? null), now);
+  if (told) {
+    doc = { ...withAnswer(doc, date, { action: 'going', indoor: told.indoor }, told.at), answeredAt: told.at };
+    store.writeLocal('walks', date, doc);
+    log(`walk: out walking since ${new Date(told.at).toISOString()} from his words${told.indoor ? ' (indoors)' : ''}`);
+  }
   const view = dayPart(doc, inp.n.clock?.wokeAt ?? null);
   const health = (d) => { const r = store.getRecord('health', d); return r && !r.deleted ? r.data : null; };
   const steps = walkSteps(date, isoDate(new Date(now), tz), health);
