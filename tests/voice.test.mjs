@@ -341,5 +341,91 @@ test('Whisper: a full-length request asks the server for the whole clip (audio_c
   await w.transcribe(new Uint8Array(44)).catch(() => {});
   assert.equal(forms[0]?.get('audio_ctx'), '0');
   assert.equal(forms[1]?.get('audio_ctx'), null);
+  assert.equal(forms[0]?.get('temperature'), '0');
+  await w.transcribe(new Uint8Array(44), '', { full: true, temperature: 0.4 }).catch(() => {});
+  assert.equal(forms[2]?.get('temperature'), '0.4', 'the second read of a made-up line goes warmer');
   w.stop();
+});
+
+// Tue 11/10, 9:11 AM: he answered the sleep question out loud twice (15 s and 10 s of dictation) and both times only
+// "Thank you." came back from Whisper and reached the coach. A made-up stock line never stands in for his words.
+test('Whisper made-up lines (Tue 11/10): a lone "Thank you." from long speech is read again, never taken as his words', async () => {
+  const { judgeTranscript } = await import('../server/voice/whisper.mjs');
+  assert.equal(judgeTranscript('Thank you.', 15), 'made-up');
+  assert.equal(judgeTranscript('Thanks!', 10), 'made-up');
+  assert.equal(judgeTranscript('Thank you very much.', 4), 'made-up');
+  assert.equal(judgeTranscript('Thank you.', 0.05), 'made-up', 'no speech at all: made up from silence');
+  assert.equal(judgeTranscript('Thank you.', 0.9), 'ok', 'a real thanks, about a second of speech');
+  assert.equal(judgeTranscript('Thank you.', null), 'ok', 'speech unknown: left alone');
+  assert.equal(judgeTranscript('Yes.', 8), 'thin');
+  assert.equal(judgeTranscript('Yes.', 1), 'ok');
+  assert.equal(judgeTranscript('Thank you, logged it, what is next?', 4), 'ok');
+  assert.equal(judgeTranscript('I went to bed at 8:30 PM and woke up at 6:30 AM.', 10), 'ok');
+
+  const dir = mkdtempSync(join(tmpdir(), 'thq-voice-'));
+  const store = openStore(join(dir, 'db.sqlite'));
+  let texts = []; let calls = [];
+  const whisper = { transcribe: async (wav, prompt, opts) => { calls.push(opts); return { text: texts.shift() ?? '', ms: 5 }; }, status: () => ({ running: true }), ensure: async () => {} };
+  const sent = [];
+  const coach = { send: async (o) => { sent.push(o); o.emit({ type: 'done', message: { role: 'assistant', text: 'ok' } }); return { text: 'ok' }; } };
+  const logs = [];
+  const voice = openVoice({ store, dataDir: dir, engine: fakeEngine(), whisper, coach, log: (l) => logs.push(l), holdMs: 5, joinMs: 5, talkingHoldMs: 10 });
+  const speech = (sec) => encodeWav(new Float32Array(16000 * sec).map((_, i) => 0.3 * Math.sin(i / 7)));
+  try {
+    // His 9:11 AM case: 15 s of him talking, Whisper says "Thank you."; read again it gives his words.
+    texts = ['Thank you.', 'I went to bed around 8:30 PM and woke up just before 6:30 AM.']; calls = [];
+    let r = await voice.dictate(speech(15));
+    assert.equal(r.text, 'I went to bed around 8:30 PM and woke up just before 6:30 AM.');
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0], { full: true });
+    assert.deepEqual(calls[1], { full: true, temperature: 0.4 }, 'the second read is the whole clip, a little warmer');
+    // Both reads made up: nothing comes back as his words, and the phone is told it missed him.
+    texts = ['Thank you.', 'Thank you.']; calls = [];
+    r = await voice.dictate(speech(10));
+    assert.deepEqual(r, { text: '', ms: 10, missed: true });
+    assert.ok(logs.some((l) => /made-up line dropped/.test(l)));
+    // A real, short "Thank you." stays his.
+    texts = ['Thank you.']; calls = [];
+    assert.equal((await voice.dictate(speech(1))).text, 'Thank you.');
+    assert.equal(calls.length, 1, 'read once');
+    // One word from a long stretch is read again; the same word twice is his (never lost).
+    texts = ['Yes.', 'Yes.']; calls = [];
+    assert.equal((await voice.dictate(speech(8))).text, 'Yes.');
+    assert.equal(calls.length, 2);
+    texts = ['Thank you.', 'Yes.']; calls = [];
+    assert.equal((await voice.dictate(speech(8))).text, 'Yes.', 'a made-up line, then a short real word: the word');
+    // A long normal answer: one read, untouched.
+    texts = ['Slept fine, bed at 9.']; calls = [];
+    assert.equal((await voice.dictate(speech(5))).text, 'Slept fine, bed at 9.');
+    assert.equal(calls.length, 1);
+
+    // The always-on mic: the same made-up line from 4 s of his voice never reaches the coach; the phone hears "missed".
+    for (let i = 0; i < ROUND_MIN; i++) voice.enrol({ bytes: encodeWav(clip({ who: 1 })), condition: 'home' });
+    texts = ['Thank you.', 'Thank you.'];
+    const ev = [];
+    await voice.utterance({ bytes: encodeWav(clip({ who: 1, sec: 4 })), deviceId: 'phone', emit: (e) => ev.push(e) });
+    assert.equal(ev[0].type, 'heard');
+    assert.equal(ev[0].ok, false);
+    assert.equal(ev[0].reason, 'missed');
+    assert.equal(sent.length, 0, 'nothing reached the coach');
+    // Read again right: his words go to the coach.
+    texts = ['Thank you.', 'Bed at 8:30, up at 6:25.'];
+    const ev2 = [];
+    await voice.utterance({ bytes: encodeWav(clip({ who: 1, sec: 4 })), deviceId: 'phone', emit: (e) => ev2.push(e) });
+    assert.equal(ev2[0].ok, true);
+    assert.equal(ev2[0].text, 'Bed at 8:30, up at 6:25.');
+    await new Promise((res) => setTimeout(res, 60));
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].text, /Bed at 8:30/);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('dictation on the phone (Tue 11/10): a dropped made-up line says "say it again"; the box gets nothing', async () => {
+  const { dictationText, MISSED_MESSAGE } = await import('../app/js/lib/dictate-keep.js');
+  const { REASON_TEXT } = await import('../app/js/lib/voice-text.js');
+  assert.equal(dictationText({ text: ' Bed at 9. ' }), 'Bed at 9.');
+  assert.equal(dictationText({ text: '' }), '');
+  assert.throws(() => dictationText({ text: '', missed: true }), (e) => e.missed === true && e.message === MISSED_MESSAGE);
+  assert.match(MISSED_MESSAGE, /Say it again/);
+  assert.match(REASON_TEXT.missed, /SAY AGAIN/);
 });

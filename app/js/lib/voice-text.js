@@ -27,7 +27,7 @@ export function calibrationPhrases(suppNames = []) {
 }
 
 /** Short words for the silent readout when speech was heard but not acted on. */
-export const REASON_TEXT = { you: 'YOU', noise: 'NOISE', music: 'MUSIC', unsure: 'TOO SHORT', 'not-you': 'NOT YOU', 'not-calibrated': 'NOT SET UP', empty: 'NO WORDS', duplicate: 'ALREADY HEARD', aside: 'OTHERS TALKING · SAY COACH', 'self-talk': 'SELF-TALK', hush: 'STOPPED' };
+export const REASON_TEXT = { you: 'YOU', noise: 'NOISE', music: 'MUSIC', unsure: 'TOO SHORT', 'not-you': 'NOT YOU', 'not-calibrated': 'NOT SET UP', empty: 'NO WORDS', duplicate: 'ALREADY HEARD', aside: 'OTHERS TALKING · SAY COACH', 'self-talk': 'SELF-TALK', hush: 'STOPPED', missed: 'DIDN\'T CATCH · SAY AGAIN' };
 
 /**
  * The header's two voice buttons (Thu 10/22, like Claude voice mode): the mic only switches his microphone, never the

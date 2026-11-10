@@ -6,7 +6,7 @@
 import { join } from 'node:path';
 import { openVoiceprint, thresholdFor, DEFAULT_STRICTNESS } from './voiceprint.mjs';
 import { decide } from './gate.mjs';
-import { cleanTranscript } from './whisper.mjs';
+import { cleanTranscript, judgeTranscript, wordCount } from './whisper.mjs';
 import { decodeWav, encodeWav, resample, normalise, VOICE_RATE } from '../../app/js/lib/wav.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
 
@@ -99,14 +99,47 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
    * like a typed message (marked as spoken); the coach's events follow on `emit`.
    */
   const waiting = new Map(); // device -> {texts, timer, fire, arm}: a clip held for the rest of what he is saying
+
+  /** The stretches of speech in a clip (VAD) and their seconds; null when the voice models can't say. */
+  const speechIn = (samples) => {
+    try {
+      if (engine?.speechOf) { const r = engine.speechOf(samples); return { speech: r.speech, speechSec: r.speechSec }; }
+      if (engine?.analyse) return { speech: null, speechSec: engine.analyse(samples).speechSec };
+    } catch { /* models not loaded */ }
+    return null;
+  };
+
+  /**
+   * Whisper's words for a clip, checked (Tue 11/10: two real answers came back as a lone "Thank you."). A made-up stock
+   * line, or one or two words from a long stretch of speech, is read once more: only the speech (silences out), a little
+   * warmer. Still a made-up line: {text: '', missed: true}, so it never stands in for what he said. Thin twice: the longer.
+   */
+  async function readChecked(samples, opts, sp) {
+    const first = await whisper.transcribe(encodeWav(normalise(samples)), '', opts);
+    const text = cleanTranscript(first.text, hint()).replace(/\s+/g, ' ').trim();
+    const sec = sp ? sp.speechSec : null;
+    const v = judgeTranscript(text, sec);
+    if (v === 'ok') return { text, ms: first.ms };
+    const only = (sp.speech ? sp : speechIn(samples))?.speech;
+    const again = await whisper.transcribe(encodeWav(normalise(only?.length > VOICE_RATE * 0.3 ? only : samples)), '', { ...opts, temperature: 0.4 });
+    const text2 = cleanTranscript(again.text, hint()).replace(/\s+/g, ' ').trim();
+    const v2 = judgeTranscript(text2, sec);
+    const ms = first.ms + again.ms;
+    log(`voice: "${text}" from ${sec.toFixed(1)} s of speech looked ${v}; read again: ${v2 === 'ok' ? 'got his words' : `"${text2}"`}`);
+    if (v2 === 'ok') return { text: text2, ms };
+    if (v === 'thin') return { text: v2 === 'thin' && wordCount(text2) > wordCount(text) ? text2 : text, ms };
+    if (v2 === 'thin') return { text: text2, ms };
+    return { text: '', ms, missed: true };
+  }
+
   /** Dictation into the chat box (Tue 10/20): the words only, no voice lock, nothing saved or answered. */
   async function dictate(bytes) {
     if (!whisper) throw fail(503, 'speech to text not available');
     // The whole clip in one request (Tue 10/20: everything after about 10 s was lost).
     const samples = clipOf(bytes, DICTATE_MAX_SEC);
-    const raw = await whisper.transcribe(encodeWav(normalise(samples)), '', { full: true });
-    log(`voice: dictation ${Math.round(samples.length / VOICE_RATE)} s, ${raw.ms} ms to text`);
-    return { text: cleanTranscript(raw.text, hint()).replace(/\s+/g, ' ').trim(), ms: raw.ms };
+    const r = await readChecked(samples, { full: true }, speechIn(samples));
+    log(`voice: dictation ${Math.round(samples.length / VOICE_RATE)} s, ${r.ms} ms to text${r.missed ? ', made-up line dropped' : ''}`);
+    return r.missed ? { text: '', ms: r.ms, missed: true } : { text: r.text, ms: r.ms };
   }
 
   /** The phone heard him start again (its VAD): hold what was heard until the next clip. */
@@ -144,8 +177,13 @@ export function openVoice({ store, dataDir, engine, whisper = null, coach = null
     }
     if (!whisper) throw fail(503, 'speech to text not available');
     // No vocabulary hint: with one, Whisper wrote short commands twice in testing; without, names came out right.
-    const raw = await whisper.transcribe(encodeWav(normalise(c.samples)));
-    const text = cleanTranscript(raw.text, hint());
+    const raw = await readChecked(c.samples, {}, c.analysis ? { speech: null, speechSec: c.analysis.speechSec } : null);
+    const text = raw.text;
+    if (raw.missed) {
+      log(`voice: made-up line dropped (${raw.ms} ms)`);
+      emit({ type: 'heard', ok: false, reason: 'missed', score: d.score });
+      return null;
+    }
     if (!text) {
       log(`voice: no words (${raw.ms} ms)`);
       emit({ type: 'heard', ok: false, reason: 'empty', score: d.score });

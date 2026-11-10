@@ -18,6 +18,32 @@ const MADE_UP = [/^thanks? (you )?for watching/i, /^thank you for watching/i, /^
 const GRUNT = /^(u+g+h+|u+h+|u+m+|a+h+|o+h+|h+m+|m+h*m+|h+u+h+|h+a+(h+a+)*|a+r+g+h*|g+r+|h*n+g+h*|p+h+e+w+|w+h+e+w+|o+o+f+|h+u+|e+h+|g+a+h+|r+a+h+|h+h+)$/i;
 export const onlyGrunts = (t) => { const w = String(t || '').toLowerCase().split(/[^\p{L}]+/u).filter(Boolean); return w.length > 0 && w.every((x) => GRUNT.test(x)); };
 
+// Tue 11/10, 9:11 AM, his words: "The wispr mic did that not me", then "This is my third time saying this": he answered
+// the sleep question out loud twice (15 s and 10 s of dictation) and both times only "Thank you." came back, the line
+// Whisper writes when its decoding fails on real speech or makes something up from silence. One of these stock lines
+// alone is not taken as his words when far more speech was heard than it takes to say it, or no speech at all.
+const STOCK = /^(thank you|thank you (very|so) much|thank you bye|thanks|thanks a lot|thanks bye|bye|bye bye|goodbye|okay|ok|you|so|oh|yeah|mm|hmm)$/;
+const normWords = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const wordCount = (t) => (normWords(t) ? normWords(t).split(' ').length : 0);
+/** Seconds of speech a lone stock line can't account for (it takes about a second to say). */
+export const STOCK_MAX_SPEECH_SEC = 2.5;
+/** This much speech coming back as one or two words: Whisper probably dropped most of it (read again). */
+export const THIN_SPEECH_SEC = 6;
+
+/**
+ * How far to trust a cleaned transcript, given how much speech the clip held (speechSec: the VAD's seconds; null when
+ * unknown). 'made-up': a stock line from much more speech (or none): never his words. 'thin': one or two words from a
+ * long stretch of speech, worth a second read. 'ok' otherwise.
+ */
+export function judgeTranscript(text, speechSec) {
+  const n = normWords(text);
+  if (!n || speechSec == null) return 'ok';
+  if (STOCK.test(n) && (speechSec >= STOCK_MAX_SPEECH_SEC || speechSec < 0.2)) return 'made-up';
+  if (wordCount(n) <= 2 && speechSec >= THIN_SPEECH_SEC) return 'thin';
+  return 'ok';
+}
+export { wordCount };
+
 /**
  * Whisper's text, cleaned. Returns '' when nothing he could have said is left (music, noise, a made-up line, or the
  * vocabulary hint repeated back).
@@ -92,11 +118,12 @@ export function openWhisper({ bin = DEFAULT_BIN, model = DEFAULT_MODEL, port = D
     return starting;
   }
 
-  async function transcribeRaw(wav, prompt = '', { full = false } = {}) {
+  async function transcribeRaw(wav, prompt = '', { full = false, temperature = 0 } = {}) {
     const form = new FormData();
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'clip.wav');
     form.append('response_format', 'json');
-    form.append('temperature', '0');
+    // A second read of a clip that came back as a made-up line goes a little warmer (the server runs without fallback).
+    form.append('temperature', String(temperature));
     if (prompt) form.append('prompt', prompt);
     // full: the whole clip, however long (dictation). The server's -ac 512 hears about 10 s, fast for commands; long
     // speech was cut there (Tue 10/20). audio_ctx 0 per request reads all of it in Whisper's own 30 s windows.

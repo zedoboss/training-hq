@@ -12,6 +12,17 @@ export const MAX_TRIES = 3;
 /** The phone couldn't reach the Mac at all (as opposed to the Mac answering with an error). */
 export const isUnreachable = (e) => /unreachable|failed to fetch|networkerror|load failed|network connection was lost|abort/i.test(String(e?.message || e || ''));
 
+/**
+ * Tue 11/10: the Mac's Whisper turned a real answer into a lone "Thank you." twice. The Mac now drops a made-up line like
+ * that (server/voice/whisper.mjs judgeTranscript) and says so; nothing goes in the box and he hears to say it again.
+ */
+export const MISSED_MESSAGE = 'Didn\'t catch that. The speech-to-text only made up a stock line like "Thank you." Say it again.';
+/** The Mac's answer to a dictation clip: its words, or MISSED_MESSAGE as an error when it dropped a made-up line. */
+export function dictationText(r) {
+  if (r?.missed) { const e = new Error(MISSED_MESSAGE); e.missed = true; throw e; }
+  return String(r?.text || '').trim();
+}
+
 /** What he reads when the Mac can't be reached at the moment he stops the mic. */
 export const KEPT_MESSAGE = 'Can\'t reach your Mac, most likely this phone\'s Tailscale dropped. Your recording is kept and goes in the box by itself once it\'s back. Not back in a minute? Open Tailscale, turn it off and on.';
 

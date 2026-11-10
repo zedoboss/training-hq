@@ -8,7 +8,7 @@ import { macSendRaw } from './data.js';
 import { lendMic } from './voice.js';
 import { getState, subscribe } from './store.js';
 import { formatTime } from './time.js';
-import { flushKept, cacheStore, isUnreachable, joinDraft, sendRiding, KEPT_MESSAGE } from './dictate-keep.js';
+import { flushKept, cacheStore, isUnreachable, joinDraft, sendRiding, dictationText, KEPT_MESSAGE } from './dictate-keep.js';
 
 // Paragraphs by voice (Tue 10/20): up to 5 minutes; the Mac reads it in one go.
 const MAX_SEC = 300;
@@ -62,7 +62,7 @@ export async function startDictation() {
   };
 }
 
-const sendClip = async (wav) => String((await macSendRaw('/api/voice/dictate', wav, 'audio/wav', 180000)).text || '').trim();
+const sendClip = async (wav) => dictationText(await macSendRaw('/api/voice/dictate', wav, 'audio/wav', 180000));
 let kept = null; let waiting = false;
 /** Clips (their `at`) a stop() is still re-sending: watchKept skips them so they are never sent twice. */
 const riding = new Set();

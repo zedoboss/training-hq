@@ -21,6 +21,7 @@ import { callsForCalm } from './coach-talk.js';
 import { updateApp } from './sw-client.js';
 
 const KEY = 'thq.voice.listen';
+const MISSED_SAY = 'Didn\'t catch that. Say it again.';
 const SEEN = 'thq.voice.used';
 const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private mode */ } } };
 const prefs = () => withDefaults(getState().settings);
@@ -139,7 +140,12 @@ async function turn(wav, { overCoach: echo = false } = {}) {
         broadcast(e);
         if (e.type === 'heard') {
           // Not him. A clip that began while the coach was talking is mostly its own echo: no readout for that.
-          if (!e.ok) { if (!(echo && e.reason === 'not-you')) showReadout(e.reason, e.score); return; }
+          if (!e.ok) {
+            if (!(echo && e.reason === 'not-you')) showReadout(e.reason, e.score);
+            // Tue 11/10: his words came back as a made-up line ("Thank you."), dropped on the Mac: he hears to say it again.
+            if (e.reason === 'missed') speak(MISSED_SAY);
+            return;
+          }
           ok = true;
           // The rest of what he was saying, joined on the Mac to the message already on its way: that turn's answer is
           // the one to speak (Thu 10/22: treating it as a new turn dropped it: "he did set the reminder in the chat,

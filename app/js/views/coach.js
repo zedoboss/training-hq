@@ -175,7 +175,7 @@ function renderChat(view) {
       try {
         const text = await d.stop({ onRetry: () => { micPhase = 'retry'; if (!busy) idleState(); } });
         if (text) { box.value = `${box.value.trim()}${box.value.trim() ? ' ' : ''}${text}`; box.dispatchEvent(new Event('input')); box.focus(); } else toast('Nothing heard.');
-      } catch (e) { toast(e.message || 'The Mac could not hear that.', e.kept ? { ms: 10000 } : {}); }
+      } catch (e) { toast(e.message || 'The Mac could not hear that.', e.kept || e.missed ? { ms: 10000 } : {}); }
       b.classList.remove('is-busy');
       micPhase = null; if (!busy && !gone) idleState();
       return;
