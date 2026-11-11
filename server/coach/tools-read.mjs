@@ -9,7 +9,7 @@ import { buildSession, summarize, elapsedMs } from '../../app/js/lib/session.js'
 import { targetFor, repNotes } from '../../app/js/lib/targets.js';
 import { confirmedKg, modeOf, isConfirmed } from '../../app/js/lib/progression.js';
 import { currentBodyweight, healthDays, hoursText, weightSeries, withSleepLog } from '../../app/js/lib/health.js';
-import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds, restAskAreas, homeSkips } from '../../app/js/lib/holds.js';
+import { roundsByDate, areaStatus, holdSlots, PHASE_TEXT, restChoices, restChoiceText, roundSeconds, restAskAreas, homeSkips, holdBase, isHoldSet } from '../../app/js/lib/holds.js';
 import { ACTION_TEXT, askedAreas } from '../../app/js/lib/readiness.js';
 import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf, SOURCE_LABEL } from '../../app/js/lib/calendar.js';
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
@@ -259,6 +259,52 @@ export function holdsDueText(s) {
   return `Holds still due today: ${parts.join('. ')}.`;
 }
 
+/**
+ * Thu 11/12 (his words, about Wed 11/11 3:36 PM: "That's about 10 hours after this morning's 9:31 AM round"; the round ran
+ * 9:42-9:48 AM, 9:31 AM was Tuesday's, and the coach only saw "morning 9:30 AM: DONE", his reminder slot): the rounds
+ * he logged today with their real times, from the records. '' when he has no tendon areas.
+ */
+export function roundTimesText(s, slots = null) {
+  const areas = s.list('tendons').filter((a) => a.kind === 'area');
+  if (!areas.length) return '';
+  const sets = s.list('sets');
+  const exToArea = new Map();
+  for (const a of areas) for (const n of [...(a.loadsArea?.exercises || []), ...(a.holds || []).map((h) => h.exercise)]) { exToArea.set(n, a.id); exToArea.set(holdBase(n), a.id); }
+  const byArea = {};
+  const today = s.list('sessions').filter((x) => x.startedAt && s.date(x.startedAt) === s.today && (x.status === 'done' || x.status === 'active'))
+    .sort((p, q) => p.startedAt - q.startedAt);
+  for (const x of today) {
+    const mine = sets.filter((y) => y.sessionId === x.id && y.done && y.doneAt);
+    if (x.kind === 'holds') {
+      if (!x.area) continue;
+      const end = x.endedAt || (mine.length ? Math.max(...mine.map((y) => y.doneAt)) : null);
+      const list = (byArea[x.area] ||= []);
+      const same = list.find((r) => !r.gym && end && r.end && x.startedAt < r.end && end > r.start); // one round logged twice (Tue 11/10)
+      if (same) { same.end = Math.max(same.end, end); continue; }
+      list.push({ start: x.startedAt, end, open: x.status === 'active', round: x.round, holds: mine.length });
+      continue;
+    }
+    const seen = new Set();
+    for (const ex of x.exercises || []) {
+      const area = exToArea.get(ex.name) || exToArea.get(holdBase(ex.name));
+      const done = mine.filter((y) => y.exKey === ex.key && isHoldSet(y, ex));
+      if (!area || !done.length || seen.has(area)) continue;
+      seen.add(area);
+      const times = done.map((y) => y.doneAt);
+      (byArea[area] ||= []).push({ start: Math.min(...times), end: Math.max(...times), gym: x.title || LABEL[x.dayType] || 'workout', ex: ex.name });
+    }
+  }
+  const t = (ms) => timeText(ms, s.tz);
+  const parts = areas.filter((a) => byArea[a.id]?.length).map((a) => `${a.label}: ${byArea[a.id].sort((p, q) => p.start - q.start).map((r) => (r.gym
+    ? `${r.ex} at the gym in ${r.gym}, ${r.start === r.end ? t(r.start) : `${t(r.start)} to ${t(r.end)}`}`
+    : r.open ? `started ${t(r.start)}, not finished (${r.holds} hold${r.holds === 1 ? '' : 's'} saved)`
+      : `${r.end ? `${t(r.start)} to ${t(r.end)}` : t(r.start)}${r.round ? ` (${r.round} round)` : ''}`)).join('; ')}`);
+  const rule = 'the only times to give for a round done today; the morning and evening times in the holds line are his reminder slots, never when he did one, and a round from another day is never today\'s';
+  if (parts.length) return `Hold rounds he logged today (${rule}): ${parts.join('. ')}.`;
+  const planned = slots ?? slotsToday(s).slots;
+  return planned.length ? 'Hold rounds he logged today: none yet. Never give a time for one he hasn\'t logged.' : '';
+}
+
 function holdLines(s) {
   const { areas, slots } = slotsToday(s);
   if (!slots.length) return ['Tendon holds today: none planned.'];
@@ -273,7 +319,7 @@ function holdLines(s) {
   const lateMorning = slots.filter((x) => x.slot === 'morning' && !x.done && !x.skipped && x.time && nowHm >= x.time);
   const evening = slots.find((x) => x.slot === 'evening' && !x.done && x.time && nowHm < x.time);
   const out = [`Tendon holds today: ${slots.map((x) => `${x.label} ${x.slot === 'after' ? 'after the session' : x.slot === 'home' ? `at home today (he skipped the gym ${x.fromGym.exercise}: "${x.fromGym.reason}")` : x.slot === 'rest' ? `rest day (${formatHm(x.time)})` : `${x.slot} ${formatHm(x.time)}`}: ${x.skipped ? 'skipped today (his choice)' : `${x.exercise}${x.also?.length ? ` + ${x.also.join(', ')}` : ''}${x.slot === 'rest' && x.holdIndex === 'other' ? ' (his own hold)' : ''}, ${x.done ? 'DONE' : x.ask ? 'not answered yet' : 'open'}`}`).join('; ')}.`];
-  out.push(roundLine);
+  out.push(roundTimesText(s, slots), roundLine);
   if (lateMorning.length) out.push(`The morning round${lateMorning.length > 1 ? 's' : ''} (${lateMorning.map((x) => x.label).join(', ')}, due ${formatHm(lateMorning[0].time)}) ${lateMorning.length > 1 ? 'are' : 'is'} late: call it late, not "morning". One round now${evening ? `, the evening one at ${formatHm(evening.time)}` : ' and one later'}; not back to back.`);
   // A2: the rest-day question. He answers; the coach never suggests a hold.
   for (const x of slots.filter((y) => y.slot === 'rest' && y.ask)) {
@@ -510,6 +556,8 @@ export function contextLine({ store, tz, now, screen = null }) {
   // live count is here with every message, ahead of what the notifications said.
   lines.push(`Now: ${suppLine(s)}`);
   lines.push(`Now: ${mealsNowLine(s)}${mealFitText(s)}`);
+  const rounds = roundTimesText(s);
+  if (rounds) lines.push(`Now: ${rounds}`);
   lines.push(...pathLines(s));
   lines.push(...phasePlanLines(s));
   lines.push(...recoveryContext(s));
