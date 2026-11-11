@@ -169,16 +169,19 @@ export const quotable = (said) => { const s = String(said ?? '').trim(); return 
 const INDOOR = /\b(malls?|indoors?|inside|treadmill|gym|shops?|shopping|stores?|supermarket|airport|office)\b/;
 const LATER = /\b(?:at|in|by|around) \d|\b(?:in an?|in half|later|after|tonight|tomorrow|this (?:evening|afternoon|morning)|when|if|maybe|probably|might|should|soon)\b|\d\s*(?:am|pm|a\.m|p\.m)\b/;
 /**
- * He says he's walking now or about to (Tue 11/10, 2:47 PM, "Im gonna walk around in the mall for a bit" went
+ * He says he's walking now (Tue 11/10, 2:47 PM, "Im gonna walk around in the mall for a bit" went
  * unrecorded, so at 3:30 PM the app asked "Did you start walking?" with a rain warning): {indoor} or null. A time later
  * on ("at 5", "in an hour", "later", "after dinner", "tonight", "maybe") is a plan, not a walk now; "not" is no walk, nor "I was gonna walk but it's raining".
  */
 export function walkingNow(text) {
   const s = String(text || '').toLowerCase().replace(/[\u2018\u2019'`]/g, '');
   for (const part of s.split(/[.?!\n]+/)) {
-    const m = part.match(/\b(?:im|i am|ill|i will|gonna|going to|going|about to|heading (?:out )?to|off to|out)\s+(?:(?:gonna|going to|go|going|just|quickly|for|take|taking|do|doing|on)\s+){0,3}(?:a\s+(?:quick\s+|short\s+|little\s+)?)?(?:walk|walking)\b(.*)/);
+    const m = part.match(/\b(?:im|i am|ill|i will|gonna|going to|going|heading (?:out )?to|off to|out)\s+(?:(?:gonna|going to|go|going|just|quickly|for|take|taking|do|doing|on)\s+){0,3}(?:a\s+(?:quick\s+|short\s+|little\s+)?)?(?:walk|walking)\b(.*)/);
     if (!m) continue;
     const before = part.slice(0, m.index);
+    // Wed 11/11, his words: "I'm not walking right now. Give me a bit. I'll tell you when I'm walking": "when I'm walking"
+    // is a walk to come, and "about to" is a plan, not a walk now.
+    if (/\b(when|once|if|until|till|before|after|soon|then|first|bit)\b/.test(before)) continue;
     if (/\b(not|dont|wont|cant|never|no|was|were|wasnt|werent)\s*$/.test(before) || /\b(not|dont|wont|cant|never)\b/.test(m[0].slice(0, m[0].length - m[1].length))) continue;
     // Only the walk's own words count: "...for a bit, remind me supplements in 30mins" is a walk now.
     const own = m[1].split(/,|;|\band\b|\bthen\b|\bbut\b|\bremind\b|\bso\b/)[0].split(/\s+/).slice(0, 9).join(' ');

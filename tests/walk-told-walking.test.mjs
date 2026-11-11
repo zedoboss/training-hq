@@ -21,7 +21,7 @@ const MALL = 'Im gonna walk around in the mall for a bit remind me supplements i
 // Rain 88% all afternoon, UV low.
 const weather = { hours: ['14:00', '15:00', '16:00', '17:00'].map((h) => ({ at: at(h), uv: 1.5, rain: 88 })) };
 
-test('walkingNow: walking now or about to, in his words; a later time, a maybe or a "not" is no walk now', () => {
+test('walkingNow: walking now, in his words; a later time, a maybe or a "not" is no walk now', () => {
   for (const [t, indoor] of [[MALL, true], ['going for a quick walk in the mall', true], ["I'm going for a walk", false], ['im walking now', false],
     ['Heading out to walk', false], ["I'm on a walk", false], ['im gonna walk around the shops', true], ['im going for a walk till 4', false],
     ['Going walking now and remind me at 4', false], ['On the treadmill, im walking', true]]) {
