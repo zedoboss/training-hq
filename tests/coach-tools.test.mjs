@@ -324,8 +324,8 @@ test('supplements: taken and skipped are logged as he said, with the stock warni
 
 test('a meal he describes is logged with confirmed items, and can be corrected', async () => {
   const r = await call('log_meal', { items: [{ name: 'Rice', grams: 200, kcal: 260, protein: 5 }, { name: 'Eggs', grams: 100, kcal: 143, protein: 12.6 }], time: '02:30' });
-  assert.match(r.text, /^Logged [A-Za-z]+, 2:30 AM \[id meal-[^\]]+\]: Rice 200 g \(his numbers\), Eggs 100 g \(his numbers\); 403 kcal, 17\.6 g protein\./);
-  assert.match(r.text, /Tuesday 1\/20: 403 kcal, 17\.6 g protein \(targets 2000 kcal, 150 g protein/);
+  assert.match(r.text, /^Logged [A-Za-z]+, 2:30 AM \[id meal-[^\]]+\]: Rice 200 g \(his numbers\), Eggs 100 g \(his numbers\); 403 kcal, 17\.6 g protein, carbs and fat unknown \(no value for Rice, Eggs\)\./);
+  assert.match(r.text, /Tuesday 1\/20: 403 kcal, 17\.6 g protein, carbs and fat unknown \(no value for Rice, Eggs\) \(targets 2,000 kcal, 150 g protein/);
   const meal = list('meals')[0];
   assert.equal(meal.source, 'manual');
   assert.ok(meal.before.confirmedAt);
@@ -334,7 +334,7 @@ test('a meal he describes is logged with confirmed items, and can be corrected',
   assert.match((await call('log_meal', { items: [{ name: 'X', grams: 1, kcal: 1, protein: 0 }], time: '20:00' })).text, /in the future/);
   // A5: no numbers from him: USDA values; a food USDA doesn't know and no numbers: refused.
   const u = await call('log_meal', { items: [{ name: 'Rice', grams: 450, usda: 'Rice, white, long-grain, regular, unenriched, cooked without salt' }, { name: 'Eggs', grams: 100 }], time: '02:00' });
-  assert.match(u.text, /Rice 450 g, Eggs 100 g; 728 kcal, 24\.7 g protein \(USDA values\)/);
+  assert.match(u.text, /Rice 450 g, Eggs 100 g; 728 kcal, 24\.7 g protein, 127\.5 g carbs, 10\.8 g fat \(USDA values\)/);
   const usda = list('meals').find((m) => m.before.items.some((x) => x.grams === 450)).before.items;
   assert.deepEqual(usda.map((x) => [x.fdcId, x.source]), [[169757, 'usda'], [171287, 'usda']]);
   assert.match((await call('log_meal', { items: [{ name: 'Nuoc cham', grams: 20 }] })).text, /No USDA match for "Nuoc cham"\. .*Nothing logged yet/);
@@ -647,7 +647,7 @@ test('log_meal by packs and counts (A7): his foods sized from his packs; unknown
     { name: 'Eggs', fdcId: 171287, unit: { grams: 50, label: 'egg', plural: 'eggs' } },
   ] });
   const r = await call('log_meal', { items: [{ name: 'almonds', packs: 0.5 }, { name: 'eggs', count: 3 }], time: '02:00' });
-  assert.match(r.text, /Raw almonds ½ pack \(100 g\), Eggs 3 eggs \(171 g with shells, about 150 g of egg\); 794 kcal, 40 g protein \(USDA values\)/);
+  assert.match(r.text, /Raw almonds ½ pack \(100 g\), Eggs 3 eggs \(171 g with shells, about 150 g of egg\); 794 kcal, 40 g protein, 22\.6 g carbs, 64\.2 g fat \(USDA values\)/);
   const items = list('meals')[0].before.items;
   assert.deepEqual(items.map((x) => [x.name, x.grams, x.portion, x.fdcId, x.source]), [['Raw almonds', 100, '½ pack', 170567, 'usda'], ['Eggs', 150, '3 eggs', 171287, 'usda']]);
   assert.match(await call('meals').then((m) => m.text), /No kitchen scale: he goes by packs and counts: Raw almonds, pack 200 g; Eggs, 1 egg = 50 g \(57 g with shell\)/);

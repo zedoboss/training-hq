@@ -31,7 +31,7 @@ import { fastingOn, withFast } from '../../app/js/lib/fast.js';
 import { answerNeck, placeLabel, NECK_PLACES, withHomeNotes, bottleFor, HOME_HOW } from '../../app/js/lib/neck.js';
 import { AREA_NAMES } from '../../app/js/lib/holdoffs.js';
 import { withUsda, sameFood, gramsFor, amountText, itemAmount } from '../../app/js/lib/foods.js';
-import { foodsDb, myFoods } from '../foods.mjs';
+import { foodsDb, myFoods, macrosText } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
 import { newChange, amendChange, asksOf, isOpen, lineAtOf, lineOf, relatedTo, whereText, pausedUntil, COL as CHANGES, KINDS as CHANGE_KINDS } from './changes.mjs';
@@ -627,7 +627,7 @@ async function logMeal(a, ctx) {
   put(s, 'meals', id, meal);
   const t = itemTotals(items);
   const day = mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: meal.date }).split('\n')[0];
-  return wrote(`Logged ${meal.name}${preset ? ` (his preset "${preset.name}")` : ''}, ${timeText(at, s.tz)}${meal.date !== s.date(at) ? ` (counts for ${dayText(meal.date, s.today)}, his waking day)` : meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText(s)).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.foodDay() ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
+  return wrote(`Logged ${meal.name}${preset ? ` (his preset "${preset.name}")` : ''}, ${timeText(at, s.tz)}${meal.date !== s.date(at) ? ` (counts for ${dayText(meal.date, s.today)}, his waking day)` : meal.date !== s.today ? ` ${dayText(meal.date, s.today)}` : ''} [id ${id}]: ${items.map(itemText(s)).join(', ')}; ${t.kcal} kcal, ${t.protein} g protein, ${macrosText(items, { mine: myFoods(s.one('fuel', 'plan')) })}${items.some((x) => x.source === 'usda') ? ' (USDA values)' : ''}.\n${day}${meal.date === s.foodDay() ? planLeftText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() })) : ''}`, `${meal.name}: ${t.kcal} kcal, ${t.protein} g protein`);
 }
 
 /** Thu 10/22: save a logged meal as one of his presets, to log again by name or with one tap on Fuel. */
@@ -665,7 +665,7 @@ async function correctMeal(a, ctx) {
   if (a.ateAll) next.after = { photoId: null, at: s.now, none: true, leftovers: [], confirmedAt: s.now, by: 'coach' };
   put(s, 'meals', meal.id, next);
   const t = itemTotals(next.before?.items || []);
-  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map(itemText(s)).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein on the plate${next.after?.none ? ', all eaten' : meal.after ? ' (his leftovers still come off)' : ''}.`, `${next.name} corrected`);
+  return wrote(`${next.name} (${timeText(next.at, s.tz)}, ${dayText(next.date, s.today)}) now: ${(next.before?.items || []).map(itemText(s)).join(', ') || 'no items'}; ${t.kcal} kcal, ${t.protein} g protein, ${macrosText(next.before?.items || [], { mine: myFoods(s.one('fuel', 'plan')) })} on the plate${next.after?.none ? ', all eaten' : meal.after ? ' (his leftovers still come off)' : ''}.\n${mealsText(snapshot(ctx.store, { tz: ctx.tz, now: ctx.now() }), { date: next.date }).split('\n')[0]}`, `${next.name} corrected`);
 }
 
 // ---- supplements --------------------------------------------------------------------------------------------------

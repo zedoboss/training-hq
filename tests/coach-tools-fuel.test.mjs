@@ -118,7 +118,7 @@ test('meal_edit move: to another day at the same clock time, or at his time; nev
 test('meal_edit copy: what he ate that day, logged again now or on the day he names', async () => {
   const r = await call('meal_edit', { action: 'copy', meal: 'm1' });
   const id = r.text.match(/\[id ([^\]]+)\]/)[1];
-  assert.match(r.text, /^Copied Lunch of Wednesday 1\/21 to Thursday 1\/22, 1:00 PM as Lunch \[id .+\]: Eggs 2 eggs \(136 g with shells, about 120 g of egg\); 172 kcal, 15\.1 g protein\./);
+  assert.match(r.text, /^Copied Lunch of Wednesday 1\/21 to Thursday 1\/22, 1:00 PM as Lunch \[id .+\]: Eggs 2 eggs \(136 g with shells, about 120 g of egg\); 172 kcal, 15\.1 g protein, 0\.9 g carbs, 11\.4 g fat\./);
   const m = data('meals', id);
   assert.deepEqual([m.date, m.at, m.by, m.copiedFrom, m.before.confirmedAt, m.before.items.length, m.tz], [TODAY, NOW, 'coach', 'm1', NOW, 1, 'UTC']);
   assert.equal(data('meals', 'm1').date, '2026-01-21', 'the original stays');

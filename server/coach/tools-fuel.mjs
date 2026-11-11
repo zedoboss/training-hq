@@ -10,7 +10,7 @@ import { put, del, num, ITEMS, mealItems, momentOf } from './tools-write.mjs';
 import { mealsText, suppDayKind } from './tools-read.mjs';
 import { newMeal, cleanItems, itemTotals, presetsOf, findPreset, beforeItems, leftovers, netItems } from '../../app/js/lib/meals.js';
 import { withUsda, sameFood, gramsFor, amountText, itemAmount } from '../../app/js/lib/foods.js';
-import { foodsDb, myFoods } from '../foods.mjs';
+import { foodsDb, myFoods, macrosText } from '../foods.mjs';
 import { WEEKDAYS, FOOD_TEXT, statusOn, withStatus, logId, daysText, doseFor, stockStatus, lastsText } from '../../app/js/lib/supplements.js';
 import { mealTimesOf, mealFitIssues } from '../../app/js/lib/fuel-reminders.js';
 import { withDefaults } from '../../app/js/lib/settings.js';
@@ -38,7 +38,8 @@ const itemsRefusal = ({ noSize, unknown }) => (noSize.length
   ? `No grams for ${noSize.map((x) => `"${x.name}"`).join(', ')}: packs and counts work only for his foods that have them. Ask him for the grams. Nothing changed.`
   : `No USDA match for ${unknown.map((x) => `"${x.name}"`).join(', ')}. Give its USDA description (usda), ask him for its numbers, or save it as his food (my_food). Nothing changed.`);
 const itemText = (s) => { const mine = myFoods(s.one('fuel', 'plan')); return (x) => `${x.name} ${itemAmount(x, mine)}${x.source === 'label' ? ' (his numbers)' : x.source === 'typed' ? ' (his numbers)' : x.source === 'usda' ? '' : ' (estimate)'}`; };
-const totalsText = (items) => { const t = itemTotals(items); return `${n0(t.kcal)} kcal, ${t.protein} g protein`; };
+// Wed 11/11: carbs and fat with kcal and protein (his own foods' labels need his plan, s).
+const totalsText = (items, s) => { const t = itemTotals(items); return `${n0(t.kcal)} kcal, ${t.protein} g protein, ${macrosText(items, { mine: myFoods(s.one('fuel', 'plan')) })}`; };
 
 // ---- supplement_list ----------------------------------------------------------------------------------------------
 
@@ -226,7 +227,7 @@ async function mealEdit(a, ctx) {
     if (a.away != null) next.away = Boolean(a.away);
     if (a.cooked != null) next.cooked = Boolean(a.cooked);
     put(s, 'meals', id, next);
-    return wrote(`Copied ${meal.name} of ${dayText(meal.date, today)} to ${dayText(date, today)}, ${timeText(at, s.tz)} as ${next.name} [id ${id}]: ${items.map(itemText(s)).join(', ')}; ${totalsText(items)}${left.items.length ? ' (what he ate that day, leftovers off)' : ''}.\n${dayLine(ctx, date)}`, `${next.name} copied to ${date}`);
+    return wrote(`Copied ${meal.name} of ${dayText(meal.date, today)} to ${dayText(date, today)}, ${timeText(at, s.tz)} as ${next.name} [id ${id}]: ${items.map(itemText(s)).join(', ')}; ${totalsText(items, s)}${left.items.length ? ' (what he ate that day, leftovers off)' : ''}.\n${dayLine(ctx, date)}`, `${next.name} copied to ${date}`);
   }
 
   const doc = presetsDoc(s);
@@ -270,7 +271,7 @@ async function mealEdit(a, ctx) {
     }
     if (!items.length) return refuse(`That leaves "${preset.name}" empty. To remove it: action delete_preset. Nothing changed.`);
     savePresets(s, doc, raw.map((p) => (p.id === preset.id ? { ...p, items: cleanItems(items), savedAt: s.now, edited: true } : p)));
-    return wrote(`Preset "${preset.name}" now: ${items.map(itemText(s)).join(', ')}; ${totalsText(items)}. Meals logged from it before stay as they were.`, `preset ${preset.name} edited`);
+    return wrote(`Preset "${preset.name}" now: ${items.map(itemText(s)).join(', ')}; ${totalsText(items, s)}. Meals logged from it before stay as they were.`, `preset ${preset.name} edited`);
   }
   return refuse('action: move, copy, rename_preset, delete_preset or preset_items.');
 }

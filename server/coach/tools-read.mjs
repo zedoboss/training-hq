@@ -15,8 +15,8 @@ import { dayMarks, setText, weekStreak, workoutDates, sessionsPerWeek, sourceOf,
 import { sessionPoints, records, repRecords } from '../../app/js/lib/records.js';
 import { dayTotals, mealTotals, beforeItems, leftovers, netItems, mealState, STATE_SHORT, mealMarks, itemTotals, presetsOf, isEmptyMeal } from '../../app/js/lib/meals.js';
 import { amountsLine, itemAmount, myFoods } from '../../app/js/lib/foods.js';
-import { dayMicro, weekMicro, plannedMicro, microRows } from '../../app/js/lib/micro.js';
-import { foodsDb } from '../foods.mjs';
+import { dayMicro, weekMicro, plannedMicro, microRows, eatenItems } from '../../app/js/lib/micro.js';
+import { foodsDb, macrosText } from '../foods.mjs';
 import { reviewOpen, checklist, whenText as suppWhen, outOfStock, statusOn, stockStatus, lastsText, adherence, streak, dayKindFrom, daysText, FOOD_TEXT, suppMarks, doseFor } from '../../app/js/lib/supplements.js';
 import { lowAnswered, mealTimesOf, mealFitIssues } from '../../app/js/lib/fuel-reminders.js';
 import { walkLines, usualWalkHm, walkSteps, hourRisk, weatherWords, safeWindowsText, uvClimb, weatherCodeText, rainingNow, rainChanceText, seenNow, obsNow, umbrellaWorth } from '../../app/js/lib/walks.js';
@@ -914,13 +914,16 @@ export function mealsText(s, { date = null }) {
   const plan = s.one('fuel', 'plan') || {};
   const mine = myFoods(plan);
   const t = dayTotals(s.list('meals'), est, d);
-  const lines = [`${dayText(d, s.today)}: ${t.kcal.toLocaleString('en-US')} kcal, ${t.protein} g protein (targets ${plan.kcal ?? '?'} kcal, ${plan.proteinG ?? '?'} g protein; his September plan).`];
+  // Wed 11/11: carbs and fat too, eaten (leftovers off), against his targets.
+  const macros = macrosText(eatenItems(s.list('meals'), est, d), { mine });
+  const targets = [`${plan.kcal != null ? plan.kcal.toLocaleString('en-US') : '?'} kcal`, `${plan.proteinG ?? '?'} g protein`, ...(plan.carbsG != null ? [`${plan.carbsG} g carbs`] : []), ...(plan.fatG != null ? [`${plan.fatG} g fat`] : [])];
+  const lines = [`${dayText(d, s.today)}: ${t.kcal.toLocaleString('en-US')} kcal, ${t.protein} g protein, ${macros} (targets ${targets.join(', ')}; his September plan).`];
   for (const m of meals) {
     const b = beforeItems(m, est);
     const l = leftovers(m, est);
     const eaten = b.items ? netItems(b.items, l.items) : null;
     const mt = mealTotals(m, est);
-    lines.push(`- ${m.name} ${timeText(m.at, s.tz)} [id ${m.id}] (${STATE_SHORT[mealState(m, est, s.now)] || mealState(m, est, s.now)}${b.estimated && b.items ? ', estimate' : ''}): ${eaten ? eaten.map((x) => `${x.name} ${itemAmount(x, mine)}`).join(', ') || 'nothing' : 'being read'}${mt.known ? `; ${mt.kcal} kcal, ${mt.protein} g protein` : ''}${m.note ? `; note: ${m.note}` : ''}`);
+    lines.push(`- ${m.name} ${timeText(m.at, s.tz)} [id ${m.id}] (${STATE_SHORT[mealState(m, est, s.now)] || mealState(m, est, s.now)}${b.estimated && b.items ? ', estimate' : ''}): ${eaten ? eaten.map((x) => `${x.name} ${itemAmount(x, mine)}`).join(', ') || 'nothing' : 'being read'}${mt.known ? `; ${mt.kcal} kcal, ${mt.protein} g protein, ${macrosText(eaten || [], { mine })}` : ''}${m.note ? `; note: ${m.note}` : ''}`);
   }
   if (!meals.length) lines.push('No meals logged.');
   lines.push(mealTimesLine(s));
