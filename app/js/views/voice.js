@@ -66,7 +66,7 @@ function hub(view) {
         <li>A recording of your own voice played back (a video, a voice note) sounds like you and can pass.</li>
         <li>Someone whose voice is very like yours may pass now and then; strict makes that rare, not impossible.</li>
         <li>It misses you sometimes, more at the gym with loud music, when you shout, whisper or have a cold. Repeat yourself, or tap.</li>
-        <li>Only while the app is open and on screen: iPhone stops the microphone when it locks or you switch apps.</li>
+        <li>Only while the app is open and on screen: iPhone stops the microphone when it locks or you switch apps. Coming back, tap TAP TO LISTEN: the app never opens the microphone by itself, because an open microphone pauses your music.</li>
         <li>Very short words ("yes", "next") carry little of your voice; strict may ignore them. Say a few words.</li>
       </ul></div>
       <div class="section-label">Start again</div>

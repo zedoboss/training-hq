@@ -208,7 +208,7 @@ function bargeCheck() {
 }
 
 // When the microphone can't be opened (Mon 10/19: under iPhone Mirroring iOS refuses it with a dialog), the app must not
-// ask again on every return to the screen: that kept the dialog coming back and the phone stuck. Automatic retries
+// ask again by itself (leaving Voice setup): that kept the dialog coming back and the phone stuck. Automatic retries
 // wait this long; a tap on the chip always tries at once.
 const MIC_RETRY_MS = 120000;
 let micFailedAt = 0;
@@ -357,25 +357,29 @@ export async function lendMic(onFrame) {
 export function hold(on) {
   held = Math.max(0, held + (on ? 1 : -1));
   if (held) { closeListening(); player.stop(); setPhase(listening() ? 'paused' : 'off'); }
-  else if (listening() && !lent) openListening().catch(() => {});
+  else if (listening() && !lent && mayRetry()) openListening().catch(() => {});
 }
 
-// Only while the app is open and on screen: the microphone closes when it hides and opens again when it's back
-// (iPhone may want a tap for that: the chip then says TAP TO LISTEN).
+// Only while the app is open and on screen: the microphone closes when it hides. Coming back it stays closed until he
+// taps the chip (TAP TO LISTEN). Wed 11/11, 3:58 PM: "Opening the training hq stops my music again": the app opened
+// the always-on mic by itself as it came on screen, and an open microphone puts iPhone in 'play-and-record', which
+// pauses his music (no mixing mode exists for it in Safari). Opening or switching to the app never does that now.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { closeListening(); player.stop(); if (listening()) setPhase('paused'); }
-  else if (listening() && !held && mayRetry()) openListening().catch(() => {});
+  else if (listening() && !mic && !held && !lent) setPhase('tap');
 });
 // The first tap after the app opens lets iPhone play sound again.
 document.addEventListener('pointerdown', () => { audioContext(); rest.unlockAudio(); }, { once: true, capture: true });
 
-/** At app start: listen again if it was on, as long as calibration still allows it. */
+/**
+ * At app start: if listening was on for this device (and calibration still allows it), the chip says TAP TO LISTEN.
+ * The microphone opens only from his tap on it (Wed 11/11: opening the app paused his music; see visibilitychange).
+ */
 export async function resume() {
   if (!listening()) return;
+  if (!mic) setPhase('tap');
   try {
     const st = await macGet('/api/voice/status');
-    if (!st.canListen) { stop(); return; }
-  } catch { /* Mac unreachable: listening waits; the chip says so */ setPhase('tap'); error = 'Mac unreachable'; emit(); return; }
-  if (!mayRetry()) { setPhase('tap'); return; }
-  openListening().catch(() => {});
+    if (!st.canListen) stop();
+  } catch { /* Mac unreachable: the chip says so */ error = 'Mac unreachable'; emit(); }
 }
