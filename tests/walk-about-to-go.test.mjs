@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { walkingNow, emptyWalk } from '../app/js/lib/walks.js';
+import { walkingNow, emptyWalk, withAnswer, planAt, walkDue } from '../app/js/lib/walks.js';
 import { openStore } from '../server/store.mjs';
 import { toldWalking } from '../server/notify.mjs';
 import { RULES } from '../server/coach/prompt.mjs';
@@ -45,10 +45,31 @@ test('his afternoon replayed: nothing marks him out walking until he says he is'
   }
 });
 
-test('the coach: "I\'ll go now" is a 15-minute plan, going only once he says he is walking', () => {
-  assert.match(RULES, /About to go is not walking \(his words, Wed 11\/11[^\n]*"I'll go now"[^\n]*inMinutes 15[^\n]*until he says he's walking or out/);
+// Wed 11/11, 3:42 PM, his words: "Why a 15 min and not 5???": about to go with no time named = check after 5 minutes;
+// a time he names himself still wins.
+test('the coach: "I\'ll go now" is a 5-minute plan, his own time wins, going only once he says he is walking', () => {
+  assert.match(RULES, /About to go is not walking \(his words, Wed 11\/11[^\n]*"I'll go now"[^\n]*walk plan inMinutes 5;[^\n]*a time he names himself[^\n]*wins[^\n]*until he says he's walking or out/);
+  assert.doesNotMatch(RULES, /About to go[^\n]*inMinutes 15/);
   assert.doesNotMatch(RULES, /walking now or about to/);
   const walk = WRITE_TOOLS.find((t) => t.name === 'walk');
-  assert.match(walk.description, /About to go is a plan, not going: 'I'll go now'[^"]*inMinutes 15[^"]*going only once he says he's walking/);
+  assert.match(walk.description, /About to go is a plan, not going: 'I'll go now'[^"]*plan inMinutes 5 \(a time he names wins\)[^"]*going only once he says he's walking/);
+  assert.doesNotMatch(walk.description, /inMinutes 15/);
   assert.doesNotMatch(walk.description, /walking now or about to/);
+});
+
+test('his 3:34 PM "give me a bit" as a 5-minute plan: "Did you start walking?" at 3:39 PM, not before, though he just wrote', () => {
+  const TZ = 'Asia/Ho_Chi_Minh';
+  const now = at('15:34');
+  const pAt = planAt({ inMinutes: 5, now, tz: TZ });
+  assert.equal(pAt, at('15:39'));
+  const doc = { ...withAnswer(emptyWalk(D), D, { action: 'plan', at: pAt, said: null }, now), answeredAt: now };
+  const o = { tz: TZ, doc, goal: 8000, wakeHm: '07:00', bedHm: '23:00', lastUserAt: now, steps: { steps: 5485, asOf: now } };
+  assert.equal(walkDue({ ...o, now: at('15:38') }), null);
+  const due = walkDue({ ...o, now: at('15:39') });
+  assert.equal(due.kind, 'plan');
+  assert.match(due.text, /Did you start walking\?/);
+  // He named his own time ("in 20 minutes"): nothing at 3:39 PM, the ask at 3:54 PM.
+  const own = { ...o, doc: { ...withAnswer(emptyWalk(D), D, { action: 'plan', at: planAt({ inMinutes: 20, now, tz: TZ }), said: 'in 20 minutes' }, now), answeredAt: now } };
+  assert.equal(walkDue({ ...own, now: at('15:39') }), null);
+  assert.equal(walkDue({ ...own, now: at('15:54') }).kind, 'plan');
 });
