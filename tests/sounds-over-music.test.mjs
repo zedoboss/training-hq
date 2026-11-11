@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-// A fake iPhone: the audio session remembers every mode it was set to; the audio element notes the mode it played in.
+// A fake iPhone: the audio session remembers every mode it was set to; an audio element would note the mode it played in.
 const modes = [];
 const session = { _t: 'auto', get type() { return this._t; }, set type(v) { this._t = v; modes.push(v); } };
 Object.defineProperty(globalThis, 'navigator', { value: { audioSession: session }, configurable: true, writable: true });
@@ -50,13 +50,13 @@ test("a 'playback' left behind when he switched to his music is gone when the ap
 test('the unlock tap and every timer sound play over his music, never in playback', async () => {
   sounds.unlockAudio();
   await tick();
-  assert.equal(elPlays[0], 'ambient', 'the silent unlock play is already mixing');
+  // Wed 11/11: no media element at all (a silent play on the first tap; iPhone treats an element as a music player).
+  assert.deepEqual(elPlays, [], 'the unlock tap played a media element');
   for (const id of ['beeps', 'count', 'go', 'chime']) sounds.play(id, 80, { alarm: true });
   sounds.play('tick', 80);
   sounds.play('record', 80);
   await tick();
-  assert.ok(elPlays.length >= 5);
-  assert.ok(elPlays.every((m) => m === 'ambient'), `element played in ${elPlays}`);
+  assert.deepEqual(elPlays, [], 'timer sounds are Web Audio only');
   assert.equal(session.type, 'ambient');
   assert.ok(!modes.includes('playback'), `modes set: ${modes}`);
 });
@@ -65,7 +65,6 @@ test('a sound after the mode went back to auto (squat screen closed) mixes again
   session.type = 'auto';
   sounds.play('beeps', 80, { alarm: true });
   assert.equal(session.type, 'ambient');
-  assert.equal(elPlays.at(-1), 'ambient');
 });
 
 test("the coach's voice plays over his music", async () => {

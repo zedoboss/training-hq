@@ -5,7 +5,7 @@
 // timer, sync, the session screen's exercise). Barge-in: when someone talks over the coach, the first second goes to
 // the Mac's voice check, and only his voice stops it. The screen stays on while listening (wake lock).
 import { micSession } from './voice-rec.js';
-import { audioContext, audioRunning, resetAudio } from './voice-mic.js';
+import { audioContext, audioRunning, resetAudio, unlockAudioContext, holdAudio } from './voice-mic.js';
 import { createPlayer } from './voice-player.js';
 import { encodeWav } from './wav.js';
 import { sentenceSplitter, replyGate } from './voice-text.js';
@@ -50,6 +50,7 @@ const player = createPlayer({
   context: audioContext,
   fetchSpeech: voiceSpeech,
   onState: (speaking) => {
+    holdAudio('voice', speaking); // the audio is let go a few seconds after the voice ends (lib/voice-mic.js)
     setPhase(speaking ? 'speaking' : restPhase());
     // The caption stays while he talks and goes a second after (ui/coach-caption.js).
     window.dispatchEvent(new CustomEvent('thq:coach-speaking', { detail: { speaking } }));
@@ -369,7 +370,8 @@ document.addEventListener('visibilitychange', () => {
   else if (listening() && !mic && !held && !lent) setPhase('tap');
 });
 // The first tap after the app opens lets iPhone play sound again.
-document.addEventListener('pointerdown', () => { audioContext(); rest.unlockAudio(); }, { once: true, capture: true });
+// Only unlocks: if nothing plays, the audio is let go again a few seconds later (lib/voice-mic.js, Wed 11/11).
+document.addEventListener('pointerdown', () => { unlockAudioContext(); rest.unlockAudio(); }, { once: true, capture: true });
 
 /**
  * At app start: if listening was on for this device (and calibration still allows it), the chip says TAP TO LISTEN.

@@ -4,7 +4,7 @@
 // (so the count-in and the end of a hold are always marked). Only his real words stop it (lib/voice.js calls stop()
 // when the Mac hears him); pain or stop hands over to Calm for a while.
 import { voiceSpeech } from './data.js';
-import { audioContext } from './voice-mic.js';
+import { audioContext, unlockAudioContext, audioBusy } from './voice-mic.js';
 import { pcm16ToFloat } from './wav.js';
 import { play, overMusic } from './sounds.js';
 import { getState } from './store.js';
@@ -102,6 +102,7 @@ function playBuffer(run, buf) {
   const src = ctx.createBufferSource();
   src.buffer = buf; src.connect(ctx.destination);
   src.start(ctx.currentTime + 0.02);
+  audioBusy(buf.duration * 1000 + 500); // not let go of mid-line (lib/voice-mic.js)
   run.sources.add(src);
   // A rough loudness for the echo check.
   const d = buf.getChannelData(0); let peak = 0;
@@ -167,4 +168,4 @@ export function stop() {
 export const firedCues = () => fired.slice();
 
 /** A tap that may lead to sound: lets iPhone play the voice. */
-export const unlock = () => { try { audioContext(); } catch { /* no audio */ } };
+export const unlock = () => { try { unlockAudioContext(); } catch { /* no audio */ } };

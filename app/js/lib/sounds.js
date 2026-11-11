@@ -11,28 +11,17 @@
 // restarting it needs a tap. So timer sounds (alarm) now play as a short sound file through an audio element that a
 // tap has unlocked (iPhone lets that element play again later without a tap); Web Audio stays for the rest and as
 // the fallback. The Mac also sends a "Rest over" notification (rest-push), which iPhone sounds on its own.
-import { audioContext as sharedContext } from './voice-mic.js';
+// Wed 11/11, 4:10 PM: "Nope still pauses my brave music" (just opening the app). The sound-file way never once played
+// on his phone (the Mac's log: 92 timer sounds, every one 'el:false', none by file), and its silent unlock play on the
+// first tap is a media element, the one kind of sound iPhone treats as a music player. Gone: timer sounds are Web
+// Audio only, and an unlock tap only unlocks: lib/voice-mic.js lets the audio go again if nothing plays.
+import { audioContext as sharedContext, unlockAudioContext, audioBusy } from './voice-mic.js';
 import { diag } from './diag.js';
 
 let audio = null;
 let mic = false;
-let el = null; let elReady = false;
 // Thu 10/22: the beeps used an audio context of their own beside the coach's voice; iPhone can leave a second one
 // silent. They now share the voice's (lib/voice-mic.js), which a tap unlocks for both.
-const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
-
-/** The audio element, unlocked inside a tap (a silent play), so later timer sounds play without one. */
-function unlockElement() {
-  try {
-    if (!el) { el = new Audio(); el.preload = 'auto'; el.setAttribute('playsinline', ''); }
-    if (elReady) return;
-    // Mixing first: a sound file played in iPhone's 'auto' mode counts as media and pauses his music.
-    overMusic();
-    el.src = SILENT;
-    const p = el.play();
-    if (p?.then) p.then(() => { elReady = true; }).catch(() => {}); else elReady = true;
-  } catch { /* no audio element */ }
-}
 
 function ready() {
   try {
@@ -42,7 +31,8 @@ function ready() {
   return audio;
 }
 
-export function unlockAudio() { ready(); unlockElement(); }
+/** A tap that may lead to a sound later: iPhone lets the app play then. Plays nothing now. */
+export function unlockAudio() { try { overMusic(); audio = unlockAudioContext(); } catch { /* no audio */ } }
 
 /** The coach's microphone is open (its audio mode already ignores the silent switch; the mix mode must not override it). */
 export function micActive(on) { mic = !!on; if (!mic) overMusic(); }
@@ -97,35 +87,14 @@ export function play(id = 'beeps', volume = 80, { alarm = false } = {}) {
   const n = /^beeps-(\d)$/.exec(id);
   const notes = n ? Array.from({ length: +n[1] }, (_, i) => [i * 0.28, i === +n[1] - 1 ? 1320 : 880, 0.22]) : PATTERNS[id] || PATTERNS.beeps;
   overMusic();
-  if (alarm && elReady && playFile(notes, volume, a, id)) return;
-  if (alarm) diag({ what: 'sound', id, path: 'webaudio', ctx: a.state, el: elReady });
+  audioBusy((Math.max(...notes.map(([at, , len]) => at + len)) + 1) * 1000);
+  if (alarm) diag({ what: 'sound', id, path: 'webaudio', ctx: a.state });
   if (a.state === 'running') { schedule(a, notes, volume); return; }
   // Stopped: play once it runs again (or anyway after a moment, if iPhone never says so).
   let done = false;
   const go = () => { if (!done) { done = true; schedule(a, notes, volume); } };
   a.resume().then(go).catch(go);
   setTimeout(go, 800);
-}
-
-const files = new Map();
-/** A timer sound as a sound file in the unlocked element; Web Audio when the element refuses. */
-function playFile(notes, volume, a, id = '') {
-  try {
-    const key = `${JSON.stringify(notes)}@${volume}`;
-    if (!files.has(key)) files.set(key, URL.createObjectURL(new Blob([wavOf(notes, volume)], { type: 'audio/wav' })));
-    el.src = files.get(key);
-    el.currentTime = 0;
-    const t = Date.now();
-    const p = el.play();
-    if (p?.then) {
-      p.then(() => diag({ what: 'sound', id, path: 'file', ok: true, ms: Date.now() - t, ctx: a.state, session: navigator.audioSession?.type }))
-        .catch((e) => {
-          diag({ what: 'sound', id, path: 'file', ok: false, err: e?.name || String(e), ctx: a.state });
-          elReady = false; if (a.state === 'running') schedule(a, notes, volume); else a.resume().then(() => schedule(a, notes, volume)).catch(() => {});
-        });
-    }
-    return true;
-  } catch (e) { diag({ what: 'sound', id, path: 'file', ok: false, err: e?.name || String(e) }); return false; }
 }
 
 const WAVES = {

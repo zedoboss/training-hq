@@ -6,12 +6,62 @@ import { micOpening } from './sounds.js';
 
 let ctx = null;
 
-/** The app's audio context for voice (made on a tap, so iPhone lets it play). */
-export function audioContext() {
+// Wed 11/11, 4:10 PM: "Nope still pauses my brave music", after the mic fix: opening the app paused music playing in
+// Brave with no microphone open. This audio context, once a tap had started it (the first tap, Send on Talk, a timer),
+// stayed running for good, playing silence; iPhone parks a running one when the app hides and starts it again as the
+// app comes back on screen, taking the audio as it does. Now the app lets go of it (suspends it) when it goes off
+// screen, and a few seconds after a tap that only unlocked sound, a dictation or the coach's voice, if nothing else
+// plays: coming back to the app starts no audio. A sound, the voice or the mic wakes it only when it actually plays
+// (audioContext() below), and iPhone allows that without a new tap once one tap has started it.
+export const IDLE_MS = 3000;
+let uses = 0; let busyUntil = 0; let idleTimer = null;
+const holds = new Map();
+
+function make() {
   if (!ctx || ctx.state === 'closed') ctx = new (window.AudioContext || window.webkitAudioContext)();
   // 'interrupted' is iPhone's state after something else took the audio (Tue 10/20: iPhone Mirroring).
   if (ctx.state === 'suspended' || ctx.state === 'interrupted') ctx.resume().catch(() => {});
   return ctx;
+}
+
+/** The app's audio context, for something about to play or record now (made on a tap, so iPhone lets it play). */
+export function audioContext() { uses++; return make(); }
+
+/** A tap that may lead to sound later: starts the context inside the tap (iPhone rule), then lets go if unused. */
+export function unlockAudioContext() { const c = make(); idleSoon(); return c; }
+
+/** Something is playing for `ms` from now (a sound, a coach line): no letting go before it ends. */
+export function audioBusy(ms) { uses++; busyUntil = Math.max(busyUntil, Date.now() + Math.max(0, ms)); }
+
+/** A microphone ('mic') or the coach's voice ('voice') uses the context until it says it's done. */
+export function holdAudio(key, on) {
+  const n = Math.max(0, (holds.get(key) || 0) + (on ? 1 : -1));
+  if (n) holds.set(key, n); else holds.delete(key);
+  if (on) uses++; else if (!holds.size) idleSoon();
+}
+
+/** Let go of the audio now: iPhone keeps a suspended context stopped when the app comes back (it was ours to stop). */
+export function letGoOfAudio() {
+  clearTimeout(idleTimer); idleTimer = null;
+  if (ctx && (ctx.state === 'running' || ctx.state === 'interrupted')) { try { ctx.suspend().catch(() => {}); } catch { /* gone */ } }
+}
+
+/** In IDLE_MS: let go if nothing used the audio since and nothing is playing or recording. */
+export function idleSoon() {
+  const from = uses;
+  clearTimeout(idleTimer);
+  const check = () => {
+    idleTimer = null;
+    if (uses > from || holds.size) return; // used meanwhile, or held: its end asks again
+    if (Date.now() < busyUntil) { idleTimer = setTimeout(check, busyUntil - Date.now() + 50); return; }
+    letGoOfAudio();
+  };
+  idleTimer = setTimeout(check, IDLE_MS);
+}
+
+if (typeof document !== 'undefined' && document.addEventListener) {
+  // Off screen iPhone stops the microphone and the app's sound anyway (voice.js closes the mic and the voice here too).
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') letGoOfAudio(); });
 }
 
 /** Whether the shared audio context is running (false when there is none yet). */
@@ -47,9 +97,9 @@ export async function openMic({ onFrame, onEnded = () => {} }) {
 
 async function openMicOnce({ onFrame, onEnded }) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('No microphone access in this browser.');
-  micOpening(1);
+  micOpening(1); holdAudio('mic', true);
   let released = false;
-  const release = () => { if (!released) { released = true; micOpening(-1); } };
+  const release = () => { if (!released) { released = true; micOpening(-1); holdAudio('mic', false); } };
   try { return await openMicHeld({ onFrame, onEnded, release }); } catch (e) { release(); throw e; }
 }
 
