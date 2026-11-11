@@ -50,17 +50,20 @@ test('his Wednesday replayed: sleep and body asks unanswered, no morning plan, n
     await f.run('05:39', '05:39');
     assert.ok(f.said().some((t) => /How did you sleep\?/.test(t)), f.said().join(' | '));
     await f.run('05:40', '06:30');
-    assert.ok(f.sent.some((m) => /^How does your body feel today\?/.test(m.body)), 'the body question still comes after the sleep one is left');
+    // Thu 11/12: one question at a time: no body question while the sleep one waits.
+    assert.equal(f.said().some((t) => /How does your body feel today\?/.test(t)), false, 'no body question while sleep waits');
     const before = f.said().length;
     await f.run('06:31', '11:00');
-    assert.deepEqual(f.said().slice(before), [], 'nothing else while both questions wait, 4 hours on and more');
+    assert.deepEqual(f.said().slice(before), [], 'nothing else while the sleep question waits, 4 hours on and more');
     assert.equal(morningGate(f.store, T('11:00'), TZ).hold, true);
-    // He replies at 11:05 AM: the day goes on, the scan checklist with it (he hasn't trained yet).
+    // He replies at 11:05 AM, past the morning (4 hours after he got up): the day goes on, the scan checklist with it
+    // (he hasn't trained yet).
     f.say('11:05', 'slept ok, body 0');
     await f.run('11:05', '12:00');
     assert.equal(morningGate(f.store, T('12:00'), TZ).hold, false);
     assert.ok(f.sent.some((m) => /^Body scan today, before you train/.test(m.body)), f.sent.map((m) => `${hmOf(m.at)} ${m.body}`).join(' | '));
-    assert.equal(f.talk().filter((m) => /How did you sleep|How does your body/.test(m.text)).length, 2, 'each question once');
+    assert.equal(f.talk().filter((m) => /How did you sleep/.test(m.text)).length, 1, 'sleep asked once');
+    assert.equal(f.talk().filter((m) => /How does your body/.test(m.text)).length, 0, 'body never asked past the morning');
   } finally { f.done(); }
 });
 

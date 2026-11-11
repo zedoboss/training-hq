@@ -474,10 +474,11 @@ export function morningGate(store, now, tz) {
   const trainedAt = Math.max(0, ...sessions.filter((x) => x.kind !== 'holds' && x.status !== 'discarded' && x.startedAt && x.startedAt <= now && (c ? x.startedAt >= c.wokeAt : isoDate(new Date(x.startedAt), tz) === date)).map((x) => x.startedAt));
   const trainedToday = trainedAt > 0;
   // Not up yet: any of it in the last 4 hours and "Are you up?" waits too.
+  const sleepKnown = Boolean(health?.sleep || store.getRecord('sleep-log', night)?.data);
   const noQuiet = !state.open && (noQuietYet(store, now) || (upAt == null && activityOf(store, now - SLEEP.gapH * 3600000, now).length > 0));
   const step = morningStep({
     now, wakeAt, upAt, state, upNoSleep: !c && !upAt && stillUp(store, now, tz), noQuiet,
-    sleepKnown: Boolean(health?.sleep || store.getRecord('sleep-log', night)?.data),
+    sleepKnown,
     bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness || (c && store.getRecord('days', isoDate(new Date(now), tz))?.data?.readiness)) || trainedToday,
     coachAsked: { sleep: askedBy(ASKS_SLEEP), body: askedBy(ASKS_BODY) },
     lastUserAt: Math.max(0, ...msgs.filter((x) => x.role === 'user').map((x) => x.at || 0)),
@@ -485,7 +486,7 @@ export function morningGate(store, now, tz) {
     workoutAt: trainedAt,
     bodyText: morningBodyText(lastWorkoutPain({ sessions, sets: list('sets'), today: date, tz }), date, tz),
   });
-  return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt, clock: c, night };
+  return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt, clock: c, night, sleepKnown };
 }
 
 /** The morning's state without what was asked or greeted before he got up (moving: or opened, a day before his). */
@@ -589,7 +590,7 @@ function movingContext(store, now, tz, g) {
 function morningLine(store, g, tz) {
   const t = (ms) => formatTime(new Date(ms), tz);
   const asked = [['up', '"Are you up?"'], ['sleep', 'how he slept'], ['body', 'how his body feels']].filter(([k]) => g.state[k]).map(([k, w]) => `${w} at ${t(g.state[k])}`);
-  return `His morning (his rule, Fri 10/23): one question at a time, in this order: ${g.clock ? '' : 'is he up, how he slept, '}how his body feels (${morningBodyText(lastWorkoutPain({ sessions: recordsOf(store, 'sessions'), sets: recordsOf(store, 'sets'), today: g.date, tz }), g.date, tz)}), then the day's plan. The app ${asked.length ? `asked ${asked.join(', ')}` : 'has asked nothing yet'}, and holds the day's reminders until that's through. When he answers one, ask the next yourself, one question, never the plan first.`;
+  return `His morning (his rule, Fri 10/23): one question at a time, in this order: ${g.clock ? '' : 'is he up, how he slept, '}how his body feels (${morningBodyText(lastWorkoutPain({ sessions: recordsOf(store, 'sessions'), sets: recordsOf(store, 'sets'), today: g.date, tz }), g.date, tz)}), then the day's plan. The app ${asked.length ? `asked ${asked.join(', ')}` : 'has asked nothing yet'}, and holds the day's reminders until that's through. When he answers one, ask the next yourself, one question, never the plan first.${!g.clock && g.state.sleep && !g.sleepKnown ? ' How he slept is still unanswered (not logged): the app asks nothing else and holds the plan till it is, so don\'t ask about his body or give the plan either. If he writes about something else, answer that and end with the sleep question in one short line, unless your last reply already ended with it; save his times with log_sleep.' : ''}`;
 }
 
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */

@@ -54,17 +54,27 @@ test('the morning steps: up, then sleep, then body; one at a time; quiet until h
   assert.deepEqual(step({ now: T('11:00'), state: { up: T('10:00') } }), { hold: true, open: false, ask: null });
   // Sat 10/24: still nothing 4 hours, or all day, after his wake time: still quiet, still waiting for him.
   for (const hm of ['14:00', '18:00', '23:59']) assert.deepEqual(step({ now: T(hm), state: { up: T('10:00') } }), { hold: true, open: false, ask: null }, hm);
-  // Up but leaving the questions (Thu 11/5, his words: hold the plan until he replies): held 4 hours on, and all day.
-  const left = { upAt: T('10:05'), lastUserAt: T('10:05'), state: { up: T('10:00'), sleep: T('10:08'), body: T('10:38') }, lastCoachAt: T('10:38') };
-  for (const hm of ['11:10', '14:00', '20:00']) assert.deepEqual(step({ ...left, now: T(hm) }), { hold: true, open: false, ask: null }, hm);
+  // Up but leaving the sleep question (Thu 11/5, his words: hold the plan until he replies; Thu 11/12: one question at
+  // a time, no body question while sleep waits): held, no next question, 4 hours on and all day.
+  const left = { upAt: T('10:05'), lastUserAt: T('10:05'), state: { up: T('10:00'), sleep: T('10:08') }, lastCoachAt: T('10:08') };
+  for (const hm of ['10:38', '10:50', '11:10', '14:00', '20:00']) assert.deepEqual(step({ ...left, now: T(hm) }), { hold: true, open: false, ask: null }, hm);
   assert.deepEqual(step({ ...left, now: T('14:00'), noQuiet: true }), { hold: true, open: false, ask: null }, '4 hours active: still his answer first');
-  // He replies at 2:00 PM: 3 minutes later the day goes on. A workout started counts as getting on with it too.
-  assert.deepEqual(step({ ...left, now: T('14:03'), lastUserAt: T('14:00') }), { hold: false, open: true, ask: null });
-  assert.deepEqual(step({ ...left, now: T('14:00'), workoutAt: T('13:30'), noQuiet: true }), { hold: false, open: true, ask: null });
-  // His answer logged in the app instead (sleep and check-in known): no hold either.
+  // He writes about something else at 12:00 PM: sleep is still unanswered, so no body question and no plan.
+  for (const hm of ['12:03', '12:40', '13:30']) assert.deepEqual(step({ ...left, now: T(hm), lastUserAt: T('12:00') }), { hold: true, open: false, ask: null }, hm);
+  // Once the morning is over (4 hours after he got up), a message after the ask lets the day go.
+  assert.deepEqual(step({ ...left, now: T('14:03'), lastUserAt: T('14:00') }).hold, true, 'not yet 4 hours after he got up (10:05 AM)');
+  assert.deepEqual(step({ ...left, now: T('14:08'), lastUserAt: T('14:05') }), { hold: false, open: true, ask: null });
+  assert.deepEqual(step({ ...left, now: T('14:05'), lastUserAt: T('12:00') }), { hold: false, open: true, ask: null });
+  // A workout started counts as getting on with it, at once (and as his check-in: notify.mjs bodyKnown).
+  assert.deepEqual(step({ ...left, now: T('11:00'), workoutAt: T('10:50'), bodyKnown: true }), { hold: false, open: true, ask: null });
+  // His sleep logged (the coach saved it, or the app): the body question next, after a quiet 3 minutes.
+  assert.deepEqual(step({ ...left, now: T('12:03'), lastUserAt: T('12:00'), sleepKnown: true }).ask, { key: 'body', text: 'BODY?' });
+  // Both known: no hold.
   assert.deepEqual(step({ ...left, now: T('14:00'), sleepKnown: true, bodyKnown: true }), { hold: false, open: true, ask: null });
-  // Only the sleep one answered in the app: the body question he left still holds the day.
-  assert.deepEqual(step({ ...left, now: T('14:00'), sleepKnown: true }), { hold: true, open: false, ask: null });
+  // The body question asked and left: the day waits for his reply to it, however long.
+  const leftBody = { ...left, sleepKnown: true, state: { ...left.state, body: T('10:38') }, lastCoachAt: T('10:38') };
+  for (const hm of ['11:10', '14:00', '20:00']) assert.deepEqual(step({ ...leftBody, now: T(hm) }), { hold: true, open: false, ask: null }, hm);
+  assert.deepEqual(step({ ...leftBody, now: T('11:03'), lastUserAt: T('11:00') }), { hold: false, open: true, ask: null });
   // Nothing asked yet and 4 hours gone (never quiet enough to ask): the day goes on, as before.
   assert.deepEqual(step({ now: T('14:30'), upAt: T('10:05'), lastUserAt: T('14:29'), state: { up: T('10:00') } }), { hold: false, open: true, ask: null });
   // He writes at 11:40 AM: 3 minutes later, sleep.
@@ -158,9 +168,15 @@ test('the coach asks the next morning question in its reply: the app does not as
     await f.run('10:20', '10:40');
     assert.equal(f.sent.filter((m) => /How did you sleep/.test(m.body)).length, 0);
     assert.equal(morningGate(f.store, T('10:40'), TZ).hold, true, 'waiting for his answer');
-    // He never answers it: 30 minutes after the coach asked (10:20:05 AM), his back.
-    await f.run('10:41', '10:52');
-    assert.ok(f.sent.some((m) => hmOf(m.at) === '10:51 AM' && /lower back/.test(m.body)));
+    // He never answers it (Thu 11/12): no body question after it, however long; the day waits.
+    await f.run('10:41', '12:30');
+    assert.equal(f.sent.some((m) => /lower back/.test(m.body)), false);
+    assert.equal(morningGate(f.store, T('12:30'), TZ).hold, true);
+    // He answers it at 12:31 PM (the coach logs it): his back next.
+    f.say('12:31', 'bed 1, up 10');
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: at(D, '01:00'), wake: T('10:00'), source: 'coach', at: T('12:31') });
+    await f.run('12:31', '12:36');
+    assert.ok(f.sent.some((m) => hmOf(m.at) === '12:34 PM' && /lower back/.test(m.body)), f.sent.map((m) => `${hmOf(m.at)} ${m.body}`).join(' | '));
   } finally { f.done(); }
 });
 

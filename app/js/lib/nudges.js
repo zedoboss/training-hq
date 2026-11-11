@@ -585,7 +585,7 @@ export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
  * giveUpH: once he's up, this long after his wake time (or after he got up, if later) no more questions are asked and,
  * when none is left unanswered, the day goes on as usual. Never while he hasn't shown he's up, and never past a
  * question he hasn't answered (Thu 11/5).
- * waitMin: a question he leaves this long counts as passed over, the next one comes; the day still waits for his reply.
+ * waitMin: no longer moves on (Thu 11/12): a question he leaves keeps the next one and the day waiting.
  * quietMin: after his message or the coach's reply, this long before the next question.
  */
 export const MORNING = { giveUpH: 4, waitMin: 30, quietMin: 3 };
@@ -662,8 +662,13 @@ export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQui
   // morning plan went out, then the scan checklist at 7:10 AM): a question he leaves still brings the next one after
   // waitMin, but the day stays held until he replies (or logs it, or starts a workout), however long; giveUpH and
   // noQuiet only let the day go when nothing is left unanswered.
+  // Thu 11/12 (the nightly review of Wednesday 11/11: "How did you sleep?" 9:20 AM, no answer, his body 9:50 AM; he
+  // answered the body one at 11:11 AM, wrote about breakfast at 11:13 AM, and the walk plan went out at 11:17 AM and
+  // the day's plan at 11:20 AM, sleep never answered): one question at a time. A question he leaves never brings the
+  // next one, however long. And the sleep question is answered only when his sleep is logged: a message about
+  // something else doesn't let the morning go on. A workout started still does; and once the morning is over
+  // (giveUpH) a message after the last ask lets the day go, so it is never held all day while he talks to the coach.
   const replied = Math.max(lastUserAt || 0, workoutAt || 0);
-  let unanswered = false;
   const steps = [['sleep', sleepKnown, 'How did you sleep? When did you go to bed and when did you wake up?'], ['body', bodyKnown, bodyText]];
   for (const [key, known, text] of steps) {
     if (known) continue;
@@ -672,11 +677,9 @@ export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQui
       if (late) continue;
       return { hold: true, open: false, ask: quiet ? { key, text } : null };
     }
-    if (replied > askedAt) continue;
-    if (now - askedAt < MORNING.waitMin * 60000) return { hold: true, open: false, ask: null };
-    unanswered = true; // passed over: the next question, but no plan until he answers
+    const answered = key === 'sleep' ? (workoutAt || 0) > askedAt || (late && replied > askedAt) : replied > askedAt;
+    if (!answered) return { hold: true, open: false, ask: null };
   }
-  if (unanswered) return { hold: true, open: false, ask: null };
   // Then the plan: not on top of his answer or the coach's reply either.
   return late || quiet ? { hold: false, open: true, ask: null } : { hold: true, open: false, ask: null };
 }
