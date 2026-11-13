@@ -216,7 +216,7 @@ function rotationLines(s) {
   return out;
 }
 
-function slotsToday(s) {
+export function slotsToday(s) {
   const areas = s.list('tendons').filter((a) => a.kind === 'area');
   const rot = s.rotation();
   const rounds = roundsByDate(areas, s.list('sessions'), s.list('sets'), s.one('bridge', 'last-loads'));

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { runOnce, parseJsonAnswer, isSignedOut } from '../claude.mjs';
 import { snapshot } from './shared.mjs';
 import { timelineText, fold } from './memory.mjs';
+import { slotsToday } from './tools-read.mjs';
 import { newChange, asksOf, COL as CHANGES, MSGS } from './changes.mjs';
 import { formatDay, formatTime, isoDate, zonedTime } from '../../app/js/lib/time.js';
 import { addDays } from '../../app/js/lib/rotation.js';
@@ -47,6 +48,53 @@ const words = (s, n) => { const w = String(s ?? '').trim().split(/\s+/).filter(B
  *  next to the same fixes done): the app names each fix itself, once, in its state when he reads it. */
 const FIX_TALK = /\b((is|are|was|were|be|being|been|got|now) fixed|fixed overnight|fixed(?=\s*:)|fix(es|ing)? (is|are|was|were|filed|queued|coming|in progress)|fixing|fix(es)? for)\b/i;
 export const withoutFixes = (s) => String(s ?? '').trim().split(/(?<=[.!?])\s+/).filter((x) => x && !FIX_TALK.test(x)).join(' ');
+
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const stemOf = (label) => String(label || '').toLowerCase().replace(/s$/, '').replace(/[^a-z ]/g, '');
+const SIMPLE = { morning: 'morning', evening: 'evening', rest: 'rest-day' };
+/** An area's rounds still open today in one line ("Knees: evening round still due today."), '' when none is. */
+function dueLine(slots) {
+  const open = slots.filter((x) => !x.done && !x.skipped);
+  if (!open.length) return '';
+  const simple = open.every((x) => SIMPLE[x.slot]);
+  const what = simple
+    ? `${open.map((x) => SIMPLE[x.slot]).join(' and ')} round${open.length > 1 ? 's' : ''}`
+    : open.map((x) => (SIMPLE[x.slot] ? `${SIMPLE[x.slot]} round` : x.slot === 'after' ? 'round after the session' : 'round at home')).join(' and ');
+  return `${slots[0].label}: ${what} still due today.`;
+}
+
+/**
+ * Fri 11/13 (the nightly review, about Thu 11/12: the morning text was written at 6:32 AM, held, and went out at 11:46 AM
+ * saying "Knee round before you leave, another before bed." though he had logged the morning round 7:30-7:36 AM and was
+ * out): the night's text is rebuilt from today's records when it goes out. A sentence about today's hold rounds for an
+ * area with a round already logged (or skipped) today is dropped, and in its place one line per area names only what's
+ * still due (nothing when all are done). Sentences about another day (yesterday, tomorrow, a weekday that isn't today)
+ * and areas with nothing logged yet are kept as written.
+ */
+export function freshRounds(text, s) {
+  const src = String(text ?? '').trim();
+  if (!src) return src;
+  let slots;
+  try { ({ slots } = slotsToday(s)); } catch { return src; }
+  const moved = new Set(slots.filter((x) => x.done || x.skipped).map((x) => x.area));
+  if (!moved.size) return src;
+  const areas = [...new Map(slots.map((x) => [x.area, stemOf(x.label)])).entries()].filter(([, st]) => st);
+  const named = (p) => areas.filter(([, st]) => new RegExp(`\\b${st}s?\\b`, 'i').test(p)).map(([id]) => id);
+  const today = WEEKDAYS[new Date(`${s.today}T12:00:00Z`).getUTCDay()];
+  const other = new RegExp(`\\b(yesterday|tomorrow|last night|${WEEKDAYS.filter((d) => d !== today).join('|')})\\b`, 'i');
+  const out = []; const hit = new Set(); let at = -1;
+  for (const p of src.split(/(?<=[.!?])\s+/)) {
+    const names = named(p);
+    const about = !other.test(p) && (/\brounds?\b/i.test(p) || (names.length && /\bholds?\b/i.test(p)));
+    const touched = !about ? [] : names.length ? (names.some((id) => moved.has(id)) ? names : []) : [...moved];
+    if (!touched.length) { out.push(p); continue; }
+    touched.forEach((id) => hit.add(id));
+    if (at < 0) at = out.length;
+  }
+  if (!hit.size) return src;
+  out.splice(at, 0, ...[...hit].map((id) => dueLine(slots.filter((x) => x.area === id))).filter(Boolean));
+  return out.join(' ');
+}
 /** A fix's answer as one line: "Done:" said once, by the line's own head. */
 const fixLine = (head, s) => `${head}: ${clip(String(s ?? '').replace(/^\s*(done|fixed|not fixed|question)\s*:\s*/i, ''), 120)}`;
 const dayName = (date) => formatDay(new Date(`${date}T12:00:00Z`), 'UTC');
@@ -368,7 +416,9 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const said = diaries.map((d) => withoutFixes(d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
       ? d.morning.replace(/\b\d[\d,]* of ([\d,]+ kcal)/, `${kcalOf(d.date).toLocaleString('en-US')} of $1`) : d.morning)).filter(Boolean);
     const learned = diaries.reduce((n, d) => n + (d.facts?.length || 0), 0);
-    const head = said.join(' ');
+    // Written at night, it may go out hours later (held for his hold-off, a session, a talk): today's hold rounds as
+    // the records say now (freshRounds), never a round he has already logged.
+    const head = freshRounds(said.join(' '), snapshot(store, { tz: zone, now: t }));
     // Thu 11/5 (his list of missing features: "Your 4:33 AM morning message came with three 'Being fixed now' lines
     // tacked on. Build updates shouldn't ride along in daily messages"): the morning message is only what was learned;
     // the fixes come as their own message; one still building isn't named at all: it is told on its own once it's done
