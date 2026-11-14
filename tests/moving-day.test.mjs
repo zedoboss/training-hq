@@ -170,7 +170,7 @@ test('his Tuesday replayed: asleep after his 6:45 AM ribs, nothing at 10:00 AM o
     assert.equal(sleep.wake, at(TUE, '17:54'));
     assert.equal(sleep.inBedMin, 609);
     const greet = f.talk().at(-1).text;
-    assert.match(greet, /^Morning\. Sleep logged from your activity: 7:45 AM to 5:54 PM, 10 h 09 min\. Off\? Tell me the real times\. How does your body feel today\?/);
+    assert.match(greet, /^Sleep logged from your activity: 7:45 AM to 5:54 PM, 10 h 09 min\. Off\? Tell me the real times\. How does your body feel today\?/);
     assert.doesNotMatch(greet, /How did you sleep/);
     assert.equal(f.sent.filter((m) => m.at >= at(TUE, '07:55')).length, 0, 'he is in the app: no notification');
     assert.equal(foodDayOf(f.store, at(TUE, '18:30'), TZ), TUE);
@@ -211,7 +211,9 @@ test('the questions asked before he slept are not this morning\'s: nothing goes 
     f.store.setMeta('morning:state', { date: TUE, from: at(TUE, '05:18'), sleep: at(TUE, '05:18'), body: at(TUE, '05:23') });
     f.opens(at(TUE, '17:54'));
     await f.run(at(TUE, '17:54'), at(TUE, '17:54'));
-    assert.match(f.talk().at(-1).text, /^Morning\./);
+    // The greeting goes out (at 5:54 PM without the word "Morning.", Sat 11/14).
+    assert.match(f.talk().at(-1).ref, /^morning:greet/);
+    assert.doesNotMatch(f.talk().at(-1).text, /^Morning/);
     assert.equal(morningGate(f.store, at(TUE, '17:55'), TZ).hold, true, 'his morning is on: the day waits');
   } finally { f.done(); }
 });

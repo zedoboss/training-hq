@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist, nextSuppsText } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING, pastMidday } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart, settleWalk, walkingNow, WALK } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
@@ -115,6 +115,10 @@ function recoveryFrom(one, list) {
 // A reminder held for his morning or a workout this long past its time, naming a time, is said as what to do now
 // (heldPlanText).
 const HELD_OVERDUE_MIN = 30;
+// Sat 11/14 (Fri 11/13: at 3:57 PM his held morning, then the walk ask 2 minutes later): after his held morning went out
+// past midday as one ask, the walk ask, the nudges and the coach's initiatives wait this long (his nudge gap).
+export const LATE_HELD = { key: 'notify:late-held', quietMin: 20 };
+const afterLateHeld = (store, now) => now - (store.getMeta(LATE_HELD.key) || 0) < LATE_HELD.quietMin * 60000;
 const WAIT_FOR_WAKE = new Set(['holds', 'supps', 'meals', 'cook', 'evening', 'neck', 'recovery', 'scan', 'flex']);
 
 /**
@@ -548,21 +552,34 @@ export async function morningTick({ store, push, log = () => {}, now, tz }) {
     // His sleep worked out from his activity: said with the first message of his morning, once.
     const auto = c && !st.sleepTold ? store.getRecord('sleep-log', g.night)?.data : null;
     const sleepLine = auto?.source === 'auto' && !store.getRecord('sleep-log', g.night)?.deleted ? autoSleepText(auto, tz) : null;
-    if (sleepLine) st.sleepTold = now;
-    const v = coachVoice(greet ? [GREET.text, sleepLine, ask?.text].filter(Boolean).join(' ') : [sleepLine, g.ask.text].filter(Boolean).join(' '), { calm: true });
-    const r = !greet && push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: `morning-${key}` }) : { sent: 0 };
-    sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `morning:${key}` });
+    // Sat 11/14 (lib/nudges.js MIDDAY_HM): "Morning." only before midday and once a day ("Morning. Are you up?" counts);
+    // otherwise the next question alone, or nothing when there's none (the open itself still counts as his greeting).
+    const hello = morningOk(store, now, tz, today);
+    const words = (greet ? [hello && GREET.text, sleepLine, ask?.text] : [sleepLine, g.ask.text]).filter(Boolean)
+      .map((x) => (hello ? x : x.replace(/^Morning\.\s*/, ''))).join(' ');
+    if (words) {
+      if (sleepLine) st.sleepTold = now;
+      const v = coachVoice(words, { calm: true });
+      const r = !greet && push.list().length ? await push.notify({ title: v.title, body: v.body, url: '#/coach', tag: `morning-${key}` }) : { sent: 0 };
+      sayInTalk(store, { text: v.body, at: now, tz, kind: 'nudge', ref: `morning:${key}` });
+      store.setMeta(LAST, now);
+      log(`morning ${key}: ${v.body.slice(0, 80)} (${r.sent} sent)`);
+      out = { key: `morning:${key}`, body: v.body };
+    } else log(`morning ${key}: nothing said (past midday or "Morning." said today, nothing to ask)`);
     if (greet) st.greet = now;
     const asked = greet ? ask : g.ask;
     if (asked) st[asked.key] = now;
     // The nudges' own sleep question is this one: not again today.
     if (asked?.key === 'sleep') { const ns = store.getMeta(NUDGES) || { last: 0, byKey: {} }; ns.byKey.sleep = now; store.setMeta(NUDGES, ns); }
-    store.setMeta(LAST, now);
-    log(`morning ${key}: ${v.body.slice(0, 80)} (${r.sent} sent)`);
-    out = { key: `morning:${key}`, body: v.body };
   }
   if (JSON.stringify(st) !== JSON.stringify(g.state)) store.setMeta(MORNING_STATE, st);
   return out;
+}
+
+/** "Morning." may be said now: before midday, and no coach message of his day so far began with it. */
+function morningOk(store, now, tz, today) {
+  if (pastMidday(now, tz)) return false;
+  return !recordsOf(store, MSGS).some((m) => m.role === 'assistant' && m.at <= now && today(m.at) && /^Morning\b/i.test(String(m.text || '').trim()));
 }
 
 /** For the coach, with every message: where his morning is while it is still going. */
@@ -1277,7 +1294,7 @@ export async function walkTick({ store, push, log = () => {}, now, tz }) {
   if (inp.n.kinds?.walk === false || now < (inp.n.nudgePausedUntil || 0) || heldOff('walk', holdsOf(store), now) || morningGate(store, now, tz).hold) return null;
   const a = inp.args;
   if (a.workoutEndedAt && now >= a.workoutEndedAt && now - a.workoutEndedAt < AFTER_WORKOUT_QUIET_MIN * 60000) return null;
-  if (now - (store.getMeta(LAST) || 0) < 2 * 60000 || now - (inp.lastUserAt || 0) < 60000) return null;
+  if (now - (store.getMeta(LAST) || 0) < 2 * 60000 || now - (inp.lastUserAt || 0) < 60000 || afterLateHeld(store, now)) return null;
   // His waking day, like his meals (Thu 10/29: at 12:00 AM, still up, a new day's walk ask went out and its check-ins
   // till 2:00 AM); on the moving schedule only what happened since he woke counts.
   const date = foodDayOf(store, now, tz);
@@ -1327,7 +1344,7 @@ export const INITIATIVE_GAP_MIN = 180;
 export async function initiativeTick({ store, push, coach, log = () => {}, now, tz }) {
   if (!coach?.initiate) return null;
   const inp = nudgeInputs(store, now, tz);
-  if (inp.busy || now < (inp.n.nudgePausedUntil || 0) || inp.n.kinds?.coach === false || morningGate(store, now, tz).hold) return null;
+  if (inp.busy || now < (inp.n.nudgePausedUntil || 0) || inp.n.kinds?.coach === false || morningGate(store, now, tz).hold || afterLateHeld(store, now)) return null;
   // Moving schedule: an hour after he woke, while he's up.
   const awake = inp.n.clock ? !inp.n.asleep && now - inp.n.clock.wokeAt >= 3600000 : awakeAt(now, tz, addMinHm(inp.n.wakeHm, 60), addMinHm(inp.n.bedHm, -60));
   if (!awake || now - (store.getMeta(LAST) || 0) < 10 * 60000 || now - (inp.lastUserAt || 0) < 10 * 60000) return null;
@@ -1359,7 +1376,7 @@ const addMinHm = (hm, m) => { const [h, mm] = String(hm || '00:00').split(':').m
 export async function nudgeTick({ store, push, log = () => {}, now, tz }) {
   const inp = nudgeInputs(store, now, tz);
   const state = store.getMeta(NUDGES) || { last: 0, byKey: {} };
-  const awake = awakeIn(inp.n, now, tz) && !morningGate(store, now, tz).hold;
+  const awake = awakeIn(inp.n, now, tz) && !morningGate(store, now, tz).hold && !afterLateHeld(store, now);
   if (!nudgeDue({ now, everyMin: inp.n.nudgeEveryMin, awake, lastNudgeAt: state.last, lastNoticeAt: store.getMeta(LAST) || 0, lastUserAt: inp.lastUserAt, busy: inp.busy, pausedUntil: inp.n.nudgePausedUntil })) return null;
   const holds = holdsOf(store);
   // Tue 11/10: before a session he set his own reminder for, its check-in waits for his answer (ownSessionReminder).
@@ -1455,8 +1472,12 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
         // passed times; Mon 10/26), one line in his moods at the end.
         // A single one too, half an hour overdue, when its words name a clock time (it would read back a passed one).
         const after = items.filter((i) => i.morning === 'after' || i.workout === 'after' || i.walk === 'after' || i.gym === 'after').sort((a, b) => a.heldAt - b.heldAt);
-        const merged = after.length > 1 || after.some((i) => t - i.heldAt >= HELD_OVERDUE_MIN * 60000 && /\d:\d\d\s?[AP]M/i.test(`${i.title} ${i.body}`));
+        // Sat 11/14: his morning held past midday (lib/nudges.js MIDDAY_HM) comes out as that one ask even when it is a
+        // single reminder ("Morning holds." at 3:57 PM read back as it was), and the other asks wait LATE_HELD.quietMin.
+        const late = after.some((i) => i.morning === 'after') && pastMidday(t, zone);
+        const merged = after.length > 1 || late || after.some((i) => t - i.heldAt >= HELD_OVERDUE_MIN * 60000 && /\d:\d\d\s?[AP]M/i.test(`${i.title} ${i.body}`));
         if (merged) {
+          if (late) store.setMeta(LATE_HELD.key, t);
           const v = coachVoice(heldPlanText(after, { now: t, tz: zone }), { ...opts, calm: after.some((i) => i.calm) });
           const r = await push.notify({ title: v.title, body: v.body, url: after[0].url, tag: 'morning-plan' });
           for (const i of after) sent[i.id] = t;

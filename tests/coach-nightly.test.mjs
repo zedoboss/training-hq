@@ -241,8 +241,8 @@ test('Tue 10/27: the recap names each fix once, in its state when he reads it, a
   w(CHANGES, a.id, { ...a, status: 'done', doneAt: clock, announce: 'morning', answer: 'Done: after a meal out, "back home yet?" comes 3 times, an hour apart, new words each, then quiet.' });
   w(CHANGES, b.id, { ...b, status: 'done', doneAt: clock, announce: 'morning', answer: 'Done: "Push, no time set" asks once, then once more at 7:00 PM, then quiet.' });
   w(CHANGES, c.id, { ...c, status: 'working' });
-  clock = at('17:35', '2026-03-18');
-  msg('m9', 'user', 'Lunch', '17:32', '2026-03-18');
+  clock = at('09:35', '2026-03-18');
+  msg('m9', 'user', 'Lunch', '09:32', '2026-03-18');
   await n.tick();
   // Thu 11/5 (his words: "Your 4:33 AM morning message came with three 'Being fixed now' lines tacked on. Build
   // updates shouldn't ride along in daily messages"): the morning message alone, the fixes as their own message, and
@@ -261,7 +261,7 @@ test('Tue 10/27: the recap names each fix once, in its state when he reads it, a
   assert.ok(sent.every((x) => x.body.length <= 200));
   // The one that was building finishes: told on its own.
   w(CHANGES, c.id, { ...store.getRecord(CHANGES, c.id).data, status: 'done', doneAt: clock, announce: 'morning', answer: 'Done: the walk ask says its time once.' });
-  clock = at('17:50', '2026-03-18');
+  clock = at('09:50', '2026-03-18');
   await n.tick();
   assert.equal(talk().at(-1).text, 'Done: the walk ask says its time once.');
 });

@@ -76,6 +76,14 @@ export function coachReminder(item, opts = {}) {
  * times and all, far over the lock screen. Now one line per thing (a meal's cook, ask and check-ins are one thing, the
  * latest of each), no clock time that has passed, whole asks while they fit in `max`, the rest left to the app.
  */
+// Sat 11/14 (the nightly review of Fri 11/13: no answer to 7:05 AM "Morning. Are you up?", then at 3:57 PM "Morning holds.
+// Knees..." and the greeting "Morning." again, the walk ask, two overnight messages and a run reminder within 3 minutes;
+// his words: no "Morning." in the afternoon and no second one in a day; past midday, what was held goes out as one
+// short current ask). From MIDDAY_HM his day is past its morning: no "Morning." from the app, and a morning round held
+// till then is just "Holds".
+export const MIDDAY_HM = '12:00';
+export const pastMidday = (now, tz) => hmOf(new Date(now), tz) >= MIDDAY_HM;
+
 export function heldPlanText(items, { now, tz, max = 150 } = {}) {
   const latest = new Map();
   for (const i of [...items].sort((a, b) => (a.heldAt ?? a.at) - (b.heldAt ?? b.at))) latest.set(i.tag || i.id, i);
@@ -90,7 +98,7 @@ export function heldPlanText(items, { now, tz, max = 150 } = {}) {
     if (i.kind === 'holds') {
       // Its own reminder by its name ("Morning holds"), a check-in as plain holds; a rest-day question as it was asked.
       if (/\?$/.test(i.title || '')) return i.title;
-      const name = /^holds-(morning|evening):/.test(i.id) ? i.title : 'Holds';
+      const name = /^holds-(morning|evening):/.test(i.id) && !(/^holds-morning:/.test(i.id) && Number.isFinite(now) && pastMidday(now, tz)) ? i.title : 'Holds';
       const what = items.find((x) => x.tag === i.tag && /^holds-(morning|evening):/.test(x.id))?.body || i.body;
       return `${name} now${what && !short ? ` (${first(what)})` : ''}.`;
     }

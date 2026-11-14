@@ -19,6 +19,7 @@ import { newChange, asksOf, COL as CHANGES, MSGS } from './changes.mjs';
 import { formatDay, formatTime, isoDate, zonedTime } from '../../app/js/lib/time.js';
 import { addDays } from '../../app/js/lib/rotation.js';
 import { heldOff } from '../../app/js/lib/holdoffs.js';
+import { pastMidday } from '../../app/js/lib/nudges.js';
 import { wakingDay } from '../../app/js/lib/waking-day.js';
 import { signsUpTo, movingOf } from '../notify.mjs';
 import { dayTotals, mealTotals } from '../../app/js/lib/meals.js';
@@ -382,10 +383,10 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
       || list('here').some((h) => h.phone && h.at >= dawn && h.at <= t);
   }
 
-  async function tell(text, short, ref, t = now()) {
+  async function tell(text, short, ref, t = now(), { silent = false } = {}) {
     const id = `cm.${String(t).padStart(13, '0')}.${rand()}`;
     store.writeLocal(MSGS, id, { id, role: 'assistant', text, at: t, tz: tz(), kind: 'nightly', ref });
-    try { if (push?.list?.().length) await push.notify({ title: 'Coach', body: short || text, url: '#/coach', tag: ref }); } catch (e) { log(`nightly: notification: ${e.message}`); }
+    try { if (!silent && push?.list?.().length) await push.notify({ title: 'Coach', body: short || text, url: '#/coach', tag: ref }); } catch (e) { log(`nightly: notification: ${e.message}`); }
   }
 
   /** The day's food kcal as the Fuel screen counts it (meals logged to that day). */
@@ -431,11 +432,15 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     for (const d of diaries) put(DIARY, d.date, { ...d, morningAt: t });
     for (const c of quiet) put(CHANGES, c.id, { ...c, announce: 'done', announcedAt: t });
     if (!lines.length) { log(`nightly: nothing to tell this morning (${learned} facts kept quietly)`); return null; }
-    if (head) await tell(head, clip(head, 200), `nightly-${today}`);
+    // Sat 11/14 (Fri 11/13: held till 3:59 PM, it went out as two more notifications beside the held morning's ask, the
+    // walk ask and a run reminder; his words: past midday, what was held goes out as one short current ask): from
+    // midday (lib/nudges.js MIDDAY_HM) the night's messages are written into Talk without a notification.
+    const silent = pastMidday(t, zone);
+    if (head) await tell(head, clip(head, 200), `nightly-${today}`, now(), { silent });
     // The fixes' lock screen: one fix is shown whole; several are counted (their words are in Talk, once each).
     const count = [done.length && `${done.length} fixed overnight`, other.length && `${other.length} need you`].filter(Boolean).join(', ');
-    if (fixes.length) await tell(fixes.join('\n'), clip(fixes.length > 1 ? `${count[0].toUpperCase()}${count.slice(1)}, in Talk.` : fixes[0], 200), `nightly-fixes-${today}`, now() + (head ? 1 : 0));
-    log(`nightly: morning message sent (${done.length} fixed, ${building.length} still building, not named, ${learned} facts)`);
+    if (fixes.length) await tell(fixes.join('\n'), clip(fixes.length > 1 ? `${count[0].toUpperCase()}${count.slice(1)}, in Talk.` : fixes[0], 200), `nightly-fixes-${today}`, now() + (head ? 1 : 0), { silent });
+    log(`nightly: morning message ${silent ? 'written into Talk, no notification (past midday)' : 'sent'} (${done.length} fixed, ${building.length} still building, not named, ${learned} facts)`);
     return lines.join('\n');
   }
 
