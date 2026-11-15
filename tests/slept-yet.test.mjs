@@ -84,9 +84,10 @@ test('then he sleeps: the sleep question comes when he is back after hours away,
     assert.deepEqual(f.asked(), []);
     await f.run('10:00', '14:59');
     assert.deepEqual(f.sent.filter((m) => SLEEPQ.test(m.body)).map((m) => m.body), ['Morning. Are you up?']);
-    // He opens the app at 3:00 PM, 8.5 hours later: the sleep question, in Talk (no second "Morning.", Sat 11/14).
+    // He opens the app at 3:00 PM, 8.5 hours later: the sleep question, in Talk (no second "Morning.", Sat 11/14),
+    // once 5 minutes for his answer to "Are you up?" have gone (Mon 11/16).
     f.opens(T('15:00'));
-    await f.run('15:00', '15:01');
+    await f.run('15:00', '15:06');
     assert.equal(upAtToday(f.store, T('15:01'), TZ), T('15:00'));
     assert.deepEqual(f.asked().filter((x) => /sleep/.test(x)), ['How did you sleep? When did you go to bed and when did you wake up?']);
   } finally { f.done(); }

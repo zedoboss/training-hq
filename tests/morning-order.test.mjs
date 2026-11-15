@@ -201,19 +201,22 @@ test('no answer to "Are you up?": quiet all day; he opens the app at 2:30 PM, th
     await f.run('09:58', '14:29');
     assert.deepEqual(f.sent.map((m) => [hmOf(m.at), m.body]), [['10:00 AM', 'Morning. Are you up?']]);
     for (const hm of ['14:00', '14:29']) assert.equal(morningGate(f.store, T(hm), TZ).hold, true, hm);
-    // He opens the app at 2:30 PM (its zone report): the sleep question, not the plan.
+    // He opens the app at 2:30 PM (its zone report): Mon 11/16, 5 minutes for his answer to "Are you up?", then the
+    // sleep question, not the plan.
     f.store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: T('14:30') });
-    await f.run('14:30', '14:31');
-    assert.deepEqual(f.sent.slice(1).map((m) => [hmOf(m.at), m.body]), [['2:30 PM', 'How did you sleep? When did you go to bed and when did you wake up?']]);
-    f.say('14:32', 'bed 3:30, up 2:15');
-    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: T('03:30'), wake: T('14:15'), source: 'coach', at: T('14:33') });
-    await f.run('14:32', '14:36');
+    await f.run('14:30', '14:34');
+    assert.equal(f.sent.length, 1, 'nothing while he may be answering');
+    await f.run('14:35', '14:36');
+    assert.deepEqual(f.sent.slice(1).map((m) => [hmOf(m.at), m.body]), [['2:35 PM', 'How did you sleep? When did you go to bed and when did you wake up?']]);
+    f.say('14:37', 'bed 3:30, up 2:15');
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: T('03:30'), wake: T('14:15'), source: 'coach', at: T('14:38') });
+    await f.run('14:37', '14:41');
     assert.equal(f.sent.length, 3);
     assert.match(f.sent[2].body, /^How's your lower back today\?/);
-    f.say('14:37', 'back is a 1');
-    await f.run('14:37', '14:41');
+    f.say('14:42', 'back is a 1');
+    await f.run('14:42', '14:46');
     const plan = f.sent.find((m) => m.tag === 'morning-plan');
-    assert.ok(plan && plan.at >= T('14:40'), JSON.stringify(f.sent.map((m) => [hmOf(m.at), m.body.slice(0, 40)])));
+    assert.ok(plan && plan.at >= T('14:45'), JSON.stringify(f.sent.map((m) => [hmOf(m.at), m.body.slice(0, 40)])));
     // Sat 11/14: past midday, no "Morning" in it.
     assert.match(plan.body, /^Holds now \(Knees: Toes Wall Squat Hold\)\. Then eat your first meal now, or tell me you're skipping it\./);
   } finally { f.done(); }
@@ -257,14 +260,17 @@ test('he opens the app at 2:30 PM, no answer to "Are you up?": the sleep questio
   try {
     await f.run('09:58', '14:29');
     opens(f, '14:30');
-    await f.run('14:30', '14:30');
+    // Mon 11/16: 5 minutes for his answer to "Are you up?" first; none, so the greeting asks it at 2:35 PM.
+    await f.run('14:30', '14:34');
+    assert.equal(talkOf(f.store).some((m) => /How did you sleep/.test(m.text)), false, 'not while he may be answering');
+    await f.run('14:35', '14:35');
     const greet = talkOf(f.store).at(-1);
     assert.equal(greet.text, 'How did you sleep? When did you go to bed and when did you wake up?');
     assert.equal(greet.ref, 'morning:greet:sleep');
-    assert.equal(hmOf(greet.at), '2:30 PM');
+    assert.equal(hmOf(greet.at), '2:35 PM');
     assert.deepEqual(f.sent.map((m) => m.body), ['Morning. Are you up?'], 'no notification: he is in the app');
     // The sleep question isn't asked again; his answer leads to his back, as before.
-    await f.run('14:31', '14:40');
+    await f.run('14:36', '14:40');
     assert.equal(talkOf(f.store).filter((m) => /How did you sleep/.test(m.text)).length, 1);
     f.say('14:41', 'bed 3:30, up 2:15');
     f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: T('03:30'), wake: T('14:15'), source: 'coach', at: T('14:42') });

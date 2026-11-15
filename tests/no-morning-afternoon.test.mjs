@@ -84,7 +84,8 @@ test('opened at 11:00 AM after "Morning. Are you up?": the sleep question alone,
   try {
     await f.run('07:00', '10:59');
     f.opens('11:00');
-    await f.run('11:00', '11:01');
+    // Mon 11/16: 5 minutes for his answer to "Are you up?" first.
+    await f.run('11:00', '11:06');
     const greet = f.talk().filter((m) => /^morning:greet/.test(m.ref || ''));
     assert.equal(greet.length, 1);
     assert.equal(greet[0].text, 'How did you sleep? When did you go to bed and when did you wake up?');

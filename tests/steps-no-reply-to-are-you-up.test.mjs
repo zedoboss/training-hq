@@ -77,20 +77,21 @@ test('then he opens the app at 7:37 AM: sleep, then his back, and only then the 
   try {
     await fridaySteps(f);
     f.store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: T('07:37') });
-    await f.run('07:37', '07:38');
-    assert.deepEqual(f.sent.slice(1).map((m) => [hmOf(m.at), m.body]), [['7:37 AM', 'How did you sleep? When did you go to bed and when did you wake up?']]);
-    f.say('07:40', 'bed 7:15, up 4:00');
-    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: at(Y, '19:15'), wake: T('04:00'), source: 'coach', at: T('07:41') });
-    await f.run('07:40', '07:44');
+    // Mon 11/16: 5 minutes for his answer to "Are you up?", then the sleep question.
+    await f.run('07:37', '07:42');
+    assert.deepEqual(f.sent.slice(1).map((m) => [hmOf(m.at), m.body]), [['7:42 AM', 'How did you sleep? When did you go to bed and when did you wake up?']]);
+    f.say('07:45', 'bed 7:15, up 4:00');
+    f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: at(Y, '19:15'), wake: T('04:00'), source: 'coach', at: T('07:46') });
+    await f.run('07:45', '07:49');
     assert.equal(f.sent.length, 3, f.sent.map((m) => m.body).join(' | '));
     assert.match(f.sent[2].body, /^How's your lower back today\?/);
-    assert.equal(morningGate(f.store, T('07:44'), TZ).hold, true, 'the plan waits for his answer');
-    f.say('07:45', 'back is a 1');
-    await f.run('07:45', '07:50');
+    assert.equal(morningGate(f.store, T('07:49'), TZ).hold, true, 'the plan waits for his answer');
+    f.say('07:50', 'back is a 1');
+    await f.run('07:50', '07:55');
     const after = f.sent.slice(3);
     assert.ok(after.length >= 1, 'the plan comes once he answered');
-    assert.ok(after.every((m) => m.at >= T('07:48')), after.map((m) => `${hmOf(m.at)} ${m.body}`).join(' | '));
-    assert.equal(morningGate(f.store, T('07:50'), TZ).hold, false);
+    assert.ok(after.every((m) => m.at >= T('07:53')), after.map((m) => `${hmOf(m.at)} ${m.body}`).join(' | '));
+    assert.equal(morningGate(f.store, T('07:55'), TZ).hold, false);
   } finally { f.done(); }
 });
 

@@ -47,11 +47,12 @@ test('his Wednesday replayed: no body question, no plan while sleep is unanswere
   try {
     await f.run('06:30', '06:30');
     f.opens('09:17');
-    await f.run('09:17', '09:20');
+    // Mon 11/16: 5 minutes for his answer to "Are you up?", then the sleep question.
+    await f.run('09:17', '09:22');
     assert.ok(f.said().some((t) => /How did you sleep\?/.test(t)), f.said().join(' | '));
     // 9:50 AM and on: nothing else, the day held.
     let before = f.said().length;
-    await f.run('09:21', '11:10');
+    await f.run('09:23', '11:10');
     assert.deepEqual(f.said().slice(before), [], 'nothing while the sleep question waits');
     assert.equal(morningGate(f.store, T('11:10'), TZ).hold, true);
     assert.match(morningContext(f.store, T('11:10'), TZ), /How he slept is still unanswered \(not logged\).*log_sleep/);

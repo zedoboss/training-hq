@@ -595,8 +595,9 @@ export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
  * question he hasn't answered (Thu 11/5).
  * waitMin: no longer moves on (Thu 11/12): a question he leaves keeps the next one and the day waiting.
  * quietMin: after his message or the coach's reply, this long before the next question.
+ * replyMin: "Are you up?" asked and the app opened (no reply yet): this long for his answer before the next question.
  */
-export const MORNING = { giveUpH: 4, waitMin: 30, quietMin: 3 };
+export const MORNING = { giveUpH: 4, waitMin: 30, quietMin: 3, replyMin: 5 };
 export const MORNING_UP_TEXT = 'Morning. Are you up?';
 export const PAIN_WORDS = /\b(pain\w*|hurts?|hurting|sore\w*|ache[sd]?|aching|tweak\w*|strain\w*)\b/i;
 const BODY_PART = /\b(lower back|upper back|back|knees?|shoulders?|elbows?|wrists?|hips?|neck|hamstrings?|quads?|groin|calf|calves|ankles?|chest)\b/gi;
@@ -677,6 +678,12 @@ export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQui
   // something else doesn't let the morning go on. A workout started still does; and once the morning is over
   // (giveUpH) a message after the last ask lets the day go, so it is never held all day while he talks to the coach.
   const replied = Math.max(lastUserAt || 0, workoutAt || 0);
+  // Mon 11/16 (the nightly review of Sunday 11/15: "Morning. Are you up?" 6:30 AM, he opened the app at 6:37 AM and
+  // "How did you sleep?" went out that second; at 6:38 AM he answered "Yeah" and the coach asked it again): once "Are
+  // you up?" is asked, the app opening first gives him replyMin to answer it (a message, a workout started, his sleep
+  // or check-in logged). He answers: the coach's reply asks the sleep question, once (coachAsked). He doesn't: the
+  // app asks it then (notify.mjs greets him with it when it's time, waitUp holds the greeting till then).
+  if (state.up && !late && !sleepKnown && !bodyKnown && replied <= state.up && now - upAt < MORNING.replyMin * 60000) return { hold: true, open: false, ask: null, waitUp: true };
   const steps = [['sleep', sleepKnown, 'How did you sleep? When did you go to bed and when did you wake up?'], ['body', bodyKnown, bodyText]];
   for (const [key, known, text] of steps) {
     if (known) continue;

@@ -545,7 +545,7 @@ export async function morningTick({ store, push, log = () => {}, now, tz }) {
   const opened = Math.max(0, ...appOpens(store, now, tz).filter(today)) || null;
   // Wrote first: since he woke (Tue 10/27: a message while still up from the night is not his day yet).
   const wrote = recordsOf(store, MSGS).some((m) => m.role === 'user' && m.at >= (g.upAt ?? zonedTime(g.date, '05:00', tz)) && m.at <= now && today(m.at));
-  const greet = !g.off && g.upAt != null && !st.greet && !busy && !wrote && opened != null && now - opened < GREET.freshMin * 60000 && !noQuietYet(store, now);
+  const greet = !g.off && !g.waitUp && g.upAt != null && !st.greet && !busy && !wrote && opened != null && now - opened < GREET.freshMin * 60000 && !noQuietYet(store, now);
   const ask = g.ask && g.ask.key !== 'up' ? g.ask : null; // he opened the app: he's up, no need to ask
   if (greet || (g.ask && !busy)) {
     const key = greet ? (ask ? `greet:${ask.key}` : 'greet') : g.ask.key;
