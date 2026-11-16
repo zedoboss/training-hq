@@ -96,6 +96,24 @@ export function freshRounds(text, s) {
   out.splice(at, 0, ...[...hit].map((id) => dueLine(slots.filter((x) => x.area === id))).filter(Boolean));
   return out.join(' ');
 }
+/**
+ * Tue 11/17 (his words, about Mon 11/16 3:32 PM: two days' held morning texts went out together a minute after he
+ * finished Upper A, one saying "Today's a rest day ... Lower is Monday", the next "Lower is on today"; a held morning
+ * from a past day is dropped, only the current day's goes out, checked against what he has already logged that day):
+ * once a workout is logged today, a sentence saying what today's training is (a day type, a rest day, the session or
+ * workout, today or today's weekday) is dropped. Hold rounds are freshRounds' job; other days' sentences are kept.
+ */
+const DAY_PLAN = /\b(rest day|day off|training day|session|workout|upper( [ab])?|lower|legs|pull|push|full body)\b/i;
+export function freshDay(text, s) {
+  const src = String(text ?? '').trim();
+  if (!src) return src;
+  const trained = s.list('sessions').some((x) => x && x.kind !== 'holds' && x.status !== 'discarded' && Number.isFinite(x.startedAt) && x.startedAt <= s.now && s.date(x.startedAt) === s.today);
+  if (!trained) return src;
+  const today = WEEKDAYS[new Date(`${s.today}T12:00:00Z`).getUTCDay()];
+  const other = new RegExp(`\\b(yesterday|tomorrow|last night|next|${WEEKDAYS.filter((d) => d !== today).join('|')})\\b`, 'i');
+  const now = new RegExp(`\\b(today|tonight|this (morning|afternoon|evening)|${today})\\b`, 'i');
+  return src.split(/(?<=[.!?])\s+/).filter((p) => other.test(p) || /\b(rounds?|holds?)\b/i.test(p) || !(DAY_PLAN.test(p) && now.test(p))).join(' ');
+}
 /** A fix's answer as one line: "Done:" said once, by the line's own head. */
 const fixLine = (head, s) => `${head}: ${clip(String(s ?? '').replace(/^\s*(done|fixed|not fixed|question)\s*:\s*/i, ''), 120)}`;
 const dayName = (date) => formatDay(new Date(`${date}T12:00:00Z`), 'UTC');
@@ -401,6 +419,9 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const zone = tz();
     const today = isoDate(new Date(t), zone);
     const diaries = store.listRecords(DIARY).map((r) => r.data).filter((d) => d && d.status === 'done' && !d.morningAt && d.date >= addDays(today, -CATCH_UP_DAYS) && d.date < today).sort((a, b) => a.date.localeCompare(b.date));
+    // Tue 11/17 (freshDay above): only last night's text is today's; one from an earlier day, held since, is dropped
+    // unsaid (its fixes are still told, in their state now).
+    const current = diaries.filter((d) => d.date === addDays(today, -1));
     const changes = store.listRecords(CHANGES).map((r) => r.data).filter(Boolean);
     const quiet = quietDone();
     if (!diaries.length) {
@@ -414,12 +435,13 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     // A change sent again by itself (resentAs) isn't "Not fixed": its resend is told once it ends.
     const other = [...filed, ...quiet].filter((c) => (c.status === 'failed' && !c.resentAs) || c.status === 'question');
     // A meal logged after the review (he logs the night meal once he's up): the morning's "X of Y kcal" is the Fuel total now.
-    const said = diaries.map((d) => withoutFixes(d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
+    const said = current.map((d) => withoutFixes(d.morning && d.foodKcal != null && kcalOf(d.date) !== d.foodKcal
       ? d.morning.replace(/\b\d[\d,]* of ([\d,]+ kcal)/, `${kcalOf(d.date).toLocaleString('en-US')} of $1`) : d.morning)).filter(Boolean);
     const learned = diaries.reduce((n, d) => n + (d.facts?.length || 0), 0);
     // Written at night, it may go out hours later (held for his hold-off, a session, a talk): today's hold rounds as
     // the records say now (freshRounds), never a round he has already logged.
-    const head = freshRounds(said.join(' '), snapshot(store, { tz: zone, now: t }));
+    const snap = snapshot(store, { tz: zone, now: t });
+    const head = freshDay(freshRounds(said.join(' '), snap), snap);
     // Thu 11/5 (his list of missing features: "Your 4:33 AM morning message came with three 'Being fixed now' lines
     // tacked on. Build updates shouldn't ride along in daily messages"): the morning message is only what was learned;
     // the fixes come as their own message; one still building isn't named at all: it is told on its own once it's done
@@ -429,7 +451,7 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
       ...other.map((c) => fixLine(c.status === 'question' ? 'Question' : 'Not fixed', c.answer)),
     ];
     const lines = [head, ...fixes].filter(Boolean);
-    for (const d of diaries) put(DIARY, d.date, { ...d, morningAt: t });
+    for (const d of diaries) put(DIARY, d.date, { ...d, morningAt: t, ...(current.includes(d) ? {} : { morningDropped: 'an earlier day' }) });
     for (const c of quiet) put(CHANGES, c.id, { ...c, announce: 'done', announcedAt: t });
     if (!lines.length) { log(`nightly: nothing to tell this morning (${learned} facts kept quietly)`); return null; }
     // Sat 11/14 (Fri 11/13: held till 3:59 PM, it went out as two more notifications beside the held morning's ask, the
