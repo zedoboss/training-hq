@@ -6,7 +6,7 @@
 //   my_food          save one of his usual foods with his own numbers (no USDA match), so log_meal logs it; remove one.
 //   fuel_settings    his meal times (time, latest, cook minutes = the start-cooking reminder) and his daily targets.
 import { snapshot, dayText, timeText, findByName, wrote, refuse, formatHm } from './shared.mjs';
-import { put, del, num, ITEMS, mealItems, momentOf } from './tools-write.mjs';
+import { put, del, num, ITEMS, mealItems, itemsKeeping, momentOf } from './tools-write.mjs';
 import { mealsText, suppDayKind } from './tools-read.mjs';
 import { newMeal, cleanItems, itemTotals, presetsOf, findPreset, beforeItems, leftovers, netItems } from '../../app/js/lib/meals.js';
 import { withUsda, sameFood, gramsFor, amountText, itemAmount } from '../../app/js/lib/foods.js';
@@ -254,7 +254,8 @@ async function mealEdit(a, ctx) {
     if (!a.items?.length && !a.add?.length && !a.drop?.length) return refuse('items (the whole new list), add (items on top) or drop (names to take out).');
     let items = a.items?.length ? null : cleanItems(preset.items);
     if (a.items?.length) {
-      const r = mealItems(s, a.items);
+      // Tue 11/17: what the preset already holds keeps its values (tools-write.mjs itemsKeeping).
+      const r = itemsKeeping(s, preset.items, a.items);
       if (r.noSize.length || r.unknown.length) return refuse(itemsRefusal(r));
       items = r.items;
     }

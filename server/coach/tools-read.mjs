@@ -546,7 +546,7 @@ export function contextLine({ store, tz, now, screen = null }) {
   if (meal) {
     const items = meal.before?.items || [];
     const t = itemTotals(items);
-    lines.push(`The meal on his screen: ${meal.name} (${timeText(meal.at, s.tz)}, ${dayText(meal.date, s.today)}) [id ${meal.id}]: ${items.length ? items.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') : 'no items yet'}; ${t.kcal} kcal, ${t.protein} g protein${meal.after?.none ? '; he ate it all' : meal.after?.photoId ? '; after photo taken' : ''}${meal.before?.confirmedAt ? '; confirmed' : '; not confirmed yet'}. What he says about the plate corrects it: correct_meal with this id and every item as it should be.`);
+    lines.push(`The meal on his screen: ${meal.name} (${timeText(meal.at, s.tz)}, ${dayText(meal.date, s.today)}) [id ${meal.id}]: ${items.length ? items.map((x) => `${x.name} ${Math.round(x.grams)} g`).join(', ') : 'no items yet'}; ${t.kcal} kcal, ${t.protein} g protein${meal.after?.none ? '; he ate it all' : meal.after?.photoId ? '; after photo taken' : ''}${meal.before?.confirmedAt ? '; confirmed' : '; not confirmed yet'}. What he says about the plate corrects it: correct_meal with this id and every item as it should be (more food with it: add).`);
   }
   const active = s.active();
   if (active) lines.push(activeText(s, active));

@@ -18,7 +18,7 @@ import { modeOf } from '../../app/js/lib/progression.js';
 import { currentBodyweight, weightSeries, dailyWeights } from '../../app/js/lib/health.js';
 import { measureIdFor } from '../../app/js/lib/body.js';
 import { newId, newKey } from '../../app/js/lib/routines.js';
-import { newMeal, cleanItems, itemTotals, defaultMealName, presetsOf, findPreset, mealFromPreset, withPreset } from '../../app/js/lib/meals.js';
+import { newMeal, cleanItems, itemTotals, regram, defaultMealName, presetsOf, findPreset, mealFromPreset, withPreset } from '../../app/js/lib/meals.js';
 import { logEntry, logId, statusOn, scheduledOn, stockStatus, lastsText, checklist, reviewOpen, applyReview, answerReview, outOfStock } from '../../app/js/lib/supplements.js';
 import { scanStatus, confirmDate, cancelDate, scanId, protocolOf, conditionsFrom, withResults, cleanMetrics, expectedEitherWay, withProtocol, measurementFromScan } from '../../app/js/lib/scans.js';
 import { ladderState, stepText, feelOffState, endHereState, afterAnswerState, phaseOf, GET_OUT, SYMPTOMS, CHECKLIST, planSaunaDay, SAUNA_TIME, proposalDayText, doctorDue } from '../../app/js/lib/sauna.js';
@@ -30,7 +30,7 @@ import { saveSeen } from '../weather.mjs';
 import { fastingOn, withFast } from '../../app/js/lib/fast.js';
 import { answerNeck, placeLabel, NECK_PLACES, withHomeNotes, bottleFor, HOME_HOW } from '../../app/js/lib/neck.js';
 import { AREA_NAMES } from '../../app/js/lib/holdoffs.js';
-import { withUsda, sameFood, gramsFor, amountText, itemAmount } from '../../app/js/lib/foods.js';
+import { withUsda, sameFood, gramsFor, amountText, itemAmount, tokens } from '../../app/js/lib/foods.js';
 import { foodsDb, myFoods, macrosText } from '../foods.mjs';
 import { checkInNote, missingAnswers, withTask, withCheckup, noteId } from '../../app/js/lib/recovery.js';
 import { askedAreas, loadedAreas, exercisesLoading, workingKeys, decide, complete, paramsOf, ACTION_TEXT } from '../../app/js/lib/readiness.js';
@@ -570,6 +570,35 @@ export function mealItems(s, items) {
   const unknown = out.filter((x, i) => x.source !== 'usda' && x.source !== 'label' && marked[i].kcal == null && marked[i].protein == null);
   return { items: out, unknown, noSize: [] };
 }
+/**
+ * Tue 11/17 (his words, adding sweet potato tempura and kimchi to a copied Marukame meal: "Yeah i had potatoo too rn
+ * and kimchi small as well"): correct_meal re-matched every item against USDA, so the items already in the meal that
+ * had no USDA match (logged with numbers before) were refused and the add-ons went in as a separate Snack. Now an item
+ * already in the meal (or preset), given again by its name with no new numbers or USDA words, keeps its stored values
+ * (other grams: the same values per gram); only new or changed foods are matched. A name with words the stored one
+ * lacks ("Brown rice" for "Rice") is a different food and is matched afresh.
+ */
+export function itemsKeeping(s, had, given) {
+  const pool = cleanItems(had || []);
+  const words = (x) => tokens(x);
+  const near = (want, have) => { const w = words(want); const h = words(have); return w.length > 0 && w.every((t) => h.some((u) => u === t || (t.length >= 4 && u.startsWith(t)))); };
+  const fresh = (x) => x.kcal != null || x.protein != null || x.usda || x.packs != null || x.count != null;
+  const kept = (given || []).map(() => null);
+  const take = (test) => (given || []).forEach((x, i) => {
+    if (kept[i] || fresh(x)) return;
+    const j = pool.findIndex((p) => test(x.name, p.name));
+    if (j < 0) return;
+    const [p] = pool.splice(j, 1);
+    kept[i] = x.grams == null || Math.round(Number(x.grams)) === Math.round(p.grams) ? p : (({ portion, ...rest }) => rest)(regram(p, x.grams));
+  });
+  take((a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase());
+  take(near);
+  const rest = (given || []).filter((_, i) => !kept[i]);
+  const r = rest.length ? mealItems(s, rest) : { items: [], unknown: [], noSize: [] };
+  if (r.noSize.length || r.unknown.length) return { items: [], unknown: r.unknown, noSize: r.noSize };
+  let n = 0;
+  return { items: kept.map((k) => k || r.items[n++]), unknown: [], noSize: [] };
+}
 const sizeRefusal = (noSize) => `No grams for ${noSize.map((x) => `"${x.name}"`).join(', ')}: packs and counts work only for his foods that have them (the meals tool lists them). Ask him for the grams. Nothing saved.`;
 // Each item with its amount; his eggs with their weight too (Mon 10/26, lib/foods.js itemAmount).
 const itemText = (s) => { const mine = myFoods(s.one('fuel', 'plan')); return (x) => `${x.name} ${itemAmount(x, mine)}${x.source === 'usda' ? '' : x.source === 'label' ? ' (his pack label)' : x.source === 'typed' ? ' (his numbers)' : ' (estimate)'}`; };
@@ -650,11 +679,15 @@ async function correctMeal(a, ctx) {
   if (!meal) return refuse(`No meal with id ${a.meal}. The meals tool lists the ids.`);
   if (a.remove) { del(s, 'meals', meal.id); return wrote(`Deleted ${meal.name} (${timeText(meal.at, s.tz)}, ${dayText(meal.date, s.today)}).`, `${meal.name} deleted`); }
   const next = { ...meal };
-  if (a.items) {
-    const { items, unknown, noSize } = mealItems(s, a.items);
+  if (a.items || a.add?.length) {
+    // The whole list (items: what's already there keeps its values) and/or add: foods on top of what's there.
+    const had = meal.before?.items || [];
+    const base = a.items ? itemsKeeping(s, had, a.items) : { items: cleanItems(had), unknown: [], noSize: [] };
+    const more = a.add?.length ? mealItems(s, a.add) : { items: [], unknown: [], noSize: [] };
+    const noSize = [...base.noSize, ...more.noSize]; const unknown = [...base.unknown, ...more.unknown];
     if (noSize.length) return refuse(sizeRefusal(noSize));
     if (unknown.length) return refuse(`No USDA match for ${unknown.map((x) => `"${x.name}"`).join(', ')}. Give its USDA FoodData Central description (usda), or ask him for the kcal and protein. Nothing changed.`);
-    next.before = { ...(meal.before || {}), items, confirmedAt: s.now, edited: true };
+    next.before = { ...(meal.before || {}), items: [...base.items, ...more.items], confirmedAt: s.now, edited: true };
   }
   if (a.name) next.name = String(a.name).slice(0, 40);
   if (a.time) { next.at = momentOf(s, meal.date, a.time); }
@@ -1625,7 +1658,7 @@ export const WRITE_TOOLS = [
   write('rest_timer', 'Rest timer', "His phone's rest timer: start (default: the rest time of the exercise he just did), add seconds (+15 or -15), or skip.", obj({ action: { type: 'string', enum: ['start', 'add', 'skip'] }, seconds: { type: 'integer', minimum: -600, maximum: 3600 } }), restTimer),
   write('log_meal', 'Log a meal', 'Log a meal he describes or shows in a photo in Talk, one item per food with grams, or packs/count for his own foods ("half a pack of almonds": packs 0.5; "3 eggs": count 3), (and usda: the USDA FoodData Central description when you know it). kcal and protein are computed by the app from USDA values; pass kcal/protein only when HE gave them. A food with no USDA match is refused: ask him for its numbers (my_food saves a food with his numbers). Time defaults to now. Leave date out for today: after midnight, before he has slept, the app puts the meal on his waking day (the day before) by itself, at its real time; a date he names with a time after midnight is the night after that day. photo: the id of a photo he sent in Talk that shows this meal; leave time out then: the meal gets the time he sent the message (a photo of the full plate is taken before he eats, so "I just ate" means after the photo, at the message), not when the photo was taken. Give time only when his words put the meal earlier ("this was lunch at 1", "had this at noon"). away: true when he ate it out, not at home (a restaurant, "going out to eat"): his supplements are at home, so the app then says take them once home and reminds him later, and sends no dishes message. cooked: false when he did not cook it himself (takeout or delivery eaten at home, ready-made or packaged food): no dishes message; the app sends the dishes only after a meal he cooked at home, never after a Snack. preset: one of his saved meals by name (the meals tool lists them), when he says he ate it as usual ("my usual first meal", "the classic", "same as last time"); items then are only extras on top.', obj({ items: ITEMS, preset: { type: 'string', description: 'name of one of his presets' }, photo: { type: 'string', description: 'id of the photo he sent in Talk (cphoto....)' }, away: { type: 'boolean', description: 'he ate it out, away from home' }, cooked: { type: 'boolean', description: 'false: he did not cook it himself (takeout, delivery, ready-made)' }, name: { type: 'string', description: 'Breakfast, Lunch, Dinner or Snack; default the preset\'s name, else from the time' }, time: HM, date: ISO, note: { type: 'string' } }), logMeal),
   write('meal_preset', 'Save a meal preset', 'Save a logged meal (its id from the meals tool) as one of his presets, under the name he says (default the meal\'s name). A preset of the same name is replaced. He then logs it with one tap on Fuel or by telling you.', obj({ meal: { type: 'string' }, name: { type: 'string' } }, ['meal']), mealPreset),
-  write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool), rename it, change its time or note, mark that he ate it all (ateAll: no after photo needed), mark it eaten out (away) or not cooked by him (cooked: false, takeout: no dishes message), or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, away: { type: 'boolean' }, cooked: { type: 'boolean' }, ateAll: { type: 'boolean' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
+  write('correct_meal', 'Correct a meal', 'Replace the items of a meal (by its id from the meals tool; items = the whole list, an item already in it given by its name keeps its values, other grams scale them) or add foods on top of what it holds (add: only the new foods), rename it, change its time or note, mark that he ate it all (ateAll: no after photo needed), mark it eaten out (away) or not cooked by him (cooked: false, takeout: no dishes message), or delete it.', obj({ meal: { type: 'string' }, items: ITEMS, add: ITEMS, name: { type: 'string' }, time: HM, note: { type: 'string' }, away: { type: 'boolean' }, cooked: { type: 'boolean' }, ateAll: { type: 'boolean' }, remove: { type: 'boolean' } }, ['meal']), correctMeal),
   write('supplement', 'Supplements', 'Mark supplements taken or skipped (with his reason) for today or an earlier day, or undo an answer. Leave date out for today: after midnight, before he has slept, today is still the day before (his waking day) by itself. Names as he says them ("creatine", "mag", "the morning stack" means list them). Only what he says; never assume.', obj({ names: { type: 'array', items: { type: 'string' }, minItems: 1 }, status: { type: 'string', enum: ['taken', 'skipped', 'undo'] }, reason: { type: 'string' }, date: ISO }, ['names', 'status']), supplement),
   write('supplement_setup', 'Set up a supplement', "Set up one of his supplements the way he says (what he'd enter on its page): time of day (24-hour HH:MM, or '' for no set time), with food or not, servings left in the pack, a different rest-day dose. Only what he asks for; it never adds or removes a supplement (supplement_list does, on his words). afterMeal true = he takes it right after his first meal (the app asks the moment that meal is logged; a meal named Snack doesn't count); 'second' = right after his second meal (the app asks once it's eaten, again every 5 minutes until ticked, and that meal's dishes reminder waits for it); false = not tied to a meal. bedtime true = right before he sleeps (the app asks about 30 minutes before his expected bedtime, the moving one too, and once more after it if still open; it clears a time and afterMeal).", obj({ supplement: { type: 'string' }, time: { type: 'string', pattern: '^(([01]\\d|2[0-3]):[0-5]\\d)?$' }, withFood: { type: 'string', enum: ['with', 'without', 'either'] }, servings: { type: 'number', minimum: 0 }, doseRest: { type: 'string' }, afterMeal: { enum: [true, false, 'second'] }, bedtime: { type: 'boolean' } }, ['supplement']), supplementSetup),
   write('supplement_plan', 'Restock and plans', "Record his answer about a supplement running low (restock, not-now, stop), about ones out of stock (kind out: ordered with arrives YYYY-MM-DD when he says when they come, not-yet, arrived = back on his daily list, stop = no more restock questions; supplement: names, or all), the weekly 'planning to get anything?' answer (nothing, restock-some, add), or the considering list (add or drop). kind ordered: he says he ordered ones on his restock list (out of stock or running low; supplement: names, or all; arrives if he said): no more order reminders for them until they're back. kind list: his restock list now. A new pack's count goes on the supplement (supplement_list change servings). Never changes his supplement list.", obj({ kind: { type: 'string', enum: ['restock', 'out', 'ordered', 'list', 'weekly', 'considering', 'drop_considering'] }, supplement: { type: 'string' }, answer: { type: 'string' }, arrives: ISO, name: { type: 'string' }, note: { type: 'string' }, text: { type: 'string' } }, ['kind']), supplementPlan),
