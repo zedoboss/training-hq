@@ -128,3 +128,17 @@ test('preset_items: the preset\'s own items given by name keep their values', as
     assert.match(r.text, /Udon noodles \(large\) 375 g \(his numbers\)/);
   } finally { t.done(); }
 });
+
+test('his real case: items matched to USDA by the coach\'s USDA words, given again by name only, keep their USDA values', async () => {
+  const t = setup();
+  try {
+    t.at(20, 13, 25);
+    const id = t.idOf((await t.call('log_meal', { items: [{ name: 'Zzq udon bowl (large)', grams: 375, usda: 'Rice, brown, long-grain, cooked' }] })).text);
+    const was = t.meal(id).before.items[0];
+    assert.equal(was.source, 'usda');
+    const r = await t.call('correct_meal', { meal: id, items: [{ name: 'Zzq udon bowl (large)', grams: 375 }, { name: 'Rice (cooked weight)', grams: 100 }] });
+    assert.ok(r.wrote, r.text);
+    assert.deepEqual(t.meal(id).before.items[0], was);
+    assert.equal(t.meal(id).before.items.length, 2);
+  } finally { t.done(); }
+});
