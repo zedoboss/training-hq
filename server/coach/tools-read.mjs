@@ -31,9 +31,9 @@ import { addMinutesHm, formatTime, formatDay, hmOf, zonedTime } from '../../app/
 import { restFor, restText } from '../../app/js/lib/settings.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
-import { afterMeals, mealSpansFor, morningContext, walkSigns } from '../notify.mjs';
+import { afterMeals, mealSpansFor, morningContext, walkSigns, bedSaidText } from '../notify.mjs';
 import { painEntries, painByArea, repeatFlags, areaText } from '../../app/js/lib/pain.js';
-import { PAIN_WORDS } from '../../app/js/lib/nudges.js';
+import { PAIN_WORDS, saidBedtime } from '../../app/js/lib/nudges.js';
 import { MOOD_LABEL } from '../../app/js/lib/coach-talk.js';
 import { activityDays, DISCIPLINE, WEEKDAYS } from '../../app/js/lib/activities.js';
 import { pathsOf, stageText } from '../../app/js/lib/hold-path.js';
@@ -702,9 +702,11 @@ function noticeLines(s) {
     || s.list('body-scans').some((x) => x.date === s.today && isDone(x));
   const slept = Boolean(health?.sleep || s.one('sleep-log', s.today));
   const moving = Boolean(s.settings().notify?.movingDay);
+  // Thu 11/19: he said good night last night: that's his bedtime, only how he slept and when he woke are asked.
+  const bedSaid = slept || moving ? null : saidBedtime(s.list('coach-messages'), s.now);
   return [
     recent.length ? `Your notifications to him in the last 3 hours, newest first (he may be answering one; their numbers were true when sent, possibly wrong, and the "Now:" lines are what's true now): ${recent.map((m) => `${formatTime(new Date(m.at), s.tz)} "${m.text}"`).join('; ')}.` : '',
-    `Today: weigh-in ${weighed ? 'logged' : scanHold(s.list('coach-holds'), s.now) ? 'not logged (Evolt scans paused by him: don\'t ask for one)' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : moving ? 'not logged yet (the moving schedule works it out when he wakes: don\'t ask)' : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
+    `Today: weigh-in ${weighed ? 'logged' : scanHold(s.list('coach-holds'), s.now) ? 'not logged (Evolt scans paused by him: don\'t ask for one)' : 'not logged (Evolt at the gym before training; save it with log_weight)'}; last night's sleep ${slept ? 'known' : moving ? 'not logged yet (the moving schedule works it out when he wakes: don\'t ask)' : bedSaid ? `not logged. ${bedSaidText(bedSaid, s.tz)}` : 'not logged (he has no watch: ask, save with log_sleep)'}.`,
   ].filter(Boolean);
 }
 

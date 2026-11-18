@@ -79,7 +79,7 @@ test('then he opens the app at 7:37 AM: sleep, then his back, and only then the 
     f.store.writeLocal('here', 'iphone', { phone: true, tz: TZ, at: T('07:37') });
     // Mon 11/16: 5 minutes for his answer to "Are you up?", then the sleep question.
     await f.run('07:37', '07:42');
-    assert.deepEqual(f.sent.slice(1).map((m) => [hmOf(m.at), m.body]), [['7:42 AM', 'How did you sleep? When did you go to bed and when did you wake up?']]);
+    assert.deepEqual(f.sent.slice(1).map((m) => [hmOf(m.at), m.body]), [['7:42 AM', 'How did you sleep, and what time did you wake up?']]); // Thu 11/19: his "going to bed" is his bedtime
     f.say('07:45', 'bed 7:15, up 4:00');
     f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: at(Y, '19:15'), wake: T('04:00'), source: 'coach', at: T('07:46') });
     await f.run('07:45', '07:49');
@@ -131,7 +131,7 @@ test('he answers "Are you up?" at 4:05 AM (before 5:00 AM): sleep at once, then 
     await f.run('04:00', '04:04');
     f.say('04:05', 'yeah up');
     await f.run('04:05', '04:09');
-    assert.deepEqual(f.sent.map((m) => [hmOf(m.at), m.body]), [['4:00 AM', 'Morning. Are you up?'], ['4:08 AM', 'How did you sleep? When did you go to bed and when did you wake up?']]);
+    assert.deepEqual(f.sent.map((m) => [hmOf(m.at), m.body]), [['4:00 AM', 'Morning. Are you up?'], ['4:08 AM', 'How did you sleep, and what time did you wake up?']]); // his "going to bed" is his bedtime (Thu 11/19)
     assert.equal(morningGate(f.store, T('04:09'), TZ).hold, true);
     f.say('04:10', 'bed 7:15, up 4');
     f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: at(Y, '19:15'), wake: T('04:00'), source: 'coach', at: T('04:10') });

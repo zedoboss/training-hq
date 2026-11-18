@@ -147,6 +147,7 @@ const MEAL_ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth'];
  * @param {{started: boolean, done: boolean}} o.session  today's workout
  * @param {boolean} o.weighedToday  a weight (Evolt or other) logged today
  * @param {boolean} o.sleepLogged   last night's sleep known (Health or told to the coach)
+ * @param {number|null} [o.bedSaidAt] when he said he was going to sleep last night (saidBedtime): only his wake is asked
  * @param {{kcal: number, protein: number}} o.eaten
  * @param {{kcal: number, protein: number}|null} o.targets
  * @param {{steps: number, asOf: number}|null} o.steps   today's steps from Apple Health and when they were read
@@ -173,7 +174,7 @@ const MEAL_ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth'];
  * @param {Object<string, number>} [o.sent]  nudge key -> when it went out (the nudge state's byKey): counts check-ins
  * @returns {Array<{key: string, priority: number, gapMin: number, text: string, url: string, calm?: boolean}>}
  */
-export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true,
+export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm = null, session = {}, weighedToday = false, sleepLogged = true, bedSaidAt = null,
   eaten = { kcal: 0, protein: 0 }, targets = null, steps = null, stepGoal = null, suppsUntimed = null, scanToday = null, wakeHm = NUDGE_DEFAULTS.wakeHm, bedHm = NUDGE_DEFAULTS.bedHm,
   wokeAt = null, arrivedAt = null, morning = null, workoutEndedAt = null, mealAfterGymAt = null, mealAnsweredAt = null, lastMealAt = null, mealsAt = [], healthAt = undefined, suppsAfterMeal = null, suppsBed = null, fasting = false, scanPaused = false, walkingSince = null, sent = {} }) {
   const out = [];
@@ -251,7 +252,7 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   // Sleep: the morning question, until noon. Asked once (Fri 10/23, his words: "you shouldn't keep on messaging me").
   if (!sleepLogged && sinceWake < Math.max(60, minOf('12:00') - minOf(wakeHm))) {
     out.push({ key: 'sleep', priority: 90, gapMin: ONCE_MIN, url: '#/coach',
-      text: `How did you sleep? Tell me when you went to bed and when you woke up (your schedule: ${formatHm(bedHm)} to ${formatHm(wakeHm)}).` });
+      text: bedSaidAt ? SLEEP_TEXT_BED_KNOWN : `How did you sleep? Tell me when you went to bed and when you woke up (your schedule: ${formatHm(bedHm)} to ${formatHm(wakeHm)}).` });
   }
 
   // His morning routine, once, in the first 90 minutes after he wakes (Tue 10/20).
@@ -599,6 +600,39 @@ export function pickNudge(candidates = [], sentByKey = {}, now = Date.now()) {
  */
 export const MORNING = { giveUpH: 4, waitMin: 30, quietMin: 3, replyMin: 5 };
 export const MORNING_UP_TEXT = 'Morning. Are you up?';
+
+// Thu 11/19, his words: "Why are you asking me at what time I went to bed when that's obvious? I clearly told you
+// yesterday" (Wed 11/18 11:01 PM "I took magnesium, two of them, and now I'm going to sleep. Good night."; at 6:41 AM the
+// coach asked "What time did you go to bed and wake up?"). His "going to sleep / good night" is his bedtime: the
+// morning asks only how he slept and when he woke.
+const GOOD_NIGHT = /\b(good ?night|goodnight|night night|nighty night|gn)\b/i;
+const TO_SLEEP = /\b((going|gonna|about|off|heading|head|go(ing)? back) (to )?(go )?(to )?(sleep|bed)|(i'?m|im) (sleeping|in bed)|time (for|to) (sleep|bed)|hitting the (sack|hay))\b/i;
+const NOT_TO_SLEEP = /\b(before|after|when|until|till|if)\b[^.!?]{0,20}\b(sleep|bed)\b|\b(can'?t|cannot|couldn'?t|not|don'?t|won'?t) (going to |gonna )?(go to )?(sleep|bed)\b/i;
+/** He said he's going to sleep: a good night, or "going to sleep" (not "before I sleep", "can't sleep"); no question. */
+export const saysGoodnight = (text) => {
+  const t = String(text || '').trim();
+  if (/\?\s*$/.test(t)) return false;
+  return GOOD_NIGHT.test(t) || (TO_SLEEP.test(t) && !NOT_TO_SLEEP.test(t));
+};
+/** A good night counts as his bedtime when his next message came this many hours later or more (he slept). */
+export const BEDTIME_QUIET_H = 3;
+/**
+ * When he said he was going to sleep last night (ms), or null. The night is the latest gap of BEDTIME_QUIET_H hours or
+ * more in his messages before `before` (now): his last message ahead of it is his bedtime when it says he's going to
+ * sleep and was said within the 20 hours before `before`. msgs: Talk messages ({role, text, at}).
+ */
+export function saidBedtime(msgs = [], before = Date.now()) {
+  const mine = msgs.filter((m) => m?.role === 'user' && Number.isFinite(m.at) && m.at <= before).sort((a, b) => a.at - b.at);
+  for (let i = mine.length - 1; i >= 0; i--) {
+    const m = mine[i];
+    if (before - m.at > 20 * 3600000) return null;
+    const next = mine[i + 1]?.at ?? before;
+    if (next - m.at >= BEDTIME_QUIET_H * 3600000) return saysGoodnight(m.text) ? m.at : null;
+  }
+  return null;
+}
+export const SLEEP_TEXT = 'How did you sleep? When did you go to bed and when did you wake up?';
+export const SLEEP_TEXT_BED_KNOWN = 'How did you sleep, and what time did you wake up?';
 export const PAIN_WORDS = /\b(pain\w*|hurts?|hurting|sore\w*|ache[sd]?|aching|tweak\w*|strain\w*)\b/i;
 const BODY_PART = /\b(lower back|upper back|back|knees?|shoulders?|elbows?|wrists?|hips?|neck|hamstrings?|quads?|groin|calf|calves|ankles?|chest)\b/gi;
 
@@ -656,9 +690,10 @@ const formatDayIso = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('e
  * @param {number} o.lastCoachAt the coach's last message or notification, ms
  * @param {number} [o.workoutAt] his latest workout started today, ms: like a reply, it lets the day go
  * @param {string} o.bodyText    the body question
+ * @param {number|null} [o.bedSaid] when he said he was going to sleep last night (saidBedtime): bedtime known, not asked
  * @returns {{hold: boolean, open: boolean, ask: {key: string, text: string}|null}}
  */
-export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQuiet = false, sleepKnown = false, bodyKnown = false, state = {}, coachAsked = {}, lastUserAt = 0, lastCoachAt = 0, workoutAt = 0, bodyText = morningBodyText(null) }) {
+export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQuiet = false, sleepKnown = false, bodyKnown = false, state = {}, coachAsked = {}, lastUserAt = 0, lastCoachAt = 0, workoutAt = 0, bodyText = morningBodyText(null), bedSaid = null }) {
   if (state.open) return { hold: false, open: true, ask: null };
   // Before his day starts: the wake-time rules hold things already.
   if (now < Math.min(wakeAt, upAt ?? Infinity)) return { hold: false, open: false, ask: null };
@@ -684,7 +719,7 @@ export function morningStep({ now, wakeAt, upAt = null, upNoSleep = false, noQui
   // or check-in logged). He answers: the coach's reply asks the sleep question, once (coachAsked). He doesn't: the
   // app asks it then (notify.mjs greets him with it when it's time, waitUp holds the greeting till then).
   if (state.up && !late && !sleepKnown && !bodyKnown && replied <= state.up && now - upAt < MORNING.replyMin * 60000) return { hold: true, open: false, ask: null, waitUp: true };
-  const steps = [['sleep', sleepKnown, 'How did you sleep? When did you go to bed and when did you wake up?'], ['body', bodyKnown, bodyText]];
+  const steps = [['sleep', sleepKnown, bedSaid ? SLEEP_TEXT_BED_KNOWN : SLEEP_TEXT], ['body', bodyKnown, bodyText]];
   for (const [key, known, text] of steps) {
     if (known) continue;
     const askedAt = Math.max(state[key] || 0, coachAsked[key] || 0);

@@ -9,7 +9,7 @@ import { withDefaults } from '../app/js/lib/settings.js';
 import { dayTotals, isSnack, isEmptyMeal } from '../app/js/lib/meals.js';
 import { mealTimesOf, MEAL_NUDGE } from '../app/js/lib/fuel-reminders.js';
 import { checklist, nextSuppsText } from '../app/js/lib/supplements.js';
-import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING, pastMidday } from '../app/js/lib/nudges.js';
+import { coachReminder, coachVoice, heldPlanText, nudgeCandidates, nudgeDue, pickNudge, awakeAt, dishesDue, mealEatenAt, leavesDishes, DISHES_TEXT, DISHES_AFTER_MIN, AFTER_MEAL2_BUMP_MIN, AFTER_WORKOUT_QUIET_MIN, AWAY_REMIND_MIN, AWAY_CHECK_MIN, awaySuppsText, lateSuppsText, loggedLate, after2GapMin, ateOut, ownSuppsTime, morningStep, morningBodyText, lastWorkoutPain, MORNING, pastMidday, saidBedtime } from '../app/js/lib/nudges.js';
 import { walkDue, withAsk, withAnswer, usualWalkHm, walkSteps, dayPart, settleWalk, walkingNow, WALK } from '../app/js/lib/walks.js';
 import { fastingOn } from '../app/js/lib/fast.js';
 import { wakingDay, awakeSince, SLEEP_GAP_H, WAKE_FROM_HM } from '../app/js/lib/waking-day.js';
@@ -480,7 +480,10 @@ export function morningGate(store, now, tz) {
   // Not up yet: any of it in the last 4 hours and "Are you up?" waits too.
   const sleepKnown = Boolean(health?.sleep || store.getRecord('sleep-log', night)?.data);
   const noQuiet = !state.open && (noQuietYet(store, now) || (upAt == null && activityOf(store, now - SLEEP.gapH * 3600000, now).length > 0));
+  // Thu 11/19: his "going to sleep, good night" last night is his bedtime: only how he slept and when he woke are asked.
+  const bedSaid = c || sleepKnown ? null : saidBedtime(msgs, now);
   const step = morningStep({
+    bedSaid,
     now, wakeAt, upAt, state, upNoSleep: !c && !upAt && stillUp(store, now, tz), noQuiet,
     sleepKnown,
     bodyKnown: Boolean(store.getRecord('days', date)?.data?.readiness || (c && store.getRecord('days', isoDate(new Date(now), tz))?.data?.readiness)) || trainedToday,
@@ -490,7 +493,7 @@ export function morningGate(store, now, tz) {
     workoutAt: trainedAt,
     bodyText: morningBodyText(lastWorkoutPain({ sessions, sets: list('sets'), today: date, tz }), date, tz),
   });
-  return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt, clock: c, night, sleepKnown };
+  return { ...step, state, date, openAt: step.open ? state.open || now : null, upAt, clock: c, night, sleepKnown, bedSaid };
 }
 
 /** The morning's state without what was asked or greeted before he got up (moving: or opened, a day before his). */
@@ -582,6 +585,10 @@ function morningOk(store, now, tz, today) {
   return !recordsOf(store, MSGS).some((m) => m.role === 'assistant' && m.at <= now && today(m.at) && /^Morning\b/i.test(String(m.text || '').trim()));
 }
 
+/** Thu 11/19 (his words: "Why are you asking me at what time I went to bed when that's obvious? I clearly told you
+ * yesterday"): his good night last night, for the coach. */
+export const bedSaidText = (at, tz) => `He said he was going to sleep at ${formatTime(new Date(at), tz)} last night: that is his bedtime. Don't ask when he went to bed; ask only how he slept and when he woke, and save bed ${hmOf(new Date(at), tz)} with log_sleep.`;
+
 /** For the coach, with every message: where his morning is while it is still going. */
 export function morningContext(store, now, tz) {
   const g = morningGate(store, now, tz);
@@ -607,7 +614,7 @@ function movingContext(store, now, tz, g) {
 function morningLine(store, g, tz) {
   const t = (ms) => formatTime(new Date(ms), tz);
   const asked = [['up', '"Are you up?"'], ['sleep', 'how he slept'], ['body', 'how his body feels']].filter(([k]) => g.state[k]).map(([k, w]) => `${w} at ${t(g.state[k])}`);
-  return `His morning (his rule, Fri 10/23): one question at a time, in this order: ${g.clock ? '' : 'is he up, how he slept, '}how his body feels (${morningBodyText(lastWorkoutPain({ sessions: recordsOf(store, 'sessions'), sets: recordsOf(store, 'sets'), today: g.date, tz }), g.date, tz)}), then the day's plan. The app ${asked.length ? `asked ${asked.join(', ')}` : 'has asked nothing yet'}, and holds the day's reminders until that's through. When he answers one, ask the next yourself, one question, never the plan first.${!g.clock && g.state.sleep && !g.sleepKnown ? ' How he slept is still unanswered (not logged): the app asks nothing else and holds the plan till it is, so don\'t ask about his body or give the plan either. If he writes about something else, answer that and end with the sleep question in one short line, unless your last reply already ended with it; save his times with log_sleep.' : ''}`;
+  return `His morning (his rule, Fri 10/23): one question at a time, in this order: ${g.clock ? '' : 'is he up, how he slept, '}how his body feels (${morningBodyText(lastWorkoutPain({ sessions: recordsOf(store, 'sessions'), sets: recordsOf(store, 'sets'), today: g.date, tz }), g.date, tz)}), then the day's plan. The app ${asked.length ? `asked ${asked.join(', ')}` : 'has asked nothing yet'}, and holds the day's reminders until that's through. When he answers one, ask the next yourself, one question, never the plan first.${!g.clock && g.state.sleep && !g.sleepKnown ? ' How he slept is still unanswered (not logged): the app asks nothing else and holds the plan till it is, so don\'t ask about his body or give the plan either. If he writes about something else, answer that and end with the sleep question in one short line, unless your last reply already ended with it; save his times with log_sleep.' : ''}${!g.clock && !g.sleepKnown && g.bedSaid ? ` ${bedSaidText(g.bedSaid, tz)}` : ''}`;
 }
 
 /** Today's and tomorrow's reminders (a check-in before an early session can fall on the evening before). */
@@ -1071,6 +1078,7 @@ export function nudgeInputs(store, now, tz) {
       // Tue 10/27: "How did you sleep?" only once he has slept and is up (upAtToday), never while he's still up. The
       // moving schedule works his sleep out itself (autoSleep): never asked. Sat 10/31: nor before 4 quiet hours (noQuietYet).
       sleepLogged: Boolean(c) || Boolean(health?.sleep || one('sleep-log', date)) || upAtToday(store, now, tz) == null || noQuietYet(store, now),
+      bedSaidAt: c ? null : saidBedtime(list(MSGS), now),
       wokeAt: c ? c.wokeAt : one('sleep-log', date)?.wake ?? health?.sleep?.wake ?? null,
       workoutEndedAt: Math.max(0, ...list('sessions').filter((x) => x.status === 'done' && x.kind !== 'holds' && x.endedAt && since(x.endedAt)).map((x) => x.endedAt)) || null,
       mealAfterGymAt: afterGym({ date, activity: st.activity, areas: st.areas, rounds: st.rounds, scans: st.scans, scanPlan: st.scanPlan, holdoffs: st.holdoffs })?.mealAt ?? null,
