@@ -34,6 +34,11 @@ test('his bedtime: his last message before the night, when it is a good night', 
   // At 6:30 AM, and still at 6:41 AM after his "Yeah".
   assert.equal(saidBedtime(wed, T('06:30')), at(Y, '23:01'));
   assert.equal(saidBedtime([...wed, u(D, '06:41', 'Yeah')], T('06:42')), at(Y, '23:01'));
+  // Quiet after his "Yeah" till he answers at 10:05 AM: the night is still Wednesday's, the bedtime still known.
+  assert.equal(saidBedtime([...wed, u(D, '06:41', 'Yeah')], T('10:04')), at(Y, '23:01'));
+  assert.equal(saidBedtime([...wed, u(D, '06:41', 'Yeah'), u(D, '10:05', 'slept ok')], T('10:05')), at(Y, '23:01'));
+  // An afternoon nap's "going to sleep" isn't last night's bedtime when the night itself had no good night.
+  assert.equal(saidBedtime([u(Y, '14:00', 'going to sleep for a bit'), u(Y, '18:00', 'up'), u(Y, '21:00', 'ok')], T('06:30')), null);
   // Not yet slept (right after it): no bedtime from last night's message yet.
   assert.equal(saidBedtime(wed, at(Y, '23:30')), null);
   // He wrote again after it, then the night: that last message isn't a good night, so the bedtime isn't known.

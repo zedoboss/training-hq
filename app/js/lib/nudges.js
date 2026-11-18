@@ -617,19 +617,22 @@ export const saysGoodnight = (text) => {
 /** A good night counts as his bedtime when his next message came this many hours later or more (he slept). */
 export const BEDTIME_QUIET_H = 3;
 /**
- * When he said he was going to sleep last night (ms), or null. The night is the latest gap of BEDTIME_QUIET_H hours or
- * more in his messages before `before` (now): his last message ahead of it is his bedtime when it says he's going to
- * sleep and was said within the 20 hours before `before`. msgs: Talk messages ({role, text, at}).
+ * When he said he was going to sleep last night (ms), or null. The night is the longest gap of BEDTIME_QUIET_H hours or
+ * more in his messages within the 20 hours before `before` (now), counting the quiet up to now: his message ahead of it
+ * is his bedtime when it says he's going to sleep. The longest, not the latest: a quiet morning after his "Yeah" (6:41 AM
+ * to 10 AM) isn't the night. msgs: Talk messages ({role, text, at}).
  */
 export function saidBedtime(msgs = [], before = Date.now()) {
   const mine = msgs.filter((m) => m?.role === 'user' && Number.isFinite(m.at) && m.at <= before).sort((a, b) => a.at - b.at);
-  for (let i = mine.length - 1; i >= 0; i--) {
+  let night = null;
+  let longest = BEDTIME_QUIET_H * 3600000;
+  for (let i = 0; i < mine.length; i++) {
     const m = mine[i];
-    if (before - m.at > 20 * 3600000) return null;
-    const next = mine[i + 1]?.at ?? before;
-    if (next - m.at >= BEDTIME_QUIET_H * 3600000) return saysGoodnight(m.text) ? m.at : null;
+    if (before - m.at > 20 * 3600000) continue;
+    const gap = (mine[i + 1]?.at ?? before) - m.at;
+    if (gap >= longest) { longest = gap; night = m; }
   }
-  return null;
+  return night && saysGoodnight(night.text) ? night.at : null;
 }
 export const SLEEP_TEXT = 'How did you sleep? When did you go to bed and when did you wake up?';
 export const SLEEP_TEXT_BED_KNOWN = 'How did you sleep, and what time did you wake up?';
