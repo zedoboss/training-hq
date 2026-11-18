@@ -184,7 +184,7 @@ export const awayTag = (ms, rec, here) => { const z = awayZone(ms, rec, here); r
 // Thu 11/19 (his words: "Saturday 11/15 and Sunday 11/16 have no D3 logged"; 11/15 was a Sunday, 11/16 a Monday):
 // every weekday the coach writes next to a date is taken from the calendar, never from its own arithmetic. The date
 // is kept (it comes from his records); a weekday that doesn't match it is replaced, in the same form (full or short,
-// same case). Covers "Saturday 11/15", "Sat, 11/15/2026", "Saturday, November 15" and "11/15 (Saturday)".
+// same case). Covers "Saturday 11/15", "Saturday (11/15)", "Sat, 11/15/2026", "Saturday, November 15" and "11/15 (Saturday)".
 const WD_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const WD_RE = 'sunday|monday|tuesday|wednesday|thursday|friday|saturday|tues|thurs|thur|sun|mon|tue|wed|thu|fri|sat';
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -214,7 +214,7 @@ const fix = (written, wd) => (wd == null || WD_FULL[wd].slice(0, 3).toLowerCase(
 /** text with every weekday next to a date corrected to that date's real weekday. today: "YYYY-MM-DD" (his calendar). */
 export function fixWeekdays(text, today) {
   if (!text || typeof text !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(today || '')) return text;
-  const num = new RegExp(`\\b(${WD_RE})(\\.?,?\\s+(?:the\\s+)?)(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?(?![\\d/])`, 'gi');
+  const num = new RegExp(`\\b(${WD_RE})(\\.?,?\\s+(?:the\\s+)?|\\.?,?\\s*\\(\\s*)(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?(?![\\d/])`, 'gi');
   const named = new RegExp(`\\b(${WD_RE})(\\.?,?\\s+)(${MONTH_RE})\\.?(\\s+)(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'gi');
   const after = new RegExp(`(?<![\\d/])(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?(\\s*\\(\\s*)(${WD_RE})\\b`, 'gi');
   const yr = (y) => (y ? Number(y) : null);

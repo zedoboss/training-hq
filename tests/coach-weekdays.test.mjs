@@ -36,6 +36,8 @@ test('every form: short names, case, a comma, the year, month names, the weekday
     ['Saturday, November 15', 'Sunday, November 15'],
     ['Saturday Nov 15th, 2026', 'Sunday Nov 15th, 2026'],
     ['11/15 (Saturday)', '11/15 (Sunday)'],
+    ['Saturday (11/15)', 'Sunday (11/15)'],
+    ['Sat, (11/15/2026)', 'Sun, (11/15/2026)'],
   ];
   for (const [said, right] of cases) assert.equal(fixWeekdays(said, TODAY), right, said);
 });
