@@ -180,3 +180,46 @@ export const dayAt = (ms, rec) => formatDay(new Date(ms), zoneOf(rec));
 export const fullDateAt = (ms, rec) => formatDate(new Date(ms), zoneOf(rec));
 /** " · SKOPJE TIME" style tag for headers, or ''. */
 export const awayTag = (ms, rec, here) => { const z = awayZone(ms, rec, here); return z ? `${placeOf(z)} time` : ''; };
+
+// Thu 11/19 (his words: "Saturday 11/15 and Sunday 11/16 have no D3 logged"; 11/15 was a Sunday, 11/16 a Monday):
+// every weekday the coach writes next to a date is taken from the calendar, never from its own arithmetic. The date
+// is kept (it comes from his records); a weekday that doesn't match it is replaced, in the same form (full or short,
+// same case). Covers "Saturday 11/15", "Sat, 11/15/2026", "Saturday, November 15" and "11/15 (Saturday)".
+const WD_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WD_RE = 'sunday|monday|tuesday|wednesday|thursday|friday|saturday|tues|thurs|thur|sun|mon|tue|wed|thu|fri|sat';
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const MONTH_RE = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec';
+
+/** The weekday (0 = Sunday) of month/day, in the given year or, without one, the year that puts it nearest today. */
+function weekdayFor(month, day, year, today) {
+  const ok = (y) => { const d = new Date(Date.UTC(y, month - 1, day)); return d.getUTCMonth() === month - 1 && d.getUTCDate() === day ? d : null; };
+  if (year != null) { const y = year < 100 ? 2000 + year : year; return ok(y)?.getUTCDay() ?? null; }
+  const t = Date.parse(`${today}T00:00:00Z`);
+  const y0 = Number(today.slice(0, 4));
+  const best = [y0 - 1, y0, y0 + 1].map(ok).filter(Boolean).sort((a, b) => Math.abs(a - t) - Math.abs(b - t))[0];
+  return best ? best.getUTCDay() : null;
+}
+
+/** The right weekday written the way the wrong one was: full or 3-letter, lower, Title or UPPER case. */
+function sameForm(written, wd) {
+  const full = WD_FULL[wd];
+  const w = written.replace(/\.$/, '');
+  const name = w.length > 5 || /day$/i.test(w) ? full : full.slice(0, 3);
+  const out = w === w.toUpperCase() ? name.toUpperCase() : w === w.toLowerCase() ? name.toLowerCase() : name;
+  return written.endsWith('.') ? `${out}.` : out;
+}
+
+const fix = (written, wd) => (wd == null || WD_FULL[wd].slice(0, 3).toLowerCase() === written.slice(0, 3).toLowerCase() ? written : sameForm(written, wd));
+
+/** text with every weekday next to a date corrected to that date's real weekday. today: "YYYY-MM-DD" (his calendar). */
+export function fixWeekdays(text, today) {
+  if (!text || typeof text !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(today || '')) return text;
+  const num = new RegExp(`\\b(${WD_RE})(\\.?,?\\s+(?:the\\s+)?)(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?(?![\\d/])`, 'gi');
+  const named = new RegExp(`\\b(${WD_RE})(\\.?,?\\s+)(${MONTH_RE})\\.?(\\s+)(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'gi');
+  const after = new RegExp(`(?<![\\d/])(\\d{1,2})/(\\d{1,2})(?:/(\\d{4}|\\d{2}))?(\\s*\\(\\s*)(${WD_RE})\\b`, 'gi');
+  const yr = (y) => (y ? Number(y) : null);
+  return text
+    .replace(num, (all, wd, sep, m, d, y) => `${fix(wd, weekdayFor(Number(m), Number(d), yr(y), today))}${sep}${m}/${d}${y ? `/${y}` : ''}`)
+    .replace(named, (all, wd, sep, mon, sp, d, y) => all.replace(wd, fix(wd, weekdayFor(MONTHS.indexOf(mon.slice(0, 3).toLowerCase()) + 1, Number(d), yr(y), today))))
+    .replace(after, (all, m, d, y, sep, wd) => `${m}/${d}${y ? `/${y}` : ''}${sep}${fix(wd, weekdayFor(Number(m), Number(d), yr(y), today))}`);
+}

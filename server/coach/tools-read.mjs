@@ -27,7 +27,7 @@ import { ladderState, stepText, LADDER, PASSES_TO_UNLOCK, doctorDue, DOCTOR_QUES
 import { runText, squatMarks } from '../../app/js/lib/squat-log.js';
 import { latestByField } from '../../app/js/lib/body.js';
 import { neckAsk, neckToday, neckDoneOn, placeLabel } from '../../app/js/lib/neck.js';
-import { addMinutesHm, formatTime, hmOf, zonedTime } from '../../app/js/lib/time.js';
+import { addMinutesHm, formatTime, formatDay, hmOf, zonedTime } from '../../app/js/lib/time.js';
 import { restFor, restText } from '../../app/js/lib/settings.js';
 import { recoveryLines, checkIns, photoStatus, endsOn } from '../../app/js/lib/recovery.js';
 import { checkInLead } from '../../app/js/lib/reminders.js';
@@ -166,6 +166,15 @@ function comingUp(s, n = 8) {
   // tomorrow is not settled yet. Give the coach both versions so it never states tomorrow as fact.
   const carried = projectRotation({ last: s.last(), days: s.days(), from: addDays(s.today, 1), n: n - 1 });
   return `${line} If today's ${LABEL[t.dayType]} is NOT done today, it carries over: ${fmt(carried)}. Today's session isn't done, so don't state tomorrow's day as fact: give both, or ask whether he trains today.`;
+}
+
+/**
+ * Thu 11/19 (his words: "Saturday 11/15 and Sunday 11/16 have no D3 logged"; 11/15 was a Sunday): the past two weeks
+ * with their weekdays, so a past day is copied, never worked out. (Replies are also checked: time.js fixWeekdays.)
+ */
+export function calendarLine(s, back = 14) {
+  const days = Array.from({ length: back }, (_, i) => addDays(s.today, i - back));
+  return `Calendar, the last ${back} days (copy a past day's weekday from here): ${days.map((d) => formatDay(new Date(`${d}T12:00:00Z`), 'UTC')).join(', ')}; today ${formatDay(new Date(`${s.today}T12:00:00Z`), 'UTC')}.`;
 }
 
 /**
@@ -539,7 +548,7 @@ export function todayText(s) {
 /** The context block of every message: the rotation and the session in progress (short; the 'today' tool has the rest). */
 export function contextLine({ store, tz, now, screen = null }) {
   const s = snapshot(store, { tz, now });
-  const lines = [...rotationLines(s).slice(0, 3), comingUp(s, 6)];
+  const lines = [...rotationLines(s).slice(0, 3), comingUp(s, 6), calendarLine(s)];
   // Tue 10/20: the meal he is looking at, so "10 eggs, not 5" corrects it without a lookup first.
   const mealId = /^#\/meal\/([\w.-]+)/.exec(screen || '')?.[1];
   const meal = mealId && s.one('meals', mealId);

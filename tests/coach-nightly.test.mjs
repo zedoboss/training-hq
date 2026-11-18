@@ -417,3 +417,12 @@ test('Tue 10/27: still up from the night past 6:00 AM, the review waits (a 6:31 
   clock = at('12:00', '2026-03-18');
   assert.deepEqual(n.dueDays(), ['2026-03-15', '2026-03-16', '2026-03-17'], 'noon: reviewed');
 });
+
+test('Thu 11/19: the morning text\'s weekdays are the calendar\'s, the dates kept', async () => {
+  const { n } = nightly({ answer: { ...ANSWER, fixes: [], morning: 'Monday 3/17: eggs at 1:15 PM. Next weigh-in Thursday 3/19.' } });
+  await n.tick();
+  clock = at('07:30', '2026-03-18');
+  msg('m9', 'user', 'Up', '07:30', '2026-03-18');
+  await n.tick();
+  assert.equal(talk()[0].text, 'Tuesday 3/17: eggs at 1:15 PM. Next weigh-in Thursday 3/19.');
+});

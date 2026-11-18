@@ -16,7 +16,7 @@ import { snapshot } from './shared.mjs';
 import { timelineText, fold } from './memory.mjs';
 import { slotsToday } from './tools-read.mjs';
 import { newChange, asksOf, COL as CHANGES, MSGS } from './changes.mjs';
-import { formatDay, formatTime, isoDate, zonedTime } from '../../app/js/lib/time.js';
+import { formatDay, formatTime, isoDate, zonedTime, fixWeekdays } from '../../app/js/lib/time.js';
 import { addDays } from '../../app/js/lib/rotation.js';
 import { heldOff } from '../../app/js/lib/holdoffs.js';
 import { pastMidday } from '../../app/js/lib/nudges.js';
@@ -441,7 +441,7 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     // Written at night, it may go out hours later (held for his hold-off, a session, a talk): today's hold rounds as
     // the records say now (freshRounds), never a round he has already logged.
     const snap = snapshot(store, { tz: zone, now: t });
-    const head = freshDay(freshRounds(said.join(' '), snap), snap);
+    const head = fixWeekdays(freshDay(freshRounds(said.join(' '), snap), snap), today);
     // Thu 11/5 (his list of missing features: "Your 4:33 AM morning message came with three 'Being fixed now' lines
     // tacked on. Build updates shouldn't ride along in daily messages"): the morning message is only what was learned;
     // the fixes come as their own message; one still building isn't named at all: it is told on its own once it's done
@@ -449,7 +449,7 @@ export function openNightly({ store, privateDir, profile = () => '', fixedOnMac 
     const fixes = [
       ...done.map((c) => fixLine('Fixed overnight', c.answer)),
       ...other.map((c) => fixLine(c.status === 'question' ? 'Question' : 'Not fixed', c.answer)),
-    ];
+    ].map((x) => fixWeekdays(x, today));
     const lines = [head, ...fixes].filter(Boolean);
     for (const d of diaries) put(DIARY, d.date, { ...d, morningAt: t, ...(current.includes(d) ? {} : { morningDropped: 'an earlier day' }) });
     for (const c of quiet) put(CHANGES, c.id, { ...c, announce: 'done', announcedAt: t });

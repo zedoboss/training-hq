@@ -8,6 +8,7 @@ import { micSession } from './voice-rec.js';
 import { audioContext, audioRunning, resetAudio, unlockAudioContext, holdAudio } from './voice-mic.js';
 import { createPlayer } from './voice-player.js';
 import { encodeWav } from './wav.js';
+import { fixWeekdays, isoDate, deviceTimeZone } from './time.js';
 import { sentenceSplitter, replyGate } from './voice-text.js';
 import { voiceUtterance, voiceSpeech, macGet, macPost, macSendRaw, syncNow } from './data.js';
 import { getState } from './store.js';
@@ -132,7 +133,8 @@ async function turn(wav, { overCoach: echo = false } = {}) {
   const split = sentenceSplitter();
   const gate = replyGate(); let ok = false;
   const me = { gen: speechGen, live: false }; turns.add(me);
-  const sentence = (s) => { if (me.gen !== speechGen) return; for (const x of gate.sentence(s)) speak(x); };
+  // Thu 11/19: a weekday spoken next to a date is the calendar's (time.js fixWeekdays), as in the written reply.
+  const sentence = (s) => { if (me.gen !== speechGen) return; for (const x of gate.sentence(fixWeekdays(s, isoDate(new Date(), deviceTimeZone())))) speak(x); };
   try {
     const st = prefs();
     await voiceUtterance({

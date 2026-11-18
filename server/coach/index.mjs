@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { openCoachProcess } from './process.mjs';
 import { openMcp } from './mcp.mjs';
 import { systemPrompt, turnText, recapText, daySummary } from './prompt.mjs';
-import { isoDate } from '../../app/js/lib/time.js';
+import { isoDate, fixWeekdays } from '../../app/js/lib/time.js';
 import { COACH_MODELS as MODELS } from '../claude.mjs';
 import { deviceTimeZone, formatTime } from '../../app/js/lib/time.js';
 import { imageBlock } from '../claude.mjs';
@@ -164,7 +164,9 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
           return photos.length ? [...photos.map((p) => imageBlock(p.dataUrl)), { type: 'text', text: body }] : body;
         },
       });
-      reply = { role: 'assistant', text: res.text || '(no answer)', model: key, ms: res.ms, ...(res.firstMs != null ? { firstMs: res.firstMs } : {}), ...(voice ? { via: 'voice' } : {}) };
+      // Thu 11/19 (his words: "Saturday 11/15 and Sunday 11/16 have no D3 logged", 11/15 was a Sunday): every weekday
+      // next to a date is the calendar's, whatever the model wrote.
+      reply = { role: 'assistant', text: fixWeekdays(res.text, isoDate(new Date(now()), zone)) || '(no answer)', model: key, ms: res.ms, ...(res.firstMs != null ? { firstMs: res.firstMs } : {}), ...(voice ? { via: 'voice' } : {}) };
       // Tue 10/20 (16 s for "Yo, what's up?"): every answer's timing in the log, so a slow one can be pinned down.
       log(`coach: answered in ${(res.ms / 1000).toFixed(1)} s (first words ${res.firstMs != null ? `${(res.firstMs / 1000).toFixed(1)} s` : '-'}, ${t.tools.length} tool${t.tools.length === 1 ? '' : 's'}${res.usage?.output_tokens != null ? `, ${res.usage.output_tokens} tokens out` : ''})`);
     } catch (e) {
@@ -207,7 +209,7 @@ export function openCoach({ store, tools = [], profile = () => '', recovery = ()
     } finally {
       if (active === t) active = null;
     }
-    const text = String(res?.text || '').trim();
+    const text = fixWeekdays(String(res?.text || '').trim(), isoDate(new Date(now()), zone));
     if (!text || /^SKIP\b/i.test(text)) { log(`coach initiative ${ref || ''}: skipped`); return null; }
     const msgAt = Math.max(now(), at + 1);
     const msg = save({ id: messageId(msgAt), role: 'assistant', text, at: msgAt, tz: zone, turnId, tools: t.tools, actions: [], kind, ref, model: key, ms: res.ms });
