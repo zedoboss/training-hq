@@ -25,6 +25,8 @@ import { weeklyTick } from './weekly.mjs';
 import { lastAnswerAt, silentNow, openLabels, catchUpText, SILENT, SILENT_PASS } from '../app/js/lib/silent.js';
 
 export const SENT = 'notify:sent';
+/** Planned reminders counted as sent but never said (his own reminder said it, or he'd gone quiet): id -> when. */
+export const UNSAID = 'notify:unsaid';
 
 /** Everything the planner needs, read from the Mac's database. */
 export function stateFrom(store, tz) {
@@ -925,7 +927,7 @@ export function coveredSessionAsks(items, all, sent = {}) {
 export function waitsForOwnSession(key, own, { now, lastUserAt = 0 }) {
   if (!own) return false;
   const k = String(key || '');
-  if (k === 'session') return now < own.sessionAt + OWN_SESSION_LATE_MIN * 60000;
+  if (k === 'session' || k.startsWith('session:due:')) return now < own.sessionAt + OWN_SESSION_LATE_MIN * 60000;
   if (k.startsWith('checkin:readiness-')) return own.sentAt == null || (lastUserAt || 0) < own.sentAt;
   return false;
 }
@@ -1045,6 +1047,7 @@ export function nudgeInputs(store, now, tz) {
   const firstMealAt = firstMeal ? firstMeal.at : NaN;
   const fasting = fastingOn(st.days || {}, date, list('meals'));
   const wentOut = store.getMeta(SENT) || {};
+  const unsaid = store.getMeta(UNSAID) || {};
   const scans = scansOfStretch(list('body-scans'), c, now, tz);
   const scanPhotoIds = list('scan-photos').map((p) => p.scanId);
   return {
@@ -1058,7 +1061,7 @@ export function nudgeInputs(store, now, tz) {
       // When each one really went out (held for his morning or a workout, later than planned); null = not yet.
       // Tue 11/10: the meal-time questions as the gym holds them (gymSpans), so the after-workout meal nudge hands over
       // to the one held ask instead of saying it too, and no food nudge comes while his session is on.
-      reminders: (() => { const r = remindersToday(store, st, date, now, tz); return afterGymHold(r, gymSpans(r, list('sessions'), st, now, tz), now); })().map((i) => ({ ...i, sentAt: wentOut[i.id] ?? null })),
+      reminders: (() => { const r = remindersToday(store, st, date, now, tz); return afterGymHold(r, gymSpans(r, list('sessions'), st, now, tz), now); })().map((i) => ({ ...i, sentAt: wentOut[i.id] ?? null, ...(unsaid[i.id] ? { unsaid: true } : {}) })),
       rot,
       // The count is over everything due today that he has (Thu 10/22, his words: "0 out of 4 doesn't make sense... I've
       // only taken 3 so far"); the open names are the ones with no time (the rest have their own prompts).
@@ -1473,6 +1476,12 @@ export function startNotifier({ store, push, coach = () => null, log = () => {},
       const hushed = new Set(quiet ? due.filter((i) => !SILENT_PASS.has(i.kind)) : []);
       for (const i of hushed) { sent[i.id] = t; log(`notify ${i.id}: not sent (no answer from him since ${new Date(quiet.since).toISOString()})`); }
       if (covered.size || ownSession.size || spaced.size || repeats.size || hushed.size) store.setMeta(SENT, sent);
+      // Fri 11/20: the check-in's few nudges start with the check-in itself when it was never said (lib/nudges.js).
+      if (ownSession.size || hushed.size) {
+        const unsaid = Object.fromEntries(Object.entries(store.getMeta(UNSAID) || {}).filter(([, at]) => t - at < 2 * 86400000));
+        for (const id of [...ownSession.keys(), ...[...hushed].map((i) => i.id)]) unsaid[id] = t;
+        store.setMeta(UNSAID, unsaid);
+      }
       const items = due.filter((i) => (!i.group || latest.get(i.group) === i) && !covered.has(i.id) && !ownSession.has(i.id) && !spaced.has(i) && !repeats.has(i) && !hushed.has(i));
       if (items.length) {
         const opts = voiceOpts(store);

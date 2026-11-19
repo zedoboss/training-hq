@@ -64,10 +64,10 @@ test('nudges while paused: no "Evolt first", no scan checklist, no "Evolt number
   const texts = (o) => nudgeCandidates({ ...base, ...o });
   const due = { now: at('06:40'), sessionHm: '06:00' };
   const soon = { now: at('05:15'), sessionHm: '06:00' };
-  assert.match(texts(due).find((c) => c.key === 'session').text, /Evolt first/, 'control');
+  assert.match(texts(due).find((c) => c.key.startsWith('session:due:')).text, /Evolt first/, 'control');
   for (const o of [due, soon]) {
     const c = texts({ ...o, scanPaused: true });
-    assert.ok(c.some((x) => x.key === 'session'), 'the session nudge itself stays');
+    assert.ok(c.some((x) => x.key === 'session' || x.key.startsWith('session:due:')), 'the session nudge itself stays');
     assert.ok(c.every((x) => !/Evolt|scan/i.test(x.text)), c.map((x) => x.text).join(' | '));
   }
   const scanToday = { items: ['Bathroom first', 'No food'] };

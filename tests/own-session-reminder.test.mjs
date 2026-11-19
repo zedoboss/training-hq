@@ -52,7 +52,7 @@ test('his Tuesday, never answering: one message, his, at 12:20 PM; nothing more 
   assert.match(r.training[0].body, /Heading out\?/);
 });
 
-test('he says he is leaving at 12:22 PM: the check-in follows (then its usual 20-minute follow-ups), never naming a passed time', async () => {
+test('he says he is leaving at 12:22 PM: the check-in follows (then its few follow-ups, the first 45 minutes on), never naming a passed time', async () => {
   const r = await replay({ say: { '12:22': 'Heading out now' }, to: '12:59' });
   const checks = r.training.filter((m) => m.tag !== 'coach-r1');
   assert.equal(r.training[0].tag, 'coach-r1');

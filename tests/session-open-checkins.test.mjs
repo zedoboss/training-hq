@@ -88,6 +88,7 @@ test('unchanged around it: a time set, a session started, a rest day, a hold-off
   const o = { ...base, wokeAt: at('12:40') };
   assert.equal(ask({ ...o, now: at('15:30'), sessionHm: '16:00' }).key, 'session');
   assert.match(ask({ ...o, now: at('16:30'), sessionHm: '16:00' }).text, /^Push was due at 4:00 PM\. Go now/);
+  assert.equal(ask({ ...o, now: at('16:30'), sessionHm: '16:00' }).key, `session:due:${D}:0`);
   assert.match(ask({ ...o, now: at('21:30'), sessionHm: '21:00' }).text, /was due at 9:00 PM/, 'a time he set still counts late');
   assert.equal(ask({ ...o, now: at('15:00'), session: { started: true } }), undefined);
   assert.equal(ask({ ...o, now: at('15:00'), rot: { today: { kind: 'rest' } } }), undefined);

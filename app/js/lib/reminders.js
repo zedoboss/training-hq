@@ -143,6 +143,8 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
         body: `${LABEL[dayType]} at ${formatHm(hm)}${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}: soreness or pain, 0 = none, 3 = bad. Energy` : 'Energy'}: 0 = drained, 3 = high.`,
         // Once the session time has passed (Tue 11/10: at 12:50 PM "Push at 12:30 PM"), it says "now", never a passed time.
         sessionAt: at,
+        // Its follow-ups (lib/nudges.js checkinAgainText) and no push line: plain asks (Fri 11/20).
+        label: LABEL[dayType], sessionHm: hm, areas: asked, calm: true,
         lateBody: `${LABEL[dayType]} now${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}: soreness or pain, 0 = none, 3 = bad. Energy` : 'Energy'}: 0 = drained, 3 = high.`,
         due: !doc.readiness && !started,
       });

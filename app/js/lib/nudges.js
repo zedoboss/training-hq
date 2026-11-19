@@ -288,8 +288,14 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   if (train && !session.started && !session.done) {
     if (sessionHm) {
       const at = zonedTime(isoDate(new Date(now), tz), sessionHm, tz);
-      if (now >= at) out.push({ key: 'session', priority: 80, gapMin: 30, url: '#/train', text: `${label} was due at ${formatHm(sessionHm)}. Go now, or tell me the new time.${evoltFirst}` });
-      else if (now >= at - 60 * 60000) out.push({ key: 'session', priority: 70, gapMin: 45, url: '#/train', text: `${label} at ${formatHm(sessionHm)}.${scanPaused ? ' See you there.' : ' Evolt first when you get there, then train.'}` });
+      // Fri 11/20 (Thursday's Upper B check-in 21 times, 1:30 to 8:10 PM): once the time has passed, SESSION_DUE_CHECKS
+      // asks in new words, then quiet (the session rolls on), a late time he set too; none while the check-in's own few asks run, they ask it.
+      if (now >= at) {
+        const due = `session:due:${isoDate(new Date(now), tz)}:`;
+        const k = Object.keys(sent || {}).filter((x) => x.startsWith(due)).length;
+        const text = checkinOpen(reminders, now) ? null : sessionDueText(k, label, sessionHm, evoltFirst);
+        if (text) out.push({ key: `${due}${k}`, priority: 80, gapMin: ONCE_MIN, spaceMin: SESSION_DUE_CHECKS.spaceMin, url: '#/train', text });
+      } else if (now >= at - 60 * 60000) out.push({ key: 'session', priority: 70, gapMin: 45, url: '#/train', text: `${label} at ${formatHm(sessionHm)}.${scanPaused ? ' See you there.' : ' Evolt first when you get there, then train.'}` });
     } else if (!lateEvening(now, tz, bedHm)) {
       // Mon 10/26 (Sunday: "Push today and no time set... Your plan: 1:40 PM to 2:10 PM" 6 times, 2:40 to 11:35 PM, the
       // same words, a plan he had woken too late for): SESSION_CHECKS check-ins, new words each, his plan only while it
@@ -313,11 +319,28 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     // From when it really went out (sentAt, from the Mac; null: not yet, so nothing to follow up).
     const from = r.sentAt === undefined ? r.at : r.sentAt;
     if (!a || !r.due || r.again === false || r.group || from == null || from > now - a[2] * 60000 || r.at < now - 16 * 3600000) continue;
+    // Fri 11/20, his words on Thursday's Upper B check-in (21 times, every 20 minutes, 1:30 to 8:10 PM, the same words
+    // with a push line): an unanswered check-in gets CHECKIN_CHECKS' few asks, further apart, new words, no push line,
+    // then quiet.
+    // Not said when due (unsaid: his own reminder before the session was the one, or he'd gone quiet): the first nudge is
+    // the check-in itself, then the follow-ups count from it.
+    if (r.kind === 'readiness') {
+      const key = `${a[0]}:${r.tag || r.id}:`;
+      const base = { priority: a[1], gapMin: ONCE_MIN, spaceMin: CHECKIN_CHECKS.spaceMin, url: r.url || '#/checkin', calm: true };
+      if (r.unsaid && !sent[`${key}said`]) {
+        out.push({ ...base, key: `${key}said`, text: [/[?!]$/.test(title(r)) ? title(r) : `${title(r)}.`, r.lateBody && now >= r.sessionAt ? r.lateBody : r.body].filter(Boolean).join(' ') });
+        continue;
+      }
+      const start = r.unsaid ? sent[`${key}said`] : from;
+      const k = CHECKIN_CHECKS.afterMin.findLastIndex((m) => now >= start + m * 60000);
+      if (k >= 0) out.push({ ...base, key: `${key}${k}`, text: checkinAgainText(k, r, now) });
+      continue;
+    }
     // A meal ask isn't nudged here: its own check-ins follow it (lib/fuel-reminders.js; Fri 10/23, "First meal is late"
     // came on top of them, and after the last meal's time).
-    const title = String(r.title || '').replace(/[.:]?\s*$/, '');
+    const head = title(r);
     out.push({ key: `${a[0]}:${r.tag || r.id}`, priority: a[1], gapMin: a[3] ? ONCE_MIN : a[2], url: r.url || '#/', calm: CALM_KINDS.has(r.kind),
-      text: r.againText || [/[?!]$/.test(title) ? title : `${title}.`, r.lateBody && now >= r.sessionAt ? r.lateBody : r.body].filter(Boolean).join(' ') });
+      text: r.againText || [/[?!]$/.test(head) ? head : `${head}.`, r.lateBody && now >= r.sessionAt ? r.lateBody : r.body].filter(Boolean).join(' ') });
   }
 
   // Food behind the day's pace (wake up to 2 hours before bed).
@@ -405,6 +428,43 @@ export function foodPaceText(k, { eaten, targets, nowHm, expect }) {
     `Still behind on food: ${nf(eaten.kcal)} kcal so far, ${left} to go today. What's your next meal, and when?`,
     `Last food check for now: ${left} still to go today. Get a big meal in before the day ends.`,
   ][k] ?? null;
+}
+
+// ---- An unanswered check-in, and a session whose time has passed (Fri 11/20) ----
+/**
+ * The check-in reminder is followed up this many minutes after it went out (one ask each, later ones further apart,
+ * spaceMin at least between them), then nothing more: three asks in all.
+ */
+export const CHECKIN_CHECKS = { afterMin: [45, 150], spaceMin: 60 };
+/** A planned reminder's title as the first words of a nudge. */
+const title = (r) => String(r.title || '').replace(/[.:]?\s*$/, '');
+/** The check-in reminder went out and is still open: its few asks are the session's too, nothing after them. */
+export function checkinOpen(reminders = [], now = Date.now()) {
+  return reminders.some((r) => {
+    const from = r.sentAt === undefined ? r.at : r.sentAt;
+    return r.kind === 'readiness' && r.due && from != null && from <= now;
+  });
+}
+/** The k-th follow-up of an open check-in, each in its own words, no push line; null after the last. */
+export function checkinAgainText(k, r, now) {
+  const passed = r.sessionAt && now >= r.sessionAt;
+  const label = r.label || 'Your session';
+  const when = r.sessionHm ? formatHm(r.sessionHm) : '';
+  const areas = r.areas?.length ? `${r.areas.join(', ').replace(/^./, (c) => c.toUpperCase())}: soreness or pain from 0 (none) to 3 (bad). ` : '';
+  return [
+    `Haven't heard back on your check-in${passed && when ? `, and ${label} was due at ${when}` : ` for ${label}`}. ${areas}Energy from 0 (drained) to 3 (high)?`,
+    `Last ask on today's check-in. ${label} later, a new time, or skipping it today?`,
+  ][k] ?? null;
+}
+/** Asks after a session's time passed with no workout: this many, at least spaceMin apart, then quiet. */
+export const SESSION_DUE_CHECKS = { count: 2, spaceMin: 90 };
+/** The k-th "was due" ask, each in its own words; null after the last. */
+export function sessionDueText(k, label, hm, evoltFirst = '') {
+  if (k >= SESSION_DUE_CHECKS.count) return null;
+  return [
+    `${label} was due at ${formatHm(hm)}. Go now, or tell me the new time.${evoltFirst}`,
+    `Last check on ${label} today: going later, a new time, or skipping it?`,
+  ][k];
 }
 
 // ---- Today's session with no time set ----

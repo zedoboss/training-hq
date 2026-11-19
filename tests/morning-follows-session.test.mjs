@@ -35,7 +35,7 @@ test('his 4:32 AM: the session time has come, he started, or he is at the gym: n
   assert.equal(morning({ now: T('04:15'), sessionHm: '04:15' }), null);
   assert.equal(morning({ now: T('04:14'), sessionHm: '04:15' }), `Morning: ${ROUTINE}. Legs at 4:15 AM.`);
   // The session nudge still says it's due.
-  assert.match(nudgeCandidates({ ...base, now: T('04:32'), sessionHm: '04:15' }).find((c) => c.key === 'session').text, /^Legs was due at 4:15 AM\./);
+  assert.match(nudgeCandidates({ ...base, now: T('04:32'), sessionHm: '04:15' }).find((c) => c.key.startsWith('session:due:')).text, /^Legs was due at 4:15 AM\./);
   // Training (no time set, or before it): nothing.
   assert.equal(morning({ now: T('04:20'), session: { started: true, done: true } }), null);
   assert.equal(morning({ now: T('04:20'), sessionHm: '05:00', session: { started: true, done: true } }), null);
