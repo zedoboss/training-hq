@@ -32,7 +32,7 @@ const legsWithBackPain = {
 test('pain from his last workout comes first in the body question', () => {
   const pain = lastWorkoutPain({ sessions: [legsWithBackPain], sets: [], today: D, tz: TZ });
   assert.deepEqual(pain, { label: 'Legs', date: Y, parts: ['lower back'], exercise: 'Squat (Smith Machine)' });
-  assert.equal(morningBodyText(pain, D, TZ), "How's your lower back today? It hurt on squat yesterday (Legs). 0 to 3, and does it still hurt when you bend or move?");
+  assert.equal(morningBodyText(pain, D, TZ), "How's your lower back today? It hurt on squat yesterday (Legs). Soreness or pain, 0 = none, 3 = bad? And does it still hurt when you bend or move?");
   // A pain score on a set counts too; an older workout says its day.
   const knee = { id: 'p', dayType: 'push', status: 'done', startedAt: at('2026-03-18', '10:00'), exercises: [{ key: 'b', name: 'Bench Press' }] };
   const p2 = lastWorkoutPain({ sessions: [knee], sets: [{ sessionId: 'p', exKey: 'b', done: true, pain: 4 }], today: D, tz: TZ });
@@ -41,7 +41,7 @@ test('pain from his last workout comes first in the body question', () => {
   // No pain, or nothing in the last 2 days: the plain question.
   assert.equal(lastWorkoutPain({ sessions: [{ ...legsWithBackPain, exercises: [{ key: 'x', name: 'Squat' }] }], sets: [], today: D, tz: TZ }), null);
   assert.equal(lastWorkoutPain({ sessions: [{ ...legsWithBackPain, startedAt: at('2026-03-16', '10:00') }], sets: [], today: D, tz: TZ }), null);
-  assert.equal(morningBodyText(null, D, TZ), 'How does your body feel today? Knees, legs, back: 0 to 3.');
+  assert.equal(morningBodyText(null, D, TZ), 'Any soreness or pain today? Knees, legs, lower back: 0 = none, 3 = bad.');
 });
 
 test('the morning steps: up, then sleep, then body; one at a time; quiet until he is up', () => {

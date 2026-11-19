@@ -40,7 +40,7 @@ function wednesday() {
   return { store, sent, run, say, coach, opens, said, logSleep, done };
 }
 
-const BODY = /How does your body feel today\?|How's your/;
+const BODY = /Any soreness or pain today\?|How's your/;
 
 test('his Wednesday replayed: no body question, no plan while sleep is unanswered; his other messages are no answer to it', async () => {
   const f = wednesday();

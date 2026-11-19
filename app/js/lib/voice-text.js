@@ -53,7 +53,7 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 
 /**
  * Text as it should be spoken: no markdown or symbols, times with the letters "A M" / "P M" (brief section 4), dates
- * as "October 20", "kg" as "kilos", "60 x 8" as "60 for 8".
+ * as "October 20", "kg" as "kilos", "60 x 8" as "60 for 8", a scale's "0 = none" as "0 is none".
  */
 export function speechText(text) {
   return String(text ?? '')
@@ -68,6 +68,7 @@ export function speechText(text) {
     .replace(/(\d)\s*(?:kg|KG)\b/g, '$1 kilos')
     .replace(/\bkg\b/g, 'kilos')
     .replace(/\s*·\s*/g, ', ')
+    .replace(/\b(\d+)\s*=\s*(?=[A-Za-z])/g, '$1 is ')
     .replace(/\s+/g, ' ')
     .trim();
 }

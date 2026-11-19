@@ -170,7 +170,7 @@ test('his Tuesday replayed: asleep after his 6:45 AM ribs, nothing at 10:00 AM o
     assert.equal(sleep.wake, at(TUE, '17:54'));
     assert.equal(sleep.inBedMin, 609);
     const greet = f.talk().at(-1).text;
-    assert.match(greet, /^Sleep logged from your activity: 7:45 AM to 5:54 PM, 10 h 09 min\. Off\? Tell me the real times\. How does your body feel today\?/);
+    assert.match(greet, /^Sleep logged from your activity: 7:45 AM to 5:54 PM, 10 h 09 min\. Off\? Tell me the real times\. Any soreness or pain today\?/);
     assert.doesNotMatch(greet, /How did you sleep/);
     assert.equal(f.sent.filter((m) => m.at >= at(TUE, '07:55')).length, 0, 'he is in the app: no notification');
     assert.equal(foodDayOf(f.store, at(TUE, '18:30'), TZ), TUE);

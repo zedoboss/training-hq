@@ -51,7 +51,7 @@ test('his Wednesday replayed: sleep and body asks unanswered, no morning plan, n
     assert.ok(f.said().some((t) => /How did you sleep\?/.test(t)), f.said().join(' | '));
     await f.run('05:40', '06:30');
     // Thu 11/12: one question at a time: no body question while the sleep one waits.
-    assert.equal(f.said().some((t) => /How does your body feel today\?/.test(t)), false, 'no body question while sleep waits');
+    assert.equal(f.said().some((t) => /Any soreness or pain today\?/.test(t)), false, 'no body question while sleep waits');
     const before = f.said().length;
     await f.run('06:31', '11:00');
     assert.deepEqual(f.said().slice(before), [], 'nothing else while the sleep question waits, 4 hours on and more');
@@ -75,7 +75,7 @@ test('he answers both in time: the morning plan as before, with the gym window w
     f.say('05:41', 'slept 8 hours');
     f.store.writeLocal('sleep-log', D, { id: D, date: D, bed: at(Y, '21:30'), wake: T('05:30'), source: 'coach', at: T('05:41') });
     await f.run('05:40', '05:50');
-    const body = f.said().find((t) => /How does your body feel today\?/.test(t));
+    const body = f.said().find((t) => /Any soreness or pain today\?/.test(t));
     assert.ok(body, f.said().join(' | '));
     f.say('05:52', 'all 0');
     await f.run('05:51', '06:30');

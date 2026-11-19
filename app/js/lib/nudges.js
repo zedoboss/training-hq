@@ -665,14 +665,21 @@ export function lastWorkoutPain({ sessions = [], sets = [], today, tz }) {
   return { label: LABEL[se.dayType] || se.title || 'workout', date: last.d, parts, exercise: hits.find((h) => h.name && !h.skipped)?.name || hits.find((h) => h.name)?.name || null };
 }
 
-/** The body question of his morning: the pain from his last workout first, else how the body feels. */
+/**
+ * The body question of his morning: the pain from his last workout first, else soreness or pain anywhere. Always says
+ * what the number measures and what 0 and 3 mean (Thu 11/19, his words to "How does your body feel today? Knees, legs,
+ * back: 0 to 3": "Weird question i dont get it change it too u mean pain or what?").
+ */
+/** What a 0-3 soreness rating means, said with every body question (his check-in table: 0 none ... 3 very sore). */
+export const SORE_SCALE = '0 = none, 3 = bad';
+
 export function morningBodyText(pain, today, tz) {
-  if (!pain) return 'How does your body feel today? Knees, legs, back: 0 to 3.';
+  if (!pain) return `Any soreness or pain today? Knees, legs, lower back: ${SORE_SCALE}.`;
   const yesterday = isoDate(new Date(Date.parse(`${today}T12:00:00Z`) - 86400000), 'UTC');
   const day = pain.date === yesterday ? 'yesterday' : `on ${formatDayIso(pain.date)}`;
   const where = pain.parts.length ? pain.parts.join(' and ') : 'body';
   const on = pain.exercise ? ` on ${pain.exercise.replace(/\s*\(.*\)$/, '').toLowerCase()}` : '';
-  return `How's your ${where} today? It hurt${on} ${day} (${pain.label}). 0 to 3, and does it still hurt when you bend or move?`;
+  return `How's your ${where} today? It hurt${on} ${day} (${pain.label}). Soreness or pain, ${SORE_SCALE}? And does it still hurt when you bend or move?`;
 }
 const formatDayIso = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'numeric', day: 'numeric', timeZone: 'UTC' }).replace(',', '');
 

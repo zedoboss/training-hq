@@ -140,10 +140,10 @@ export function remindersFor({ paths = [], photoScanIds = [], holdoffs = [], dat
       out.push({
         id: `readiness:${date}`, kind: 'readiness', at: at - lead * 60000, url: '#/checkin', tag: `readiness-${date}`, fixed: true,
         title: 'Sore, or good to go?',
-        body: `${LABEL[dayType]} at ${formatHm(hm)}${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}, then energy` : 'Energy'}. Zero to three.`,
+        body: `${LABEL[dayType]} at ${formatHm(hm)}${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}: soreness or pain, 0 = none, 3 = bad. Energy` : 'Energy'}: 0 = drained, 3 = high.`,
         // Once the session time has passed (Tue 11/10: at 12:50 PM "Push at 12:30 PM"), it says "now", never a passed time.
         sessionAt: at,
-        lateBody: `${LABEL[dayType]} now${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}, then energy` : 'Energy'}. Zero to three.`,
+        lateBody: `${LABEL[dayType]} now${wk ? `, week ${wk} column` : ''}. ${asked.length ? `${cap(asked.join(', '))}: soreness or pain, 0 = none, 3 = bad. Energy` : 'Energy'}: 0 = drained, 3 = high.`,
         due: !doc.readiness && !started,
       });
     }

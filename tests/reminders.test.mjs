@@ -20,7 +20,7 @@ test('training day with a time: check-in 30 minutes before, session at its time,
   assert.deepEqual(items.map((i) => i.id.split(':')[0]), ['readiness', 'session', 'holds-evening', 'evening', 'holds-check']);
   assert.equal(k.readiness.at, at('2026-01-20', '04:00'));
   assert.equal(k.readiness.title, 'Sore, or good to go?');
-  assert.equal(k.readiness.body, 'Legs at 4:30 AM, week 3 column. Knees, shoulder, legs, back, then energy. Zero to three.');
+  assert.equal(k.readiness.body, 'Legs at 4:30 AM, week 3 column. Knees, shoulder, legs, back: soreness or pain, 0 = none, 3 = bad. Energy: 0 = drained, 3 = high.');
   assert.equal(k.readiness.url, '#/checkin');
   assert.equal(k.session.title, 'Legs at 4:30 AM');
   assert.equal(k.session.body, 'Tuesday 1/20. Week 3 column. Check-in still open.');
