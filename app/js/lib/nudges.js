@@ -10,6 +10,7 @@ import { hmOf, formatHm, formatTime, zonedTime, isoDate } from './time.js';
 import { LABEL } from './rotation.js';
 import { MEAL_NUDGE } from './fuel-reminders.js';
 import { isSnack } from './meals.js';
+import { morningRoutineLine } from './morning.js';
 
 export const NUDGE_DEFAULTS = { everyMin: 20, wakeHm: '07:00', bedHm: '22:00' };
 export const NUDGE_EVERY = [[15, 'Every 15 minutes'], [20, 'Every 20 minutes'], [30, 'Every 30 minutes'], [0, 'Off']];
@@ -161,7 +162,7 @@ const MEAL_ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth'];
  * @param {string} o.wakeHm
  * @param {string} o.bedHm
  * @param {number|null} o.wokeAt   when he actually woke today (his sleep log or Apple Health), ms
- * @param {{text?: string, gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
+ * @param {{text?: string, items?: string[], gymAfterMin?: number[]}|null} o.morning  his morning routine (settings.notify.morning)
  * @param {number|null} [o.arrivedAt]  when he arrived at the gym today (the arrival Shortcut, days/<date>.arrivedAt), ms
  * @param {number|null} [o.healthAt]  when Apple Health last reached the Mac (the newest file), ms; null = never; left out = don't say
  * @param {{open: string[], mealAt: number, away?: boolean, toldAt?: number, next?: string}|null} o.suppsAfterMeal  supplements he takes after his first meal, still open, when that meal was eaten, whether he ate it out, when the Mac first saw it logged, and the ones due later (nextSuppsText)
@@ -266,9 +267,11 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
   const sessionAt = sessionAt0 != null && sessionAt0 < dayStart && sessionAt0 + 24 * 3600000 - dayStart <= 8 * 3600000 ? sessionAt0 + 24 * 3600000 : sessionAt0;
   const atGym = (arrivedAt != null && arrivedAt <= now && (!wokeAt || arrivedAt >= wokeAt)) || session.started || session.done;
   const gymLine = sessionAt ? ` ${LABEL[rot?.today?.dayType] || 'Gym'} at ${formatHm(sessionHm)}.` : gymText ? ` Gym ${gymText}.` : '';
-  if (morning?.text && sinceWoke >= 0 && sinceWoke < 90 && !atGym && !(sessionAt && now >= sessionAt)) {
+  // His routine: his checklist when set, else his routine text (Fri 11/20: coffee was off the checklist, still in the nudge).
+  const routine = morningRoutineLine(morning);
+  if (routine && sinceWoke >= 0 && sinceWoke < 90 && !atGym && !(sessionAt && now >= sessionAt)) {
     out.push({ key: 'morning', priority: 88, gapMin: 18 * 60, url: '#/today',
-      text: `Morning: ${String(morning.text).replace(scanPaused ? /\s*\([^)]*\bEvolt\b[^)]*\)/gi : /$^/, '').replace(/[.\s]+$/, '')}.${train0 ? gymLine : ''}` });
+      text: `Morning: ${routine.replace(scanPaused ? /\s*\([^)]*\bEvolt\b[^)]*\)/gi : /$^/, '').replace(/[.\s]+$/, '')}.${train0 ? gymLine : ''}` });
   }
 
   // A body scan planned today (Tue 10/20): the checklist, once that day (Fri 10/23: it went out 4 times by 12:10 PM, "the

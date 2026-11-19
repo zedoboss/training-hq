@@ -24,6 +24,20 @@ export function morningItems(morning) {
   return itemsFromText(morning?.text);
 }
 
+/**
+ * His routine as the morning nudge says it: his own checklist when he has set one, else his routine text. Fri 11/20
+ * (Thu 11/19 6:59 AM "Morning: ... Coffee about 90 minutes after waking..."): coffee came off his checklist Thu 11/5
+ * ("I don't drink coffee every day") but the nudge still read the old text. Null when there is nothing to say.
+ */
+const NAMES = /^(Evolt|InBody|Hevy)\b/; // names keep their capital mid-sentence
+export function morningRoutineLine(morning) {
+  if (Array.isArray(morning?.items)) {
+    const items = morningItems(morning);
+    return items.length ? items.map((x, i) => (i && /^[A-Z][a-z]/.test(x) && !NAMES.test(x) ? x[0].toLowerCase() + x.slice(1) : x)).join(', ') : null;
+  }
+  return clean(morning?.text) || null;
+}
+
 /** A list typed one item per line (Settings): trimmed, no empty or repeated lines. */
 export function itemsFromLines(text) {
   const out = [];
