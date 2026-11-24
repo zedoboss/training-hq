@@ -91,12 +91,14 @@ test('after the gym, in order: the Evolt ask, "head home" 5 min after the scan, 
   const holds = { id: 'h', kind: 'holds', area: 'wrist', status: 'done', startedAt: at('11:50'), endedAt: at('11:58'), exercises: [{ key: 'c', name: 'Cupping' }] };
   const of = (extra = {}) => { const st = reminderState({ sessions, sets, tendons, settings, scanPlan, ...extra }, TZ); return remindersFor({ date: D, ...st }); };
   const pick = (list, id) => list.find((r) => r.id === id);
-  // The cupping hold still open, no round started: no ask yet at 11:41; it waits 10 minutes for a round to start (Thu
-  // 11/5: not the full 40, "I finished the gym God knows how long ago"), once one starts for it to be saved.
+  // The cupping hold still open, no round started: the ask at 11:41, while he's still at the gym (Wed 11/25: 11 minutes
+  // after the workout was too late); "head home" still waits 10 minutes for a round to start (Thu 11/5: not the full 40).
   const before = of();
-  assert.equal(pick(before, `scan-after:${D}`).at, at('11:51'));
-  // Holds saved at 11:58: the ask at 11:59, first; "start cooking" (12:00) waits for the scan (10 min), home (5), then 5.
-  const r = of({ sessions: [...sessions, holds] });
+  assert.equal(pick(before, `scan-after:${D}`).at, at('11:41'));
+  assert.equal(pick(before, `home:${D}`).at, at('12:06'), 'unchanged');
+  // A round he's in right after the workout (11:40 to 11:58): the ask at 11:59, first; "start cooking" (12:00) waits
+  // for the scan (10 min), home (5), then 5.
+  const r = of({ sessions: [...sessions, { ...holds, startedAt: at('11:40') }] });
   const ask = pick(r, `scan-after:${D}`);
   assert.equal(ask.at, at('11:59'));
   assert.match(ask.body, /^Do it before you leave the gym/);

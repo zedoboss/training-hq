@@ -310,8 +310,23 @@ export function nudgeCandidates({ now, tz, reminders = [], rot = null, sessionHm
     }
   }
   // Not all evening: up to 3 hours after the workout (Thu 10/22 audit: every 40 minutes until bed, with no way to say no).
+  // Wed 11/25 (Tuesday: "Evolt scan?" at 3:39 PM, then "Evolt number from today?... Nobody's coming to do it for you."
+  // at 4:39, 5:19 and 6:19 PM, twice the same words): EVOLT_CHECKS' few asks in all, the after-gym "Evolt scan?"
+  // reminder counting as the first, further apart, new words, no push line, then quiet.
   if (gymDay && !scanPaused && (session.started || session.done) && !weighedToday && !(workoutEndedAt && now - workoutEndedAt > 3 * 3600000)) {
-    out.push({ key: 'evolt', priority: 75, gapMin: 40, url: '#/coach', text: 'Evolt number from today? Tell me the weight (and body fat if you have it).' });
+    const day = isoDate(new Date(workoutEndedAt || now), tz);
+    const ask = reminders.find((r) => r.id === `scan-after:${day}` && r.due && !r.unsaid);
+    const askedAt = ask ? (ask.sentAt === undefined ? ask.at : ask.sentAt) : null;
+    const pre = `evolt:${day}:`;
+    const base = { priority: 75, gapMin: ONCE_MIN, spaceMin: EVOLT_CHECKS.spaceMin, url: '#/coach', calm: true };
+    const t0 = Math.min(...[askedAt, sent[`${pre}said`]].filter((t) => t != null && t <= now));
+    // That reminder still to go out (its time not come, or within its 30 minutes): it is the first ask, nothing before it.
+    const pending = ask && askedAt == null && now - ask.at < 30 * 60000;
+    if (!Number.isFinite(t0)) { if (!pending) out.push({ ...base, key: `${pre}said`, text: evoltAgainText(-1) }); }
+    else {
+      const k = EVOLT_CHECKS.afterMin.findLastIndex((m) => now >= t0 + m * 60000);
+      if (k >= 0) out.push({ ...base, key: `${pre}${k}`, text: evoltAgainText(k) });
+    }
   }
 
   // Planned reminders that already went out and are still open.
@@ -439,6 +454,19 @@ export function foodPaceText(k, { eaten, targets, nowHm, expect }) {
  * spaceMin at least between them), then nothing more: three asks in all.
  */
 export const CHECKIN_CHECKS = { afterMin: [45, 150], spaceMin: 60 };
+/**
+ * The Evolt numbers after a gym day (Wed 11/25): the first ask (the after-gym "Evolt scan?" reminder, or this nudge's
+ * own -1 when there was none), then follow-ups afterMin after it (spaceMin at least between them): three asks in all.
+ */
+export const EVOLT_CHECKS = { afterMin: [60, 150], spaceMin: 60 };
+/** The k-th Evolt ask, each in its own words, calm; -1 = the first one when no reminder asked; null after the last. */
+export function evoltAgainText(k) {
+  return {
+    '-1': 'Evolt number from today? Tell me the weight (and body fat if you have it).',
+    0: 'No Evolt numbers from today yet. Weight and body fat, or a photo of the results?',
+    1: 'Last ask on today\'s Evolt: send the numbers, or tell me you skipped it.',
+  }[k] ?? null;
+}
 /** A planned reminder's title as the first words of a nudge. */
 const title = (r) => String(r.title || '').replace(/[.:]?\s*$/, '');
 /** The check-in reminder went out and is still open: its few asks are the session's too, nothing after them. */

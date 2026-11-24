@@ -333,7 +333,8 @@ export const AFTER_GYM = { holdsMaxMin: 40, holdsStartMin: 10, scanAskMin: 1, sc
 
 /**
  * After a workout, in order: the gym is done when the workout is and the holds due after it are too (their round
- * saved; 40 minutes at most); the Evolt ask a minute later (a scan day with no scan saved); the "head home" nudge 5
+ * saved; 40 minutes at most); the Evolt ask a minute after the workout (a scan day with no scan saved; after a hold
+ * round he's already in, a minute after it); the "head home" nudge 5
  * minutes after the scan is saved (10 minutes for it when asked and not saved); meals 5 minutes after that.
  * {doneAt, scanAskAt, homeAt, mealAt} in ms, or null with no workout done that day.
  */
@@ -352,8 +353,12 @@ export function afterGym({ date, activity, areas = [], rounds = {}, scans = [], 
   // Thu 11/5: scans paused (a scan hold-off then): no Evolt ask, and "head home" and the meal don't wait for one.
   const scanDay = (cadenceOf(scanPlan) === 'training' || scanPlan?.next?.date === date) && !scanHold(holdoffs, doneAt);
   const scan = scans.find((s) => s.date === date && isDone(s));
-  const scanAskAt = scanDay && !scanTakenOn(scans, date, photoScanIds) ? doneAt + AFTER_GYM.scanAskMin * 60000 : null;
-  const base = scanAskAt ? scanAskAt + AFTER_GYM.scanWaitMin * 60000 : Math.max(doneAt, scan?.confirmedAt ?? scan?.at ?? 0);
+  // Wed 11/25 (Tuesday: Upper B ended 3:28 PM, the holds after it never started, "Evolt scan? Do it before you leave
+  // the gym" at 3:39 PM): the ask comes a minute after the workout, while he's still at the gym. Only a hold round he's
+  // already in by then keeps it waiting (till it's saved, 40 minutes at most). "Head home" and meals keep their times.
+  const inRound = (activity.holdsStart?.[date] || []).some((t) => t >= end && t <= end + AFTER_GYM.scanAskMin * 60000);
+  const scanAskAt = scanDay && !scanTakenOn(scans, date, photoScanIds) ? (inRound ? doneAt : end) + AFTER_GYM.scanAskMin * 60000 : null;
+  const base = scanAskAt ? doneAt + (AFTER_GYM.scanAskMin + AFTER_GYM.scanWaitMin) * 60000 : Math.max(doneAt, scan?.confirmedAt ?? scan?.at ?? 0);
   const homeAt = base + AFTER_GYM.homeMin * 60000;
   return { doneAt, scanAskAt, homeAt, mealAt: homeAt + AFTER_GYM.mealMin * 60000, end };
 }

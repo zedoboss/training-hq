@@ -59,7 +59,7 @@ test('scan: no "scan before the workout" once he started; a PDF being read count
   assert.equal(scanTakenOn([{ date: D, status: 'prep', pdfPending: true }], D), true);
   assert.equal(scanTakenOn([{ id: 'scan.x', date: D, status: 'prep' }], D, ['scan.x']), true, 'photos added');
   // The Evolt question stops 3 hours after the workout.
-  const evolt = (hm) => nudgeCandidates({ ...base, now: at(hm), session: { started: true, done: true }, workoutEndedAt: at('11:40'), weighedToday: false }).some((c) => c.key === 'evolt');
+  const evolt = (hm) => nudgeCandidates({ ...base, now: at(hm), session: { started: true, done: true }, workoutEndedAt: at('11:40'), weighedToday: false }).some((c) => c.key.startsWith('evolt:'));
   assert.equal(evolt('13:00'), true);
   assert.equal(evolt('15:00'), false);
 });

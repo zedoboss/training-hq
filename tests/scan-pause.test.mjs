@@ -74,8 +74,8 @@ test('nudges while paused: no "Evolt first", no scan checklist, no "Evolt number
   assert.ok(texts({ now: at('04:30'), scanToday }).some((c) => c.key === 'scan'), 'control: the scan checklist');
   assert.ok(!texts({ now: at('04:30'), scanToday, scanPaused: true }).some((c) => c.key === 'scan'));
   const after = { now: at('06:00'), session: { started: true, done: true }, rot: { today: { kind: 'done', dayType: 'legs' } }, workoutEndedAt: at('05:22') };
-  assert.ok(texts(after).some((c) => c.key === 'evolt'), 'control: the Evolt number ask');
-  assert.ok(!texts({ ...after, scanPaused: true }).some((c) => c.key === 'evolt'));
+  assert.ok(texts(after).some((c) => c.key.startsWith('evolt:')), 'control: the Evolt number ask');
+  assert.ok(!texts({ ...after, scanPaused: true }).some((c) => c.key.startsWith('evolt:')));
   assert.ok(!/Evolt/.test(sessionOpenText(0, 'Legs', null, true)));
   assert.match(sessionOpenText(0, 'Legs', null), /Evolt first/);
   const morning = { text: 'Banana, bathroom. Coffee about 90 minutes after waking (after the Evolt on gym days)' };

@@ -38,8 +38,9 @@ test('his Legs morning: the scan ask and "head home" right after the workout, ne
   const r = of();
   const ask = pick(r, `scan-after:${D}`);
   const home = pick(r, `home:${D}`);
-  // Hold skipped in the workout: not waited for; cupping never started: the gym is done 10 minutes after the end.
-  assert.equal(ask.at, at('05:33'));
+  // Hold skipped in the workout: not waited for; cupping never started: the gym is done 10 minutes after the end, the
+  // scan ask a minute after the workout (Wed 11/25: while he's still at the gym).
+  assert.equal(ask.at, at('05:23'));
   assert.ok(ask.due);
   assert.equal(home.at, at('05:48'));
   assert.equal(home.body, 'Gym done. Get settled.', 'first meal 12:30 PM: no "food is next" hours ahead');
@@ -49,29 +50,34 @@ test('his Legs morning: the scan ask and "head home" right after the workout, ne
 test('his steps climbing after the workout (972 at 5:09 AM, 2,189 at 5:42 AM): no "head home" once he left', () => {
   const stepReadings = { [D]: [{ steps: 972, at: at('05:09') }, { steps: 2189, at: at('05:42') }] };
   const r = of({ stepReadings });
-  assert.equal(pick(r, `scan-after:${D}`).due, true, '5:33 AM, before the steps showed him gone');
+  assert.equal(pick(r, `scan-after:${D}`).due, true, '5:23 AM, before the steps showed him gone');
   assert.equal(pick(r, `home:${D}`).due, false, 'walking at 5:42 AM: no "head home" at 5:48 AM');
   // A few steps around the gym don't count.
   assert.equal(pick(of({ stepReadings: { [D]: [{ steps: 972, at: at('05:09') }, { steps: 1300, at: at('05:42') }] } }), `home:${D}`).due, true);
   // Walking already logged (the coach's walk tool), or a meal: neither ask.
-  const walking = of({ walks: [{ date: D, going: { at: at('05:30') }, walks: [], asks: [] }] });
-  assert.equal(pick(walking, `scan-after:${D}`).due, false, 'walking from 5:30 AM: no 5:33 AM "before you leave the gym"');
+  const walking = of({ walks: [{ date: D, going: { at: at('05:22') }, walks: [], asks: [] }] });
+  assert.equal(pick(walking, `scan-after:${D}`).due, false, 'walking from 5:22 AM: no 5:23 AM "before you leave the gym"');
   assert.equal(pick(walking, `home:${D}`).due, false);
   const later = of({ walks: [{ date: D, going: { at: at('05:40') }, walks: [], asks: [] }] });
-  assert.equal(pick(later, `scan-after:${D}`).due, true, 'still at the gym at 5:33 AM');
+  assert.equal(pick(later, `scan-after:${D}`).due, true, 'still at the gym at 5:23 AM');
   assert.equal(pick(later, `home:${D}`).due, false, 'walking from 5:40 AM');
-  const ate = of({ meals: [{ id: 'm', date: D, at: at('05:30') }] });
+  const ate = of({ meals: [{ id: 'm', date: D, at: at('05:22') }] });
   assert.equal(pick(ate, `scan-after:${D}`).due, false, 'home and eating: no scan ask');
 });
 
 test('the holds he does at the gym after the workout still come first; "food is next" when a meal is close', () => {
-  // The cupping round started 5:30 AM, saved 5:40 AM: the ask at 5:41 AM, as on Thu 10/22.
-  const holds = { id: 'h', kind: 'holds', area: 'wrist', status: 'done', startedAt: at('05:30'), endedAt: at('05:40'), exercises: [{ key: 'c', name: 'Cupping' }] };
+  // The cupping round he was already in a minute after the workout (started 5:22 AM, saved 5:40 AM): the ask at 5:41 AM.
+  const holds = { id: 'h', kind: 'holds', area: 'wrist', status: 'done', startedAt: at('05:22'), endedAt: at('05:40'), exercises: [{ key: 'c', name: 'Cupping' }] };
   const r = of({ sessions: [legs(), holds] });
   assert.equal(pick(r, `scan-after:${D}`).at, at('05:41'));
   // A round started and still going: wait for it, 40 minutes at most.
   const going = { ...holds, status: 'active', endedAt: null };
   assert.equal(pick(of({ sessions: [legs(), going] }), `scan-after:${D}`).at, at('06:03'));
+  // Wed 11/25: a round started later (5:30 AM) doesn't move the ask: it went out at 5:23 AM, at the gym; "head home"
+  // still waits for the round.
+  const r2 = of({ sessions: [legs(), { ...holds, startedAt: at('05:30') }] });
+  assert.equal(pick(r2, `scan-after:${D}`).at, at('05:23'));
+  assert.equal(pick(r2, `home:${D}`).at, at('05:56'));
   // The knee hold not skipped and nothing started: 10 minutes, not 40.
   assert.equal(afterGym({ date: D, activity: reminderState({ sessions: [legs([])], sets, tendons, scanPlan }, TZ).activity, areas: tendons, rounds: {}, scanPlan }).doneAt, at('05:22') + AFTER_GYM.holdsStartMin * 60000);
   // A late workout: the first meal soon after the gym: "food is next" stays.
