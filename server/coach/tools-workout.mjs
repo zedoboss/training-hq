@@ -46,7 +46,7 @@ function onCard(session, name, occurrence) {
   const list = session.exercises || [];
   const names = list.map((e) => e.name).join('; ') || 'none';
   if (!name) return { error: `Which exercise? In ${session.title}: ${names}.` };
-  const { item, ambiguous } = findByName(list, name);
+  const { item, ambiguous } = findByName(list, name, undefined, undefined, { whole: true });
   if (!item) return { error: ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : `"${name}" isn't in ${session.title}. Its exercises: ${names}.` };
   const twins = list.filter((e) => sameName(e.name, item.name));
   if (twins.length < 2) return { ex: item };

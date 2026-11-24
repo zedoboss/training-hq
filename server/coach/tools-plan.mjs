@@ -80,7 +80,7 @@ function placeIn(list, a, { need = false } = {}) {
   if (a.position) return { i: Math.min(list.length, a.position - 1) };
   const ref = a.after || a.before;
   if (ref) {
-    const { item, ambiguous } = findByName(list, ref);
+    const { item, ambiguous } = findByName(list, ref, undefined, undefined, { whole: true });
     if (!item) return { error: ambiguous.length ? `Which one: ${sayList(ambiguous)}?` : `No "${ref}" in this routine. Its exercises: ${sayList(list.map((e) => e.name))}.` };
     const i = list.indexOf(item);
     return { i: a.after ? i + 1 : i };
@@ -157,8 +157,8 @@ function routineEdit(a, ctx) {
   const save = (next) => put(s, 'routines', r.id, { ...next, updatedAt: s.now, ...(a.action === 'follow_last' ? {} : { editedAt: s.now }) });
   const pick = (q = a.exercise) => {
     if (!q) return { error: `Which exercise? ${r.title}: ${sayList(r.exercises.map((e) => e.name))}.` };
-    const { item, ambiguous } = findByName(r.exercises, q);
-    if (!item) return { error: ambiguous.length ? `Which one: ${sayList(ambiguous)}?` : `No "${q}" in ${r.title}. Its exercises: ${sayList(r.exercises.map((e) => e.name))}.` };
+    const { item, ambiguous } = findByName(r.exercises, q, undefined, undefined, { whole: true });
+    if (!item) return { error: ambiguous.length ? `Which one: ${sayList(ambiguous)}?` : `No "${q}" in ${r.title}, so nothing changed. Its exercises: ${sayList(r.exercises.map((e) => e.name))}.` };
     return { e: item };
   };
   const fromLib = (q) => {

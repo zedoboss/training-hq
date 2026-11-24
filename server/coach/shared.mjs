@@ -97,11 +97,17 @@ const normFull = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' '
 /**
  * The best match for what he called something ("squat", "cable row", "mag") among names. Exact, then every word
  * found, then the most words found. Returns the item or null; `ambiguous` lists close ties.
+ * whole: true (Tue 11/24) = only an exact name or one with every word he used: picking from what is already in a
+ * routine or on a card, where a remove or edit must never land on another exercise that shares one word. His words:
+ * removing "Seated Cable Row - V Grip", not in Upper A, removed Seated Shoulder Press ("seated") instead.
  */
-export function findByName(items, query, nameOf = (x) => x.name, extraNames = () => []) {
+const FILLER = new Set(['the', 'a', 'an', 'on', 'of', 'with', 'my', 'his', 'one', 'exercise']);
+const wordIn = (hay, w) => hay.includes(` ${w}`) || (w.length >= 3 && w.endsWith('s') && hay.includes(` ${w.slice(0, -1)} `));
+export function findByName(items, query, nameOf = (x) => x.name, extraNames = () => [], { whole = false } = {}) {
   const q = normFull(query);
   if (!q) return { item: null, ambiguous: [] };
-  const words = q.split(' ');
+  let words = q.split(' ');
+  if (whole && words.some((w) => !FILLER.has(w))) words = words.filter((w) => !FILLER.has(w));
   const scored = items.map((it) => {
     const names = [nameOf(it), ...extraNames(it)].filter(Boolean);
     let best = 0;
@@ -109,9 +115,9 @@ export function findByName(items, query, nameOf = (x) => x.name, extraNames = ()
       const full = normFull(n); const short = norm(n);
       if (full === q || short === q) { best = Math.max(best, 100); continue; }
       const hay = ` ${full} `;
-      const hits = words.filter((w) => hay.includes(` ${w}`)).length;
+      const hits = words.filter((w) => wordIn(hay, w)).length;
       if (hits === words.length) best = Math.max(best, 60 + (short.startsWith(q) ? 10 : 0) - Math.min(9, full.split(' ').length));
-      else if (hits) best = Math.max(best, 10 * hits);
+      else if (hits && !whole) best = Math.max(best, 10 * hits);
     }
     return { it, best };
   }).filter((x) => x.best > 0).sort((a, b) => b.best - a.best);

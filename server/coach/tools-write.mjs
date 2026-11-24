@@ -92,9 +92,9 @@ const twinText = (twins, sets) => twins.map((e, i) => {
 
 function pickExercise(session, sets, name, { occurrence, type, open = false } = {}) {
   if (!name) return { ex: currentExercise(session, sets) };
-  let { item, ambiguous } = findByName(session.exercises, name);
+  let { item, ambiguous } = findByName(session.exercises, name, undefined, undefined, { whole: true });
   // "cupping hold": the card's name is just "Cupping".
-  if (!item && (HOLD_WORD.test(name) || REP_WORD.test(name))) ({ item, ambiguous } = findByName(session.exercises, name.replace(HOLD_WORD, ' ').replace(REP_WORD, ' ')));
+  if (!item && (HOLD_WORD.test(name) || REP_WORD.test(name))) ({ item, ambiguous } = findByName(session.exercises, name.replace(HOLD_WORD, ' ').replace(REP_WORD, ' '), undefined, undefined, { whole: true }));
   if (!item) return { error: ambiguous.length ? `Which one: ${ambiguous.join('; ')}?` : `"${name}" isn't in this session. Its exercises: ${session.exercises.map((e) => e.name).join('; ')}.` };
   const twins = session.exercises.filter((e) => sameName(e.name, item.name));
   if (twins.length < 2) return { ex: item };
